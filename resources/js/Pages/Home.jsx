@@ -1,43 +1,50 @@
-import { Link, router, usePage } from '@inertiajs/react'
-import { useEffect } from 'react'
+import { Link, usePage } from '@inertiajs/react'
 
 export default function Home() {
     const { auth } = usePage().props
 
-    // Redirect to dashboard if user is logged in
-    useEffect(() => {
+    // Determine the button text and link based on auth status
+    const getButtonProps = () => {
         if (auth?.user) {
             // Check if user has a tenant, if so go to dashboard, otherwise companies page
             if (auth.companies && auth.companies.length > 0) {
-                router.visit('/dashboard')
+                return {
+                    text: 'Dashboard',
+                    href: '/app/dashboard',
+                }
             } else {
-                router.visit('/companies')
+                return {
+                    text: 'Dashboard',
+                    href: '/app/companies',
+                }
+            }
+        } else {
+            return {
+                text: 'Sign in',
+                href: '/login',
             }
         }
-    }, [auth?.user])
-
-    // If user is logged in, don't render the homepage (redirect will happen)
-    if (auth?.user) {
-        return null
     }
+
+    const buttonProps = getButtonProps()
 
     return (
         <div className="bg-white">
             {/* Navigation */}
-            <nav className="relative z-50 bg-white shadow-sm">
+            <nav className="bg-white shadow-sm relative z-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div className="flex h-16 justify-between">
                         <div className="flex items-center">
                             <Link href="/" className="text-xl font-bold text-gray-900">
-                                Jackpot Asset Manager
+                                Jackpot
                             </Link>
                         </div>
                         <div className="flex items-center gap-4">
                             <Link
-                                href="/login"
+                                href={buttonProps.href}
                                 className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                             >
-                                Sign in
+                                {buttonProps.text}
                             </Link>
                         </div>
                     </div>
@@ -67,13 +74,12 @@ export default function Home() {
                             Organize, manage, and access all your brand assets in one place. Built for teams that value efficiency and clarity.
                         </p>
                         <div className="mt-10 flex items-center justify-center gap-x-6">
-                            <a
-                                href="#"
+                            <button
                                 onClick={(e) => e.preventDefault()}
                                 className="rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 cursor-default"
                             >
                                 Get started
-                            </a>
+                            </button>
                             <a href="#" className="text-sm font-semibold leading-6 text-gray-900">
                                 Learn more <span aria-hidden="true">→</span>
                             </a>
@@ -206,6 +212,19 @@ export default function Home() {
                     </dl>
                 </div>
             </div>
+
+            {/* Footer */}
+            <footer className="border-t border-gray-200 bg-white">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
+                    <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
+                        <div className="col-span-1 md:col-span-4">
+                            <p className="text-center text-sm text-gray-500">
+                                Jackpot copyright - Velvetysoft
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </footer>
         </div>
     )
 }

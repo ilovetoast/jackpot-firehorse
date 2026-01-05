@@ -20,6 +20,7 @@ class Tenant extends Model
     protected $fillable = [
         'name',
         'slug',
+        'timezone',
     ];
 
     /**
@@ -35,6 +36,7 @@ class Tenant extends Model
                 'name' => $tenant->name,
                 'slug' => $tenant->slug,
                 'is_default' => true,
+                'show_in_selector' => true, // Default to showing in selector
             ]);
         });
     }

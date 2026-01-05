@@ -60,22 +60,14 @@ class PlanService
 
     /**
      * Check if tenant can create a category for a brand.
+     * Only counts custom (non-system) categories against the limit.
      */
-    public function canCreateCategory(Tenant $tenant, ?Brand $brand = null): bool
+    public function canCreateCategory(Tenant $tenant, Brand $brand): bool
     {
         $limits = $this->getPlanLimits($tenant);
         
-        // Count categories for the brand (if provided) or for the tenant
-        // Note: Category model doesn't exist yet, will be added in Phase 4
-        // For now, return true to prevent errors during development
-        $currentCount = 0;
-        if (class_exists(\App\Models\Category::class)) {
-            if ($brand) {
-                $currentCount = $brand->categories()->count();
-            } else {
-                $currentCount = \App\Models\Category::where('tenant_id', $tenant->id)->count();
-            }
-        }
+        // Count only custom (non-system) categories for the brand
+        $currentCount = $brand->categories()->custom()->count();
 
         return $currentCount < $limits['max_categories'];
     }
@@ -113,8 +105,8 @@ class PlanService
         $currentCount = match ($limitType) {
             'brands' => $tenant->brands()->count(),
             'categories' => $brand
-                ? $brand->categories()->count()
-                : $tenant->categories()->count(),
+                ? $brand->categories()->custom()->count() // Only count custom (non-system) categories
+                : throw new \InvalidArgumentException('Brand is required for category limit checks'),
             default => 0,
         };
 

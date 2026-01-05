@@ -9,6 +9,12 @@ use App\Models\Category;
 use App\Models\Tenant;
 use Illuminate\Support\Str;
 
+/**
+ * Category Service
+ *
+ * Handles business logic for category creation, updates, and deletion.
+ * Ensures plan limits are enforced and system categories are protected.
+ */
 class CategoryService
 {
     public function __construct(
@@ -17,9 +23,9 @@ class CategoryService
     }
 
     /**
-     * Check if tenant can create a category.
+     * Check if tenant can create a category for a brand.
      */
-    public function canCreate(Tenant $tenant, ?Brand $brand = null): bool
+    public function canCreate(Tenant $tenant, Brand $brand): bool
     {
         return $this->planService->canCreateCategory($tenant, $brand);
     }
@@ -27,7 +33,14 @@ class CategoryService
     /**
      * Create a category with plan check.
      *
-     * @throws PlanLimitExceededException
+     * Creates a custom (non-system) category for a brand.
+     * System categories should only be created via SystemCategorySeeder.
+     *
+     * @param Tenant $tenant The tenant/company
+     * @param Brand $brand The brand to create the category for
+     * @param array $data Category data (name, slug, asset_type, is_private, etc.)
+     * @return Category The created category
+     * @throws PlanLimitExceededException If plan limit is exceeded
      */
     public function create(Tenant $tenant, Brand $brand, array $data): Category
     {
@@ -39,7 +52,7 @@ class CategoryService
             $data['slug'] = Str::slug($data['name']);
         }
 
-        // Ensure slug is unique
+        // Ensure slug is unique within tenant/brand/asset_type scope
         $baseSlug = $data['slug'];
         $slug = $baseSlug;
         $counter = 1;
@@ -53,10 +66,12 @@ class CategoryService
         }
         $data['slug'] = $slug;
 
+        // Set required fields
         $data['tenant_id'] = $tenant->id;
         $data['brand_id'] = $brand->id;
         $data['is_system'] = false; // User-created categories are never system
         $data['is_locked'] = false; // User-created categories are never locked
+        $data['is_hidden'] = $data['is_hidden'] ?? false; // Default to visible
 
         return Category::create($data);
     }
@@ -64,7 +79,12 @@ class CategoryService
     /**
      * Update a category.
      *
-     * @throws \Exception
+     * Updates a custom category. System categories cannot be updated.
+     *
+     * @param Category $category The category to update
+     * @param array $data Updated data
+     * @return Category The updated category
+     * @throws \Exception If category is locked or system
      */
     public function update(Category $category, array $data): Category
     {
@@ -73,11 +93,16 @@ class CategoryService
             throw new \Exception('Cannot update locked or system categories.');
         }
 
+        // Prevent changing is_system flag
+        if (isset($data['is_system'])) {
+            unset($data['is_system']);
+        }
+
         // Generate slug if name changed and slug not provided
         if (isset($data['name']) && (! isset($data['slug']) || empty($data['slug']))) {
             $data['slug'] = Str::slug($data['name']);
 
-            // Ensure slug is unique (excluding current category)
+            // Ensure slug is unique within tenant/brand/asset_type scope (excluding current category)
             $baseSlug = $data['slug'];
             $slug = $baseSlug;
             $counter = 1;
@@ -101,7 +126,11 @@ class CategoryService
     /**
      * Delete a category.
      *
-     * @throws \Exception
+     * Deletes a custom category. System categories cannot be deleted.
+     *
+     * @param Category $category The category to delete
+     * @return void
+     * @throws \Exception If category is locked or system
      */
     public function delete(Category $category): void
     {
@@ -111,5 +140,28 @@ class CategoryService
         }
 
         $category->delete();
+    }
+
+    /**
+     * Toggle the hidden state of a category.
+     *
+     * Allows hiding/showing categories. System categories can be hidden
+     * but this should be plan/permission gated in the controller.
+     *
+     * @param Category $category The category to toggle
+     * @param bool $hidden Whether to hide or show the category
+     * @return Category The updated category
+     * @throws \Exception If category is locked and trying to change hidden state
+     */
+    public function setHidden(Category $category, bool $hidden): Category
+    {
+        // System categories can be hidden, but locked categories cannot be modified
+        if ($category->is_locked && $category->is_hidden !== $hidden) {
+            throw new \Exception('Cannot change hidden state of locked categories.');
+        }
+
+        $category->update(['is_hidden' => $hidden]);
+
+        return $category->fresh();
     }
 }

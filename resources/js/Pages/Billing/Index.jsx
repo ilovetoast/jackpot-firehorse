@@ -1,30 +1,33 @@
-import { useForm, router, Link } from '@inertiajs/react'
+import { useForm, router, Link, usePage } from '@inertiajs/react'
 import { useState } from 'react'
+import AppNav from '../../Components/AppNav'
+import AppFooter from '../../Components/AppFooter'
 
 export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method }) {
+    const { auth } = usePage().props
     const { post, processing } = useForm()
     const [selectedPlan, setSelectedPlan] = useState(null)
 
     const handleSubscribe = (priceId) => {
-        post('/billing/subscribe', {
+        post('/app/billing/subscribe', {
             price_id: priceId,
         })
     }
 
     const handleUpdateSubscription = (priceId) => {
-        post('/billing/update-subscription', {
+        post('/app/billing/update-subscription', {
             price_id: priceId,
         })
     }
 
     const handleCancel = () => {
         if (confirm('Are you sure you want to cancel your subscription? You will lose access to premium features at the end of your billing period.')) {
-            post('/billing/cancel')
+            post('/app/billing/cancel')
         }
     }
 
     const handleResume = () => {
-        post('/billing/resume')
+        post('/app/billing/resume')
     }
 
     const formatLimit = (limit) => {
@@ -37,20 +40,10 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
     const currentPlanData = plans?.find((p) => p.id === current_plan)
 
     return (
-        <div className="min-h-full bg-gray-50">
-            <nav className="bg-white shadow-sm">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                    <div className="flex h-16 justify-between">
-                        <div className="flex items-center">
-                            <Link href="/dashboard" className="text-xl font-bold text-gray-900">
-                                {tenant?.name || 'Jackpot Asset Manager'}
-                            </Link>
-                        </div>
-                    </div>
-                </div>
-            </nav>
-
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        <div className="min-h-full">
+            <AppNav brand={auth.activeBrand} tenant={tenant} />
+            <main className="bg-gray-50">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8">
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900">Billing & Plans</h1>
                     <p className="mt-2 text-sm text-gray-700">Manage your subscription and billing information</p>
@@ -194,7 +187,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         <h3 className="text-lg font-medium leading-6 text-gray-900">Invoices</h3>
                         <div className="mt-4">
                             <Link
-                                href="/billing/invoices"
+                                href="/app/billing/invoices"
                                 className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
                             >
                                 View all invoices →
@@ -202,7 +195,9 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         </div>
                     </div>
                 </div>
+                </div>
             </main>
+            <AppFooter />
         </div>
     )
 }

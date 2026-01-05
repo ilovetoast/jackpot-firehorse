@@ -56,7 +56,11 @@ class BillingController extends Controller
         });
 
         return Inertia::render('Billing/Index', [
-            'tenant' => $tenant,
+            'tenant' => [
+                'id' => $tenant->id,
+                'name' => $tenant->name,
+                'slug' => $tenant->slug,
+            ],
             'current_plan' => $currentPlan,
             'plans' => $plans->values(),
             'subscription' => $subscription ? [

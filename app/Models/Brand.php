@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -20,9 +21,12 @@ class Brand extends Model
         'slug',
         'logo_path',
         'is_default',
+        'show_in_selector',
         'primary_color',
         'secondary_color',
         'accent_color',
+        'nav_color',
+        'logo_filter',
         'settings',
     ];
 
@@ -35,6 +39,7 @@ class Brand extends Model
     {
         return [
             'is_default' => 'boolean',
+            'show_in_selector' => 'boolean',
             'settings' => 'array',
         ];
     }
@@ -72,6 +77,12 @@ class Brand extends Model
                     ->update(['is_default' => false]);
             }
         });
+
+        // Automatically create system categories when a brand is created
+        static::created(function ($brand) {
+            $seeder = app(\App\Services\SystemCategorySeeder::class);
+            $seeder->seedForBrand($brand);
+        });
     }
 
     /**
@@ -88,5 +99,13 @@ class Brand extends Model
     public function categories(): HasMany
     {
         return $this->hasMany(Category::class);
+    }
+
+    /**
+     * Get the users that belong to this brand.
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class)->withPivot('role')->withTimestamps();
     }
 }

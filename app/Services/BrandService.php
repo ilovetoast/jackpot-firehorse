@@ -48,6 +48,11 @@ class BrandService
         $data['slug'] = $slug;
 
         $data['tenant_id'] = $tenant->id;
+        
+        // Default show_in_selector to true if not provided
+        if (!isset($data['show_in_selector'])) {
+            $data['show_in_selector'] = true;
+        }
 
         return Brand::create($data);
     }

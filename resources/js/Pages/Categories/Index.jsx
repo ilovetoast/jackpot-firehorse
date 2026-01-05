@@ -1,8 +1,11 @@
-import { Link, router, useForm } from '@inertiajs/react'
+import { Link, router, useForm, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
+import AppNav from '../../Components/AppNav'
+import AppFooter from '../../Components/AppFooter'
 
 export default function CategoriesIndex({ categories, filters, limits, asset_types }) {
+    const { auth } = usePage().props
     const { data, setData, post, processing, reset } = useForm({
         name: '',
         slug: '',
@@ -13,12 +16,12 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
 
     const handleFilter = (key, value) => {
         const newFilters = { ...filters, [key]: value }
-        router.get('/categories', newFilters, { preserveState: true })
+        router.get('/app/categories', newFilters, { preserveState: true })
     }
 
     const handleCreate = (e) => {
         e.preventDefault()
-        post('/categories', {
+        post('/app/categories', {
             onSuccess: () => {
                 setShowCreateForm(false)
                 reset()
@@ -28,7 +31,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
 
     const handleDelete = (categoryId) => {
         if (confirm('Are you sure you want to delete this category?')) {
-            router.delete(`/categories/${categoryId}`, {
+            router.delete(`/app/categories/${categoryId}`, {
                 preserveScroll: true,
             })
         }
@@ -42,8 +45,10 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
     }
 
     return (
-        <div className="min-h-full bg-gray-50">
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        <div className="min-h-full">
+            <AppNav brand={auth.activeBrand} tenant={null} />
+            <main className="bg-gray-50">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8 flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Categories</h1>
@@ -62,7 +67,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                         <div className="text-sm text-gray-500">
                             Limit reached ({limits.current}/{formatLimit(limits.max)})
                             <Link
-                                href="/billing"
+                                href="/app/billing"
                                 className="ml-2 font-medium text-indigo-600 hover:text-indigo-500"
                             >
                                 Upgrade →
@@ -72,14 +77,14 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                 </div>
 
                 {/* Limit Indicator */}
-                <div className="mb-6 overflow-hidden rounded-lg bg-white shadow">
-                    <div className="px-4 py-3">
-                        <p className="text-sm text-gray-600">
-                            Using <span className="font-medium">{limits.current}</span> of{' '}
-                            <span className="font-medium">{formatLimit(limits.max)}</span> categories
-                        </p>
-                    </div>
-                </div>
+                {!limits.can_create && (
+                    <PlanLimitIndicator
+                        current={limits.current}
+                        max={limits.max}
+                        label="Categories"
+                        className="mb-6"
+                    />
+                )}
 
                 {/* Filters */}
                 <div className="mb-6 overflow-hidden rounded-lg bg-white shadow">
@@ -242,7 +247,9 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                         )}
                     </ul>
                 </div>
-            </div>
+                </div>
+            </main>
+            <AppFooter />
         </div>
     )
 }

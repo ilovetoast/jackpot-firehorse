@@ -17,33 +17,12 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Create a default user
-        $user = User::create([
-            'name' => 'Michael Steele',
-            'email' => 'msteele@velvethammerbranding.com',
-            'password' => Hash::make('password'),
+        $this->call([
+            RoleSeeder::class,
+            PermissionSeeder::class,
+            SystemCategoryTemplateSeeder::class, // Seed system category templates first
+            CompanyBrandSeeder::class, // This creates the site owner and companies/brands
+            CategorySeeder::class,
         ]);
-
-        // Create a default tenant/company
-        // Note: Brand is automatically created via Tenant model event
-        $tenant = Tenant::create([
-            'name' => 'Velvet Hammer Branding',
-            'slug' => 'velvet-hammer-branding',
-        ]);
-
-        // Associate user with tenant
-        $user->tenants()->attach($tenant->id);
-        
-        // Ensure default brand exists (should be created automatically, but verify)
-        if (! $tenant->defaultBrand) {
-            $tenant->brands()->create([
-                'name' => $tenant->name,
-                'slug' => $tenant->slug,
-                'is_default' => true,
-            ]);
-        }
-
-        // Run the company/brand seeder
-        $this->call(CompanyBrandSeeder::class);
     }
 }

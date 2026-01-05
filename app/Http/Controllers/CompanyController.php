@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Tenant;
+use App\Services\BillingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -10,6 +11,11 @@ use Inertia\Response;
 
 class CompanyController extends Controller
 {
+    public function __construct(
+        protected BillingService $billingService
+    ) {
+    }
+
     /**
      * Show the company management page.
      */
@@ -20,12 +26,22 @@ class CompanyController extends Controller
         $currentCompanyId = session('tenant_id');
 
         return Inertia::render('Companies/Index', [
-            'companies' => $companies->map(fn ($company) => [
-                'id' => $company->id,
-                'name' => $company->name,
-                'slug' => $company->slug,
-                'is_active' => $company->id == $currentCompanyId,
-            ]),
+            'companies' => $companies->map(function ($company) use ($currentCompanyId) {
+                $currentPlan = $this->billingService->getCurrentPlan($company);
+                $subscription = $company->subscription('default');
+                
+                return [
+                    'id' => $company->id,
+                    'name' => $company->name,
+                    'slug' => $company->slug,
+                    'timezone' => $company->timezone ?? 'UTC',
+                    'is_active' => $company->id == $currentCompanyId,
+                    'billing' => [
+                        'current_plan' => $currentPlan,
+                        'subscription_status' => $subscription ? $subscription->stripe_status : 'none',
+                    ],
+                ];
+            }),
         ]);
     }
 
@@ -52,6 +68,74 @@ class CompanyController extends Controller
             'brand_id' => $defaultBrand->id,
         ]);
 
-        return redirect()->intended('/dashboard');
+        return redirect()->intended('/app/dashboard');
+    }
+
+    /**
+     * Show the company settings page.
+     */
+    public function settings()
+    {
+        $user = Auth::user();
+        $tenant = app('tenant'); // Get the active tenant from middleware
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors([
+                'settings' => 'You must select a company to view settings.',
+            ]);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return redirect()->route('companies.index')->withErrors([
+                'settings' => 'You do not have access to this company.',
+            ]);
+        }
+
+        // Get billing information
+        $currentPlan = $this->billingService->getCurrentPlan($tenant);
+        $subscription = $tenant->subscription('default');
+        $teamMembersCount = $tenant->users()->count();
+
+        return Inertia::render('Companies/Settings', [
+            'tenant' => [
+                'id' => $tenant->id,
+                'name' => $tenant->name,
+                'slug' => $tenant->slug,
+                'timezone' => $tenant->timezone ?? 'UTC',
+            ],
+            'billing' => [
+                'current_plan' => $currentPlan,
+                'subscription_status' => $subscription ? $subscription->stripe_status : 'none',
+            ],
+            'team_members_count' => $teamMembersCount,
+        ]);
+    }
+
+    /**
+     * Update the company settings.
+     */
+    public function updateSettings(Request $request)
+    {
+        $user = Auth::user();
+        $tenant = app('tenant'); // Get the active tenant from middleware
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors([
+                'settings' => 'You must select a company to update settings.',
+            ]);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'timezone' => 'required|string|max:255',
+        ]);
+
+        $tenant->update($validated);
+
+        return redirect()->route('companies.settings')->with('success', 'Company settings updated successfully.');
     }
 }

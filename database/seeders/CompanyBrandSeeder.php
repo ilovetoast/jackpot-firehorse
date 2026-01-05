@@ -7,6 +7,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class CompanyBrandSeeder extends Seeder
 {
@@ -15,97 +16,100 @@ class CompanyBrandSeeder extends Seeder
      */
     public function run(): void
     {
-        // Get or create user 1 (Site Owner)
+        // Create a site owner user (ID 1)
         $siteOwner = User::firstOrCreate(
-            ['id' => 1],
+            ['email' => 'siteowner@example.com'],
             [
-                'name' => 'Site Owner',
-                'email' => 'siteowner@example.com',
+                'first_name' => 'Site',
+                'last_name' => 'Owner',
                 'password' => Hash::make('password'),
             ]
         );
 
-        // Create companies and brands
-        $companies = [
-            [
-                'name' => 'St. Croix',
-                'slug' => 'st-croix',
-                'brands' => [
-                    'St Croix',
-                    'St Croix Fly',
-                    'Seviin',
-                ],
-            ],
-            [
-                'name' => 'Augusta',
-                'slug' => 'augusta',
-                'brands' => [],
-            ],
-            [
-                'name' => 'ACG',
-                'slug' => 'acg',
-                'brands' => [
-                    'Nebo',
-                    'True',
-                    'Thaw',
-                ],
-            ],
-            [
-                'name' => 'Victory',
-                'slug' => 'victory',
-                'brands' => [],
-            ],
+        // Define companies and their brands
+        $companiesData = [
+            'St. Croix' => ['St Croix', 'St Croix Fly', 'Seviin'],
+            'Augusta' => ['Augusta'],
+            'ACG' => ['Nebo', 'True', 'Thaw'],
+            'Victory' => ['Victory'],
         ];
 
-        foreach ($companies as $companyData) {
-            // Create company
-            $company = Tenant::firstOrCreate(
-                ['slug' => $companyData['slug']],
-                ['name' => $companyData['name']]
+        foreach ($companiesData as $companyName => $brandNames) {
+            $companySlug = Str::slug($companyName);
+            
+            // Create or get tenant - the boot() method will auto-create a default brand
+            $tenant = Tenant::firstOrCreate(
+                ['slug' => $companySlug],
+                ['name' => $companyName]
             );
 
-            // Attach site owner to company
-            if (!$company->users()->where('users.id', $siteOwner->id)->exists()) {
-                $company->users()->attach($siteOwner->id);
+            // Update name if it changed
+            if ($tenant->name !== $companyName) {
+                $tenant->update(['name' => $companyName]);
             }
 
-            // Create brands for this company
-            if (empty($companyData['brands'])) {
-                // If no brands specified, ensure at least default brand exists
-                if (!$company->defaultBrand) {
-                    $company->brands()->create([
-                        'name' => $company->name,
-                        'slug' => $company->slug,
-                        'is_default' => true,
+            // Attach site owner to every company
+            $siteOwner->tenants()->syncWithoutDetaching([$tenant->id]);
+
+            // Get the first brand name we want
+            $firstBrandName = $brandNames[0];
+            $firstBrandSlug = Str::slug($firstBrandName);
+            
+            // Get the auto-created default brand (created by Tenant boot method)
+            $defaultBrand = $tenant->defaultBrand;
+            
+            if ($defaultBrand) {
+                // If the default brand's slug matches what we want, update it
+                if ($defaultBrand->slug === $firstBrandSlug) {
+                    $defaultBrand->update([
+                        'name' => $firstBrandName,
+                        'show_in_selector' => true,
+                        'primary_color' => '#000000',
+                        'secondary_color' => '#ffffff',
+                        'accent_color' => '#6366f1',
+                    ]);
+                } else {
+                    // If it doesn't match, update it to be the first brand we want
+                    $defaultBrand->update([
+                        'name' => $firstBrandName,
+                        'slug' => $firstBrandSlug,
+                        'show_in_selector' => true,
+                        'primary_color' => '#000000',
+                        'secondary_color' => '#ffffff',
+                        'accent_color' => '#6366f1',
                     ]);
                 }
             } else {
-                // Create specified brands
-                $isFirst = true;
-                foreach ($companyData['brands'] as $brandName) {
-                    $brandSlug = \Illuminate\Support\Str::slug($brandName);
-                    $brand = Brand::firstOrCreate(
-                        [
-                            'tenant_id' => $company->id,
-                            'slug' => $brandSlug,
-                        ],
-                        [
-                            'name' => $brandName,
-                            'is_default' => $isFirst,
-                        ]
-                    );
+                // If no default brand exists (shouldn't happen, but handle it), create it
+                Brand::create([
+                    'tenant_id' => $tenant->id,
+                    'name' => $firstBrandName,
+                    'slug' => $firstBrandSlug,
+                    'is_default' => true,
+                    'show_in_selector' => true,
+                    'primary_color' => '#000000',
+                    'secondary_color' => '#ffffff',
+                    'accent_color' => '#6366f1',
+                    'settings' => [],
+                ]);
+            }
 
-                    // If this is the first brand and it's not default, make it default
-                    if ($isFirst && !$brand->is_default) {
-                        // Unset other defaults
-                        Brand::where('tenant_id', $company->id)
-                            ->where('id', '!=', $brand->id)
-                            ->update(['is_default' => false]);
-                        $brand->update(['is_default' => true]);
-                    }
-
-                    $isFirst = false;
-                }
+            // Create any additional brands (skip the first one since we already handled it)
+            foreach (array_slice($brandNames, 1) as $brandName) {
+                $brandSlug = Str::slug($brandName);
+                
+                Brand::firstOrCreate(
+                    ['tenant_id' => $tenant->id, 'slug' => $brandSlug],
+                    [
+                        'name' => $brandName,
+                        'is_default' => false,
+                        'show_in_selector' => true,
+                        'primary_color' => '#000000',
+                        'secondary_color' => '#ffffff',
+                        'accent_color' => '#6366f1',
+                        'settings' => [],
+                    ]
+                );
             }
         }
     }

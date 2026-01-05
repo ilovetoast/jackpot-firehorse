@@ -49,7 +49,7 @@ class LoginController extends Controller
                     'tenant_id' => $tenant->id,
                     'brand_id' => $defaultBrand->id,
                 ]);
-                return redirect()->intended('/dashboard');
+                return redirect()->intended('/app/dashboard');
             }
 
             // User has no tenants - redirect back with error

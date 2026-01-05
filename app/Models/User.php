@@ -20,9 +20,16 @@ class User extends Authenticatable
      * @var list<string>
      */
     protected $fillable = [
-        'name',
+        'first_name',
+        'last_name',
         'email',
         'password',
+        'country',
+        'timezone',
+        'address',
+        'city',
+        'state',
+        'zip',
     ];
 
     /**
@@ -33,6 +40,15 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+    ];
+
+    /**
+     * The accessors to append to the model's array form.
+     *
+     * @var list<string>
+     */
+    protected $appends = [
+        'name',
     ];
 
     /**
@@ -49,10 +65,26 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the user's full name.
+     */
+    public function getNameAttribute(): string
+    {
+        return trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? ''));
+    }
+
+    /**
      * Get the tenants that this user belongs to.
      */
     public function tenants(): BelongsToMany
     {
         return $this->belongsToMany(Tenant::class);
+    }
+
+    /**
+     * Get the brands that this user belongs to.
+     */
+    public function brands(): BelongsToMany
+    {
+        return $this->belongsToMany(Brand::class)->withPivot('role')->withTimestamps();
     }
 }

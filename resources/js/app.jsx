@@ -3,6 +3,7 @@ import '../css/app.css'
 
 import { createInertiaApp } from '@inertiajs/react'
 import { createRoot } from 'react-dom/client'
+import BrandThemeProvider from './Components/BrandThemeProvider'
 
 const pages = import.meta.glob('./Pages/**/*.jsx', { eager: false })
 
@@ -16,6 +17,11 @@ createInertiaApp({
         return component()
     },
     setup({ el, App, props }) {
-        createRoot(el).render(<App {...props} />)
+        const root = createRoot(el)
+        root.render(
+            <BrandThemeProvider initialPage={props.initialPage}>
+                <App {...props} />
+            </BrandThemeProvider>
+        )
     },
 })
