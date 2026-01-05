@@ -1,0 +1,92 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Builder;
+
+class Brand extends Model
+{
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'tenant_id',
+        'name',
+        'slug',
+        'logo_path',
+        'is_default',
+        'primary_color',
+        'secondary_color',
+        'accent_color',
+        'settings',
+    ];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'is_default' => 'boolean',
+            'settings' => 'array',
+        ];
+    }
+
+    /**
+     * Scope a query to only include default brands.
+     */
+    public function scopeDefault(Builder $query): Builder
+    {
+        return $query->where('is_default', true);
+    }
+
+    /**
+     * Boot the model.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function ($brand) {
+            // If this is being set as default, ensure no other brand is default for this tenant
+            if ($brand->is_default) {
+                static::where('tenant_id', $brand->tenant_id)
+                    ->where('is_default', true)
+                    ->update(['is_default' => false]);
+            }
+        });
+
+        static::updating(function ($brand) {
+            // If this is being set as default, ensure no other brand is default for this tenant
+            if ($brand->isDirty('is_default') && $brand->is_default) {
+                static::where('tenant_id', $brand->tenant_id)
+                    ->where('id', '!=', $brand->id)
+                    ->where('is_default', true)
+                    ->update(['is_default' => false]);
+            }
+        });
+    }
+
+    /**
+     * Get the tenant that owns this brand.
+     */
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
+    /**
+     * Get the categories for this brand.
+     */
+    public function categories(): HasMany
+    {
+        return $this->hasMany(Category::class);
+    }
+}

@@ -1,0 +1,114 @@
+You are working in a Laravel 11 + Inertia (React) SaaS application.
+
+GLOBAL PRINCIPLES
+- This is a multi-tenant SaaS from day one.
+- Tenants represent Companies.
+- Users may belong to multiple Tenants.
+- All data must be tenant-scoped unless explicitly global.
+- No code may assume a single tenant.
+- No hard-coded IDs, buckets, or environments.
+- Prefer clarity over cleverness.
+
+ENVIRONMENT
+- Local development runs via Laravel Sail (Docker).
+- Local S3 is emulated using MinIO (S3-compatible).
+- Production uses AWS S3 with signed URLs.
+- Filesystem must behave identically in all environments.
+- Never bypass S3 logic in local development.
+
+TENANCY STRATEGY (MANDATORY)
+
+- This application uses a SINGLE shared database.
+- This is an intentional design choice.
+- DO NOT implement database-per-tenant or schema-per-tenant patterns.
+
+- The package `stancl/tenancy` is installed but MUST NOT be used.
+- Do NOT use any traits, middleware, helpers, events, or concepts from `stancl/tenancy`.
+- If any rule or suggestion conflicts with this, assume that suggestion is WRONG.
+
+- Multi-tenancy is implemented manually using best practices:
+  - A `tenants` table represents companies.
+  - Users may belong to multiple tenants.
+  - A `tenant_user` pivot table defines membership.
+  - All tenant-owned data includes an explicit `tenant_id`.
+  - Tenant context is resolved via middleware.
+  - Authorization is enforced using policies and permissions.
+
+- Tenant isolation is logical (row-level), not infrastructural.
+- Do not rely on hidden global state or magic tenant switching.
+- Always write explicit, predictable tenant-scoped code.
+
+- If a task appears to require DB-per-tenant, STOP and ask for clarification.
+
+USER & TENANT RELATIONSHIPS
+- Users may belong to multiple tenants.
+- Tenant-user relationship uses a pivot table (`tenant_user`).
+- Users have roles scoped per tenant and per brand.
+- No roles are global unless explicitly marked as such.
+
+PERMISSIONS (Spatie)
+- Use spatie/laravel-permission.
+- Roles and permissions must be tenant-scoped.
+- Do not use global roles.
+- Prefer permissions over hard-coded logic.
+- Always check permissions through policies or gates.
+
+STRIPE BILLING (Cashier)
+- Stripe subscriptions belong to Tenants, not Users.
+- Billing plans define feature limits, not access logic.
+- Feature gating must reference subscription state.
+- Stripe logic must be isolated in service classes.
+- Never embed Stripe API calls directly in controllers.
+
+BILLING & ANALYTICS ASSUMPTIONS
+
+- Stripe subscriptions are owned by Tenants, not Users.
+- Cross-tenant analytics and reporting are expected in the future.
+- Design decisions must not block aggregate queries across tenants.
+
+DATA MODELING
+- All tenant-owned models must include:
+  - tenant_id
+  - proper foreign key constraints
+- Brands belong to tenants.
+- Assets belong to brands and tenants.
+- Categories are tenant-scoped with system defaults.
+- Use soft deletes where data recovery is valuable.
+
+FILES & ASSETS
+- Assets are stored in S3 only.
+- Use signed URLs for all asset access.
+- Bucket structure must be environment-agnostic.
+- Asset paths must include tenant and brand identifiers.
+- No public-read buckets.
+
+DATABASE
+- Use migrations for all schema changes.
+- Avoid JSON columns unless necessary.
+- Index tenant_id on all tenant-owned tables.
+- Use transactions for multi-step writes.
+
+CODE QUALITY
+- Follow Laravel conventions.
+- Prefer services over fat controllers.
+- Write code assuming future scale.
+- Add comments where logic is non-obvious.
+- Never sacrifice tenant safety for speed.
+
+UI/UX DESIGN
+- Follow polar.sh design principles: clean, minimal, typography-forward.
+- Use neutral colors: grays (50-950), whites, subtle borders.
+- Generous whitespace and clean spacing.
+- Subtle borders (border-gray-200) instead of heavy shadows.
+- Clean cards with minimal chrome.
+- Simple, elegant buttons with clear hierarchy.
+- Focus on readability and clarity over decoration.
+
+OUT OF SCOPE (DO NOT IMPLEMENT UNLESS ASKED)
+- Subdomain routing
+- AI features
+- Public asset sharing
+- CDN integration
+- Analytics dashboards
+
+If uncertain, ask clarifying questions before generating code.
