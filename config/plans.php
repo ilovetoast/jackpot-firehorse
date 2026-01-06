@@ -19,6 +19,7 @@ return [
             'max_categories' => 0,
             'max_storage_mb' => 100,
             'max_upload_size_mb' => 10,
+            'max_users' => 2,
         ],
         'features' => [
             'basic_asset_types',
@@ -36,6 +37,7 @@ return [
             'max_categories' => 2,
             'max_storage_mb' => 1024, // 1GB
             'max_upload_size_mb' => 50,
+            'max_users' => 5,
         ],
         'features' => [
             'all_asset_types',
@@ -53,10 +55,12 @@ return [
             'max_categories' => 5, // Unlimited
             'max_storage_mb' => 999999, // 10GB
             'max_upload_size_mb' => 999999,
+            'max_users' => 20,
         ],
         'features' => [
             'all_asset_types',
             'advanced_features',
+            'access_to_more_roles',
         ],
         'notes' => [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
@@ -71,11 +75,13 @@ return [
             'max_categories' => 10, // Unlimited
             'max_storage_mb' => 999999, // Unlimited
             'max_upload_size_mb' => 999999, // Unlimited
+            'max_users' => PHP_INT_MAX, // Unlimited
         ],
         'features' => [
             'all_asset_types',
             'advanced_features',
             'custom_integrations',
+            'access_to_more_roles',
         ],
         'notes' => [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\SignupController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -11,6 +12,8 @@ Route::get('/', fn () => Inertia::render('Home'));
 Route::middleware('guest')->group(function () {
     Route::get('/login', [LoginController::class, 'show'])->name('login');
     Route::post('/login', [LoginController::class, 'store']);
+    Route::get('/signup', [SignupController::class, 'show'])->name('signup');
+    Route::post('/signup', [SignupController::class, 'store']);
 });
 
 Route::middleware('auth')->prefix('app')->group(function () {
@@ -24,6 +27,8 @@ Route::middleware('auth')->prefix('app')->group(function () {
     Route::middleware('tenant')->group(function () {
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
+        Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
+        Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
     });
     
     // Profile routes
@@ -38,6 +43,10 @@ Route::middleware('auth')->prefix('app')->group(function () {
     Route::get('/admin/stripe-status', [\App\Http\Controllers\SiteAdminController::class, 'stripeStatus'])->name('admin.stripe-status');
     Route::post('/admin/permissions/site-role', [\App\Http\Controllers\SiteAdminController::class, 'saveSiteRolePermissions'])->name('admin.permissions.site-role');
     Route::post('/admin/permissions/company-role', [\App\Http\Controllers\SiteAdminController::class, 'saveCompanyRolePermissions'])->name('admin.permissions.company-role');
+    Route::post('/admin/permissions/create', [\App\Http\Controllers\SiteAdminController::class, 'createPermission'])->name('admin.permissions.create');
+    Route::post('/admin/companies/{tenant}/add-user', [\App\Http\Controllers\SiteAdminController::class, 'addUserToCompany'])->name('admin.companies.add-user');
+    Route::put('/admin/companies/{tenant}/users/{user}/role', [\App\Http\Controllers\SiteAdminController::class, 'updateUserRole'])->name('admin.companies.users.update-role');
+    Route::post('/admin/users/{user}/assign-site-role', [\App\Http\Controllers\SiteAdminController::class, 'assignSiteRole'])->name('admin.users.assign-site-role');
     
     // System Category management routes (site owner only)
     Route::get('/admin/system-categories', [\App\Http\Controllers\SystemCategoryController::class, 'index'])->name('admin.system-categories.index');

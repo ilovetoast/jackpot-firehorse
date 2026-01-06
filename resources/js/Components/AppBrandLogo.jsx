@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, router } from '@inertiajs/react'
+import { getContrastTextColor } from '../utils/colorUtils'
 
 export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand }) {
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
@@ -38,11 +39,18 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             className="h-12 w-auto max-w-72 object-contain"
                             style={logoFilterStyle}
                         />
-                    ) : (
-                        <div className="h-12 w-12 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                            <span className="text-base font-medium text-white">{firstLetter}</span>
-                        </div>
-                    )}
+                    ) : (() => {
+                        const fallbackBrandColor = firstBrand.primary_color || '#4f46e5'
+                        const fallbackTextColor = getContrastTextColor(fallbackBrandColor)
+                        return (
+                            <div 
+                                className="h-12 w-12 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{ backgroundColor: fallbackBrandColor }}
+                            >
+                                <span className="text-base font-medium" style={{ color: fallbackTextColor }}>{firstLetter}</span>
+                            </div>
+                        )
+                    })()}
                 </Link>
             )
         }
@@ -50,7 +58,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         // No brands available, show minimal placeholder
         return (
             <div className="flex items-center">
-                <div className="h-12 w-12 rounded-full bg-indigo-600 flex items-center justify-center">
+                <div className="h-12 w-12 rounded-full bg-indigo-600 flex items-center justify-center" style={{ backgroundColor: '#4f46e5' }}>
                     <span className="text-sm font-medium text-white">B</span>
                 </div>
             </div>
@@ -60,6 +68,10 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     // Ensure we have a brand name to display
     const brandName = activeBrand.name || 'Brand'
     const firstLetter = brandName.charAt(0).toUpperCase()
+    // Get brand primary color, fallback to indigo-600 if not set
+    const brandColor = activeBrand.primary_color || '#4f46e5' // indigo-600 default
+    // Get appropriate text color based on background color
+    const textColorForBrand = getContrastTextColor(brandColor)
 
     // If multiple brands, show clickable button with dropdown
     if (hasMultipleBrands) {
@@ -67,7 +79,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
             <div className="relative">
                 <button
                     type="button"
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 min-w-0 max-w-full"
                     onClick={() => setBrandMenuOpen(!brandMenuOpen)}
                     aria-expanded="false"
                     aria-haspopup="true"
@@ -77,16 +89,31 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                         <img
                             src={activeBrand.logo_path}
                             alt={brandName}
-                            className="h-12 w-auto max-w-72 object-contain"
+                            className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
                             style={logoFilterStyle}
                         />
                     ) : (
-                        <div className="h-12 w-12 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                            <span className="text-base font-medium text-white">{firstLetter}</span>
-                        </div>
+                        <>
+                            <div 
+                                className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{ backgroundColor: brandColor }}
+                            >
+                                <span className="text-sm font-medium" style={{ color: textColorForBrand }}>{firstLetter}</span>
+                            </div>
+                            <span 
+                                className="truncate min-w-0"
+                                style={{ 
+                                    fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
+                                    maxWidth: '200px'
+                                }}
+                                title={brandName}
+                            >
+                                {brandName}
+                            </span>
+                        </>
                     )}
                     <svg
-                        className="h-5 w-5"
+                        className="h-5 w-5 flex-shrink-0"
                         style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
                         viewBox="0 0 20 20"
                         fill="currentColor"
@@ -113,40 +140,45 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                 </p>
                             </div>
                             <div className="max-h-64 overflow-y-auto">
-                                {brands.map((brandOption) => (
+                                {brands
+                                    .filter((brandOption) => !brandOption.is_disabled) // Hide disabled brands (inaccessible brands are already filtered in backend)
+                                    .map((brandOption) => (
                                     <button
                                         key={brandOption.id}
                                         type="button"
-                                        onClick={() => !brandOption.is_disabled && handleSwitchBrand(brandOption.id)}
-                                        disabled={brandOption.is_disabled}
+                                        onClick={() => handleSwitchBrand(brandOption.id)}
                                         className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm ${
-                                            brandOption.is_disabled
-                                                ? 'opacity-50 cursor-not-allowed text-gray-400'
-                                                : brandOption.is_active
+                                            brandOption.is_active
                                                 ? 'bg-indigo-50 text-indigo-700 font-medium hover:bg-indigo-100'
                                                 : 'text-gray-700 hover:bg-gray-50'
                                         }`}
                                     >
-                                        {brandOption.logo_path ? (
-                                            <img
-                                                src={brandOption.logo_path}
-                                                alt={brandOption.name}
-                                                className="h-8 w-auto flex-shrink-0"
-                                            />
-                                        ) : (
-                                            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-medium text-white">
-                                                {brandOption.name.charAt(0).toUpperCase()}
-                                            </div>
-                                        )}
+                                        {(() => {
+                                            if (brandOption.logo_path) {
+                                                return (
+                                                    <img
+                                                        src={brandOption.logo_path}
+                                                        alt={brandOption.name}
+                                                        className="h-8 w-auto flex-shrink-0"
+                                                    />
+                                                )
+                                            }
+                                            const optionBrandColor = brandOption.primary_color || '#4f46e5'
+                                            const optionTextColor = getContrastTextColor(optionBrandColor)
+                                            return (
+                                                <div 
+                                                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium"
+                                                    style={{ 
+                                                        backgroundColor: optionBrandColor,
+                                                        color: optionTextColor
+                                                    }}
+                                                >
+                                                    {brandOption.name.charAt(0).toUpperCase()}
+                                                </div>
+                                            )
+                                        })()}
                                         <span className="flex-1 truncate">{brandOption.name}</span>
-                                        {brandOption.is_disabled && (
-                                            <span className="flex-shrink-0 text-xs text-gray-400" title="Plan limit exceeded">
-                                                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                                </svg>
-                                            </span>
-                                        )}
-                                        {brandOption.is_active && !brandOption.is_disabled && (
+                                        {brandOption.is_active && (
                                             <svg
                                                 className="h-4 w-4 flex-shrink-0 text-indigo-600"
                                                 fill="currentColor"
@@ -171,18 +203,33 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
 
     // Single brand - simple link to dashboard
     return (
-        <Link href="/app/dashboard" className="flex items-center min-w-0">
+        <Link href="/app/dashboard" className="flex items-center min-w-0 max-w-full">
             {activeBrand.logo_path ? (
                 <img
                     src={activeBrand.logo_path}
                     alt={brandName}
-                    className="h-12 w-auto max-w-72 object-contain"
+                    className="h-12 w-auto max-w-72 object-contain flex-shrink-0"
                     style={logoFilterStyle}
                 />
             ) : (
-                <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-medium text-white">{firstLetter}</span>
-                </div>
+                <>
+                    <div 
+                        className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: brandColor }}
+                    >
+                        <span className="text-sm font-medium" style={{ color: textColorForBrand }}>{firstLetter}</span>
+                    </div>
+                    <span 
+                        className="truncate min-w-0 ml-2"
+                        style={{ 
+                            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
+                            maxWidth: '200px'
+                        }}
+                        title={brandName}
+                    >
+                        {brandName}
+                    </span>
+                </>
             )}
         </Link>
     )

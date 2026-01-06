@@ -1,200 +1,463 @@
-import { useForm, router, Link, usePage } from '@inertiajs/react'
+import { router, Link, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method }) {
+export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color }) {
     const { auth } = usePage().props
-    const { post, processing } = useForm()
-    const [selectedPlan, setSelectedPlan] = useState(null)
+    const [processingPlanId, setProcessingPlanId] = useState(null)
 
-    const handleSubscribe = (priceId) => {
-        post('/app/billing/subscribe', {
-            price_id: priceId,
-        })
+    const handleSubscribe = (priceId, planId) => {
+        if (!priceId || priceId === 'price_free' || priceId === 'price_FREE') {
+            alert('This plan cannot be purchased. Please select a paid plan.')
+            return
+        }
+        
+        setProcessingPlanId(planId)
+        // Submit form to create checkout session and redirect
+        router.post('/app/billing/subscribe', 
+            { price_id: priceId },
+            {
+                preserveState: false,
+                preserveScroll: false,
+                onFinish: () => {
+                    setProcessingPlanId(null)
+                },
+                onError: (errors) => {
+                    setProcessingPlanId(null)
+                    if (errors.price_id) {
+                        console.error('Price ID error:', errors.price_id)
+                    }
+                }
+            }
+        )
     }
 
-    const handleUpdateSubscription = (priceId) => {
-        post('/app/billing/update-subscription', {
+    const handleUpdateSubscription = (priceId, planId) => {
+        if (!priceId) {
+            console.error('Price ID is required')
+            return
+        }
+        
+        setProcessingPlanId(planId)
+        router.post('/app/billing/update-subscription', {
             price_id: priceId,
+        }, {
+            onFinish: () => {
+                setProcessingPlanId(null)
+            },
+            onError: () => {
+                setProcessingPlanId(null)
+            }
         })
     }
 
     const handleCancel = () => {
         if (confirm('Are you sure you want to cancel your subscription? You will lose access to premium features at the end of your billing period.')) {
-            post('/app/billing/cancel')
+            setProcessingPlanId('cancel')
+            router.post('/app/billing/cancel', {}, {
+                onFinish: () => {
+                    setProcessingPlanId(null)
+                }
+            })
         }
     }
 
     const handleResume = () => {
-        post('/app/billing/resume')
+        setProcessingPlanId('resume')
+        router.post('/app/billing/resume', {}, {
+            onFinish: () => {
+                setProcessingPlanId(null)
+            }
+        })
     }
 
     const formatLimit = (limit) => {
-        if (limit === Number.MAX_SAFE_INTEGER || limit === 2147483647) {
+        if (limit === Number.MAX_SAFE_INTEGER || limit === 2147483647 || limit === 999999) {
             return 'Unlimited'
         }
         return limit
     }
 
+    const formatStorage = (mb) => {
+        if (mb === Number.MAX_SAFE_INTEGER || mb === 2147483647 || mb === 999999) {
+            return 'Unlimited'
+        }
+        if (mb >= 1024) {
+            return `${(mb / 1024).toFixed(1)} GB`
+        }
+        return `${mb} MB`
+    }
+
+    const formatUsage = (current, max) => {
+        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999) {
+            return `${current} of Unlimited`
+        }
+        return `${current} of ${max}`
+    }
+
+    const getUsagePercentage = (current, max) => {
+        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999) {
+            return 0
+        }
+        return Math.min((current / max) * 100, 100)
+    }
+
     const currentPlanData = plans?.find((p) => p.id === current_plan)
+    const sitePrimaryColor = site_primary_color || '#6366f1'
+
+    // Feature list for each plan
+    const getPlanFeatures = (plan) => {
+        const features = []
+        
+        // Always include basic features
+        features.push('Custom domains')
+        features.push('Edge content delivery')
+        features.push('Advanced analytics')
+        
+        // Add plan-specific features
+        if (plan.id === 'starter' || plan.id === 'pro' || plan.id === 'enterprise') {
+            features.push('Quarterly workshops')
+        }
+        
+        if (plan.id === 'pro' || plan.id === 'enterprise') {
+            features.push('Single sign-on (SSO)')
+            features.push('Priority phone support')
+        }
+        
+        if (plan.id === 'enterprise') {
+            features.push('Custom integrations')
+            features.push('Dedicated account manager')
+        }
+        
+        // Add role access feature
+        if (plan.features && plan.features.includes('access_to_more_roles')) {
+            features.push('Access to more roles and permissions')
+        }
+        
+        return features
+    }
 
     return (
-        <div className="min-h-full">
+        <div className="min-h-full bg-white">
             <AppNav brand={auth.activeBrand} tenant={tenant} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8">
-                    <h1 className="text-3xl font-bold tracking-tight text-gray-900">Billing & Plans</h1>
-                    <p className="mt-2 text-sm text-gray-700">Manage your subscription and billing information</p>
+            <main className="relative isolate">
+                {/* Gradient Background (like homepage) */}
+                <div
+                    className="absolute inset-x-0 -top-40 -z-10 transform-gpu overflow-hidden blur-3xl sm:-top-80 pointer-events-none"
+                    aria-hidden="true"
+                >
+                    <div
+                        className="relative left-[calc(50%-11rem)] aspect-[1155/678] w-[36.125rem] -translate-x-1/2 rotate-[30deg] bg-gradient-to-tr from-[#ff80b5] to-[#9089fc] opacity-30 sm:left-[calc(50%-30rem)] sm:w-[72.1875rem]"
+                        style={{
+                            clipPath:
+                                'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.5% 76.7%, 76.1% 97.7%, 74.1% 44.1%)',
+                        }}
+                    />
+                </div>
+                <div
+                    className="absolute inset-x-0 top-[calc(100%-13rem)] -z-10 transform-gpu overflow-hidden blur-3xl sm:top-[calc(100%-30rem)] pointer-events-none"
+                    aria-hidden="true"
+                >
+                    <div
+                        className="relative left-[calc(50%+3rem)] aspect-[1155/678] w-[36.125rem] -translate-x-1/2 bg-gradient-to-tr from-[#ff80b5] to-[#9089fc] opacity-30 sm:left-[calc(50%+36rem)] sm:w-[72.1875rem]"
+                        style={{
+                            clipPath:
+                                'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.5% 76.7%, 76.1% 97.7%, 74.1% 44.1%)',
+                        }}
+                    />
                 </div>
 
-                {/* Current Plan Card */}
-                {subscription && (
-                    <div className="mb-8 overflow-hidden rounded-lg bg-white shadow">
-                        <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-lg font-medium leading-6 text-gray-900">Current Subscription</h3>
-                            <div className="mt-4">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-900">
-                                            {currentPlanData?.name || current_plan}
-                                        </p>
-                                        <p className="text-sm text-gray-500">
-                                            Status: {subscription.status}
-                                            {subscription.on_grace_period && ' (Cancels at period end)'}
-                                        </p>
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
+                    {/* Header */}
+                    <div className="text-center mb-12">
+                        <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
+                            Pricing that grows with you
+                        </h1>
+                        <p className="mt-4 text-lg text-gray-600">
+                            Choose an affordable plan that's packed with the best features for engaging your audience, creating customer loyalty, and driving sales.
+                        </p>
+                    </div>
+
+                    {/* Current Plan Usage Card */}
+                    {currentPlanData && (
+                        <div className="mb-12 bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                            <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Plan: {currentPlanData.name}</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">Brands</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(current_usage?.brands || 0, current_plan_limits?.max_brands || 0)}
+                                        </span>
                                     </div>
-                                    <div className="flex gap-2">
-                                        {subscription.canceled && !subscription.on_grace_period && (
-                                            <button
-                                                type="button"
-                                                onClick={handleResume}
-                                                disabled={processing}
-                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                            >
-                                                Resume
-                                            </button>
-                                        )}
-                                        {!subscription.canceled && (
-                                            <button
-                                                type="button"
-                                                onClick={handleCancel}
-                                                disabled={processing}
-                                                className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                                            >
-                                                Cancel Subscription
-                                            </button>
-                                        )}
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.brands || 0, current_plan_limits?.max_brands || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">Users</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(current_usage?.users || 0, current_plan_limits?.max_users || 0)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.users || 0, current_plan_limits?.max_users || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">Categories</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(current_usage?.categories || 0, current_plan_limits?.max_categories || 0)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.categories || 0, current_plan_limits?.max_categories || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">Storage</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatStorage(current_usage?.storage_mb || 0)} / {formatStorage(current_plan_limits?.max_storage_mb || 0)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.storage_mb || 0, current_plan_limits?.max_storage_mb || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Payment Method */}
-                {payment_method && (
-                    <div className="mb-8 overflow-hidden rounded-lg bg-white shadow">
-                        <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-lg font-medium leading-6 text-gray-900">Payment Method</h3>
-                            <div className="mt-4">
-                                <p className="text-sm text-gray-900">
-                                    {payment_method.brand?.toUpperCase() || payment_method.type} •••• {payment_method.last_four}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Plans Grid */}
-                <div className="mb-8">
-                    <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Available Plans</h3>
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-                        {plans?.map((plan) => (
-                            <div
-                                key={plan.id}
-                                className={`overflow-hidden rounded-lg border shadow-sm ${
-                                    plan.is_current
-                                        ? 'border-indigo-600 ring-2 ring-indigo-600'
-                                        : 'border-gray-200 bg-white'
-                                }`}
-                            >
-                                <div className="p-6">
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-lg font-semibold text-gray-900">{plan.name}</h4>
-                                        {plan.is_current && (
-                                            <span className="rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-indigo-800">
-                                                Current
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="mt-4 space-y-2">
-                                        <div className="text-sm text-gray-600">
-                                            <span className="font-medium">Brands:</span> {formatLimit(plan.limits.max_brands)}
-                                        </div>
-                                        <div className="text-sm text-gray-600">
-                                            <span className="font-medium">Categories:</span> {formatLimit(plan.limits.max_categories)}
-                                        </div>
-                                        <div className="text-sm text-gray-600">
-                                            <span className="font-medium">Storage:</span>{' '}
-                                            {plan.limits.max_storage_mb === 2147483647
-                                                ? 'Unlimited'
-                                                : `${plan.limits.max_storage_mb} MB`}
-                                        </div>
-                                        <div className="text-sm text-gray-600">
-                                            <span className="font-medium">Upload Size:</span>{' '}
-                                            {plan.limits.max_upload_size_mb === 2147483647
-                                                ? 'Unlimited'
-                                                : `${plan.limits.max_upload_size_mb} MB`}
-                                        </div>
-                                    </div>
-                                    <div className="mt-6">
-                                        {plan.is_current ? (
-                                            <button
-                                                type="button"
-                                                disabled
-                                                className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400"
+                    {/* Plans Grid */}
+                    <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
+                        {plans?.map((plan) => {
+                            const isCurrent = plan.is_current
+                            const features = getPlanFeatures(plan)
+                            
+                            return (
+                                <div
+                                    key={plan.id}
+                                    className={`relative rounded-lg border ${
+                                        isCurrent
+                                            ? 'border-gray-300 bg-white ring-2 shadow-lg'
+                                            : 'border-gray-200 bg-white shadow-sm'
+                                    }`}
+                                    style={isCurrent ? { ringColor: sitePrimaryColor } : {}}
+                                >
+                                    {isCurrent && (
+                                        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                                            <span
+                                                className="rounded-full px-3 py-1 text-xs font-medium text-white"
+                                                style={{ backgroundColor: sitePrimaryColor }}
                                             >
                                                 Current Plan
-                                            </button>
-                                        ) : (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (subscription) {
-                                                        handleUpdateSubscription(plan.stripe_price_id)
-                                                    } else {
-                                                        handleSubscribe(plan.stripe_price_id)
-                                                    }
-                                                }}
-                                                disabled={processing}
-                                                className="w-full rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                            >
-                                                {subscription ? 'Switch to Plan' : 'Subscribe'}
-                                            </button>
-                                        )}
+                                            </span>
+                                        </div>
+                                    )}
+                                    
+                                    <div className="p-6">
+                                        <h3 className="text-xl font-semibold text-gray-900 mb-2">{plan.name}</h3>
+                                        
+                                        <div className="mb-4">
+                                            {plan.monthly_price ? (
+                                                <>
+                                                    <span className="text-3xl font-bold text-gray-900">${plan.monthly_price}</span>
+                                                    <span className="text-gray-500 ml-2">USD</span>
+                                                    <p className="text-sm text-gray-500 mt-1">Billed monthly</p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="text-3xl font-bold text-gray-900">Free</span>
+                                                    <p className="text-sm text-gray-500 mt-1">No credit card required</p>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* Limits Summary */}
+                                        <div className="mb-6 space-y-2 text-sm text-gray-600">
+                                            <div className="flex justify-between">
+                                                <span>Brands:</span>
+                                                <span className="font-medium text-gray-900">{formatLimit(plan.limits.max_brands)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>Users:</span>
+                                                <span className="font-medium text-gray-900">{formatLimit(plan.limits.max_users)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>Categories:</span>
+                                                <span className="font-medium text-gray-900">{formatLimit(plan.limits.max_categories)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>Storage:</span>
+                                                <span className="font-medium text-gray-900">{formatStorage(plan.limits.max_storage_mb)}</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Features List */}
+                                        <ul className="mb-6 space-y-3">
+                                            {features.map((feature, index) => (
+                                                <li key={index} className="flex items-start">
+                                                    <svg
+                                                        className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5"
+                                                        viewBox="0 0 20 20"
+                                                        fill="currentColor"
+                                                    >
+                                                        <path
+                                                            fillRule="evenodd"
+                                                            d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                                                            clipRule="evenodd"
+                                                        />
+                                                    </svg>
+                                                    <span className="text-sm text-gray-600">{feature}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+
+                                        {/* Action Button */}
+                                        <div className="mt-6">
+                                            {isCurrent ? (
+                                                <button
+                                                    type="button"
+                                                    disabled
+                                                    className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
+                                                >
+                                                    Current Plan
+                                                </button>
+                                            ) : plan.id === 'free' ? (
+                                                <button
+                                                    type="button"
+                                                    disabled
+                                                    className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
+                                                >
+                                                    Free Plan
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!plan.stripe_price_id || plan.stripe_price_id === 'price_free') {
+                                                            alert('This plan is not available for purchase. Please contact support.')
+                                                            return
+                                                        }
+                                                        if (subscription) {
+                                                            handleUpdateSubscription(plan.stripe_price_id, plan.id)
+                                                        } else {
+                                                            handleSubscribe(plan.stripe_price_id, plan.id)
+                                                        }
+                                                    }}
+                                                    disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free'}
+                                                    className={`w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors ${
+                                                        plan.id === 'pro'
+                                                            ? 'hover:opacity-90'
+                                                            : 'hover:opacity-90'
+                                                    }`}
+                                                    style={{ backgroundColor: sitePrimaryColor }}
+                                                >
+                                                    {processingPlanId === plan.id ? 'Processing...' : subscription ? 'Switch to Plan' : 'Buy this plan'}
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            )
+                        })}
                     </div>
-                </div>
 
-                {/* Invoices Link */}
-                <div className="overflow-hidden rounded-lg bg-white shadow">
-                    <div className="px-4 py-5 sm:p-6">
-                        <h3 className="text-lg font-medium leading-6 text-gray-900">Invoices</h3>
-                        <div className="mt-4">
-                            <Link
-                                href="/app/billing/invoices"
-                                className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
-                            >
-                                View all invoices →
-                            </Link>
+                    {/* Current Subscription & Payment Method */}
+                    {(subscription || payment_method) && (
+                        <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {subscription && (
+                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                                    <h3 className="text-lg font-medium text-gray-900 mb-4">Current Subscription</h3>
+                                    <div className="space-y-2">
+                                        <p className="text-sm text-gray-600">
+                                            <span className="text-gray-500">Plan:</span>{' '}
+                                            <span className="text-gray-900 font-medium">
+                                                {currentPlanData?.name || current_plan}
+                                            </span>
+                                        </p>
+                                        <p className="text-sm text-gray-600">
+                                            <span className="text-gray-500">Status:</span>{' '}
+                                            <span className="text-gray-900 font-medium capitalize">{subscription.status}</span>
+                                            {subscription.on_grace_period && (
+                                                <span className="text-yellow-600 ml-2">(Cancels at period end)</span>
+                                            )}
+                                        </p>
+                                        <div className="flex gap-2 mt-4">
+                                            {subscription.canceled && !subscription.on_grace_period && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleResume}
+                                                    disabled={processingPlanId !== null}
+                                                    className="rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+                                                    style={{ backgroundColor: sitePrimaryColor }}
+                                                >
+                                                    {processingPlanId === 'resume' ? 'Processing...' : 'Resume'}
+                                                </button>
+                                            )}
+                                            {!subscription.canceled && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleCancel}
+                                                    disabled={processingPlanId !== null}
+                                                    className="rounded-md bg-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-300"
+                                                >
+                                                    {processingPlanId === 'cancel' ? 'Processing...' : 'Cancel Subscription'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {payment_method && (
+                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                                    <h3 className="text-lg font-medium text-gray-900 mb-4">Payment Method</h3>
+                                    <p className="text-sm text-gray-600">
+                                        {payment_method.brand?.toUpperCase() || payment_method.type} •••• {payment_method.last_four}
+                                    </p>
+                                </div>
+                            )}
                         </div>
+                    )}
+
+                    {/* Invoices Link */}
+                    <div className="mt-8 text-center">
+                        <Link
+                            href="/app/billing/invoices"
+                            className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                        >
+                            View all invoices →
+                        </Link>
                     </div>
-                </div>
                 </div>
             </main>
             <AppFooter />

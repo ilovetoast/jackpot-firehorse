@@ -7,6 +7,7 @@ use App\Services\BrandService;
 use App\Services\CategoryService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -25,8 +26,17 @@ class BrandController extends Controller
      */
     public function index(): Response
     {
+        $user = Auth::user();
         $tenant = app('tenant');
+
+        // Check if user has permission to view brand settings
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to view brand settings.');
+        }
+
+        // If user has brand_settings.manage permission, they can see all brands for the tenant
         $brands = $tenant->brands;
+
         $limits = $this->planService->getPlanLimits($tenant);
         $currentCount = $brands->count();
         $canCreate = $this->brandService->canCreate($tenant);
@@ -74,11 +84,17 @@ class BrandController extends Controller
      */
     public function switch(Request $request, Brand $brand)
     {
+        $user = Auth::user();
         $tenant = app('tenant');
 
         // Verify brand belongs to tenant
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Verify user has access to this brand (via brand_user pivot table)
+        if (! $user->brands()->where('brands.id', $brand->id)->exists()) {
+            abort(403, 'You do not have access to this brand.');
         }
 
         session(['brand_id' => $brand->id]);
@@ -91,7 +107,14 @@ class BrandController extends Controller
      */
     public function create(): Response
     {
+        $user = Auth::user();
         $tenant = app('tenant');
+
+        // Check if user has permission to manage brand settings
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to create brands.');
+        }
+
         $canCreate = $this->brandService->canCreate($tenant);
 
         if (! $canCreate) {
@@ -108,12 +131,18 @@ class BrandController extends Controller
      */
     public function store(Request $request)
     {
+        $user = Auth::user();
         $tenant = app('tenant');
+
+        // Check if user has permission to manage brand settings
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to create brands.');
+        }
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
-            'logo' => 'nullable|mimes:png,webp,svg|max:2048',
+            'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
             'primary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'secondary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'accent_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
@@ -148,11 +177,17 @@ class BrandController extends Controller
      */
     public function show(Brand $brand): Response
     {
+        $user = Auth::user();
         $tenant = app('tenant');
 
         // Verify brand belongs to tenant
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Verify user has access to this brand (via brand_user pivot table)
+        if (! $user->brands()->where('brands.id', $brand->id)->exists()) {
+            abort(403, 'You do not have access to this brand.');
         }
 
         return Inertia::render('Brands/Show', [
@@ -177,6 +212,10 @@ class BrandController extends Controller
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
         }
+
+        // Check if user has admin or owner role (not member) - using policy check
+        // The policy checks for 'manage brands' permission which only admin and owner have
+        $this->authorize('update', $brand);
 
         // Get categories for this brand
         $categories = $brand->categories()->orderBy('asset_type')->orderBy('name')->get();
@@ -231,10 +270,13 @@ class BrandController extends Controller
             abort(403, 'Brand does not belong to this tenant.');
         }
 
+        // Check if user has admin or owner role (not member) - using policy check
+        $this->authorize('update', $brand);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
-            'logo' => 'nullable|mimes:png,webp,svg|max:2048',
+            'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
             'show_in_selector' => 'nullable|boolean',
             'primary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'secondary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
@@ -276,11 +318,17 @@ class BrandController extends Controller
      */
     public function destroy(Brand $brand)
     {
+        $user = Auth::user();
         $tenant = app('tenant');
 
         // Verify brand belongs to tenant
         if ($brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Check if user has permission to manage brand settings
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to delete brands.');
         }
 
         try {

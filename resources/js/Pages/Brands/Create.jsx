@@ -119,7 +119,7 @@ export default function BrandsCreate() {
                                             type="file"
                                             name="logo"
                                             id="logo"
-                                            accept="image/png,image/webp,image/svg+xml"
+                                            accept="image/png,image/webp,image/svg+xml,image/avif"
                                             onChange={(e) => {
                                                 const file = e.target.files?.[0]
                                                 if (file) {

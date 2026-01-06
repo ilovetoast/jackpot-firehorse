@@ -13,55 +13,65 @@ class PermissionSeeder extends Seeder
      */
     public function run(): void
     {
-        // Create permissions
-        $permissions = [
-            'view brand',
-            'upload asset',
-            'view private category',
-            'approve asset',
-            'manage categories',
-            'manage brands',
-            'manage users',
-            'manage billing',
+        // Company permissions (tenant-scoped)
+        $companyPermissions = [
+            'billing.view',
+            'billing.manage',
+            'company_settings.view',
+            'team.manage',
+            'activity_logs.view',
+            'brand_settings.manage',
+            'brand_categories.manage',
         ];
 
-        foreach ($permissions as $permission) {
+        // Site permissions (global)
+        $sitePermissions = [
+            'company.manage',
+            'permissions.manage',
+        ];
+
+        // Create all permissions
+        foreach (array_merge($companyPermissions, $sitePermissions) as $permission) {
             Permission::firstOrCreate([
                 'name' => $permission,
                 'guard_name' => 'web',
             ]);
         }
 
-        // Assign permissions to roles
-        $owner = Role::findByName('owner', 'web');
-        $admin = Role::findByName('admin', 'web');
-        $contributor = Role::findByName('contributor', 'web');
-        $viewer = Role::findByName('viewer', 'web');
+        // Create and assign permissions to company roles
+        $owner = Role::firstOrCreate(['name' => 'owner', 'guard_name' => 'web']);
+        $admin = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
+        $brandManager = Role::firstOrCreate(['name' => 'brand_manager', 'guard_name' => 'web']);
+        $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']);
 
-        // Owner has all permissions
-        $owner->givePermissionTo(Permission::all());
+        // Owner has all company permissions
+        $owner->syncPermissions($companyPermissions);
 
-        // Admin has all except billing
-        $admin->givePermissionTo([
-            'view brand',
-            'upload asset',
-            'view private category',
-            'approve asset',
-            'manage categories',
-            'manage brands',
-            'manage users',
+        // Admin has all company permissions
+        $admin->syncPermissions($companyPermissions);
+
+        // Brand Manager has brand-related permissions and billing view
+        $brandManager->syncPermissions([
+            'brand_settings.manage',
+            'brand_categories.manage',
+            'billing.view',
         ]);
 
-        // Contributor can upload and view
-        $contributor->givePermissionTo([
-            'view brand',
-            'upload asset',
-            'view private category',
-        ]);
+        // Member has no special permissions (basic access only)
+        $member->syncPermissions([]);
 
-        // Viewer can only view
-        $viewer->givePermissionTo([
-            'view brand',
-        ]);
+        // Create and assign permissions to site roles
+        $siteOwner = Role::firstOrCreate(['name' => 'site_owner', 'guard_name' => 'web']);
+        $siteAdmin = Role::firstOrCreate(['name' => 'site_admin', 'guard_name' => 'web']);
+        $siteSupport = Role::firstOrCreate(['name' => 'site_support', 'guard_name' => 'web']);
+        $compliance = Role::firstOrCreate(['name' => 'compliance', 'guard_name' => 'web']);
+
+        // Site Owner has all site permissions
+        $siteOwner->syncPermissions($sitePermissions);
+
+        // Site Admin, Site Support, and Compliance start with no permissions (can be assigned via UI)
+        $siteAdmin->syncPermissions([]);
+        $siteSupport->syncPermissions([]);
+        $compliance->syncPermissions([]);
     }
 }

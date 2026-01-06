@@ -124,4 +124,16 @@ class PlanService
     {
         return (new self)->getCurrentPlan($tenant);
     }
+
+    /**
+     * Check if tenant has access to brand_manager role.
+     * Only Pro and Enterprise plans have access to brand_manager role.
+     */
+    public function hasAccessToBrandManagerRole(Tenant $tenant): bool
+    {
+        $planName = $this->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+        
+        return in_array('access_to_more_roles', $plan['features'] ?? []);
+    }
 }

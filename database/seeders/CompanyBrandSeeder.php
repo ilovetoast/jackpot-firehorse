@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Spatie\Permission\Models\Role;
 
 class CompanyBrandSeeder extends Seeder
 {
@@ -16,17 +17,56 @@ class CompanyBrandSeeder extends Seeder
      */
     public function run(): void
     {
-        // Create a site owner user (ID 1)
-        $siteOwner = User::firstOrCreate(
-            ['email' => 'siteowner@example.com'],
+        // Create initial user account (ID 1) with placeholder info
+        $initialUser = User::firstOrCreate(
+            ['email' => 'msteele@velvethammerbranding.com'],
             [
-                'first_name' => 'Site',
-                'last_name' => 'Owner',
+                'first_name' => 'Michael',
+                'last_name' => 'Steele',
+                'password' => Hash::make('gotrice'),
+            ]
+        );
+
+        // Create initial company for user 1
+        $initialCompany = Tenant::firstOrCreate(
+            ['slug' => 'velvethammerbranding'],
+            ['name' => 'Velve Hammer Branding']
+        );
+
+        // Attach user 1 to the initial company as owner
+        $initialUser->tenants()->syncWithoutDetaching([$initialCompany->id => ['role' => 'owner']]);
+        // make Site Owner role
+        $initialUser->assignRole('site_owner');
+
+        // Get the default brand for the initial company
+        $initialDefaultBrand = $initialCompany->defaultBrand;
+        if ($initialDefaultBrand) {
+            $initialDefaultBrand->update([
+                'name' => 'Example Company',
+                'show_in_selector' => true,
+                'primary_color' => '#6366f1',
+                'secondary_color' => '#8b5cf6',
+                'accent_color' => '#ec4899',
+            ]);
+        }
+
+        // Create a site owner user for secondary companies (will be user ID 2+ if user 1 exists)
+        $siteOwner = User::firstOrCreate(
+            ['email' => 'johndoe@example.com'],
+            [
+                'first_name' => 'John',
+                'last_name' => 'Doe',
                 'password' => Hash::make('password'),
             ]
         );
 
-        // Define companies and their brands
+        // Assign site_owner role to the site owner user
+        $siteOwnerRole = Role::where('name', 'site_owner')->first();
+        if ($siteOwnerRole && !$siteOwner->hasRole('site_owner')) {
+            $siteOwner->assignRole('site_owner');
+        }
+
+        // Define secondary companies and their brands
         $companiesData = [
             'St. Croix' => ['St Croix', 'St Croix Fly', 'Seviin'],
             'Augusta' => ['Augusta'],

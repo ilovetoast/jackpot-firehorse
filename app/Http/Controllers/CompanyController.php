@@ -91,10 +91,17 @@ class CompanyController extends Controller
             ]);
         }
 
+        // Check if user has permission to view company settings
+        // Check via tenant role permissions
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+            abort(403, 'Only administrators and owners can access company settings.');
+        }
+
         // Get billing information
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
         $subscription = $tenant->subscription('default');
         $teamMembersCount = $tenant->users()->count();
+        $brandsCount = $tenant->brands()->count();
 
         return Inertia::render('Companies/Settings', [
             'tenant' => [
@@ -108,6 +115,7 @@ class CompanyController extends Controller
                 'subscription_status' => $subscription ? $subscription->stripe_status : 'none',
             ],
             'team_members_count' => $teamMembersCount,
+            'brands_count' => $brandsCount,
         ]);
     }
 
@@ -127,6 +135,12 @@ class CompanyController extends Controller
 
         if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(403, 'You do not have access to this company.');
+        }
+
+        // Check if user has permission to view company settings (required for update too)
+        // Check via tenant role permissions
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+            abort(403, 'Only administrators and owners can update company settings.');
         }
 
         $validated = $request->validate([

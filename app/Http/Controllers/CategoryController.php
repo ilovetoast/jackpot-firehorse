@@ -9,6 +9,7 @@ use App\Services\CategoryService;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -35,6 +36,11 @@ class CategoryController extends Controller
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'Only administrators, owners, and brand managers can access category settings.');
+        }
 
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id);
@@ -139,6 +145,12 @@ class CategoryController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
+        $user = $request->user();
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'Only administrators, owners, and brand managers can create categories.');
+        }
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
@@ -167,6 +179,7 @@ class CategoryController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
+        $user = $request->user();
 
         // Verify category belongs to tenant/brand
         if ($category->tenant_id !== $tenant->id) {
@@ -176,6 +189,9 @@ class CategoryController extends Controller
         if ($category->brand_id !== $brand->id) {
             abort(403, 'Category does not belong to this brand.');
         }
+
+        // Check if user has admin/owner role or manage categories/manage brands permission - using policy
+        $this->authorize('update', $category);
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
@@ -210,6 +226,9 @@ class CategoryController extends Controller
         if ($category->brand_id !== $brand->id) {
             abort(403, 'Category does not belong to this brand.');
         }
+
+        // Check if user has admin/owner role or manage categories/manage brands permission - using policy
+        $this->authorize('delete', $category);
 
         try {
             $this->categoryService->delete($category);

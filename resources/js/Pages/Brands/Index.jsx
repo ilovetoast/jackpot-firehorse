@@ -188,42 +188,30 @@ export default function BrandsIndex({ brands, limits }) {
 
                                                     {/* Categories Section */}
                                                     <div>
-                                                        <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">
+                                                        <h3 className="text-base font-semibold leading-6 text-gray-900 mb-3">
                                                             Categories
                                                         </h3>
                                                         {brand.categories && brand.categories.length > 0 ? (
-                                                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                                                                <ul className="divide-y divide-gray-200">
-                                                                    {brand.categories.map((category) => (
-                                                                        <li key={category.id} className="px-4 py-3">
-                                                                            <div className="flex items-center justify-between">
-                                                                                <div>
-                                                                                    <p className="text-sm font-medium text-gray-900">
-                                                                                        {category.name}
-                                                                                    </p>
-                                                                                    <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-                                                                                        <span>{category.asset_type}</span>
-                                                                                        {category.is_system && (
-                                                                                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">
-                                                                                                System
-                                                                                            </span>
-                                                                                        )}
-                                                                                        {category.is_private && (
-                                                                                            <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
-                                                                                                Private
-                                                                                            </span>
-                                                                                        )}
-                                                                                        {category.is_locked && (
-                                                                                            <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
-                                                                                                Locked
-                                                                                            </span>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        </li>
-                                                                    ))}
-                                                                </ul>
+                                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                                                                {brand.categories.map((category) => (
+                                                                    <div key={category.id} className="bg-white rounded-md border border-gray-200 p-2.5">
+                                                                        <p className="text-xs font-medium text-gray-900 truncate mb-1">
+                                                                            {category.name}
+                                                                        </p>
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            {category.is_system && (
+                                                                                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">
+                                                                                    System
+                                                                                </span>
+                                                                            )}
+                                                                            {category.is_locked && (
+                                                                                <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                                                                                    Locked
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
                                                             </div>
                                                         ) : (
                                                             <p className="text-sm text-gray-500">No categories yet.</p>

@@ -40,12 +40,29 @@ export default function Home() {
                             </Link>
                         </div>
                         <div className="flex items-center gap-4">
-                            <Link
-                                href={buttonProps.href}
-                                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                            >
-                                {buttonProps.text}
-                            </Link>
+                            {auth?.user ? (
+                                <Link
+                                    href={buttonProps.href}
+                                    className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                >
+                                    {buttonProps.text}
+                                </Link>
+                            ) : (
+                                <>
+                                    <Link
+                                        href="/login"
+                                        className="text-sm font-semibold leading-6 text-gray-900 hover:text-gray-700"
+                                    >
+                                        Login
+                                    </Link>
+                                    <Link
+                                        href="/signup"
+                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    >
+                                        Sign up
+                                    </Link>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>

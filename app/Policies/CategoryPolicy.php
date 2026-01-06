@@ -61,10 +61,14 @@ class CategoryPolicy
 
     /**
      * Determine if the user can create categories.
+     * Note: This is called from controller which has tenant context via middleware.
+     * We'll check permission in the controller directly since we need tenant context.
      */
     public function create(User $user): bool
     {
-        return $user->can('manage categories');
+        // Permission check is done in controller with tenant context
+        // This method is kept for policy consistency but controller handles the actual check
+        return true; // Controller will enforce the permission check
     }
 
     /**
@@ -72,12 +76,14 @@ class CategoryPolicy
      */
     public function update(User $user, Category $category): bool
     {
-        // User must belong to the tenant and have manage categories permission
+        // User must belong to the tenant
         if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
             return false;
         }
 
-        if (! $user->can('manage categories')) {
+        // Check tenant-scoped permission
+        $tenant = $category->tenant;
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
             return false;
         }
 
@@ -96,12 +102,14 @@ class CategoryPolicy
      */
     public function delete(User $user, Category $category): bool
     {
-        // User must belong to the tenant and have manage categories permission
+        // User must belong to the tenant
         if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
             return false;
         }
 
-        if (! $user->can('manage categories')) {
+        // Check tenant-scoped permission
+        $tenant = $category->tenant;
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
             return false;
         }
 

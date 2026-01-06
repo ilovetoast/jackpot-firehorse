@@ -38,8 +38,9 @@ class BrandPolicy
      */
     public function update(User $user, Brand $brand): bool
     {
+        $tenant = $brand->tenant;
         return $user->tenants()->where('tenants.id', $brand->tenant_id)->exists()
-            && $user->can('manage brands');
+            && $user->hasPermissionForTenant($tenant, 'brand_settings.manage');
     }
 
     /**

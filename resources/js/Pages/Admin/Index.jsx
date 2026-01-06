@@ -1,11 +1,24 @@
 import { useState } from 'react'
-import { Link, usePage } from '@inertiajs/react'
+import { Link, usePage, useForm, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import UserSelector from '../../Components/UserSelector'
 
-export default function AdminIndex({ companies, users, stats }) {
+export default function AdminIndex({ companies, users, stats, all_users }) {
     const { auth } = usePage().props
     const [activeTab, setActiveTab] = useState('companies')
+    const [expandedCompany, setExpandedCompany] = useState(null)
+    const [expandedDetails, setExpandedDetails] = useState(null)
+    const { data, setData, post, processing, errors, reset } = useForm({
+        user_id: null,
+        role: 'member',
+        brand_ids: [],
+    })
+    const [showRoleModal, setShowRoleModal] = useState(null)
+    const [selectedUserForRole, setSelectedUserForRole] = useState(null)
+    const { data: roleData, setData: setRoleData, post: postRole, processing: roleProcessing } = useForm({
+        role: '',
+    })
 
     const adminTools = [
         { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '#' },
@@ -146,29 +159,262 @@ export default function AdminIndex({ companies, users, stats }) {
                                     {companies.length === 0 ? (
                                         <p className="text-sm text-gray-500 text-center py-8">No companies found</p>
                                     ) : (
-                                        companies.map((company) => (
-                                            <div key={company.id} className="flex items-center justify-between py-4 border-b border-gray-200 last:border-0">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <h3 className="text-sm font-semibold text-gray-900">{company.name}</h3>
+                                        companies.map((company) => {
+                                            const isExpanded = expandedCompany === company.id
+                                            const isDetailsExpanded = expandedDetails === company.id
+                                            const handleUserSelect = (user) => {
+                                                setData('user_id', user.id)
+                                            }
+                                            const handleSubmit = (e) => {
+                                                e.preventDefault()
+                                                post(`/app/admin/companies/${company.id}/add-user`, {
+                                                    preserveScroll: true,
+                                                    onSuccess: () => {
+                                                        reset()
+                                                        setExpandedCompany(null)
+                                                    },
+                                                })
+                                            }
+                                            const toggleBrand = (brandId) => {
+                                                const currentBrands = data.brand_ids || []
+                                                if (currentBrands.includes(brandId)) {
+                                                    setData('brand_ids', currentBrands.filter(id => id !== brandId))
+                                                } else {
+                                                    setData('brand_ids', [...currentBrands, brandId])
+                                                }
+                                            }
+                                            const handleRoleChange = (userId, newRole) => {
+                                                router.put(`/app/admin/companies/${company.id}/users/${userId}/role`, {
+                                                    role: newRole,
+                                                }, {
+                                                    preserveScroll: true,
+                                                    onSuccess: () => {
+                                                        // Refresh the page data to update owner and roles
+                                                        router.reload({ only: ['companies'] })
+                                                    },
+                                                })
+                                            }
+
+                                            return (
+                                                <div key={company.id} className="border-b border-gray-200 last:border-0">
+                                                    <div className="flex items-center justify-between py-4">
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-3">
+                                                                <BuildingOfficeIcon className="h-5 w-5 text-gray-400" />
+                                                                <div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <h3 className="text-sm font-semibold text-gray-900">{company.name}</h3>
+                                                                        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                                                            company.plan_name === 'free' ? 'bg-gray-100 text-gray-800' :
+                                                                            company.plan_name === 'starter' ? 'bg-green-100 text-green-800' :
+                                                                            company.plan_name === 'pro' ? 'bg-blue-100 text-blue-800' :
+                                                                            'bg-purple-100 text-purple-800'
+                                                                        }`}>
+                                                                            {company.plan}
+                                                                        </span>
+                                                                        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                                                            company.stripe_status === 'active' ? 'bg-green-100 text-green-800' :
+                                                                            company.stripe_status === 'inactive' ? 'bg-yellow-100 text-yellow-800' :
+                                                                            'bg-gray-100 text-gray-800'
+                                                                        }`}>
+                                                                            {company.stripe_status === 'active' ? 'active' :
+                                                                             company.stripe_status === 'inactive' ? 'inactive' :
+                                                                             'not connected'}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="mt-1 text-sm text-gray-500">
+                                                                        {company.owner && (
+                                                                            <span>Owner: {company.owner.name} ({company.owner.email})</span>
+                                                                        )}
+                                                                        {company.owner && company.users_count > 0 && <span className="mx-2">•</span>}
+                                                                        <span>{company.users_count} member{company.users_count !== 1 ? 's' : ''}</span>
+                                                                        {company.brands_count > 0 && (
+                                                                            <span className="ml-2">• {company.brands_count} brand{company.brands_count !== 1 ? 's' : ''}</span>
+                                                                        )}
+                                                                        {company.stripe_connected && (
+                                                                            <span className="ml-2 flex items-center gap-1">
+                                                                                <span className="h-2 w-2 rounded-full bg-green-500"></span>
+                                                                                Stripe Connected
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {company.created_at && (
+                                                                        <div className="mt-1 text-xs text-gray-400">
+                                                                            Created {company.created_at}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="ml-4 flex gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setExpandedCompany(isExpanded ? null : company.id)
+                                                                    if (!isExpanded) {
+                                                                        reset()
+                                                                    }
+                                                                }}
+                                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                            >
+                                                                {isExpanded ? 'Cancel' : 'Add User'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setExpandedDetails(isDetailsExpanded ? null : company.id)
+                                                                    // Close add user form if open
+                                                                    if (isExpanded) {
+                                                                        setExpandedCompany(null)
+                                                                        reset()
+                                                                    }
+                                                                }}
+                                                                className="rounded-md bg-gray-200 px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-300"
+                                                            >
+                                                                {isDetailsExpanded ? 'Hide Details' : 'View Details'}
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                    <div className="mt-1 text-sm text-gray-500">
-                                                        <span>{company.users_count} member{company.users_count !== 1 ? 's' : ''}</span>
-                                                        {company.brands_count > 0 && (
-                                                            <span className="ml-2">• {company.brands_count} brand{company.brands_count !== 1 ? 's' : ''}</span>
-                                                        )}
-                                                    </div>
+
+                                                    {/* Company Details Section */}
+                                                    {isDetailsExpanded && (
+                                                        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+                                                            <h4 className="text-sm font-semibold text-gray-900 mb-4">Company Members</h4>
+                                                            <div className="space-y-3">
+                                                                {company.users && company.users.length > 0 ? (
+                                                                    company.users.map((user) => (
+                                                                        <div key={user.id} className="flex items-center justify-between py-2 px-3 bg-white rounded-md border border-gray-200">
+                                                                            <div className="flex items-center gap-3 flex-1">
+                                                                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-medium text-white">
+                                                                                    {user.first_name?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
+                                                                                </div>
+                                                                                <div className="flex-1">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-sm font-medium text-gray-900">
+                                                                                            {user.first_name && user.last_name
+                                                                                                ? `${user.first_name} ${user.last_name}`
+                                                                                                : user.first_name || user.email}
+                                                                                        </span>
+                                                                                        {user.role && (
+                                                                                            <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                                                                                user.role === 'owner' ? 'bg-orange-100 text-orange-800' :
+                                                                                                user.role === 'admin' ? 'bg-blue-100 text-blue-800' :
+                                                                                                'bg-gray-100 text-gray-800'
+                                                                                            }`}>
+                                                                                                {user.role === 'owner' && <span className="mr-1">👑</span>}
+                                                                                                {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <p className="text-xs text-gray-500 mt-0.5">{user.email}</p>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="ml-4">
+                                                                                <select
+                                                                                    value={user.role || 'member'}
+                                                                                    onChange={(e) => handleRoleChange(user.id, e.target.value)}
+                                                                                    className="rounded-md border-gray-300 py-1.5 px-3 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                                >
+                                                                                    <option value="member">Member</option>
+                                                                                    <option value="admin">Admin</option>
+                                                                                    {company.has_access_to_brand_manager && (
+                                                                                        <option value="brand_manager">Brand Manager</option>
+                                                                                    )}
+                                                                                    <option value="owner">Owner</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))
+                                                                ) : (
+                                                                    <p className="text-sm text-gray-500 py-4 text-center">No members found</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Add User Form */}
+                                                    {isExpanded && (
+                                                        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+                                                            <form onSubmit={handleSubmit} className="space-y-4">
+                                                                <UserSelector
+                                                                    users={all_users || []}
+                                                                    selectedUser={all_users?.find(u => u.id === data.user_id) || null}
+                                                                    onSelect={handleUserSelect}
+                                                                    placeholder="Search for a user..."
+                                                                    label="Select User"
+                                                                />
+                                                                {errors.user_id && (
+                                                                    <p className="text-sm text-red-600">{errors.user_id}</p>
+                                                                )}
+
+                                                                {/* Role Selection */}
+                                                                <div>
+                                                                    <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">
+                                                                        Company Role
+                                                                    </label>
+                                                                    <select
+                                                                        value={data.role}
+                                                                        onChange={(e) => setData('role', e.target.value)}
+                                                                        className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                                    >
+                                                                        <option value="member">Member</option>
+                                                                        <option value="admin">Admin</option>
+                                                                        {company.has_access_to_brand_manager && (
+                                                                            <option value="brand_manager">Brand Manager</option>
+                                                                        )}
+                                                                        <option value="owner">Owner</option>
+                                                                    </select>
+                                                                    {errors.role && (
+                                                                        <p className="mt-1 text-sm text-red-600">{errors.role}</p>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Brand Selection */}
+                                                                {company.brands && company.brands.length > 0 && (
+                                                                    <div>
+                                                                        <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">
+                                                                            Select Brands (optional - leave empty to add to all brands)
+                                                                        </label>
+                                                                        <div className="space-y-2">
+                                                                            {company.brands.map((brand) => {
+                                                                                const isSelected = (data.brand_ids || []).includes(brand.id)
+                                                                                return (
+                                                                                    <label key={brand.id} className="flex items-center">
+                                                                                        <input
+                                                                                            type="checkbox"
+                                                                                            checked={isSelected}
+                                                                                            onChange={() => toggleBrand(brand.id)}
+                                                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                                                        />
+                                                                                        <span className="ml-2 flex items-center gap-2 text-sm text-gray-900">
+                                                                                            <TagIcon className="h-4 w-4 text-gray-400" />
+                                                                                            {brand.name}
+                                                                                            {brand.is_default && (
+                                                                                                <span className="ml-2 text-xs text-gray-500">(Default)</span>
+                                                                                            )}
+                                                                                        </span>
+                                                                                    </label>
+                                                                                )
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+
+                                                                <div className="flex justify-end">
+                                                                    <button
+                                                                        type="submit"
+                                                                        disabled={!data.user_id || processing}
+                                                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        {processing ? 'Adding...' : 'Add User to Company'}
+                                                                    </button>
+                                                                </div>
+                                                            </form>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <div className="ml-4">
-                                                    <Link
-                                                        href={`/app/companies/${company.id}`}
-                                                        className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                                                    >
-                                                        View Details
-                                                    </Link>
-                                                </div>
-                                            </div>
-                                        ))
+                                            )
+                                        })
                                     )}
                                 </div>
                             </div>
@@ -198,41 +444,137 @@ export default function AdminIndex({ companies, users, stats }) {
                                     {users.length === 0 ? (
                                         <p className="text-sm text-gray-500 text-center py-8">No users found</p>
                                     ) : (
-                                        users.map((user) => (
-                                            <div key={user.id} className="flex items-center justify-between py-4 border-b border-gray-200 last:border-0">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-sm font-medium text-white">
-                                                            {user.first_name?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
+                                        users.map((user) => {
+                                            const handleAssignSiteRole = () => {
+                                                setSelectedUserForRole(user)
+                                                setShowRoleModal(user.id)
+                                                setRoleData('role', user.site_roles?.[0] || '')
+                                            }
+                                            const handleSubmitSiteRole = (e) => {
+                                                e.preventDefault()
+                                                postRole(`/app/admin/users/${user.id}/assign-site-role`, {
+                                                    preserveScroll: true,
+                                                    onSuccess: () => {
+                                                        setShowRoleModal(null)
+                                                        setSelectedUserForRole(null)
+                                                        setRoleData('role', '')
+                                                    },
+                                                })
+                                            }
+
+                                            return (
+                                                <div key={user.id} className="flex items-center justify-between py-4 border-b border-gray-200 last:border-0">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-sm font-medium text-white">
+                                                                {user.first_name?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
+                                                            </div>
+                                                            <div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <h3 className="text-sm font-semibold text-gray-900">
+                                                                        {user.first_name && user.last_name
+                                                                            ? `${user.first_name} ${user.last_name}`
+                                                                            : user.first_name || user.email}
+                                                                    </h3>
+                                                                    {/* Site Roles Only - Remove Duplicates */}
+                                                                    {user.site_roles && user.site_roles.length > 0 && (
+                                                                        [...new Set(user.site_roles)].map((role) => (
+                                                                            <span key={role} className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                                                                role === 'site_owner' ? 'bg-yellow-100 text-yellow-800' :
+                                                                                role === 'site_admin' ? 'bg-blue-100 text-blue-800' :
+                                                                                'bg-gray-100 text-gray-800'
+                                                                            }`}>
+                                                                                {role === 'site_owner' && <span className="mr-1">👑</span>}
+                                                                                {role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                                                            </span>
+                                                                        ))
+                                                                    )}
+                                                                </div>
+                                                                <p className="mt-1 text-sm text-gray-500">{user.email}</p>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <h3 className="text-sm font-semibold text-gray-900">
-                                                                {user.first_name && user.last_name
-                                                                    ? `${user.first_name} ${user.last_name}`
-                                                                    : user.first_name || user.email}
-                                                            </h3>
-                                                            <p className="mt-1 text-sm text-gray-500">{user.email}</p>
+                                                        <div className="mt-2 text-sm text-gray-500">
+                                                            <span>Member of {user.companies_count} compan{user.companies_count !== 1 ? 'ies' : 'y'}</span>
+                                                            {user.companies && user.companies.length > 0 && (
+                                                                <span className="ml-2">
+                                                                    • {user.companies.map(c => c.name).join(', ')}
+                                                                </span>
+                                                            )}
                                                         </div>
-                                                    </div>
-                                                    <div className="mt-2 text-sm text-gray-500">
-                                                        <span>{user.companies_count} compan{user.companies_count !== 1 ? 'ies' : 'y'}</span>
-                                                        {user.companies.length > 0 && (
-                                                            <span className="ml-2">
-                                                                • {user.companies.map(c => c.name).join(', ')}
-                                                            </span>
+                                                        {user.brands && user.brands.length > 0 && (
+                                                            <div className="mt-1 text-sm text-gray-500">
+                                                                <span>Added to {user.brands.length} brand{user.brands.length !== 1 ? 's' : ''}</span>
+                                                                <span className="ml-2">
+                                                                    • {user.brands.map(b => `${b.name}${b.tenant_name ? ` (${b.tenant_name})` : ''}`).join(', ')}
+                                                                </span>
+                                                            </div>
                                                         )}
                                                     </div>
+                                                    <div className="ml-4 flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleAssignSiteRole}
+                                                            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                        >
+                                                            Assign Role
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    {/* Site Role Assignment Modal */}
+                                                    {showRoleModal === user.id && (
+                                                        <div className="fixed inset-0 z-50 overflow-y-auto">
+                                                            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                                                                <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowRoleModal(null)}></div>
+                                                                <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                                                                    <form onSubmit={handleSubmitSiteRole}>
+                                                                        <div>
+                                                                            <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">
+                                                                                Assign Site Role to {selectedUserForRole?.first_name} {selectedUserForRole?.last_name}
+                                                                            </h3>
+                                                                            <div>
+                                                                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                                                    Site Role
+                                                                                </label>
+                                                                                <select
+                                                                                    value={roleData.role}
+                                                                                    onChange={(e) => setRoleData('role', e.target.value)}
+                                                                                    className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                                                >
+                                                                                    <option value="">No Site Role</option>
+                                                                                    <option value="site_owner">Site Owner</option>
+                                                                                    <option value="site_admin">Site Admin</option>
+                                                                                    <option value="site_support">Site Support</option>
+                                                                                    <option value="compliance">Compliance</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
+                                                                            <button
+                                                                                type="submit"
+                                                                                disabled={roleProcessing}
+                                                                                className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 sm:col-start-2 disabled:opacity-50"
+                                                                            >
+                                                                                {roleProcessing ? 'Assigning...' : 'Assign Role'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setShowRoleModal(null)
+                                                                                    setSelectedUserForRole(null)
+                                                                                }}
+                                                                                className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
+                                                                            >
+                                                                                Cancel
+                                                                            </button>
+                                                                        </div>
+                                                                    </form>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <div className="ml-4">
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                                                    >
-                                                        View Details
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))
+                                            )
+                                        })
                                     )}
                                 </div>
                             </div>
@@ -353,6 +695,15 @@ function FolderIcon(props) {
     return (
         <svg fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" {...props}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+        </svg>
+    )
+}
+
+function TagIcon(props) {
+    return (
+        <svg fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.469.469 1.229.469 1.698 0l4.182-4.182c.469-.469.469-1.229 0-1.698L11.16 3.66A2.25 2.25 0 009.568 3z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
         </svg>
     )
 }

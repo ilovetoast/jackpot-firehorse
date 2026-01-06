@@ -3,6 +3,108 @@ import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import ImageCropModal from '../../Components/ImageCropModal'
+import PlanLimitCallout from '../../Components/PlanLimitCallout'
+
+// CategoryCard component for compact grid layout
+function CategoryCard({ category, brandId }) {
+    const [isEditing, setIsEditing] = useState(false)
+    const [editName, setEditName] = useState(category.name)
+    const { data, setData, put, processing: putProcessing } = useForm({ name: category.name })
+    const [deleteProcessing, setDeleteProcessing] = useState(false)
+
+    const handleRename = (e) => {
+        e.preventDefault()
+        if (editName.trim() === category.name || !editName.trim()) {
+            setIsEditing(false)
+            setEditName(category.name)
+            return
+        }
+
+        setData('name', editName.trim())
+        put(`/app/categories/${category.id}`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setIsEditing(false)
+            },
+            onError: () => {
+                setEditName(category.name)
+            },
+        })
+    }
+
+    const handleDelete = () => {
+        if (confirm(`Are you sure you want to delete "${category.name}"? This action cannot be undone.`)) {
+            setDeleteProcessing(true)
+            router.delete(`/app/categories/${category.id}`, {
+                preserveScroll: true,
+                onFinish: () => {
+                    setDeleteProcessing(false)
+                },
+            })
+        }
+    }
+
+    const canEdit = !category.is_system && !category.is_locked
+    const processing = putProcessing || deleteProcessing
+
+    return (
+        <div className="border-b border-gray-200 last:border-b-0">
+            <div className="px-4 py-3 flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                    {isEditing ? (
+                        <form onSubmit={handleRename} className="flex items-center gap-2">
+                            <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                onBlur={handleRename}
+                                autoFocus
+                                className="block w-full rounded-md border-0 py-1.5 text-sm font-medium text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                disabled={processing}
+                            />
+                        </form>
+                    ) : (
+                        <>
+                            <p className="text-sm font-medium text-gray-900">{category.name}</p>
+                            <div className="mt-1 flex items-center gap-3">
+                                {category.is_system && (
+                                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                                        System
+                                    </span>
+                                )}
+                                {category.is_locked && (
+                                    <span className="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800">
+                                        Locked
+                                    </span>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+                {canEdit && !isEditing && (
+                    <div className="flex items-center gap-2 ml-4">
+                        <button
+                            type="button"
+                            onClick={() => setIsEditing(true)}
+                            className="text-sm text-indigo-600 hover:text-indigo-900"
+                            disabled={processing}
+                        >
+                            Rename
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleDelete}
+                            className="text-sm text-red-600 hover:text-red-900"
+                            disabled={processing}
+                        >
+                            Delete
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
 
 export default function BrandsEdit({ brand, categories, category_limits }) {
     const { auth } = usePage().props
@@ -130,7 +232,7 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                             type="file"
                                             name="logo"
                                             id="logo"
-                                            accept="image/png,image/webp,image/svg+xml"
+                                            accept="image/png,image/webp,image/svg+xml,image/avif"
                                             onChange={(e) => {
                                                 const file = e.target.files?.[0]
                                                 if (file) {
@@ -504,97 +606,88 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                     {/* Categories Section */}
                     <div id="categories-section" className="overflow-hidden bg-white shadow sm:rounded-lg">
                         <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Categories</h3>
-                            <p className="text-sm text-gray-500 mb-4">
-                                Manage categories for this brand. Categories are brand-specific and help organize your assets.
-                            </p>
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="text-lg font-medium leading-6 text-gray-900">Categories</h3>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Manage categories for this brand. Categories are brand-specific and help organize your assets.
+                                    </p>
+                                </div>
+                                {category_limits && category_limits.can_create && (
+                                    <Link
+                                        href="/app/categories"
+                                        className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    >
+                                        <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                        </svg>
+                                        Add Category
+                                    </Link>
+                                )}
+                            </div>
 
                             {category_limits && !category_limits.can_create && (
-                                <div className="mb-4 rounded-md bg-yellow-50 p-4">
-                                    <div className="flex">
-                                        <div className="ml-3">
-                                            <h3 className="text-sm font-medium text-yellow-800">Plan Limit Reached</h3>
-                                            <div className="mt-2 text-sm text-yellow-700">
-                                                <p>
-                                                    You have reached the maximum number of categories ({category_limits.current}/{category_limits.max}) for your plan.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
+                                <PlanLimitCallout
+                                    title="Category limit reached"
+                                    message={`You have reached the maximum number of custom categories (${category_limits.current} of ${category_limits.max === Number.MAX_SAFE_INTEGER || category_limits.max === 2147483647 ? 'unlimited' : category_limits.max}) for your plan. Please upgrade your plan to create more categories.`}
+                                />
+                            )}
+
+                            {category_limits && category_limits.can_create && (
+                                <div className="mb-4 text-sm text-gray-600">
+                                    Custom categories: {category_limits.current} / {category_limits.max === Number.MAX_SAFE_INTEGER || category_limits.max === 2147483647 ? 'Unlimited' : category_limits.max}
                                 </div>
                             )}
 
-                            <div className="space-y-4">
-                                {categories && categories.length > 0 ? (
-                                    <div className="space-y-2">
-                                        {categories.map((category) => (
-                                            <div
-                                                key={category.id}
-                                                className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="flex-shrink-0">
-                                                        <span className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
-                                                            {category.asset_type}
-                                                        </span>
+                            {categories && categories.length > 0 ? (
+                                <div className="space-y-6">
+                                    {/* Group by Asset Type */}
+                                    {['basic', 'marketing'].map((assetType) => {
+                                        const typeCategories = categories.filter(cat => cat.asset_type === assetType)
+                                        if (typeCategories.length === 0) return null
+
+                                        return (
+                                            <div key={assetType}>
+                                                <h4 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
+                                                    {assetType === 'basic' ? 'Asset' : 'Marketing'}
+                                                </h4>
+                                                <div className="overflow-hidden bg-white rounded-lg border border-gray-200">
+                                                    <div className="divide-y divide-gray-200">
+                                                        {typeCategories.map((category) => (
+                                                            <CategoryCard
+                                                                key={category.id}
+                                                                category={category}
+                                                                brandId={brand.id}
+                                                            />
+                                                        ))}
                                                     </div>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-gray-900">{category.name}</p>
-                                                        <p className="text-xs text-gray-500">{category.slug}</p>
-                                                    </div>
-                                                    {category.is_system && (
-                                                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                                                            System
-                                                        </span>
-                                                    )}
-                                                    {category.is_locked && (
-                                                        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
-                                                            Locked
-                                                        </span>
-                                                    )}
-                                                    {category.is_private && (
-                                                        <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-800">
-                                                            Private
-                                                        </span>
-                                                    )}
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="text-center py-8">
-                                        <svg
-                                            className="mx-auto h-12 w-12 text-gray-400"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                            aria-hidden="true"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7a1.994 1.994 0 01-.586-1.414V7a4 4 0 014-4z"
-                                            />
-                                        </svg>
-                                        <h3 className="mt-2 text-sm font-semibold text-gray-900">No categories</h3>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Get started by creating your first category for this brand.
-                                        </p>
-                                    </div>
-                                )}
-
-                                {category_limits && category_limits.can_create && (
-                                    <div className="mt-4">
-                                        <Link
-                                            href="/app/categories"
-                                            className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                        >
-                                            Create Category
-                                        </Link>
-                                    </div>
-                                )}
-                            </div>
+                                        )
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 border border-gray-200 rounded-lg">
+                                    <svg
+                                        className="mx-auto h-12 w-12 text-gray-400"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7a1.994 1.994 0 01-.586-1.414V7a4 4 0 014-4z"
+                                        />
+                                    </svg>
+                                    <h3 className="mt-2 text-sm font-semibold text-gray-900">No categories</h3>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Get started by creating your first category for this brand.
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </div>
 

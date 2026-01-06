@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Services\BillingService;
+use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Stripe\Price;
+use Stripe\Stripe;
 
 class BillingController extends Controller
 {
@@ -43,8 +46,44 @@ class BillingController extends Controller
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
         $subscription = $tenant->subscription('default');
         $paymentMethod = $tenant->defaultPaymentMethod();
+        $planService = new PlanService();
 
-        $plans = collect(config('plans'))->map(function ($plan, $key) use ($currentPlan) {
+        // Get current usage counts
+        $currentUsage = [
+            'brands' => $tenant->brands()->count(),
+            'users' => $tenant->users()->count(),
+            'categories' => $tenant->brands()->withCount(['categories' => function ($query) {
+                $query->where('is_system', false);
+            }])->get()->sum('categories_count'),
+            'storage_mb' => 0, // TODO: Calculate actual storage usage
+        ];
+
+        // Fetch Stripe price data for each plan
+        $plans = collect(config('plans'))->map(function ($plan, $key) use ($currentPlan, $currentUsage) {
+            $priceData = null;
+            $monthlyPrice = null;
+            
+            // Skip free plan
+            if ($key !== 'free' && $plan['stripe_price_id'] !== 'price_free') {
+                try {
+                    $stripeSecret = env('STRIPE_SECRET');
+                    if ($stripeSecret) {
+                        Stripe::setApiKey($stripeSecret);
+                        $price = Price::retrieve($plan['stripe_price_id']);
+                        $monthlyPrice = $price->unit_amount ? number_format($price->unit_amount / 100, 2) : null;
+                        $priceData = [
+                            'amount' => $price->unit_amount ? number_format($price->unit_amount / 100, 2) : null,
+                            'currency' => strtoupper($price->currency ?? 'usd'),
+                            'interval' => $price->recurring->interval ?? 'month',
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    // Price not found or error fetching - will show without price
+                    $priceData = null;
+                    $monthlyPrice = null;
+                }
+            }
+
             return [
                 'id' => $key,
                 'name' => $plan['name'],
@@ -52,8 +91,15 @@ class BillingController extends Controller
                 'limits' => $plan['limits'],
                 'features' => $plan['features'],
                 'is_current' => $key === $currentPlan,
+                'price' => $priceData,
+                'monthly_price' => $monthlyPrice,
             ];
         });
+
+        $currentPlanLimits = $planService->getPlanLimits($tenant);
+        
+        // Use site-wide branding color (not tenant-specific)
+        $sitePrimaryColor = '#6366f1'; // Default Jackpot brand color
 
         return Inertia::render('Billing/Index', [
             'tenant' => [
@@ -61,7 +107,10 @@ class BillingController extends Controller
                 'name' => $tenant->name,
                 'slug' => $tenant->slug,
             ],
+            'site_primary_color' => $sitePrimaryColor,
             'current_plan' => $currentPlan,
+            'current_plan_limits' => $currentPlanLimits,
+            'current_usage' => $currentUsage,
             'plans' => $plans->values(),
             'subscription' => $subscription ? [
                 'status' => $subscription->stripe_status,
