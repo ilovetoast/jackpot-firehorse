@@ -77,8 +77,15 @@ class HandleInertiaRequests extends Middleware
                 $maxBrands = $limits['max_brands'] ?? PHP_INT_MAX;
                 $brandLimitExceeded = $currentBrandCount > $maxBrands;
 
+                // Check if user is tenant owner/admin - they see ALL brands (ignoring show_in_selector)
+                $tenantRole = null;
+                $isTenantOwnerOrAdmin = false;
+                if ($user) {
+                    $tenantRole = $user->getRoleForTenant($tenant);
+                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+                }
+                
                 // Get brands the user has access to (via brand_user pivot table) for this tenant
-                // Always include the active brand if it exists, even if user doesn't have explicit access
                 $userBrandIds = [];
                 if ($user) {
                     $userBrandIds = $user->brands()
@@ -94,27 +101,49 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get();
 
-                // Filter to only brands the user has access to
-                // Always include the active brand even if user doesn't have explicit access
-                $accessibleBrands = $allBrands->filter(function ($brand) use ($userBrandIds, $activeBrand) {
-                    // User has access if they're in the brand_user pivot table
-                    $hasAccess = in_array($brand->id, $userBrandIds);
-                    // Always include active brand
+
+                // Filter brands based on user role and access
+                $accessibleBrands = $allBrands->filter(function ($brand) use ($userBrandIds, $activeBrand, $isTenantOwnerOrAdmin, $tenant, $user) {
+                    // Always include active brand (even if user doesn't have explicit access)
                     $isActive = $activeBrand && $brand->id === $activeBrand->id;
-                    return $hasAccess || $isActive;
+                    if ($isActive) {
+                        return true;
+                    }
+                    
+                    // Tenant owners/admins see ALL brands (ignoring show_in_selector flag)
+                    // This is bulletproof: owners/admins always see all brands for their tenant
+                    if ($isTenantOwnerOrAdmin) {
+                        return true;
+                    }
+                    
+                    // For regular members: check if they have explicit access via brand_user pivot table
+                    // If they have a role on the brand, they should see it regardless of show_in_selector
+                    // This ensures anyone with a role and access to the brand can see it
+                    $hasBrandAccess = in_array($brand->id, $userBrandIds);
+                    if ($hasBrandAccess) {
+                        // User has explicit access to this brand (has a role) - always show it
+                        return true;
+                    }
+                    
+                    // If user doesn't have explicit brand access, they shouldn't see it
+                    // (show_in_selector is only for general visibility, but explicit access trumps it)
+                    return false;
                 });
+
 
                 // Determine which brands are disabled (those beyond the limit)
                 // If limit is exceeded, brands beyond the limit count are disabled
-                // However, the active brand should never be disabled
+                // IMPORTANT: Even admins/owners cannot access disabled brands - plan limits apply to everyone
+                // However, the active brand should never be disabled (can't switch away from it)
                 $brands = $accessibleBrands->values()->map(function ($brand, $index) use ($activeBrand, $maxBrands, $brandLimitExceeded) {
                     $isActive = $activeBrand && $brand->id === $activeBrand->id;
-                    // Brands beyond the limit are disabled (but still shown)
+                    // Brands beyond the limit are disabled (but still shown so user knows they exist)
                     // Index is 0-based, so index >= maxBrands means it's beyond the limit
-                    // But never disable the active brand
+                    // But never disable the active brand (user must be able to see their current brand)
+                    // Plan limits apply to EVERYONE, including admins/owners
                     $isDisabled = $brandLimitExceeded && ($index >= $maxBrands) && !$isActive;
                     
-                    return [
+                    $brandData = [
                         'id' => $brand->id,
                         'name' => $brand->name,
                         'slug' => $brand->slug,
@@ -124,11 +153,42 @@ class HandleInertiaRequests extends Middleware
                         'is_disabled' => $isDisabled,
                         'logo_filter' => $brand->logo_filter ?? 'none',
                         'primary_color' => $brand->primary_color,
+                        'show_in_selector' => $brand->show_in_selector ?? true,
                     ];
+                    
+                    return $brandData;
                 });
+                
+                // Calculate plan limit info for alerts
+                $disabledBrandsCount = $brands->where('is_disabled', true)->count();
+                
+                // Get user limit info
+                $currentUserCount = $tenant->users()->count();
+                $maxUsers = $limits['max_users'] ?? PHP_INT_MAX;
+                $userLimitExceeded = $currentUserCount > $maxUsers;
+                
+                // Get enabled/disabled users for this tenant
+                $enabledUsers = $tenant->getEnabledUsers($planService);
+                $disabledUserIds = $enabledUsers['disabled'];
+                $isUserDisabled = $user && in_array($user->id, $disabledUserIds);
+                
+                $planLimitInfo = [
+                    'brand_limit_exceeded' => $brandLimitExceeded,
+                    'current_brand_count' => $currentBrandCount,
+                    'max_brands' => $maxBrands,
+                    'disabled_brands_count' => $disabledBrandsCount,
+                    'disabled_brand_names' => $brands->where('is_disabled', true)->pluck('name')->toArray(),
+                    'plan_name' => $planService->getCurrentPlan($tenant),
+                    'user_limit_exceeded' => $userLimitExceeded,
+                    'current_user_count' => $currentUserCount,
+                    'max_users' => $maxUsers,
+                    'disabled_user_ids' => $disabledUserIds,
+                    'is_user_disabled' => $isUserDisabled,
+                ];
             } catch (\Exception $e) {
                 // If there's an error loading brands, just use empty array
                 $brands = [];
+                $planLimitInfo = null;
             }
         }
 
@@ -191,8 +251,20 @@ class HandleInertiaRequests extends Middleware
 
         return [
             ...parent::share($request),
+            'flash' => [
+                'success' => $request->session()->get('success'),
+                'error' => $request->session()->get('error'),
+                'warning' => $request->session()->get('warning'),
+                'info' => $request->session()->get('info'),
+            ],
             'auth' => [
-                'user' => $user,
+                'user' => $user ? [
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'avatar_url' => $user->avatar_url,
+                ] : null,
                 'companies' => $user ? $user->tenants->map(fn ($tenant) => [
                     'id' => $tenant->id,
                     'name' => $tenant->name,
@@ -208,7 +280,8 @@ class HandleInertiaRequests extends Middleware
                     'nav_color' => $activeBrand->nav_color,
                     'logo_filter' => $activeBrand->logo_filter ?? 'none',
                 ] : null,
-                'brands' => $brands, // All brands for the active tenant
+                'brands' => $brands, // All brands for the active tenant (filtered by access)
+                'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
                 'permissions' => $permissions,
                 'roles' => $roles,
                 'tenant_role' => $tenantRole, // Current tenant-specific role

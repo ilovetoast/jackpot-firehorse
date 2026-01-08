@@ -2,14 +2,26 @@
 
 namespace App\Models;
 
+use App\Enums\EventType;
+use App\Traits\RecordsActivity;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Builder;
 
 class Brand extends Model
 {
+    use RecordsActivity;
+
+    /**
+     * Custom event names for activity logging.
+     */
+    protected static $activityEventNames = [
+        'created' => EventType::BRAND_CREATED,
+        'updated' => EventType::BRAND_UPDATED,
+        'deleted' => EventType::BRAND_DELETED,
+    ];
     /**
      * The attributes that are mass assignable.
      *
@@ -107,5 +119,13 @@ class Brand extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class)->withPivot('role')->withTimestamps();
+    }
+
+    /**
+     * Get the invitations for this brand.
+     */
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(BrandInvitation::class);
     }
 }

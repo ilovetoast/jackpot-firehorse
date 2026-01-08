@@ -4,9 +4,18 @@ import { getContrastTextColor } from '../utils/colorUtils'
 
 export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand }) {
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
-    const hasMultipleBrands = brands && brands.length > 1
+    // Filter out disabled brands and ensure we have a valid array
+    const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
+    const hasMultipleBrands = validBrands && validBrands.length > 1
 
-    const handleSwitchBrand = (brandId) => {
+    const handleSwitchBrand = (brandId, e) => {
+        if (e) {
+            e.preventDefault()
+            e.stopPropagation()
+        }
+        
+        setBrandMenuOpen(false)
+        
         if (onSwitchBrand) {
             onSwitchBrand(brandId)
         } else {
@@ -14,18 +23,18 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                 preserveState: true,
                 preserveScroll: true,
                 onSuccess: () => {
-                    window.location.reload()
+                    // Reload only the shared auth props (auth.brands, auth.activeBrand) without full page reload
+                    router.reload({ only: ['auth'] })
                 },
             })
         }
-        setBrandMenuOpen(false)
     }
 
     // If no active brand, try to use the first brand from brands array, or show placeholder
     // This ensures the component always renders something visible
     if (!activeBrand) {
-        // Try to get the first active brand from brands array
-        const firstBrand = brands && brands.length > 0 ? brands.find(b => b.is_active) || brands[0] : null
+        // Try to get the first active brand from valid brands array
+        const firstBrand = validBrands && validBrands.length > 0 ? validBrands.find(b => b.is_active) || validBrands[0] : null
         if (firstBrand) {
             // Use the first brand as fallback
             const fallbackBrandName = firstBrand.name || 'Brand'
@@ -133,26 +142,40 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             className="fixed inset-0 z-10"
                             onClick={() => setBrandMenuOpen(false)}
                         />
-                        <div className="absolute left-0 z-20 mt-2 w-64 origin-top-left rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                        <div 
+                            className="absolute left-0 z-20 mt-2 w-64 origin-top-left rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             <div className="px-4 py-3 border-b border-gray-200">
                                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Switch Brand
                                 </p>
                             </div>
                             <div className="max-h-64 overflow-y-auto">
-                                {brands
-                                    .filter((brandOption) => !brandOption.is_disabled) // Hide disabled brands (inaccessible brands are already filtered in backend)
-                                    .map((brandOption) => (
-                                    <button
-                                        key={brandOption.id}
-                                        type="button"
-                                        onClick={() => handleSwitchBrand(brandOption.id)}
-                                        className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm ${
-                                            brandOption.is_active
-                                                ? 'bg-indigo-50 text-indigo-700 font-medium hover:bg-indigo-100'
-                                                : 'text-gray-700 hover:bg-gray-50'
-                                        }`}
-                                    >
+                                {brands && brands.length > 0 ? (
+                                    brands.map((brandOption) => {
+                                        const isDisabled = brandOption.is_disabled
+                                        const isActive = brandOption.is_active
+                                        
+                                        return (
+                                            <button
+                                                key={brandOption.id}
+                                                type="button"
+                                                onClick={(e) => {
+                                                    if (!isDisabled) {
+                                                        handleSwitchBrand(brandOption.id, e)
+                                                    }
+                                                }}
+                                                disabled={isDisabled}
+                                                className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm ${
+                                                    isDisabled
+                                                        ? 'opacity-50 cursor-not-allowed text-gray-400'
+                                                        : isActive
+                                                        ? 'bg-indigo-50 text-indigo-700 font-medium hover:bg-indigo-100'
+                                                        : 'text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                                title={isDisabled ? 'This brand is not accessible on your current plan. Upgrade to access it.' : undefined}
+                                            >
                                         {(() => {
                                             if (brandOption.logo_path) {
                                                 return (
@@ -177,22 +200,38 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                                 </div>
                                             )
                                         })()}
-                                        <span className="flex-1 truncate">{brandOption.name}</span>
-                                        {brandOption.is_active && (
-                                            <svg
-                                                className="h-4 w-4 flex-shrink-0 text-indigo-600"
-                                                fill="currentColor"
-                                                viewBox="0 0 20 20"
-                                            >
-                                                <path
-                                                    fillRule="evenodd"
-                                                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                                                    clipRule="evenodd"
-                                                />
-                                            </svg>
-                                        )}
-                                    </button>
-                                ))}
+                                                <span className="flex-1 truncate">{brandOption.name}</span>
+                                                {isActive && !isDisabled && (
+                                                    <svg
+                                                        className="h-4 w-4 flex-shrink-0 text-indigo-600"
+                                                        fill="currentColor"
+                                                        viewBox="0 0 20 20"
+                                                    >
+                                                        <path
+                                                            fillRule="evenodd"
+                                                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                                            clipRule="evenodd"
+                                                        />
+                                                    </svg>
+                                                )}
+                                                {isDisabled && (
+                                                    <svg
+                                                        className="h-4 w-4 flex-shrink-0 text-gray-400"
+                                                        fill="currentColor"
+                                                        viewBox="0 0 20 20"
+                                                        title="This brand is not accessible on your current plan. Upgrade to access it."
+                                                    >
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                                                    </svg>
+                                                )}
+                                            </button>
+                                        )
+                                    })
+                                ) : (
+                                    <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                                        No brands available
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </>

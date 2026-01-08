@@ -72,6 +72,11 @@ class CategoryService
         $data['is_system'] = false; // User-created categories are never system
         $data['is_locked'] = false; // User-created categories are never locked
         $data['is_hidden'] = $data['is_hidden'] ?? false; // Default to visible
+        
+        // Auto-assign icon if not provided
+        if (!isset($data['icon']) || empty($data['icon'])) {
+            $data['icon'] = \App\Helpers\CategoryIcons::getDefaultIcon($data['name'], $data['slug']);
+        }
 
         return Category::create($data);
     }
@@ -79,18 +84,26 @@ class CategoryService
     /**
      * Update a category.
      *
-     * Updates a custom category. System categories cannot be updated.
+     * Updates a custom category. System categories can only be updated if plan allows.
      *
      * @param Category $category The category to update
      * @param array $data Updated data
      * @return Category The updated category
-     * @throws \Exception If category is locked or system
+     * @throws \Exception If category is locked or system (without plan permission)
      */
     public function update(Category $category, array $data): Category
     {
-        // Prevent updates to locked/system categories
-        if ($category->is_locked || $category->is_system) {
-            throw new \Exception('Cannot update locked or system categories.');
+        // Prevent updates to locked categories
+        if ($category->is_locked) {
+            throw new \Exception('Cannot update locked categories.');
+        }
+
+        // System categories can only be updated if plan has edit_system_categories feature
+        if ($category->is_system) {
+            $tenant = $category->tenant;
+            if (! $this->planService->hasFeature($tenant, 'edit_system_categories')) {
+                throw new \Exception('Cannot update system categories. Upgrade to Pro or Enterprise plan to edit system categories.');
+            }
         }
 
         // Prevent changing is_system flag

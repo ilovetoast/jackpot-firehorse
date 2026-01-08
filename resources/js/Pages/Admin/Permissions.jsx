@@ -302,6 +302,48 @@ export default function AdminPermissions({
                         </div>
                     </div>
 
+                    {/* Role Architecture Explanation */}
+                    <div className="mb-8 rounded-lg bg-blue-50 border border-blue-200">
+                        <div className="px-6 py-4">
+                            <div className="flex items-start">
+                                <div className="flex-shrink-0">
+                                    <svg className="h-5 w-5 text-blue-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <h3 className="text-sm font-semibold text-blue-900 mb-2">Understanding Tenant Roles vs Brand Roles</h3>
+                                    <div className="text-sm text-blue-800 space-y-2">
+                                        <p>
+                                            <strong>Tenant-level roles</strong> (shown below) and <strong>brand-level roles</strong> are <strong>separate and can be different</strong>. Both use the same role names (owner, admin, brand_manager, member), but they control different scopes:
+                                        </p>
+                                        <div className="ml-4 space-y-1">
+                                            <p>
+                                                <strong>Tenant Roles:</strong> Control access to company-wide features like billing, team management, company settings, and activity logs. Each user has ONE tenant role per company.
+                                            </p>
+                                            <p>
+                                                <strong>Brand Roles:</strong> Control access to brand-specific features like brand settings and brand categories. Each user can have DIFFERENT roles in different brands within the same company.
+                                            </p>
+                                        </div>
+                                        <div className="mt-3 p-3 bg-blue-100 rounded border border-blue-200">
+                                            <p className="font-semibold mb-1">Example:</p>
+                                            <p>
+                                                A user might be <strong>"admin"</strong> at the tenant level (full company access) but <strong>"member"</strong> in a specific brand (limited brand access). 
+                                                Conversely, a user might be <strong>"member"</strong> at the tenant level but <strong>"brand_manager"</strong> in a specific brand they manage.
+                                            </p>
+                                        </div>
+                                        <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                            <p className="font-semibold mb-1 text-yellow-900">Important:</p>
+                                            <p className="text-yellow-800">
+                                                Tenant-level <strong>admins</strong> and <strong>owners</strong> automatically have full access to ALL brands in that company, regardless of their brand-specific role assignments. This prevents locking out company administrators.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Company Roles & Permissions */}
                     <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="border-b border-gray-200 px-6 py-4">
@@ -311,8 +353,9 @@ export default function AdminPermissions({
                                         <span className="text-indigo-600">🏢</span>
                                     </div>
                                     <div>
-                                        <h2 className="text-lg font-semibold text-gray-900">Company Roles & Permissions</h2>
-                                        <p className="mt-1 text-sm text-gray-500">Manage which permissions each company role has access to</p>
+                                        <h2 className="text-lg font-semibold text-gray-900">Company Roles & Permissions (Tenant-Level)</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Manage which permissions each tenant-level role has. These permissions apply to company-wide features.</p>
+                                        <p className="mt-1 text-xs text-gray-400">Note: The same role names are used for brand-level roles, but brand roles are assigned per-brand when adding users.</p>
                                     </div>
                                 </div>
                                 <button

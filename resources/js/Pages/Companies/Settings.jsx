@@ -1,13 +1,49 @@
 import { Link, useForm, usePage } from '@inertiajs/react'
+import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
 export default function CompanySettings({ tenant, billing, team_members_count, brands_count }) {
     const { auth } = usePage().props
+    const [activeSection, setActiveSection] = useState('company-information')
     const { data, setData, put, processing, errors } = useForm({
         name: tenant.name || '',
         timezone: tenant.timezone || 'UTC',
     })
+
+    // Handle hash navigation on mount and hash change
+    useEffect(() => {
+        const handleHashChange = () => {
+            const hash = window.location.hash.replace('#', '')
+            if (hash) {
+                setActiveSection(hash)
+                const element = document.getElementById(hash)
+                if (element) {
+                    setTimeout(() => {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }, 100)
+                }
+            }
+        }
+
+        // Check initial hash
+        handleHashChange()
+
+        // Listen for hash changes
+        window.addEventListener('hashchange', handleHashChange)
+        return () => window.removeEventListener('hashchange', handleHashChange)
+    }, [])
+
+    const handleSectionClick = (sectionId) => {
+        setActiveSection(sectionId)
+        window.location.hash = sectionId
+        const element = document.getElementById(sectionId)
+        if (element) {
+            setTimeout(() => {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }, 100)
+        }
+    }
 
     const submit = (e) => {
         e.preventDefault()
@@ -71,18 +107,79 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                         <p className="mt-2 text-sm text-gray-700">Manage your company's settings and preferences</p>
                     </div>
 
+                    {/* Navigation Bar */}
+                    <div className="mb-8 border-b border-gray-200">
+                        <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Company settings sections">
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('company-information')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'company-information'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Company Information
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('plan-billing')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'plan-billing'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Plan & Billing
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('team-members')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'team-members'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Team Members
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('brands-settings')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'brands-settings'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Brands Settings
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('danger-zone')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'danger-zone'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Danger Zone
+                            </button>
+                        </nav>
+                    </div>
+
                     {/* Company Information */}
-                    <div className="mb-8 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-5 border-b border-gray-200">
-                            <div className="flex items-center">
-                                <svg className="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-3.75 3h.75m6-3h.75m-6-3h.75M6.75 12h.75m6-3h.75m-6 3h.75m3.75-3h.75m-3.75 3h.75m3.75-3h.75m-3.75 3h.75" />
-                                </svg>
-                                <h2 className="text-lg font-semibold text-gray-900">Company Information</h2>
-                            </div>
-                            <p className="mt-1 text-sm text-gray-500">Update your company name and details</p>
-                        </div>
-                        <form onSubmit={submit} className="px-6 py-5">
+                    <div id="company-information" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                {/* Left: Header */}
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Company Information</h2>
+                                    <p className="mt-1 text-sm text-gray-500">Update your company name and details</p>
+                                </div>
+                                {/* Right: Content */}
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <form onSubmit={submit}>
                             <div className="space-y-6">
                                 <div>
                                     <label htmlFor="name" className="block text-sm font-medium leading-6 text-gray-900">
@@ -145,144 +242,158 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     <button
                                         type="submit"
                                         disabled={processing}
-                                        className="rounded-md bg-green-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 disabled:opacity-50"
+                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
                                     >
                                         Save Changes
                                     </button>
                                 </div>
                             </div>
                         </form>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Plan & Billing */}
-                    <div className="mb-8 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-5 border-b border-gray-200">
-                            <div className="flex items-center">
-                                <svg className="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-                                </svg>
-                                <h2 className="text-lg font-semibold text-gray-900">Plan & Billing</h2>
-                            </div>
-                            <p className="mt-1 text-sm text-gray-500">Manage your subscription and billing information</p>
-                        </div>
-                        <div className="px-6 py-5">
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-500">Current Plan</label>
-                                        <p className="mt-1 text-sm font-semibold text-gray-900">{formatPlanName(billing.current_plan)}</p>
-                                    </div>
-                                    <Link
-                                        href="/app/billing"
-                                        className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
-                                    >
-                                        Manage Plan
-                                        <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                        </svg>
-                                    </Link>
+                    <div id="plan-billing" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                {/* Left: Header */}
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Plan & Billing</h2>
+                                    <p className="mt-1 text-sm text-gray-500">Manage your subscription and billing information</p>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-500">Subscription Status</label>
-                                    <p className="mt-1 text-sm font-semibold text-gray-900">{formatSubscriptionStatus(billing.subscription_status)}</p>
+                                {/* Right: Content */}
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <div className="space-y-6">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-500">Current Plan</label>
+                                                <p className="mt-1 text-sm font-semibold text-gray-900">{formatPlanName(billing.current_plan)}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <Link
+                                                    href="/app/billing/overview"
+                                                    className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                                >
+                                                    Billing Overview
+                                                </Link>
+                                                <Link
+                                                    href="/app/billing"
+                                                    className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
+                                                >
+                                                    Manage Plan
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                    </svg>
+                                                </Link>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-500">Subscription Status</label>
+                                            <p className="mt-1 text-sm font-semibold text-gray-900">{formatSubscriptionStatus(billing.subscription_status)}</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Team Members */}
-                    <div className="mb-8 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-5 border-b border-gray-200">
-                            <div className="flex items-center">
-                                <svg className="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-                                </svg>
-                                <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
-                            </div>
-                            <p className="mt-1 text-sm text-gray-500">Manage team members and their roles</p>
-                        </div>
-                        <div className="px-6 py-5">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-500">Members</label>
-                                    <p className="mt-1 text-sm font-semibold text-gray-900">
-                                        {team_members_count} {team_members_count === 1 ? 'team member' : 'team members'}
-                                    </p>
+                    <div id="team-members" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                {/* Left: Header */}
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
+                                    <p className="mt-1 text-sm text-gray-500">Manage team members and their roles</p>
                                 </div>
-                                <Link
-                                    href="/app/companies/team"
-                                    className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
-                                >
-                                    Manage Team
-                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                    </svg>
-                                </Link>
+                                {/* Right: Content */}
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-500">Members</label>
+                                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                                                {team_members_count} {team_members_count === 1 ? 'team member' : 'team members'}
+                                            </p>
+                                        </div>
+                                        <Link
+                                            href="/app/companies/team"
+                                            className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
+                                        >
+                                            Manage Team
+                                            <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                            </svg>
+                                        </Link>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Brands Settings */}
-                    <div className="mb-8 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-5 border-b border-gray-200">
-                            <div className="flex items-center">
-                                <svg className="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                </svg>
-                                <h2 className="text-lg font-semibold text-gray-900">Brands Settings</h2>
-                            </div>
-                            <p className="mt-1 text-sm text-gray-500">Manage your brands and their settings</p>
-                        </div>
-                        <div className="px-6 py-5">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-500">Brands</label>
-                                    <p className="mt-1 text-sm font-semibold text-gray-900">
-                                        {brands_count} {brands_count === 1 ? 'brand' : 'brands'}
-                                    </p>
+                    <div id="brands-settings" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                {/* Left: Header */}
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Brands Settings</h2>
+                                    <p className="mt-1 text-sm text-gray-500">Manage your brands and their settings</p>
                                 </div>
-                                <Link
-                                    href="/app/brands"
-                                    className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
-                                >
-                                    Manage Brands
-                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                    </svg>
-                                </Link>
+                                {/* Right: Content */}
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-500">Brands</label>
+                                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                                                {brands_count} {brands_count === 1 ? 'brand' : 'brands'}
+                                            </p>
+                                        </div>
+                                        <Link
+                                            href="/app/brands"
+                                            className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
+                                        >
+                                            Manage Brands
+                                            <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                            </svg>
+                                        </Link>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Danger Zone */}
-                    <div className="overflow-hidden rounded-lg border-2 border-red-200 bg-red-50 shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-5 border-b border-red-200">
-                            <div className="flex items-center">
-                                <svg className="h-5 w-5 text-red-400 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                                </svg>
-                                <h2 className="text-lg font-semibold text-red-900">Danger Zone</h2>
-                            </div>
-                            <p className="mt-1 text-sm text-red-700">Irreversible and destructive actions</p>
-                        </div>
-                        <div className="px-6 py-5">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <h3 className="text-base font-semibold text-red-900">Delete Company</h3>
-                                    <p className="mt-1 text-sm text-red-700">
-                                        Permanently delete your company and all associated data. This action cannot be undone.
-                                    </p>
+                    <div id="danger-zone" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg border-2 border-red-200 bg-red-50 shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                {/* Left: Header */}
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-red-200">
+                                    <h2 className="text-lg font-semibold text-red-900">Danger Zone</h2>
+                                    <p className="mt-1 text-sm text-red-700">Irreversible and destructive actions</p>
                                 </div>
-                                <button
-                                    type="button"
-                                    className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                >
-                                    <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                    </svg>
-                                    Delete Company
-                                </button>
+                                {/* Right: Content */}
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h3 className="text-base font-semibold text-red-900">Delete Company</h3>
+                                            <p className="mt-1 text-sm text-red-700">
+                                                Permanently delete your company and all associated data. This action cannot be undone.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                        >
+                                            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                            </svg>
+                                            Delete Company
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

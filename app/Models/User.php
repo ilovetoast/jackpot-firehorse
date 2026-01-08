@@ -3,6 +3,8 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\EventType;
+use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -13,7 +15,16 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, HasRoles;
+    use HasFactory, Notifiable, HasRoles, RecordsActivity;
+
+    /**
+     * Custom event names for activity logging.
+     */
+    protected static $activityEventNames = [
+        'created' => EventType::USER_CREATED,
+        'updated' => EventType::USER_UPDATED,
+        'deleted' => EventType::USER_DELETED,
+    ];
 
     /**
      * The attributes that are mass assignable.
@@ -25,12 +36,14 @@ class User extends Authenticatable
         'last_name',
         'email',
         'password',
+        'avatar_url',
         'country',
         'timezone',
         'address',
         'city',
         'state',
         'zip',
+        'suspended_at',
     ];
 
     /**
@@ -61,6 +74,7 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'suspended_at' => 'datetime',
             'password' => 'hashed',
         ];
     }
@@ -139,6 +153,70 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the user's role for a specific brand.
+     */
+    public function getRoleForBrand(Brand $brand): ?string
+    {
+        // Query the pivot table directly to get the role
+        // This ensures we always get the latest role value from the database
+        $pivot = DB::table('brand_user')
+            ->where('user_id', $this->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+        
+        return $pivot?->role ?? null;
+    }
+
+    /**
+     * Set the user's role for a specific brand.
+     */
+    public function setRoleForBrand(Brand $brand, string $role): void
+    {
+        if ($this->brands()->where('brands.id', $brand->id)->exists()) {
+            $this->brands()->updateExistingPivot($brand->id, ['role' => $role]);
+        } else {
+            $this->brands()->attach($brand->id, ['role' => $role]);
+        }
+    }
+
+    /**
+     * Check if user has a permission for a specific brand.
+     * First checks tenant-level permission (admin/owner may have full access),
+     * then checks brand-specific role permissions.
+     */
+    public function hasPermissionForBrand(Brand $brand, string $permission): bool
+    {
+        $tenant = $brand->tenant;
+        
+        // Check tenant-level access first
+        $tenantRole = $this->getRoleForTenant($tenant);
+        
+        // Admin/Owner at tenant level have full access to all brands
+        if (in_array($tenantRole, ['admin', 'owner'])) {
+            return $this->hasPermissionForTenant($tenant, $permission);
+        }
+        
+        // Check if user is assigned to this brand
+        if (!$this->brands()->where('brands.id', $brand->id)->exists()) {
+            return false;
+        }
+        
+        // Get brand role and check permissions
+        $brandRole = $this->getRoleForBrand($brand);
+        if (!$brandRole) {
+            return false;
+        }
+        
+        // Check if brand role has permission
+        $role = \Spatie\Permission\Models\Role::where('name', $brandRole)->first();
+        if ($role && $role->hasPermissionTo($permission)) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
      * Check if user has a permission based on their tenant role.
      * For company-level permissions, ONLY checks tenant role permissions.
      * For site-level permissions, checks both Spatie permissions and tenant role permissions.
@@ -168,5 +246,51 @@ class User extends Authenticatable
         }
 
         return false;
+    }
+
+    /**
+     * Check if the user is suspended.
+     */
+    public function isSuspended(): bool
+    {
+        return $this->suspended_at !== null;
+    }
+
+    /**
+     * Suspend the user account.
+     */
+    public function suspend(): void
+    {
+        $this->update(['suspended_at' => now()]);
+    }
+
+    /**
+     * Unsuspend the user account.
+     */
+    public function unsuspend(): void
+    {
+        $this->update(['suspended_at' => null]);
+    }
+
+    /**
+     * Check if user is disabled due to plan limits for a specific tenant.
+     * Owner is never disabled due to plan limits.
+     * Owner is determined by having 'owner' role OR being the first user by created_at.
+     * 
+     * @param \App\Models\Tenant $tenant
+     * @return bool
+     */
+    public function isDisabledByPlanLimit(Tenant $tenant): bool
+    {
+        // Owner is NEVER disabled - check this FIRST using tenant's isOwner method
+        // This includes fallback logic (first user is owner even without 'owner' role)
+        if ($tenant->isOwner($this)) {
+            return false;
+        }
+        
+        $planService = app(\App\Services\PlanService::class);
+        $enabledUsers = $tenant->getEnabledUsers($planService);
+        
+        return in_array($this->id, $enabledUsers['disabled']);
     }
 }

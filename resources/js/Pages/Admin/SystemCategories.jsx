@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import CategoryIconSelector from '../../Components/CategoryIconSelector'
+import { CategoryIcon } from '../../Helpers/categoryIcons'
 import {
     PlusIcon,
     PencilIcon,
@@ -19,6 +21,7 @@ export default function SystemCategories({ templates, asset_types }) {
     const { data, setData, post, put, delete: destroy, processing, errors, reset } = useForm({
         name: '',
         slug: '',
+        icon: 'folder',
         asset_type: 'basic',
         is_private: false,
         is_hidden: false,
@@ -36,6 +39,7 @@ export default function SystemCategories({ templates, asset_types }) {
         setData({
             name: template.name,
             slug: template.slug,
+            icon: template.icon || 'folder',
             asset_type: template.asset_type,
             is_private: template.is_private,
             is_hidden: template.is_hidden,
@@ -96,6 +100,9 @@ export default function SystemCategories({ templates, asset_types }) {
                                 <p className="mt-2 text-sm text-gray-700">
                                     Manage global system category templates. These categories are automatically copied to new brands when they are created.
                                 </p>
+                                <p className="mt-1 text-xs text-amber-600">
+                                    Note: Updates to templates only affect new brands. Existing brands have their own copies of these categories.
+                                </p>
                             </div>
                             <button
                                 type="button"
@@ -107,25 +114,6 @@ export default function SystemCategories({ templates, asset_types }) {
                             </button>
                         </div>
                     </div>
-
-                    {/* Success/Error Messages */}
-                    {flash?.success && (
-                        <div className="mb-4 rounded-md bg-green-50 p-4">
-                            <div className="flex">
-                                <CheckIcon className="h-5 w-5 text-green-400" aria-hidden="true" />
-                                <p className="ml-3 text-sm font-medium text-green-800">{flash.success}</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {flash?.error && (
-                        <div className="mb-4 rounded-md bg-red-50 p-4">
-                            <div className="flex">
-                                <XMarkIcon className="h-5 w-5 text-red-400" aria-hidden="true" />
-                                <p className="ml-3 text-sm font-medium text-red-800">{flash.error}</p>
-                            </div>
-                        </div>
-                    )}
 
                     {/* Form Modal */}
                     {showForm && (
@@ -182,6 +170,16 @@ export default function SystemCategories({ templates, asset_types }) {
                                             {errors.slug && <p className="mt-1 text-sm text-red-600">{errors.slug}</p>}
                                         </div>
                                     </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">
+                                        Icon
+                                    </label>
+                                    <CategoryIconSelector
+                                        value={data.icon}
+                                        onChange={(iconId) => setData('icon', iconId)}
+                                    />
                                 </div>
 
                                 <div>
@@ -333,7 +331,14 @@ export default function SystemCategories({ templates, asset_types }) {
                                             {templates.filter(t => t.asset_type === 'basic').map((template) => (
                                                 <tr key={template.id} className="hover:bg-gray-50">
                                                     <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                                                        <div className="flex items-center gap-3">
+                                                            <CategoryIcon 
+                                                                iconId={template.icon || 'folder'} 
+                                                                className="h-5 w-5 flex-shrink-0" 
+                                                                color="text-gray-400"
+                                                            />
+                                                            <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                                                        </div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="text-sm text-gray-500">{template.slug}</div>
@@ -431,7 +436,14 @@ export default function SystemCategories({ templates, asset_types }) {
                                             {templates.filter(t => t.asset_type === 'marketing').map((template) => (
                                                 <tr key={template.id} className="hover:bg-gray-50">
                                                     <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                                                        <div className="flex items-center gap-3">
+                                                            <CategoryIcon 
+                                                                iconId={template.icon || 'folder'} 
+                                                                className="h-5 w-5 flex-shrink-0" 
+                                                                color="text-gray-400"
+                                                            />
+                                                            <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                                                        </div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="text-sm text-gray-500">{template.slug}</div>

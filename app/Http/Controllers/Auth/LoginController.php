@@ -32,6 +32,15 @@ class LoginController extends Controller
             $request->session()->regenerate();
 
             $user = Auth::user();
+            
+            // Check if user is suspended
+            if ($user->isSuspended()) {
+                Auth::logout();
+                return back()->withErrors([
+                    'email' => 'Your account has been suspended. Please contact support for assistance.',
+                ])->onlyInput('email');
+            }
+            
             $tenants = $user->tenants;
 
             // Auto-select tenant if user has tenants

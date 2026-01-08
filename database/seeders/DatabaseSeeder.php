@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             PermissionSeeder::class,
             SystemCategoryTemplateSeeder::class, // Seed system category templates first
+            NotificationTemplateSeeder::class, // Seed notification templates
             CompanyBrandSeeder::class, // This creates the site owner and companies/brands
             CategorySeeder::class,
         ]);

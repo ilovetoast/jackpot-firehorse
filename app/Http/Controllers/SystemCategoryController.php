@@ -41,6 +41,7 @@ class SystemCategoryController extends Controller
                 'id' => $template->id,
                 'name' => $template->name,
                 'slug' => $template->slug,
+                'icon' => $template->icon,
                 'asset_type' => $template->asset_type->value,
                 'is_private' => $template->is_private,
                 'is_hidden' => $template->is_hidden,
@@ -62,6 +63,7 @@ class SystemCategoryController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
+            'icon' => 'nullable|string|max:255',
             'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
             'is_private' => 'boolean',
             'is_hidden' => 'boolean',
@@ -89,6 +91,7 @@ class SystemCategoryController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
+            'icon' => 'nullable|string|max:255',
             'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
             'is_private' => 'boolean',
             'is_hidden' => 'boolean',

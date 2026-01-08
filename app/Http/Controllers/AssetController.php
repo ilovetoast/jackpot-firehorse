@@ -68,6 +68,7 @@ class AssetController extends Controller
                 'id' => $category->id,
                 'name' => $category->name,
                 'slug' => $category->slug,
+                'icon' => $category->icon,
                 'asset_type' => $category->asset_type->value,
                 'is_system' => $category->is_system,
                 'is_private' => $category->is_private,
@@ -89,6 +90,7 @@ class AssetController extends Controller
                     'id' => null, // Template, no ID
                     'name' => $template->name,
                     'slug' => $template->slug,
+                    'icon' => $template->icon ?? 'folder',
                     'asset_type' => $template->asset_type->value,
                     'is_system' => true,
                     'is_private' => $template->is_private,

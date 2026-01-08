@@ -13,13 +13,40 @@ class PlanService
      */
     public function getCurrentPlan(Tenant $tenant): string
     {
-        // Check if tenant has an active subscription
-        if (! $tenant->subscribed()) {
+        // If manual plan override is set, use it
+        if ($tenant->manual_plan_override) {
+            $overridePlan = $tenant->manual_plan_override;
+            // Validate that the plan exists in config
+            if (config("plans.{$overridePlan}")) {
+                return $overridePlan;
+            }
+        }
+        
+        // Get the most recent active subscription with name 'default'
+        // Don't rely on Cashier's subscribed() method as it may not work correctly
+        // with multiple subscriptions or when using Tenant instead of User
+        $subscription = $tenant->subscriptions()
+            ->where('name', 'default')
+            ->where('stripe_status', 'active')
+            ->orderBy('created_at', 'desc')
+            ->first();
+        
+        // Fallback to Cashier's method if direct query doesn't work
+        if (! $subscription) {
+            $subscription = $tenant->subscription('default');
+        }
+        
+        if (! $subscription) {
             return 'free';
         }
 
-        $subscription = $tenant->subscription();
-        $priceId = $subscription->stripe_price ?? null;
+        // First try to get price from subscription
+        $priceId = $subscription->stripe_price;
+        
+        // If not found, try to get from subscription items
+        if (! $priceId && $subscription->items->count() > 0) {
+            $priceId = $subscription->items->first()->stripe_price;
+        }
 
         if (! $priceId) {
             return 'free';
@@ -34,6 +61,42 @@ class PlanService
 
         // Default to free if price ID not found
         return 'free';
+    }
+    
+    /**
+     * Check if plan is externally managed (Shopify, etc.) and cannot be adjusted from backend.
+     */
+    public function isExternallyManaged(Tenant $tenant): bool
+    {
+        $source = $tenant->plan_management_source;
+        
+        // If explicitly set to shopify, it's externally managed
+        if ($source === 'shopify') {
+            return true;
+        }
+        
+        // Auto-detect: if no plan_management_source is set but they have stripe_id, 
+        // we can manage it (Stripe allows admin updates)
+        // Only Shopify is considered externally managed
+        return false;
+    }
+    
+    /**
+     * Get the plan management source, auto-detecting if not set.
+     */
+    public function getPlanManagementSource(Tenant $tenant): string
+    {
+        if ($tenant->plan_management_source) {
+            return $tenant->plan_management_source;
+        }
+        
+        // Auto-detect based on available integrations
+        if ($tenant->stripe_id) {
+            return 'stripe';
+        }
+        
+        // Default to manual if no integration found
+        return 'manual';
     }
 
     /**
@@ -135,5 +198,26 @@ class PlanService
         $plan = config("plans.{$planName}", config('plans.free'));
         
         return in_array('access_to_more_roles', $plan['features'] ?? []);
+    }
+
+    /**
+     * Get plan features for a tenant.
+     */
+    public function getPlanFeatures(Tenant $tenant): array
+    {
+        $planName = $this->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+        
+        return $plan['features'] ?? [];
+    }
+
+    /**
+     * Check if tenant has a specific plan feature.
+     */
+    public function hasFeature(Tenant $tenant, string $feature): bool
+    {
+        $features = $this->getPlanFeatures($tenant);
+        
+        return in_array($feature, $features);
     }
 }

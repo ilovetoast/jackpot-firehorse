@@ -4,7 +4,7 @@ import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
 export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color }) {
-    const { auth } = usePage().props
+    const { auth, errors, flash } = usePage().props
     const [processingPlanId, setProcessingPlanId] = useState(null)
 
     const handleSubscribe = (priceId, planId) => {
@@ -42,7 +42,9 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
         setProcessingPlanId(planId)
         router.post('/app/billing/update-subscription', {
             price_id: priceId,
+            plan_id: planId,
         }, {
+            preserveScroll: false,
             onFinish: () => {
                 setProcessingPlanId(null)
             },
@@ -50,6 +52,42 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                 setProcessingPlanId(null)
             }
         })
+    }
+    
+    // Determine if a plan is higher or lower than current plan
+    const getPlanAction = (plan) => {
+        if (!currentPlanData || plan.id === current_plan) {
+            return null // Current plan or no current plan
+        }
+        
+        const currentPrice = parseFloat(currentPlanData.monthly_price || 0)
+        const planPrice = parseFloat(plan.monthly_price || 0)
+        
+        if (planPrice > currentPrice) {
+            return 'upgrade'
+        } else if (planPrice < currentPrice) {
+            return 'downgrade'
+        }
+        
+        return 'switch' // Same price, different plan
+    }
+    
+    const getButtonText = (plan) => {
+        if (plan.id === current_plan) {
+            return 'Current Plan'
+        }
+        
+        const action = getPlanAction(plan)
+        if (action === 'upgrade') {
+            return 'Upgrade'
+        } else if (action === 'downgrade') {
+            return 'Downgrade'
+        } else if (action === 'switch') {
+            return 'Switch Plan'
+        }
+        
+        // New subscription
+        return subscription ? 'Switch to Plan' : 'Buy this plan'
     }
 
     const handleCancel = () => {
@@ -179,6 +217,38 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         </p>
                     </div>
 
+                    {/* Incomplete Payment Warning */}
+                    {subscription?.has_incomplete_payment && subscription?.payment_url && (
+                        <div className="mb-6 rounded-md bg-yellow-50 p-4 border border-yellow-200">
+                            <div className="flex">
+                                <div className="flex-shrink-0">
+                                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <h3 className="text-sm font-medium text-yellow-800">
+                                        Payment Required
+                                    </h3>
+                                    <div className="mt-2 text-sm text-yellow-700">
+                                        <p>Your subscription payment is incomplete. Please complete your payment before you can upgrade or change plans.</p>
+                                        <div className="mt-3">
+                                            <a
+                                                href={subscription.payment_url}
+                                                className="inline-flex items-center rounded-md bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500"
+                                            >
+                                                Complete Payment
+                                                <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                </svg>
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Current Plan Usage Card */}
                     {currentPlanData && (
                         <div className="mb-12 bg-white rounded-lg border border-gray-200 shadow-sm p-6">
@@ -250,6 +320,40 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 backgroundColor: sitePrimaryColor,
                                             }}
                                         />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Error Messages */}
+                    {errors?.subscription && (
+                        <div className="mb-6 rounded-md bg-yellow-50 p-4 border border-yellow-200">
+                            <div className="flex">
+                                <div className="flex-shrink-0">
+                                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <h3 className="text-sm font-medium text-yellow-800">
+                                        Payment Required
+                                    </h3>
+                                    <div className="mt-2 text-sm text-yellow-700">
+                                        <p>{errors.subscription}</p>
+                                        {errors.payment_url && (
+                                            <div className="mt-3">
+                                                <a
+                                                    href={errors.payment_url}
+                                                    className="inline-flex items-center rounded-md bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500"
+                                                >
+                                                    Complete Payment
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                    </svg>
+                                                </a>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -359,6 +463,15 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 >
                                                     Free Plan
                                                 </button>
+                                            ) : subscription?.has_incomplete_payment ? (
+                                                <button
+                                                    type="button"
+                                                    disabled
+                                                    className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
+                                                    title="Complete your payment before changing plans"
+                                                >
+                                                    Payment Required
+                                                </button>
                                             ) : (
                                                 <button
                                                     type="button"
@@ -373,15 +486,11 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                             handleSubscribe(plan.stripe_price_id, plan.id)
                                                         }
                                                     }}
-                                                    disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free'}
-                                                    className={`w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors ${
-                                                        plan.id === 'pro'
-                                                            ? 'hover:opacity-90'
-                                                            : 'hover:opacity-90'
-                                                    }`}
+                                                    disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free' || subscription?.has_incomplete_payment}
+                                                    className={`w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed`}
                                                     style={{ backgroundColor: sitePrimaryColor }}
                                                 >
-                                                    {processingPlanId === plan.id ? 'Processing...' : subscription ? 'Switch to Plan' : 'Buy this plan'}
+                                                    {processingPlanId === plan.id ? 'Processing...' : getButtonText(plan)}
                                                 </button>
                                             )}
                                         </div>
@@ -391,66 +500,15 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         })}
                     </div>
 
-                    {/* Current Subscription & Payment Method */}
-                    {(subscription || payment_method) && (
-                        <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {subscription && (
-                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
-                                    <h3 className="text-lg font-medium text-gray-900 mb-4">Current Subscription</h3>
-                                    <div className="space-y-2">
-                                        <p className="text-sm text-gray-600">
-                                            <span className="text-gray-500">Plan:</span>{' '}
-                                            <span className="text-gray-900 font-medium">
-                                                {currentPlanData?.name || current_plan}
-                                            </span>
-                                        </p>
-                                        <p className="text-sm text-gray-600">
-                                            <span className="text-gray-500">Status:</span>{' '}
-                                            <span className="text-gray-900 font-medium capitalize">{subscription.status}</span>
-                                            {subscription.on_grace_period && (
-                                                <span className="text-yellow-600 ml-2">(Cancels at period end)</span>
-                                            )}
-                                        </p>
-                                        <div className="flex gap-2 mt-4">
-                                            {subscription.canceled && !subscription.on_grace_period && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleResume}
-                                                    disabled={processingPlanId !== null}
-                                                    className="rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
-                                                    style={{ backgroundColor: sitePrimaryColor }}
-                                                >
-                                                    {processingPlanId === 'resume' ? 'Processing...' : 'Resume'}
-                                                </button>
-                                            )}
-                                            {!subscription.canceled && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleCancel}
-                                                    disabled={processingPlanId !== null}
-                                                    className="rounded-md bg-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-300"
-                                                >
-                                                    {processingPlanId === 'cancel' ? 'Processing...' : 'Cancel Subscription'}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {payment_method && (
-                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
-                                    <h3 className="text-lg font-medium text-gray-900 mb-4">Payment Method</h3>
-                                    <p className="text-sm text-gray-600">
-                                        {payment_method.brand?.toUpperCase() || payment_method.type} •••• {payment_method.last_four}
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Invoices Link */}
-                    <div className="mt-8 text-center">
+                    {/* Billing Overview & Invoices Links */}
+                    <div className="mt-8 flex items-center justify-center gap-6">
+                        <Link
+                            href="/app/billing/overview"
+                            className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                        >
+                            View billing overview →
+                        </Link>
+                        <span className="text-gray-300">|</span>
                         <Link
                             href="/app/billing/invoices"
                             className="text-sm font-medium text-gray-600 hover:text-gray-900"

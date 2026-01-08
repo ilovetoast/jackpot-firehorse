@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import AppBrandLogo from './AppBrandLogo'
 import PermissionGate from './PermissionGate'
+import Avatar from './Avatar'
 
 export default function AppNav({ brand, tenant }) {
     const { auth } = usePage().props
     const { post } = useForm()
     const [userMenuOpen, setUserMenuOpen] = useState(false)
+    const [showPlanAlert, setShowPlanAlert] = useState(false)
     
     // Get current URL for active link detection
     const currentUrl = typeof window !== 'undefined' ? window.location.pathname : ''
@@ -30,7 +32,8 @@ export default function AppNav({ brand, tenant }) {
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
-                window.location.reload()
+                // Reload only the shared props (auth.brands, auth.activeBrand) without full page reload
+                router.reload({ only: ['auth'] })
             },
         })
     }
@@ -65,10 +68,151 @@ export default function AppNav({ brand, tenant }) {
 
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')
+    // Check if we're in admin area - never show plan limit banner in admin
+    const isAdminPage = currentUrl.startsWith('/app/admin')
+    
+    // Check for plan limit alerts
+    const planLimitInfo = auth.brand_plan_limit_info
+    const hasPlanLimitIssue = planLimitInfo && planLimitInfo.brand_limit_exceeded && isAppPage && !isAdminPage
+    
+    // Track last shown brand ID to detect brand switches
+    const [lastShownBrandId, setLastShownBrandId] = useState(() => {
+        if (typeof window === 'undefined') return null
+        return sessionStorage.getItem('plan_alert_last_brand_id')
+    })
+    
+    // Show pop-up on initial page load and when switching brands (but never in admin area)
+    useEffect(() => {
+        // Never show in admin area
+        if (isAdminPage) {
+            setShowPlanAlert(false)
+            return
+        }
+        
+        if (hasPlanLimitIssue && typeof window !== 'undefined') {
+            // Check if this is a full page reload vs Inertia navigation
+            const navigation = window.performance?.getEntriesByType('navigation')[0]
+            const navigationType = navigation?.type
+            const isFullPageReload = navigationType === 'reload' || 
+                                     navigationType === 'navigate' ||
+                                     !window.history?.state?._inertia
+            
+            // Get current active brand ID
+            const currentBrandId = activeBrand?.id?.toString()
+            
+            // Show alert if:
+            // 1. It's a full page reload and we haven't shown it yet this load, OR
+            // 2. Brand has changed (user switched brands)
+            const brandChanged = currentBrandId && currentBrandId !== lastShownBrandId
+            
+            if (isFullPageReload) {
+                const shownThisLoad = sessionStorage.getItem('plan_alert_shown_this_load')
+                if (!shownThisLoad) {
+                    setShowPlanAlert(true)
+                    sessionStorage.setItem('plan_alert_shown_this_load', 'true')
+                    if (currentBrandId) {
+                        setLastShownBrandId(currentBrandId)
+                        sessionStorage.setItem('plan_alert_last_brand_id', currentBrandId)
+                    }
+                }
+            } else if (brandChanged && currentBrandId) {
+                // Brand switch detected - show alert again
+                setShowPlanAlert(true)
+                setLastShownBrandId(currentBrandId)
+                sessionStorage.setItem('plan_alert_last_brand_id', currentBrandId)
+            }
+        }
+    }, [hasPlanLimitIssue, activeBrand?.id, lastShownBrandId, isAdminPage])
+    
+    // Clear the flag on page unload so it can show again on next reload
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            if (typeof window !== 'undefined') {
+                sessionStorage.removeItem('plan_alert_shown_this_load')
+            }
+        }
+        
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload)
+            // Also clear on component unmount (which happens on reload)
+            if (typeof window !== 'undefined') {
+                const navigation = window.performance?.getEntriesByType('navigation')[0]
+                if (navigation?.type === 'reload') {
+                    sessionStorage.removeItem('plan_alert_shown_this_load')
+                }
+            }
+        }
+    }, [])
+    
+    const handleDismissPlanAlert = () => {
+        setShowPlanAlert(false)
+    }
     
     return (
-        <nav className="shadow-sm relative" style={{ backgroundColor: navColor }}>
-            <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
+        <div>
+            {/* Plan Limit Alert Banner */}
+            {showPlanAlert && planLimitInfo && (
+                <div className="relative bg-white border-b border-yellow-200 shadow-sm">
+                    {/* Yellow accent bar */}
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-500"></div>
+                    <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
+                        <div className="py-3 flex items-center justify-between relative">
+                            <div className="flex items-center ml-4">
+                                {/* Warning icon */}
+                                <svg className="h-5 w-5 text-yellow-600 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                </svg>
+                                <div className="text-sm">
+                                    {hasAdminOrOwnerRole ? (
+                                        <div className="text-gray-700">
+                                            <span className="font-medium text-yellow-600">Plan Limit Exceeded:</span>{' '}
+                                            You have <strong>{planLimitInfo.current_brand_count} brands</strong> but {tenant?.name ? `${tenant.name}'s` : 'your'} plan only allows <strong>{planLimitInfo.max_brands}</strong>.
+                                            {planLimitInfo.disabled_brand_names && planLimitInfo.disabled_brand_names.length > 0 && (
+                                                <span> <strong>{planLimitInfo.disabled_brand_names.join(', ')}</strong> {planLimitInfo.disabled_brand_names.length === 1 ? 'is' : 'are'} not accessible on {tenant?.name ? `${tenant.name}'s` : 'your'} current plan.</span>
+                                            )}
+                                            {' '}
+                                            <Link href="/app/billing" className="font-medium text-yellow-600 underline hover:text-yellow-700" onClick={handleDismissPlanAlert}>
+                                                Upgrade your plan
+                                            </Link> to access all brands.
+                                        </div>
+                                    ) : (
+                                        planLimitInfo.disabled_brand_names && planLimitInfo.disabled_brand_names.length > 0 && (
+                                            <div className="text-gray-700">
+                                                You've been added to <strong>{planLimitInfo.disabled_brand_names.join(', ')}</strong>, but {planLimitInfo.disabled_brand_names.length === 1 ? 'it is' : 'they are'} not accessible on {tenant?.name ? `${tenant.name}'s` : 'your'} current plan.
+                                            </div>
+                                        )
+                                    )}
+                                </div>
+                            </div>
+                            <div className="ml-4 flex items-center gap-2">
+                                {hasAdminOrOwnerRole && (
+                                    <Link
+                                        href="/app/billing"
+                                        onClick={handleDismissPlanAlert}
+                                        className="inline-flex items-center rounded-md bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-yellow-400"
+                                    >
+                                        Upgrade Plan
+                                    </Link>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={handleDismissPlanAlert}
+                                    className="inline-flex rounded-md bg-white p-1.5 text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:ring-offset-white"
+                                >
+                                    <span className="sr-only">Dismiss</span>
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            <nav className="shadow-sm relative" style={{ backgroundColor: navColor }}>
+                <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                 <div className="flex h-20 justify-between">
                     <div className="flex flex-1 items-center">
                         {/* Brand Logo Component */}
@@ -179,8 +323,14 @@ export default function AppNav({ brand, tenant }) {
                                     <svg className="ml-2 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                         <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                                     </svg>
-                                                    <div className="ml-3 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-white">
-                                        {auth.user?.first_name?.charAt(0).toUpperCase() || auth.user?.email?.charAt(0).toUpperCase()}
+                                    <div className="ml-3">
+                                        <Avatar
+                                            avatarUrl={auth.user?.avatar_url}
+                                            firstName={auth.user?.first_name}
+                                            lastName={auth.user?.last_name}
+                                            email={auth.user?.email}
+                                            size="h-8 w-8 text-xs"
+                                        />
                                     </div>
                                 </button>
                             </div>
@@ -195,13 +345,22 @@ export default function AppNav({ brand, tenant }) {
                                         {/* Account Section */}
                                         <div className="px-4 py-2 border-b border-gray-200">
                                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account</p>
-                                            <div className="px-3 py-1">
-                                                <p className="text-xs text-gray-900 truncate">
-                                                    {auth.user?.first_name && auth.user?.last_name
-                                                        ? `${auth.user.first_name} ${auth.user.last_name}`
-                                                        : auth.user?.first_name || auth.user?.email}
-                                                </p>
-                                                <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
+                                            <div className="px-3 py-1 flex items-center gap-3">
+                                                <Avatar
+                                                    avatarUrl={auth.user?.avatar_url}
+                                                    firstName={auth.user?.first_name}
+                                                    lastName={auth.user?.last_name}
+                                                    email={auth.user?.email}
+                                                    size="sm"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs text-gray-900 truncate">
+                                                        {auth.user?.first_name && auth.user?.last_name
+                                                            ? `${auth.user.first_name} ${auth.user.last_name}`
+                                                            : auth.user?.first_name || auth.user?.email}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
+                                                </div>
                                             </div>
                                             <Link
                                                 href="/app/profile"
@@ -280,7 +439,7 @@ export default function AppNav({ brand, tenant }) {
                                                     Team Management
                                                 </Link>
                                             </PermissionGate>
-                                            {canAccessTeamManagement && (
+                                            <PermissionGate permission="activity_logs.view">
                                                 <Link
                                                     href="/app/companies/activity"
                                                     className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
@@ -291,7 +450,7 @@ export default function AppNav({ brand, tenant }) {
                                                     </svg>
                                                     Activity Logs
                                                 </Link>
-                                            )}
+                                            </PermissionGate>
                                         </div>
 
                                         {/* Brands Section */}
@@ -371,6 +530,7 @@ export default function AppNav({ brand, tenant }) {
                     </div>
                 </div>
             </div>
-        </nav>
+            </nav>
+        </div>
     )
 }

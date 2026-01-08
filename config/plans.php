@@ -61,6 +61,7 @@ return [
             'all_asset_types',
             'advanced_features',
             'access_to_more_roles',
+            'edit_system_categories',
         ],
         'notes' => [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
@@ -82,6 +83,7 @@ return [
             'advanced_features',
             'custom_integrations',
             'access_to_more_roles',
+            'edit_system_categories',
         ],
         'notes' => [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',

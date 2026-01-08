@@ -18,8 +18,11 @@
     input[type="number"],
     input[type="tel"],
     input[type="search"],
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"],
     textarea,
     select {
-        @apply px-3;
+        @apply px-3 py-2;
     }
 }

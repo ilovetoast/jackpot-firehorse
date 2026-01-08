@@ -3,11 +3,15 @@ import { useForm } from '@inertiajs/react'
 import { useState } from 'react'
 import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
 import AppNav from '../../Components/AppNav'
+import { CategoryIcon } from '../../Helpers/categoryIcons'
+import BrandAvatar from '../../Components/BrandAvatar'
+import Avatar from '../../Components/Avatar'
 
 export default function BrandsIndex({ brands, limits }) {
     const { auth } = usePage().props
     const { post, processing } = useForm()
     const [expandedBrand, setExpandedBrand] = useState(null)
+    const [categoryTab, setCategoryTab] = useState({}) // Track active tab per brand: { brandId: 'basic' | 'marketing' }
 
     const handleDelete = (brandId, brandName) => {
         if (confirm(`Are you sure you want to delete "${brandName}"?`)) {
@@ -61,36 +65,45 @@ export default function BrandsIndex({ brands, limits }) {
                         ) : (
                             <ul className="divide-y divide-gray-200">
                                 {brands.map((brand) => (
-                                    <li key={brand.id} className="hover:bg-gray-50 transition-colors">
+                                    <li 
+                                        key={brand.id} 
+                                        className={`transition-colors ${
+                                            brand.is_disabled 
+                                                ? 'opacity-60 bg-gray-50' 
+                                                : 'hover:bg-gray-50'
+                                        }`}
+                                    >
                                         {/* Brand Row */}
                                         <div
                                             className="flex items-center px-6 py-4 cursor-pointer"
-                                            onClick={() => toggleExpand(brand.id)}
+                                            onClick={() => !brand.is_disabled && toggleExpand(brand.id)}
                                         >
                                             {/* Logo */}
                                             <div className="flex-shrink-0 mr-4">
-                                                {brand.logo_path ? (
-                                                    <img
-                                                        src={brand.logo_path}
-                                                        alt={brand.name}
-                                                        className="h-12 w-12 rounded-full object-cover"
-                                                    />
-                                                ) : (
-                                                    <div className="h-12 w-12 rounded-full bg-indigo-600 flex items-center justify-center text-white font-semibold text-lg">
-                                                        {brand.name.charAt(0).toUpperCase()}
-                                                    </div>
-                                                )}
+                                                <BrandAvatar
+                                                    logoPath={brand.logo_path}
+                                                    name={brand.name}
+                                                    primaryColor={brand.primary_color}
+                                                    size="lg"
+                                                />
                                             </div>
 
                                             {/* Brand Info */}
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2">
-                                                    <p className="text-sm font-semibold text-gray-900 truncate">
+                                                    <p className={`text-sm font-semibold truncate ${
+                                                        brand.is_disabled ? 'text-gray-400' : 'text-gray-900'
+                                                    }`}>
                                                         {brand.name}
                                                     </p>
                                                     {brand.is_default && (
                                                         <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
                                                             Default
+                                                        </span>
+                                                    )}
+                                                    {brand.is_disabled && (
+                                                        <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                                                            Not Accessible (Plan Limit)
                                                         </span>
                                                     )}
                                                 </div>
@@ -104,15 +117,29 @@ export default function BrandsIndex({ brands, limits }) {
                                                 </div>
                                             </div>
 
-                                            {/* Edit Button */}
-                                            <div className="flex-shrink-0 ml-4">
-                                                <Link
-                                                    href={`/app/brands/${brand.id}/edit`}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                                >
-                                                    Edit
-                                                </Link>
+                                            {/* Action Buttons */}
+                                            <div className="flex-shrink-0 ml-4 flex items-center gap-2">
+                                                {!brand.is_disabled && (
+                                                    <Link
+                                                        href={`/app/brands/${brand.id}/edit`}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                    >
+                                                        Edit
+                                                    </Link>
+                                                )}
+                                                {!brand.is_default && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            handleDelete(brand.id, brand.name)
+                                                        }}
+                                                        className="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                )}
                                             </div>
 
                                             {/* Expand/Collapse Icon */}
@@ -192,26 +219,97 @@ export default function BrandsIndex({ brands, limits }) {
                                                             Categories
                                                         </h3>
                                                         {brand.categories && brand.categories.length > 0 ? (
-                                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                                                                {brand.categories.map((category) => (
-                                                                    <div key={category.id} className="bg-white rounded-md border border-gray-200 p-2.5">
-                                                                        <p className="text-xs font-medium text-gray-900 truncate mb-1">
-                                                                            {category.name}
-                                                                        </p>
-                                                                        <div className="flex flex-wrap items-center gap-2">
-                                                                            {category.is_system && (
-                                                                                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">
-                                                                                    System
-                                                                                </span>
-                                                                            )}
-                                                                            {category.is_locked && (
-                                                                                <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
-                                                                                    Locked
-                                                                                </span>
-                                                                            )}
+                                                            <div className="overflow-hidden bg-white rounded-lg border border-gray-200">
+                                                                {/* Tab Navigation */}
+                                                                <div className="border-b border-gray-200">
+                                                                    <nav className="-mb-px flex space-x-8 px-4" aria-label="Tabs">
+                                                                        <button
+                                                                            onClick={() => setCategoryTab({ ...categoryTab, [brand.id]: 'basic' })}
+                                                                            className={`
+                                                                                group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
+                                                                                ${(categoryTab[brand.id] || 'basic') === 'basic'
+                                                                                    ? 'border-indigo-500 text-indigo-600'
+                                                                                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                                                                }
+                                                                            `}
+                                                                        >
+                                                                            <svg
+                                                                                className={`
+                                                                                    -ml-0.5 mr-2 h-5 w-5
+                                                                                    ${(categoryTab[brand.id] || 'basic') === 'basic' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                                                `}
+                                                                                fill="none"
+                                                                                viewBox="0 0 24 24"
+                                                                                strokeWidth="1.5"
+                                                                                stroke="currentColor"
+                                                                            >
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                                                                            </svg>
+                                                                            Asset
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => setCategoryTab({ ...categoryTab, [brand.id]: 'marketing' })}
+                                                                            className={`
+                                                                                group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
+                                                                                ${(categoryTab[brand.id] || 'basic') === 'marketing'
+                                                                                    ? 'border-indigo-500 text-indigo-600'
+                                                                                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                                                                }
+                                                                            `}
+                                                                        >
+                                                                            <svg
+                                                                                className={`
+                                                                                    -ml-0.5 mr-2 h-5 w-5
+                                                                                    ${(categoryTab[brand.id] || 'basic') === 'marketing' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                                                `}
+                                                                                fill="none"
+                                                                                viewBox="0 0 24 24"
+                                                                                strokeWidth="1.5"
+                                                                                stroke="currentColor"
+                                                                            >
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                                                                            </svg>
+                                                                            Marketing Asset
+                                                                        </button>
+                                                                    </nav>
+                                                                </div>
+                                                                {/* Categories List */}
+                                                                <div className="divide-y divide-gray-200">
+                                                                    {brand.categories
+                                                                        .filter(category => category.asset_type === (categoryTab[brand.id] || 'basic'))
+                                                                        .map((category) => (
+                                                                            <div key={category.id} className="px-4 py-3 flex items-center">
+                                                                                <div className="flex items-center flex-1 min-w-0">
+                                                                                    {/* Category Icon */}
+                                                                                    <div className="mr-3 flex-shrink-0">
+                                                                                        {category.is_system || category.is_locked ? (
+                                                                                            <CategoryIcon 
+                                                                                                iconId={category.icon || 'folder'} 
+                                                                                                className="h-5 w-5" 
+                                                                                                color="text-gray-400"
+                                                                                            />
+                                                                                        ) : (
+                                                                                            <CategoryIcon 
+                                                                                                iconId={category.icon || 'plus-circle'} 
+                                                                                                className="h-5 w-5" 
+                                                                                                color="text-indigo-500"
+                                                                                            />
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <p className="text-sm font-medium text-gray-900 truncate">
+                                                                                            {category.name}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    {brand.categories.filter(category => category.asset_type === (categoryTab[brand.id] || 'basic')).length === 0 && (
+                                                                        <div className="px-4 py-8 text-center text-sm text-gray-500">
+                                                                            No {(categoryTab[brand.id] || 'basic') === 'basic' ? 'Asset' : 'Marketing Asset'} categories yet.
                                                                         </div>
-                                                                    </div>
-                                                                ))}
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         ) : (
                                                             <p className="text-sm text-gray-500">No categories yet.</p>
@@ -223,37 +321,82 @@ export default function BrandsIndex({ brands, limits }) {
                                                         <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">
                                                             Users
                                                         </h3>
-                                                        {brand.users && brand.users.length > 0 ? (
-                                                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                                                                <ul className="divide-y divide-gray-200">
-                                                                    {brand.users.map((user) => (
-                                                                        <li key={user.id} className="px-4 py-3">
-                                                                            <div className="flex items-center">
-                                                                                <div className="flex-shrink-0 mr-4">
-                                                                                    <div className="h-10 w-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-semibold">
-                                                                                        {user.first_name?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="flex-1 min-w-0">
-                                                                                    <p className="text-sm font-medium text-gray-900">
-                                                                                        {user.name || user.email}
-                                                                                    </p>
-                                                                                    <p className="text-sm text-gray-500 truncate">{user.email}</p>
-                                                                                </div>
-                                                                                <div className="flex-shrink-0 ml-4">
-                                                                                    {user.role && (
-                                                                                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                                                                                            {user.role}
-                                                                                        </span>
-                                                                                    )}
-                                                                                </div>
-                                                                            </div>
-                                                                        </li>
+                                                        
+                                                        {/* Add User Form */}
+                                                        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-4">
+                                                            <div className="flex items-center gap-3 mb-4">
+                                                                <div className="flex-shrink-0">
+                                                                    <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.375 21c-2.115 0-4.1-.56-5.375-1.765Z" />
+                                                                    </svg>
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <h4 className="text-sm font-semibold text-gray-900">Add team members</h4>
+                                                                    <p className="text-xs text-gray-500 mt-0.5">Invite new users or add existing company members</p>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <UserInviteForm brandId={brand.id} defaultRole="member" />
+                                                        </div>
+
+                                                        {/* Recommended Users (Company users not on brand) */}
+                                                        {brand.available_users && brand.available_users.length > 0 && (
+                                                            <div className="mb-6">
+                                                                <h4 className="text-sm font-semibold text-gray-900 mb-3">
+                                                                    Team members previously added to projects
+                                                                </h4>
+                                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                                    {brand.available_users.map((user) => (
+                                                                        <RecommendedUserCard 
+                                                                            key={user.id} 
+                                                                            user={user} 
+                                                                            brandId={brand.id}
+                                                                        />
                                                                     ))}
-                                                                </ul>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Pending Invitations */}
+                                                        {brand.pending_invitations && brand.pending_invitations.length > 0 && (
+                                                            <div className="mb-6">
+                                                                <h4 className="text-sm font-semibold text-gray-900 mb-3">
+                                                                    Pending Invitations
+                                                                </h4>
+                                                                <div className="bg-yellow-50 border border-yellow-200 rounded-lg divide-y divide-yellow-200">
+                                                                    {brand.pending_invitations.map((invitation) => (
+                                                                        <PendingInvitationCard 
+                                                                            key={invitation.id} 
+                                                                            invitation={invitation} 
+                                                                            brandId={brand.id}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Existing Users */}
+                                                        {brand.users && brand.users.length > 0 ? (
+                                                            <div>
+                                                                <h4 className="text-sm font-semibold text-gray-900 mb-3">
+                                                                    Brand Members
+                                                                </h4>
+                                                                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                                                    <ul className="divide-y divide-gray-200">
+                                                                        {brand.users.map((user) => (
+                                                                            <UserManagementCard 
+                                                                                key={user.id} 
+                                                                                user={user} 
+                                                                                brandId={brand.id}
+                                                                            />
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
                                                             </div>
                                                         ) : (
-                                                            <p className="text-sm text-gray-500">No users assigned to this brand yet.</p>
+                                                            <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                                                                <p className="text-sm text-gray-500">No users assigned to this brand yet.</p>
+                                                            </div>
                                                         )}
                                                     </div>
                                                 </div>
@@ -267,5 +410,268 @@ export default function BrandsIndex({ brands, limits }) {
                 </div>
             </main>
         </div>
+    )
+}
+
+// User Invite Form Component
+function UserInviteForm({ brandId, defaultRole = 'member' }) {
+    const { data, setData, post, processing, errors, reset } = useForm({
+        email: '',
+        role: defaultRole,
+    })
+
+    const handleSubmit = (e) => {
+        e.preventDefault()
+        post(`/app/brands/${brandId}/users/invite`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                reset()
+            },
+        })
+    }
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="flex gap-2">
+                <div className="flex-1">
+                    <input
+                        type="email"
+                        value={data.email}
+                        onChange={(e) => setData('email', e.target.value)}
+                        placeholder="Enter an email"
+                        className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                        required
+                    />
+                    {errors.email && (
+                        <p className="mt-1 text-xs text-red-600">{errors.email}</p>
+                    )}
+                </div>
+                <div className="flex-shrink-0">
+                    <select
+                        value={data.role}
+                        onChange={(e) => setData('role', e.target.value)}
+                        className="block rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                    >
+                        <option value="member">Member</option>
+                        <option value="admin">Admin</option>
+                        <option value="brand_manager">Brand Manager</option>
+                        <option value="owner">Owner</option>
+                    </select>
+                </div>
+                <button
+                    type="submit"
+                    disabled={processing}
+                    className="flex-shrink-0 rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                >
+                    {processing ? 'Sending...' : 'Send invite'}
+                </button>
+            </div>
+        </form>
+    )
+}
+
+// Recommended User Card Component
+function RecommendedUserCard({ user, brandId }) {
+    const { post, processing } = useForm()
+    const [role, setRole] = useState('member')
+
+    const handleAdd = () => {
+        post(`/app/brands/${brandId}/users/${user.id}/add`, {
+            data: { role },
+            preserveScroll: true,
+        })
+    }
+
+    return (
+        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
+            <Avatar
+                avatarUrl={user.avatar_url}
+                firstName={user.first_name}
+                lastName={user.last_name}
+                email={user.email}
+                size="sm"
+            />
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                    {user.name || user.email}
+                </p>
+                {user.name && (
+                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                )}
+            </div>
+            <div className="flex items-center gap-2">
+                <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    className="text-xs rounded-md border-0 py-1 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                    <option value="brand_manager">Brand Manager</option>
+                    <option value="owner">Owner</option>
+                </select>
+                <button
+                    type="button"
+                    onClick={handleAdd}
+                    disabled={processing}
+                    className="flex-shrink-0 rounded-full bg-indigo-600 p-1.5 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                    title="Add to brand"
+                >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    )
+}
+
+// Pending Invitation Card Component
+function PendingInvitationCard({ invitation, brandId }) {
+    const { post, processing } = useForm()
+
+    const handleResend = () => {
+        post(`/app/brands/${brandId}/invitations/${invitation.id}/resend`, {
+            preserveScroll: true,
+        })
+    }
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A'
+        const date = new Date(dateString)
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+
+    return (
+        <div className="p-3 flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
+                    {invitation.role && (
+                        <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                            {invitation.role}
+                        </span>
+                    )}
+                </div>
+                <div className="mt-1 text-xs text-gray-500">
+                    {invitation.sent_at ? (
+                        <>Sent: {formatDate(invitation.sent_at)}</>
+                    ) : (
+                        <>Created: {formatDate(invitation.created_at)}</>
+                    )}
+                </div>
+            </div>
+            <button
+                type="button"
+                onClick={handleResend}
+                disabled={processing}
+                className="ml-4 text-sm text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+            >
+                {processing ? 'Resending...' : 'Resend'}
+            </button>
+        </div>
+    )
+}
+
+// User Management Card Component
+function UserManagementCard({ user, brandId }) {
+    const { put, delete: destroy, processing } = useForm()
+    const [isEditing, setIsEditing] = useState(false)
+    const [role, setRole] = useState(user.role || 'member')
+
+    const handleRoleUpdate = () => {
+        put(`/app/brands/${brandId}/users/${user.id}/role`, {
+            data: { role },
+            preserveScroll: true,
+            onSuccess: () => {
+                setIsEditing(false)
+            },
+        })
+    }
+
+    const handleRemove = () => {
+        if (confirm(`Are you sure you want to remove ${user.name || user.email} from this brand?`)) {
+            destroy(`/app/brands/${brandId}/users/${user.id}`, {
+                preserveScroll: true,
+            })
+        }
+    }
+
+    return (
+        <li className="px-4 py-3">
+            <div className="flex items-center gap-3">
+                <Avatar
+                    avatarUrl={user.avatar_url}
+                    firstName={user.first_name}
+                    lastName={user.last_name}
+                    email={user.email}
+                    size="md"
+                />
+                <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">
+                        {user.name || user.email}
+                    </p>
+                    <p className="text-sm text-gray-500 truncate">{user.email}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    {isEditing ? (
+                        <>
+                            <select
+                                value={role}
+                                onChange={(e) => setRole(e.target.value)}
+                                className="text-xs rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                            >
+                                <option value="member">Member</option>
+                                <option value="admin">Admin</option>
+                                <option value="brand_manager">Brand Manager</option>
+                                <option value="owner">Owner</option>
+                            </select>
+                            <button
+                                type="button"
+                                onClick={handleRoleUpdate}
+                                disabled={processing}
+                                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                            >
+                                Save
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsEditing(false)
+                                    setRole(user.role || 'member')
+                                }}
+                                className="text-xs text-gray-600 hover:text-gray-800 font-medium"
+                            >
+                                Cancel
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            {user.role && (
+                                <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                                    {user.role}
+                                </span>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setIsEditing(true)}
+                                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                            >
+                                Edit Role
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleRemove}
+                                disabled={processing}
+                                className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
+                            >
+                                Remove
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+        </li>
     )
 }

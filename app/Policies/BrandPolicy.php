@@ -20,9 +20,14 @@ class BrandPolicy
      */
     public function view(User $user, Brand $brand): bool
     {
-        // User must belong to the tenant and have view brand permission
-        return $user->tenants()->where('tenants.id', $brand->tenant_id)->exists()
-            && $user->can('view brand');
+        // User must belong to the tenant
+        if (!$user->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
+            return false;
+        }
+
+        // Check brand-level permission (or tenant-level for admin/owner)
+        return $user->hasPermissionForBrand($brand, 'view brand')
+            || $user->hasPermissionForTenant($brand->tenant, 'view brand');
     }
 
     /**
@@ -38,9 +43,14 @@ class BrandPolicy
      */
     public function update(User $user, Brand $brand): bool
     {
-        $tenant = $brand->tenant;
-        return $user->tenants()->where('tenants.id', $brand->tenant_id)->exists()
-            && $user->hasPermissionForTenant($tenant, 'brand_settings.manage');
+        // User must belong to the tenant
+        if (!$user->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
+            return false;
+        }
+
+        // Check brand-level permission (or tenant-level for admin/owner)
+        return $user->hasPermissionForBrand($brand, 'brand_settings.manage')
+            || $user->hasPermissionForTenant($brand->tenant, 'brand_settings.manage');
     }
 
     /**

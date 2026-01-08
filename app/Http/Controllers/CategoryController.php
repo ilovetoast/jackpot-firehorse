@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Services\CategoryService;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -15,6 +16,7 @@ use Inertia\Response;
 
 class CategoryController extends Controller
 {
+    use HandlesFlashMessages;
     public function __construct(
         protected CategoryService $categoryService,
         protected PlanService $planService,
@@ -62,7 +64,7 @@ class CategoryController extends Controller
             $query->visible(); // Only show non-hidden categories
         }
 
-        $categories = $query->orderBy('name')->get();
+        $categories = $query->orderBy('order')->orderBy('name')->get();
 
         // Get system category templates and merge with existing categories
         // This ensures all brands see system categories even if they don't have them yet
@@ -80,11 +82,13 @@ class CategoryController extends Controller
             'id' => $category->id,
             'name' => $category->name,
             'slug' => $category->slug,
+            'icon' => $category->icon,
             'asset_type' => $category->asset_type->value,
             'is_system' => $category->is_system,
             'is_private' => $category->is_private,
             'is_locked' => $category->is_locked,
             'is_hidden' => $category->is_hidden,
+            'order' => $category->order ?? 0,
             'is_template' => false, // Existing category
         ]);
 
@@ -102,6 +106,7 @@ class CategoryController extends Controller
                     'id' => null, // No ID for templates
                     'name' => $template->name,
                     'slug' => $template->slug,
+                    'icon' => $template->icon ?? 'folder',
                     'asset_type' => $template->asset_type->value,
                     'is_system' => true,
                     'is_private' => $template->is_private,
@@ -119,6 +124,11 @@ class CategoryController extends Controller
             ->where('is_system', false) // Only count custom categories
             ->count();
         $canCreate = $this->categoryService->canCreate($tenant, $brand);
+        
+        // Get plan information
+        $currentPlan = $this->planService->getCurrentPlan($tenant);
+        $planFeatures = $this->planService->getPlanFeatures($tenant);
+        $canEditSystemCategories = $this->planService->hasFeature($tenant, 'edit_system_categories');
 
         return Inertia::render('Categories/Index', [
             'categories' => $allCategories->values(),
@@ -134,6 +144,11 @@ class CategoryController extends Controller
             'asset_types' => [
                 ['value' => AssetType::BASIC->value, 'label' => 'Basic'],
                 ['value' => AssetType::MARKETING->value, 'label' => 'Marketing'],
+            ],
+            'plan' => [
+                'name' => $currentPlan,
+                'features' => $planFeatures,
+                'can_edit_system_categories' => $canEditSystemCategories,
             ],
         ]);
     }
@@ -155,6 +170,7 @@ class CategoryController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
+            'icon' => 'nullable|string|max:255',
             'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
             'is_private' => 'nullable|boolean',
         ]);
@@ -164,7 +180,7 @@ class CategoryController extends Controller
         try {
             $category = $this->categoryService->create($tenant, $brand, $validated);
 
-            return redirect()->route('categories.index')->with('success', 'Category created successfully.');
+            return $this->redirectWithSuccess('categories.index', 'Category created successfully.');
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
             return back()->withErrors([
                 'plan_limit' => $e->getMessage(),
@@ -196,6 +212,7 @@ class CategoryController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
+            'icon' => 'nullable|string|max:255',
             'is_private' => 'nullable|boolean',
         ]);
 
@@ -233,11 +250,43 @@ class CategoryController extends Controller
         try {
             $this->categoryService->delete($category);
 
-            return redirect()->route('categories.index')->with('success', 'Category deleted successfully.');
+            return $this->redirectWithSuccess('categories.index', 'Category deleted successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Update the order of categories.
+     */
+    public function updateOrder(Request $request)
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = $request->user();
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'Only administrators, owners, and brand managers can reorder categories.');
+        }
+
+        $validated = $request->validate([
+            'categories' => 'required|array',
+            'categories.*.id' => 'required|integer|exists:categories,id',
+            'categories.*.order' => 'required|integer',
+        ]);
+
+        foreach ($validated['categories'] as $item) {
+            $category = Category::find($item['id']);
+            
+            // Verify category belongs to tenant/brand
+            if ($category && $category->tenant_id === $tenant->id && $category->brand_id === $brand->id) {
+                $category->update(['order' => $item['order']]);
+            }
+        }
+
+        return response()->json(['success' => true]);
     }
 }

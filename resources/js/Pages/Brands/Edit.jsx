@@ -4,33 +4,11 @@ import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import ImageCropModal from '../../Components/ImageCropModal'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
+import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-// CategoryCard component for compact grid layout
+// CategoryCard component matching Categories/Index clean design
 function CategoryCard({ category, brandId }) {
-    const [isEditing, setIsEditing] = useState(false)
-    const [editName, setEditName] = useState(category.name)
-    const { data, setData, put, processing: putProcessing } = useForm({ name: category.name })
     const [deleteProcessing, setDeleteProcessing] = useState(false)
-
-    const handleRename = (e) => {
-        e.preventDefault()
-        if (editName.trim() === category.name || !editName.trim()) {
-            setIsEditing(false)
-            setEditName(category.name)
-            return
-        }
-
-        setData('name', editName.trim())
-        put(`/app/categories/${category.id}`, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setIsEditing(false)
-            },
-            onError: () => {
-                setEditName(category.name)
-            },
-        })
-    }
 
     const handleDelete = () => {
         if (confirm(`Are you sure you want to delete "${category.name}"? This action cannot be undone.`)) {
@@ -44,63 +22,72 @@ function CategoryCard({ category, brandId }) {
         }
     }
 
-    const canEdit = !category.is_system && !category.is_locked
-    const processing = putProcessing || deleteProcessing
+    const canEdit = !category.is_system && !category.is_locked && category.id
+    const processing = deleteProcessing
 
     return (
-        <div className="border-b border-gray-200 last:border-b-0">
-            <div className="px-4 py-3 flex items-center justify-between">
-                <div className="flex-1 min-w-0">
-                    {isEditing ? (
-                        <form onSubmit={handleRename} className="flex items-center gap-2">
-                            <input
-                                type="text"
-                                value={editName}
-                                onChange={(e) => setEditName(e.target.value)}
-                                onBlur={handleRename}
-                                autoFocus
-                                className="block w-full rounded-md border-0 py-1.5 text-sm font-medium text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                disabled={processing}
+        <div className="px-6 py-4 hover:bg-gray-50">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center flex-1 min-w-0">
+                    {/* Category Icon */}
+                    <div className="mr-3 flex-shrink-0">
+                        {category.is_system || category.is_locked ? (
+                            <CategoryIcon 
+                                iconId={category.icon || 'folder'} 
+                                className="h-5 w-5" 
+                                color="text-gray-400"
                             />
-                        </form>
-                    ) : (
-                        <>
-                            <p className="text-sm font-medium text-gray-900">{category.name}</p>
-                            <div className="mt-1 flex items-center gap-3">
-                                {category.is_system && (
-                                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                                        System
-                                    </span>
-                                )}
-                                {category.is_locked && (
-                                    <span className="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800">
-                                        Locked
-                                    </span>
-                                )}
-                            </div>
-                        </>
-                    )}
+                        ) : (
+                            <CategoryIcon 
+                                iconId={category.icon || 'plus-circle'} 
+                                className="h-5 w-5" 
+                                color="text-indigo-500"
+                            />
+                        )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                                {category.name}
+                            </p>
+                            {category.is_private && (
+                                <span className="ml-2 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-indigo-800">
+                                    Private
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-sm text-gray-500 truncate">
+                            {category.slug}
+                        </p>
+                    </div>
                 </div>
-                {canEdit && !isEditing && (
-                    <div className="flex items-center gap-2 ml-4">
-                        <button
-                            type="button"
-                            onClick={() => setIsEditing(true)}
-                            className="text-sm text-indigo-600 hover:text-indigo-900"
-                            disabled={processing}
+                <div className="flex items-center gap-2 ml-4">
+                    {canEdit && (
+                        <Link
+                            href="/app/categories"
+                            className="rounded-md bg-white px-2 py-1.5 text-sm font-semibold text-gray-600 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                            title="Edit category"
                         >
-                            Rename
-                        </button>
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                            </svg>
+                        </Link>
+                    )}
+                    {canEdit && (
                         <button
                             type="button"
                             onClick={handleDelete}
-                            className="text-sm text-red-600 hover:text-red-900"
+                            className="rounded-md bg-white px-2 py-1.5 text-sm font-semibold text-red-600 shadow-sm ring-1 ring-inset ring-red-300 hover:bg-red-50"
+                            title="Delete category"
                             disabled={processing}
                         >
-                            Delete
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                            </svg>
                         </button>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         </div>
     )
@@ -110,6 +97,8 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
     const { auth } = usePage().props
     const [cropModalOpen, setCropModalOpen] = useState(false)
     const [imageToCrop, setImageToCrop] = useState(null)
+    const [activeCategoryTab, setActiveCategoryTab] = useState('basic')
+    const [activeSection, setActiveSection] = useState('basic-information')
     
     const { data, setData, put, processing, errors } = useForm({
         name: brand.name,
@@ -147,10 +136,12 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
         }
     }, [data.logo_preview])
 
-    // Scroll to categories section if hash is present
+    // Handle hash-based navigation and scrolling
     useEffect(() => {
-        if (window.location.hash === '#categories') {
-            const element = document.getElementById('categories-section')
+        const hash = window.location.hash.replace('#', '')
+        if (hash) {
+            setActiveSection(hash)
+            const element = document.getElementById(hash)
             if (element) {
                 setTimeout(() => {
                     element.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -158,6 +149,34 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
             }
         }
     }, [])
+
+    // Update active section on scroll
+    useEffect(() => {
+        const handleScroll = () => {
+            const sections = ['basic-information', 'brand-colors', 'navigation-settings', 'categories']
+            const scrollPosition = window.scrollY + 100
+
+            for (let i = sections.length - 1; i >= 0; i--) {
+                const section = document.getElementById(sections[i])
+                if (section && section.offsetTop <= scrollPosition) {
+                    setActiveSection(sections[i])
+                    break
+                }
+            }
+        }
+
+        window.addEventListener('scroll', handleScroll)
+        return () => window.removeEventListener('scroll', handleScroll)
+    }, [])
+
+    const handleSectionClick = (sectionId) => {
+        setActiveSection(sectionId)
+        window.location.hash = sectionId
+        const element = document.getElementById(sectionId)
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+    }
 
     return (
         <div className="min-h-full">
@@ -175,12 +194,19 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                     <p className="mt-2 text-sm text-gray-700">Update brand information and settings</p>
                 </div>
 
-                <form onSubmit={submit} className="space-y-6">
+                <form onSubmit={submit} className="space-y-8">
                     {/* Basic Information */}
-                    <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                        <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Basic Information</h3>
-                            <div className="space-y-6">
+                    <div id="basic-information" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">Basic Information</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Set your brand name, logo, and basic display settings.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
+                                <div className="px-4 py-5 sm:p-6">
+                                    <div className="space-y-6">
                                 <div>
                                     <label htmlFor="name" className="block text-sm font-medium leading-6 text-gray-900">
                                         Brand Name
@@ -193,7 +219,7 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                             required
                                             value={data.name}
                                             onChange={(e) => setData('name', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                         />
                                         {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                                     </div>
@@ -325,17 +351,25 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                     minWidth={265}
                                     minHeight={64}
                                 />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Brand Colors */}
-                    <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                        <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Brand Colors</h3>
-                            <p className="text-sm text-gray-500 mb-4">Define your brand's color palette (optional)</p>
-                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-                                <div>
+                    <div id="brand-colors" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">Brand Colors</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Define your brand's color palette. These colors will be used throughout the application.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
+                                <div className="px-4 py-5 sm:p-6">
+                                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+                                        <div>
                                     <label htmlFor="primary_color" className="block text-sm font-medium leading-6 text-gray-900">
                                         Primary Color
                                     </label>
@@ -370,10 +404,10 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
                                     </div>
-                                    {errors.primary_color && <p className="mt-2 text-sm text-red-600">{errors.primary_color}</p>}
-                                </div>
+                                            {errors.primary_color && <p className="mt-2 text-sm text-red-600">{errors.primary_color}</p>}
+                                        </div>
 
-                                <div>
+                                        <div>
                                     <label htmlFor="secondary_color" className="block text-sm font-medium leading-6 text-gray-900">
                                         Secondary Color
                                     </label>
@@ -396,10 +430,10 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
                                     </div>
-                                    {errors.secondary_color && <p className="mt-2 text-sm text-red-600">{errors.secondary_color}</p>}
-                                </div>
+                                            {errors.secondary_color && <p className="mt-2 text-sm text-red-600">{errors.secondary_color}</p>}
+                                        </div>
 
-                                <div>
+                                        <div>
                                     <label htmlFor="accent_color" className="block text-sm font-medium leading-6 text-gray-900">
                                         Accent Color
                                     </label>
@@ -422,11 +456,11 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
                                     </div>
-                                    {errors.accent_color && <p className="mt-2 text-sm text-red-600">{errors.accent_color}</p>}
-                                </div>
-                            </div>
+                                            {errors.accent_color && <p className="mt-2 text-sm text-red-600">{errors.accent_color}</p>}
+                                        </div>
+                                    </div>
 
-                            {/* Color Preview */}
+                                    {/* Color Preview */}
                             {(data.primary_color || data.secondary_color || data.accent_color) && (
                                 <div className="mt-6 pt-6 border-t border-gray-200">
                                     <p className="text-sm font-medium text-gray-700 mb-3">Color Preview:</p>
@@ -461,16 +495,23 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                     </div>
                                 </div>
                             )}
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     {/* Navigation Settings */}
-                    <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                        <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Navigation Settings</h3>
-                            <p className="text-sm text-gray-500 mb-4">Customize the top navigation bar appearance</p>
-                            
-                            <div className="space-y-6">
+                    <div id="navigation-settings" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">Navigation Settings</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Customize the top navigation bar appearance, including colors and logo filters.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
+                                <div className="px-4 py-5 sm:p-6">
+                                    <div className="space-y-6">
                                 {/* Nav Color */}
                                 <div>
                                     <label htmlFor="nav_color" className="block text-sm font-medium leading-6 text-gray-900">
@@ -599,72 +640,126 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                         </div>
                                     </div>
                                 </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Categories Section */}
-                    <div id="categories-section" className="overflow-hidden bg-white shadow sm:rounded-lg">
-                        <div className="px-4 py-5 sm:p-6">
-                            <div className="flex items-center justify-between mb-4">
-                                <div>
-                                    <h3 className="text-lg font-medium leading-6 text-gray-900">Categories</h3>
-                                    <p className="mt-1 text-sm text-gray-500">
-                                        Manage categories for this brand. Categories are brand-specific and help organize your assets.
-                                    </p>
-                                </div>
-                                {category_limits && category_limits.can_create && (
-                                    <Link
-                                        href="/app/categories"
-                                        className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                    >
-                                        <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                                        </svg>
-                                        Add Category
-                                    </Link>
-                                )}
-                            </div>
+                    <div id="categories" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">Categories</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Manage categories for this brand. Categories are brand-specific and help organize your assets.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
+                                <div className="px-4 py-5 sm:p-6">
+                                    <div className="flex items-center justify-end mb-4">
+                                        {category_limits && category_limits.can_create && (
+                                            <Link
+                                                href="/app/categories"
+                                                className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                            >
+                                                <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                                </svg>
+                                                Add Category
+                                            </Link>
+                                        )}
+                                    </div>
 
-                            {category_limits && !category_limits.can_create && (
+                                    {category_limits && !category_limits.can_create && (
                                 <PlanLimitCallout
                                     title="Category limit reached"
                                     message={`You have reached the maximum number of custom categories (${category_limits.current} of ${category_limits.max === Number.MAX_SAFE_INTEGER || category_limits.max === 2147483647 ? 'unlimited' : category_limits.max}) for your plan. Please upgrade your plan to create more categories.`}
                                 />
                             )}
 
-                            {category_limits && category_limits.can_create && (
-                                <div className="mb-4 text-sm text-gray-600">
-                                    Custom categories: {category_limits.current} / {category_limits.max === Number.MAX_SAFE_INTEGER || category_limits.max === 2147483647 ? 'Unlimited' : category_limits.max}
-                                </div>
-                            )}
+                                    {category_limits && category_limits.can_create && (
+                                        <div className="mb-4 text-sm text-gray-600">
+                                            Custom categories: {category_limits.current} / {category_limits.max === Number.MAX_SAFE_INTEGER || category_limits.max === 2147483647 ? 'Unlimited' : category_limits.max}
+                                        </div>
+                                    )}
 
-                            {categories && categories.length > 0 ? (
-                                <div className="space-y-6">
-                                    {/* Group by Asset Type */}
-                                    {['basic', 'marketing'].map((assetType) => {
-                                        const typeCategories = categories.filter(cat => cat.asset_type === assetType)
-                                        if (typeCategories.length === 0) return null
-
-                                        return (
-                                            <div key={assetType}>
-                                                <h4 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wide">
-                                                    {assetType === 'basic' ? 'Asset' : 'Marketing'}
-                                                </h4>
-                                                <div className="overflow-hidden bg-white rounded-lg border border-gray-200">
-                                                    <div className="divide-y divide-gray-200">
-                                                        {typeCategories.map((category) => (
-                                                            <CategoryCard
-                                                                key={category.id}
-                                                                category={category}
-                                                                brandId={brand.id}
-                                                            />
-                                                        ))}
-                                                    </div>
+                                    {categories && categories.length > 0 ? (
+                                <div>
+                                    {/* Tab Navigation */}
+                                    <div className="mb-4 border-b border-gray-200">
+                                        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveCategoryTab('basic')}
+                                                className={`
+                                                    group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
+                                                    ${activeCategoryTab === 'basic'
+                                                        ? 'border-indigo-500 text-indigo-600'
+                                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                                    }
+                                                `}
+                                            >
+                                                <svg
+                                                    className={`
+                                                        -ml-0.5 mr-2 h-5 w-5
+                                                        ${activeCategoryTab === 'basic' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                    `}
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    strokeWidth="1.5"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                                                </svg>
+                                                Asset
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveCategoryTab('marketing')}
+                                                className={`
+                                                    group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
+                                                    ${activeCategoryTab === 'marketing'
+                                                        ? 'border-indigo-500 text-indigo-600'
+                                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                                    }
+                                                `}
+                                            >
+                                                <svg
+                                                    className={`
+                                                        -ml-0.5 mr-2 h-5 w-5
+                                                        ${activeCategoryTab === 'marketing' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                    `}
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    strokeWidth="1.5"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                                                </svg>
+                                                Marketing Asset
+                                            </button>
+                                        </nav>
+                                    </div>
+                                    {/* Categories List */}
+                                    <div className="overflow-hidden bg-white rounded-lg border border-gray-200">
+                                        <div className="divide-y divide-gray-200">
+                                            {categories
+                                                .filter(cat => cat.asset_type === activeCategoryTab)
+                                                .map((category) => (
+                                                    <CategoryCard
+                                                        key={category.id}
+                                                        category={category}
+                                                        brandId={brand.id}
+                                                    />
+                                                ))}
+                                            {categories.filter(cat => cat.asset_type === activeCategoryTab).length === 0 && (
+                                                <div className="px-6 py-8 text-center text-sm text-gray-500">
+                                                    No {activeCategoryTab === 'basic' ? 'Asset' : 'Marketing Asset'} categories yet.
                                                 </div>
-                                            </div>
-                                        )
-                                    })}
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="text-center py-12 border border-gray-200 rounded-lg">
@@ -688,6 +783,8 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                                     </p>
                                 </div>
                             )}
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -697,7 +794,8 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                         </div>
                     )}
 
-                    <div className="flex items-center justify-end gap-3">
+                    {/* Form Actions */}
+                    <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-200">
                         <Link
                             href="/app/brands"
                             className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
@@ -709,7 +807,7 @@ export default function BrandsEdit({ brand, categories, category_limits }) {
                             disabled={processing}
                             className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
                         >
-                            Update Brand
+                            {processing ? 'Updating...' : 'Update Brand'}
                         </button>
                     </div>
                 </form>

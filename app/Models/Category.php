@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\AssetType;
+use App\Enums\EventType;
+use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -35,6 +37,17 @@ use Illuminate\Support\Str;
  */
 class Category extends Model
 {
+    use RecordsActivity;
+
+    /**
+     * Custom event names for activity logging.
+     */
+    protected static $activityEventNames = [
+        'created' => EventType::CATEGORY_CREATED,
+        'updated' => EventType::CATEGORY_UPDATED,
+        'deleted' => EventType::CATEGORY_DELETED,
+    ];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -46,10 +59,12 @@ class Category extends Model
         'asset_type',
         'name',
         'slug',
+        'icon',
         'is_system',
         'is_private',
         'is_locked',
         'is_hidden',
+        'order',
     ];
 
     /**

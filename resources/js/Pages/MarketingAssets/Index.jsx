@@ -5,6 +5,7 @@ import {
     TagIcon,
     SparklesIcon,
 } from '@heroicons/react/24/outline'
+import { CategoryIcon } from '../../Helpers/categoryIcons'
 
 export default function MarketingAssetsIndex({ categories, selected_category, show_all_button = false }) {
     const { auth } = usePage().props
@@ -86,7 +87,11 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                                         }
                                                     }}
                                                 >
-                                                    <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} />
+                                                    <CategoryIcon 
+                                                        iconId={category.icon || 'folder'} 
+                                                        className="mr-3 flex-shrink-0 h-5 w-5" 
+                                                        style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
+                                                    />
                                                     {category.name}
                                                 </button>
                                             ))

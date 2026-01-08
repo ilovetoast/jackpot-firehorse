@@ -29,6 +29,7 @@ class SystemCategory extends Model
     protected $fillable = [
         'name',
         'slug',
+        'icon',
         'asset_type',
         'is_private',
         'is_hidden',

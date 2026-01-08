@@ -35,6 +35,7 @@ class CategoryPolicy
      *
      * Visibility is determined by:
      * - Tenant membership (user must belong to category's tenant)
+     * - Brand assignment (user must be assigned to category's brand)
      * - Private flag (requires 'view private category' permission)
      * - Hidden flag (requires 'manage categories' permission)
      */
@@ -43,6 +44,16 @@ class CategoryPolicy
         // User must belong to the tenant
         if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
             return false;
+        }
+
+        // User must be assigned to the brand
+        if ($category->brand_id && !$user->brands()->where('brands.id', $category->brand_id)->exists()) {
+            // Check if user is tenant admin/owner (they have access to all brands)
+            $tenant = $category->tenant;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            if (!in_array($tenantRole, ['admin', 'owner'])) {
+                return false;
+            }
         }
 
         // If category is private, user needs view private category permission
@@ -81,15 +92,32 @@ class CategoryPolicy
             return false;
         }
 
-        // Check tenant-scoped permission
+        // Check brand-level permission (or tenant-level for admin/owner)
+        $brand = $category->brand;
         $tenant = $category->tenant;
-        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+        
+        if ($brand) {
+            // Check brand-level permission
+            if (!$user->hasPermissionForBrand($brand, 'brand_categories.manage')
+                && !$user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+                return false;
+            }
+        } else {
+            // No brand assigned, check tenant-level permission
+            if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+                return false;
+            }
+        }
+
+        // Cannot update locked categories
+        if ($category->is_locked) {
             return false;
         }
 
-        // Cannot update locked/system categories
-        if ($category->is_locked || $category->is_system) {
-            return false;
+        // System categories can only be updated if plan has edit_system_categories feature
+        if ($category->is_system) {
+            $planService = app(\App\Services\PlanService::class);
+            return $planService->hasFeature($tenant, 'edit_system_categories');
         }
 
         return true;
@@ -107,10 +135,21 @@ class CategoryPolicy
             return false;
         }
 
-        // Check tenant-scoped permission
+        // Check brand-level permission (or tenant-level for admin/owner)
+        $brand = $category->brand;
         $tenant = $category->tenant;
-        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
-            return false;
+        
+        if ($brand) {
+            // Check brand-level permission
+            if (!$user->hasPermissionForBrand($brand, 'brand_categories.manage')
+                && !$user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+                return false;
+            }
+        } else {
+            // No brand assigned, check tenant-level permission
+            if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+                return false;
+            }
         }
 
         // Cannot delete locked/system categories (enforced at both policy and service level)

@@ -149,6 +149,7 @@ class SystemCategoryService
                     'asset_type' => $template->asset_type,
                     'name' => $template->name,
                     'slug' => $template->slug,
+                    'icon' => $template->icon,
                     'is_system' => true,
                     'is_locked' => true, // System categories are locked
                     'is_private' => $template->is_private,
