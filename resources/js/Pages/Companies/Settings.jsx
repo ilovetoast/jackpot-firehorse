@@ -3,9 +3,12 @@ import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function CompanySettings({ tenant, billing, team_members_count, brands_count }) {
+export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null }) {
     const { auth } = usePage().props
     const [activeSection, setActiveSection] = useState('company-information')
+    const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
+    const [selectedNewOwner, setSelectedNewOwner] = useState(null)
+    const [initiatingTransfer, setInitiatingTransfer] = useState(false)
     const { data, setData, put, processing, errors } = useForm({
         name: tenant.name || '',
         timezone: tenant.timezone || 'UTC',
@@ -154,6 +157,19 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                             >
                                 Brands Settings
                             </button>
+                            {is_current_user_owner && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSectionClick('ownership-transfer')}
+                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                        activeSection === 'ownership-transfer'
+                                            ? 'border-indigo-500 text-indigo-600'
+                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }`}
+                                >
+                                    Ownership Transfer
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 onClick={() => handleSectionClick('danger-zone')}
@@ -364,6 +380,184 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                             </div>
                         </div>
                     </div>
+
+                    {/* Ownership Transfer */}
+                    {is_current_user_owner && (
+                        <div id="ownership-transfer" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    {/* Left: Header */}
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">Ownership Transfer</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Transfer company ownership to another team member</p>
+                                    </div>
+                                    {/* Right: Content */}
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <div className="space-y-6">
+                                            {/* Pending Transfer Status */}
+                                            {pending_transfer && (
+                                                <div className="rounded-md bg-amber-50 border border-amber-200 p-4">
+                                                    <div className="flex items-start">
+                                                        <div className="flex-shrink-0">
+                                                            <svg className="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                                            </svg>
+                                                        </div>
+                                                        <div className="ml-3 flex-1">
+                                                            <h3 className="text-sm font-medium text-amber-800">Pending Ownership Transfer</h3>
+                                                            <div className="mt-2 text-sm text-amber-700">
+                                                                <p className="font-medium">Status: {pending_transfer.status_label}</p>
+                                                                <p className="mt-1">
+                                                                    Transferring ownership from <strong>{pending_transfer.from_user.name}</strong> to <strong>{pending_transfer.to_user.name}</strong>.
+                                                                </p>
+                                                                {pending_transfer.status === 'pending' && (
+                                                                    <p className="mt-2">
+                                                                        Waiting for current owner to confirm the transfer via email.
+                                                                    </p>
+                                                                )}
+                                                                {pending_transfer.status === 'confirmed' && (
+                                                                    <p className="mt-2">
+                                                                        Current owner has confirmed. Waiting for new owner to accept the transfer via email.
+                                                                    </p>
+                                                                )}
+                                                                {pending_transfer.status === 'accepted' && (
+                                                                    <p className="mt-2">
+                                                                        New owner has accepted. Transfer will be completed shortly.
+                                                                    </p>
+                                                                )}
+                                                                {pending_transfer.initiated_at && (
+                                                                    <p className="mt-2 text-xs text-amber-600">
+                                                                        Initiated: {new Date(pending_transfer.initiated_at).toLocaleString()}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            {pending_transfer.can_cancel && (
+                                                                <div className="mt-4">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            if (confirm('Are you sure you want to cancel this ownership transfer?')) {
+                                                                                router.post(`/app/ownership-transfer/${pending_transfer.id}/cancel`, {
+                                                                                    preserveScroll: true,
+                                                                                    onSuccess: () => {
+                                                                                        router.reload({ preserveScroll: true })
+                                                                                    },
+                                                                                    onError: (errors) => {
+                                                                                        if (errors.error) {
+                                                                                            alert(errors.error)
+                                                                                        }
+                                                                                    }
+                                                                                })
+                                                                            }
+                                                                        }}
+                                                                        className="inline-flex items-center rounded-md bg-amber-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
+                                                                    >
+                                                                        Cancel Transfer
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <div className="rounded-md bg-blue-50 p-4">
+                                                <div className="flex">
+                                                    <div className="flex-shrink-0">
+                                                        <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                                                        </svg>
+                                                    </div>
+                                                    <div className="ml-3">
+                                                        <h3 className="text-sm font-medium text-blue-800">Secure Ownership Transfer</h3>
+                                                        <div className="mt-2 text-sm text-blue-700">
+                                                            <p>Ownership transfers require a secure, multi-step process:</p>
+                                                            <ol className="list-decimal list-inside mt-2 space-y-1">
+                                                                <li>You'll receive a confirmation email</li>
+                                                                <li>You must confirm the transfer via the email link</li>
+                                                                <li>The new owner will receive an acceptance email</li>
+                                                                <li>After they accept, ownership will be transferred</li>
+                                                            </ol>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            {pending_transfer ? (
+                                                <div className="rounded-md bg-gray-50 p-4">
+                                                    <p className="text-sm text-gray-600">
+                                                        A transfer is currently in progress. Please cancel the existing transfer before initiating a new one.
+                                                    </p>
+                                                </div>
+                                            ) : tenant_users.length === 0 ? (
+                                                <div className="rounded-md bg-yellow-50 p-4">
+                                                    <p className="text-sm text-yellow-700">
+                                                        There are no other team members to transfer ownership to. Please invite team members first.
+                                                    </p>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <label htmlFor="new_owner" className="block text-sm font-medium leading-6 text-gray-900">
+                                                        Select New Owner
+                                                    </label>
+                                                    <div className="mt-2">
+                                                        <select
+                                                            id="new_owner"
+                                                            name="new_owner"
+                                                            value={selectedNewOwner || ''}
+                                                            onChange={(e) => setSelectedNewOwner(e.target.value)}
+                                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                        >
+                                                            <option value="">Select a team member...</option>
+                                                            {tenant_users.map((user) => (
+                                                                <option key={user.id} value={user.id}>
+                                                                    {user.name} ({user.email})
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div className="mt-4">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (!selectedNewOwner) {
+                                                                    alert('Please select a team member to transfer ownership to.')
+                                                                    return
+                                                                }
+                                                                if (confirm(`Are you sure you want to initiate an ownership transfer to ${tenant_users.find(u => u.id === parseInt(selectedNewOwner))?.name}? You will receive a confirmation email to complete the transfer.`)) {
+                                                                    setInitiatingTransfer(true)
+                                                                    router.post(`/app/companies/${tenant.id}/ownership-transfer/initiate`, {
+                                                                        new_owner_id: parseInt(selectedNewOwner)
+                                                                    }, {
+                                                                        preserveScroll: true,
+                                                                        onSuccess: () => {
+                                                                            setSelectedNewOwner(null)
+                                                                            setInitiatingTransfer(false)
+                                                                            router.reload({ preserveScroll: true })
+                                                                        },
+                                                                        onError: (errors) => {
+                                                                            setInitiatingTransfer(false)
+                                                                            if (errors.error) {
+                                                                                alert(errors.error)
+                                                                            }
+                                                                        }
+                                                                    })
+                                                                }
+                                                            }}
+                                                            disabled={!selectedNewOwner || initiatingTransfer}
+                                                            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            {initiatingTransfer ? 'Initiating...' : 'Initiate Ownership Transfer'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Danger Zone */}
                     <div id="danger-zone" className="mb-12 scroll-mt-8">

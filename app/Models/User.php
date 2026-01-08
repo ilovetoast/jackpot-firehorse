@@ -120,9 +120,35 @@ class User extends Authenticatable
 
     /**
      * Set the user's role for a specific tenant.
+     * 
+     * @param Tenant $tenant
+     * @param string $role
+     * @param bool $bypassOwnerCheck If true, allows owner role assignment (for ownership transfers)
+     * @return void
+     * @throws \App\Exceptions\CannotAssignOwnerRoleException If trying to assign owner role and current user is not platform super-owner
      */
-    public function setRoleForTenant(Tenant $tenant, string $role): void
+    public function setRoleForTenant(Tenant $tenant, string $role, bool $bypassOwnerCheck = false): void
     {
+        // Prevent direct owner role assignment - must use ownership transfer workflow
+        if (strtolower($role) === 'owner' && !$bypassOwnerCheck) {
+            // Allow if tenant has no owner (initial setup case)
+            $currentOwner = $tenant->owner();
+            if ($currentOwner) {
+                $currentUser = \Illuminate\Support\Facades\Auth::user();
+                
+                // Only platform super-owner (user ID 1) can directly assign owner role (break-glass exception)
+                if (!$currentUser || $currentUser->id !== 1) {
+                    throw new \App\Exceptions\CannotAssignOwnerRoleException(
+                        $tenant,
+                        $this,
+                        $currentUser,
+                        'Please use the ownership transfer process in the Company settings.'
+                    );
+                }
+            }
+            // If no current owner exists, allow the assignment (initial setup)
+        }
+
         if ($this->tenants()->where('tenants.id', $tenant->id)->exists()) {
             $this->tenants()->updateExistingPivot($tenant->id, ['role' => $role]);
         } else {

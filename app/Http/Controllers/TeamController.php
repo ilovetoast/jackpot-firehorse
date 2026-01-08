@@ -222,43 +222,53 @@ class TeamController extends Controller
 
         // Get old role for logging
         $oldRole = $user->getRoleForTenant($tenant);
-        $isBecomingOwner = $validated['role'] === 'owner';
         
-        // If setting a new owner, demote the current owner first
-        if ($isBecomingOwner && $owner && $owner->id !== $user->id) {
-            $owner->setRoleForTenant($tenant, 'admin');
-            
+        try {
+            // Update role in pivot table
+            // This will throw CannotAssignOwnerRoleException if trying to assign owner role
+            $user->setRoleForTenant($tenant, $validated['role']);
+
+            // Log activity
             ActivityRecorder::record(
                 tenant: $tenant,
                 eventType: EventType::USER_ROLE_UPDATED,
-                subject: $owner,
+                subject: $user,
                 actor: $authUser,
                 brand: null,
                 metadata: [
-                    'old_role' => 'owner',
-                    'new_role' => 'admin',
-                    'reason' => 'Owner changed - automatically demoted',
+                    'old_role' => $oldRole,
+                    'new_role' => $validated['role'],
                 ]
             );
+
+            return back()->with('success', 'User role updated successfully.');
+        } catch (\App\Exceptions\CannotAssignOwnerRoleException $e) {
+            // Return error response with ownership transfer information
+            $settingsLink = route('companies.settings') . '#ownership-transfer';
+            
+            if ($request->expectsJson() || $request->wantsJson()) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'error' => 'cannot_assign_owner_role',
+                    'error_type' => 'owner_assignment_attempt',
+                    'tenant_id' => $tenant->id,
+                    'target_user_id' => $user->id,
+                    'target_user_name' => $user->name,
+                    'target_user_email' => $user->email,
+                    'ownership_transfer_route' => route('ownership-transfer.initiate', ['tenant' => $tenant->id]),
+                    'settings_link' => $settingsLink,
+                    'requires_ownership_transfer' => true,
+                ], 422);
+            }
+
+            return back()->withErrors([
+                'role' => $e->getMessage(),
+                'requires_ownership_transfer' => true,
+                'target_user_id' => $user->id,
+                'ownership_transfer_route' => route('ownership-transfer.initiate', ['tenant' => $tenant->id]),
+                'settings_link' => $settingsLink,
+            ]);
         }
-
-        // Update role in pivot table
-        $user->setRoleForTenant($tenant, $validated['role']);
-
-        // Log activity
-        ActivityRecorder::record(
-            tenant: $tenant,
-            eventType: EventType::USER_ROLE_UPDATED,
-            subject: $user,
-            actor: $authUser,
-            brand: null,
-            metadata: [
-                'old_role' => $oldRole,
-                'new_role' => $validated['role'],
-            ]
-        );
-
-        return back()->with('success', 'User role updated successfully.');
     }
 
     /**

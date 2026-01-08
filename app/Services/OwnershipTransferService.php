@@ -228,10 +228,10 @@ class OwnershipTransferService
         // Use database transaction to ensure atomicity
         DB::transaction(function () use ($transfer) {
             // Downgrade old owner to admin
-            $transfer->fromUser->setRoleForTenant($transfer->tenant, 'admin');
+            $transfer->fromUser->setRoleForTenant($transfer->tenant, 'admin', true);
 
-            // Upgrade new owner to owner
-            $transfer->toUser->setRoleForTenant($transfer->tenant, 'owner');
+            // Upgrade new owner to owner (bypass check since this is part of the transfer workflow)
+            $transfer->toUser->setRoleForTenant($transfer->tenant, 'owner', true);
 
             // Mark transfer as completed
             $transfer->update([

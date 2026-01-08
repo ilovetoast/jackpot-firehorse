@@ -216,7 +216,8 @@ trait RecordsActivity
         // Check for custom event names
         $customEvents = static::$activityEventNames ?? [];
         
-        if (isset($customEvents[$event])) {
+        // If custom event is explicitly set (even if null), use it
+        if (array_key_exists($event, $customEvents)) {
             return $customEvents[$event];
         }
 

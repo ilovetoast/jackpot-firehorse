@@ -358,12 +358,24 @@ class SiteAdminController extends Controller
             'role' => ['required', 'string', 'in:' . implode(',', $allowedRoles)],
         ]);
 
+        // Check if trying to assign owner role
+        $isBecomingOwner = $validated['role'] === 'owner';
+        
+        // Only platform super-owner (user ID 1) can directly assign owner role
+        if ($isBecomingOwner && Auth::id() !== 1) {
+            throw new \App\Exceptions\CannotAssignOwnerRoleException(
+                $tenant,
+                $user,
+                Auth::user(),
+                'Only the platform super-owner can directly assign owner role. For all other users, please use the ownership transfer process in the Company settings.'
+            );
+        }
+
         // Get old role for logging (need to refresh pivot to get current role)
         $user->refresh();
         $pivot = $tenant->users()->where('users.id', $user->id)->first()?->pivot;
         $oldRole = $pivot->role ?? null;
         $isCurrentlyOwner = $oldRole && strtolower($oldRole) === 'owner';
-        $isBecomingOwner = $validated['role'] === 'owner';
         
         // If setting a new owner, demote the current owner first
         // This ensures only ONE owner exists at a time - database is source of truth
@@ -371,6 +383,7 @@ class SiteAdminController extends Controller
             $currentOwner = $tenant->owner();
             if ($currentOwner && $currentOwner->id !== $user->id) {
                 // Demote current owner to admin (preserving their status)
+                // This is allowed for super-owner (break-glass exception)
                 $currentOwner->setRoleForTenant($tenant, 'admin');
                 
                 // Log the owner change for audit trail
@@ -386,7 +399,7 @@ class SiteAdminController extends Controller
                         'admin_email' => Auth::user()->email,
                         'old_role' => 'owner',
                         'new_role' => 'admin',
-                        'reason' => 'Owner changed - automatically demoted',
+                        'reason' => 'Owner changed - automatically demoted by platform super-owner',
                     ]
                 );
             }
@@ -402,6 +415,7 @@ class SiteAdminController extends Controller
         }
         
         // Update role in pivot table (tenant-scoped)
+        // For super-owner, this will succeed. For others, CannotAssignOwnerRoleException would have been thrown above.
         $user->setRoleForTenant($tenant, $validated['role']);
 
         // Log activity - tenant sees "system" as actor, but metadata contains admin info

@@ -9,6 +9,9 @@ import BrandRoleSelector from '../../Components/BrandRoleSelector'
 export default function Team({ tenant, members, brands = [], current_user_count, max_users, user_limit_reached }) {
     const { auth } = usePage().props
     const [showInviteModal, setShowInviteModal] = useState(false)
+    const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
+    const [ownershipTransferTarget, setOwnershipTransferTarget] = useState(null)
+    const [ownershipTransferSettingsLink, setOwnershipTransferSettingsLink] = useState(null)
     const [updatingRoles, setUpdatingRoles] = useState({})
     const { data, setData, post, processing, errors, reset } = useForm({
         email: '',
@@ -54,10 +57,36 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                 setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: false }))
                 router.reload({ preserveScroll: true })
             },
-            onError: () => {
+            onError: (errors) => {
                 setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: false }))
+                
+                // Check if this is an owner assignment attempt error
+                if (errors?.error === 'cannot_assign_owner_role' || errors?.requires_ownership_transfer) {
+                    const targetUser = members.find(m => m.id === userId)
+                    setOwnershipTransferTarget({
+                        id: userId,
+                        name: targetUser?.name || errors?.target_user_name || 'User',
+                        email: targetUser?.email || errors?.target_user_email || '',
+                    })
+                    setOwnershipTransferSettingsLink(errors?.settings_link || `/app/companies/settings#ownership-transfer`)
+                    setShowOwnershipTransferModal(true)
+                }
             }
         })
+    }
+
+    const handleInitiateOwnershipTransfer = () => {
+        if (ownershipTransferTarget) {
+            router.post(`/app/companies/${tenant.id}/ownership-transfer/initiate`, {
+                new_owner_id: ownershipTransferTarget.id
+            }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setShowOwnershipTransferModal(false)
+                    setOwnershipTransferTarget(null)
+                }
+            })
+        }
     }
 
     const handleBrandRoleChange = (userId, brandId, newRole) => {
@@ -358,6 +387,82 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                         </button>
                                     </div>
                                 </form>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Ownership Transfer Modal */}
+                {showOwnershipTransferModal && ownershipTransferTarget && (
+                    <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowOwnershipTransferModal(false)}></div>
+                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                                <div className="sm:flex sm:items-start">
+                                    <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-orange-100 sm:mx-0 sm:h-10 sm:w-10">
+                                        <svg className="h-6 w-6 text-orange-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                                        </svg>
+                                    </div>
+                                    <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                                        <h3 className="text-base font-semibold leading-6 text-gray-900" id="modal-title">
+                                            Ownership Transfer Required
+                                        </h3>
+                                        <div className="mt-2">
+                                            <p className="text-sm text-gray-500">
+                                                Please use the ownership transfer process in the{' '}
+                                                <Link 
+                                                    href={ownershipTransferSettingsLink || `/app/companies/settings#ownership-transfer`}
+                                                    className="text-indigo-600 hover:text-indigo-500 underline font-medium"
+                                                    onClick={() => setShowOwnershipTransferModal(false)}
+                                                >
+                                                    Company settings
+                                                </Link>
+                                                .
+                                            </p>
+                                        </div>
+                                        <div className="mt-4 rounded-md bg-blue-50 p-4">
+                                            <h4 className="text-sm font-medium text-blue-900 mb-2">What happens next:</h4>
+                                            <ol className="list-decimal list-inside space-y-1 text-sm text-blue-700">
+                                                <li>You'll receive a confirmation email</li>
+                                                <li>You must confirm the transfer via the email link</li>
+                                                <li>{ownershipTransferTarget.name} will receive an acceptance email</li>
+                                                <li>After they accept, ownership will be transferred</li>
+                                            </ol>
+                                        </div>
+                                        <div className="mt-4">
+                                            <p className="text-sm text-gray-600">
+                                                <strong>Transfer ownership to:</strong> {ownershipTransferTarget.name} {ownershipTransferTarget.email && `(${ownershipTransferTarget.email})`}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse sm:gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handleInitiateOwnershipTransfer}
+                                        className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:ml-3 sm:w-auto"
+                                    >
+                                        Initiate Ownership Transfer
+                                    </button>
+                                    <Link
+                                        href={ownershipTransferSettingsLink || `/app/companies/settings#ownership-transfer`}
+                                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                                        onClick={() => setShowOwnershipTransferModal(false)}
+                                    >
+                                        Go to Settings
+                                    </Link>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowOwnershipTransferModal(false)
+                                            setOwnershipTransferTarget(null)
+                                        }}
+                                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

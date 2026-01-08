@@ -114,6 +114,56 @@ class CompanyController extends Controller
             ->first();
         $teamMembersCount = $tenant->users()->count();
         $brandsCount = $tenant->brands()->count();
+        
+        // Get current owner and all tenant users (excluding current owner) for ownership transfer
+        $currentOwner = $tenant->owner();
+        $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
+        $tenantUsers = $tenant->users()
+            ->where('users.id', '!=', $currentOwner?->id ?? 0)
+            ->select('users.id', 'users.first_name', 'users.last_name', 'users.email')
+            ->get()
+            ->map(function ($u) {
+                $name = trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? ''));
+                return [
+                    'id' => $u->id,
+                    'name' => $name ?: $u->email,
+                    'email' => $u->email,
+                ];
+            });
+
+        // Get pending ownership transfer if any
+        $pendingTransfer = $tenant->ownershipTransfers()
+            ->whereIn('status', [
+                \App\Enums\OwnershipTransferStatus::PENDING,
+                \App\Enums\OwnershipTransferStatus::CONFIRMED,
+                \App\Enums\OwnershipTransferStatus::ACCEPTED,
+            ])
+            ->with(['fromUser', 'toUser', 'initiatedBy'])
+            ->latest()
+            ->first();
+
+        $pendingTransferData = null;
+        if ($pendingTransfer) {
+            $pendingTransferData = [
+                'id' => $pendingTransfer->id,
+                'status' => $pendingTransfer->status->value,
+                'status_label' => ucfirst($pendingTransfer->status->value),
+                'from_user' => [
+                    'id' => $pendingTransfer->fromUser->id,
+                    'name' => $pendingTransfer->fromUser->name,
+                    'email' => $pendingTransfer->fromUser->email,
+                ],
+                'to_user' => [
+                    'id' => $pendingTransfer->toUser->id,
+                    'name' => $pendingTransfer->toUser->name,
+                    'email' => $pendingTransfer->toUser->email,
+                ],
+                'initiated_at' => $pendingTransfer->initiated_at?->toIso8601String(),
+                'confirmed_at' => $pendingTransfer->confirmed_at?->toIso8601String(),
+                'accepted_at' => $pendingTransfer->accepted_at?->toIso8601String(),
+                'can_cancel' => $pendingTransfer->from_user_id === $user->id || $pendingTransfer->to_user_id === $user->id,
+            ];
+        }
 
         return Inertia::render('Companies/Settings', [
             'tenant' => [
@@ -128,6 +178,9 @@ class CompanyController extends Controller
             ],
             'team_members_count' => $teamMembersCount,
             'brands_count' => $brandsCount,
+            'is_current_user_owner' => $isCurrentUserOwner,
+            'tenant_users' => $tenantUsers,
+            'pending_transfer' => $pendingTransferData,
         ]);
     }
 

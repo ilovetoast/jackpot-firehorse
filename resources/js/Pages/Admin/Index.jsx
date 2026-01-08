@@ -265,6 +265,12 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                         // Refresh the page data to update owner and roles
                                                         router.reload({ only: ['companies'] })
                                                     },
+                                                    onError: (errors) => {
+                                                        // Check if this is an owner assignment attempt error
+                                                        if (errors?.error === 'cannot_assign_owner_role' || errors?.message) {
+                                                            alert(errors.message || 'Only the platform super-owner can directly assign owner role. For all other users, please use the ownership transfer process in the Company settings.')
+                                                        }
+                                                    }
                                                 })
                                             }
 
@@ -531,7 +537,12 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                                                                 setSavingUserId(null)
                                                                                                                 router.reload({ only: ['companies'] })
                                                                                                             },
-                                                                                                            onError: () => {
+                                                                                                            onError: (errors) => {
+                                                                                                                setSavingUserId(null)
+                                                                                                                // Check if this is an owner assignment attempt error
+                                                                                                                if (errors?.error === 'cannot_assign_owner_role' || errors?.message) {
+                                                                                                                    alert(errors.message || 'Only the platform super-owner can directly assign owner role. For all other users, please use the ownership transfer process in the Company settings.')
+                                                                                                                }
                                                                                                                 setSavingUserId(null)
                                                                                                             },
                                                                                                         })
