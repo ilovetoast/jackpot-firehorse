@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -46,6 +47,13 @@ class MarketingAssetController extends Controller
 
         $categories = $query->get();
 
+        // Filter out private categories that the user doesn't have access to
+        // Use CategoryPolicy to check access for each category
+        $categories = $categories->filter(function ($category) use ($user) {
+            // Use the policy to check if user can view this category
+            return $user ? Gate::forUser($user)->allows('view', $category) : false;
+        });
+
         // Get marketing system category templates
         $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::MARKETING)
             ->filter(fn ($template) => ! $template->is_hidden || ($user && $user->can('manage categories')));
@@ -61,6 +69,19 @@ class MarketingAssetController extends Controller
                        $category->asset_type->value === $template->asset_type->value;
             });
             
+            // Get access rules for private categories
+            $accessRules = [];
+            if ($category->is_private && !$category->is_system) {
+                $accessRules = $category->accessRules()->get()->map(function ($rule) {
+                    if ($rule->access_type === 'role') {
+                        return ['type' => 'role', 'role' => $rule->role];
+                    } elseif ($rule->access_type === 'user') {
+                        return ['type' => 'user', 'user_id' => $rule->user_id];
+                    }
+                    return null;
+                })->filter()->values()->toArray();
+            }
+            
             $allCategories->push([
                 'id' => $category->id,
                 'name' => $category->name,
@@ -72,6 +93,7 @@ class MarketingAssetController extends Controller
                 'is_locked' => $category->is_locked,
                 'is_hidden' => $category->is_hidden,
                 'sort_order' => $matchingTemplate ? $matchingTemplate->sort_order : 999, // Use template sort_order or high default
+                'access_rules' => $accessRules,
             ]);
         }
 

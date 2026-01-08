@@ -164,7 +164,20 @@ class User extends Authenticatable
             ->where('brand_id', $brand->id)
             ->first();
         
-        return $pivot?->role ?? null;
+        $role = $pivot?->role ?? null;
+        
+        // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
+        // This handles any legacy data that might have 'owner' as a brand role
+        if ($role === 'owner') {
+            // Update the database directly to avoid recursion
+            DB::table('brand_user')
+                ->where('user_id', $this->id)
+                ->where('brand_id', $brand->id)
+                ->update(['role' => 'admin']);
+            return 'admin';
+        }
+        
+        return $role;
     }
 
     /**
@@ -172,6 +185,12 @@ class User extends Authenticatable
      */
     public function setRoleForBrand(Brand $brand, string $role): void
     {
+        // Prevent 'owner' from being a brand role - convert to 'admin' instead
+        // Owner is only valid at the tenant level, not brand level
+        if ($role === 'owner') {
+            $role = 'admin';
+        }
+        
         if ($this->brands()->where('brands.id', $brand->id)->exists()) {
             $this->brands()->updateExistingPivot($brand->id, ['role' => $role]);
         } else {
@@ -209,10 +228,17 @@ class User extends Authenticatable
         
         // Check if brand role has permission
         $role = \Spatie\Permission\Models\Role::where('name', $brandRole)->first();
-        if ($role && $role->hasPermissionTo($permission)) {
-            return true;
+        if ($role) {
+            try {
+                if ($role->hasPermissionTo($permission)) {
+                    return true;
+                }
+            } catch (\Spatie\Permission\Exceptions\PermissionDoesNotExist $e) {
+                // Permission doesn't exist in database, return false
+                return false;
+            }
         }
-        
+
         return false;
     }
 
@@ -241,8 +267,15 @@ class User extends Authenticatable
 
         // Get the role model and check if it has the permission
         $role = \Spatie\Permission\Models\Role::where('name', $tenantRole)->first();
-        if ($role && $role->hasPermissionTo($permission)) {
-            return true;
+        if ($role) {
+            try {
+                if ($role->hasPermissionTo($permission)) {
+                    return true;
+                }
+            } catch (\Spatie\Permission\Exceptions\PermissionDoesNotExist $e) {
+                // Permission doesn't exist in database, return false
+                return false;
+            }
         }
 
         return false;

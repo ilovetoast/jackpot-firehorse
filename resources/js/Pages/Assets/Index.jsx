@@ -4,15 +4,17 @@ import AppNav from '../../Components/AppNav'
 import {
     FolderIcon,
     TagIcon,
+    LockClosedIcon,
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
 export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false }) {
     const { auth } = usePage().props
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
+    const [tooltipVisible, setTooltipVisible] = useState(null)
 
-    // Get brand primary color for sidebar background
-    const sidebarColor = auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
+    // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
+    const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
         const hex = color.replace('#', '')
@@ -48,16 +50,16 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 onClick={() => setSelectedCategoryId(null)}
                                                 className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                 style={{
-                                                    backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent',
+                                                    backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
                                                     color: textColor,
                                                 }}
                                                 onMouseEnter={(e) => {
-                                                    if (selectedCategoryId !== null) {
+                                                    if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
                                                         e.currentTarget.style.backgroundColor = hoverBgColor
                                                     }
                                                 }}
                                                 onMouseLeave={(e) => {
-                                                    if (selectedCategoryId !== null) {
+                                                    if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
                                                         e.currentTarget.style.backgroundColor = 'transparent'
                                                     }
                                                 }}
@@ -68,34 +70,76 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         )}
                                         {/* Show all categories (both basic and marketing) in a single list */}
                                         {categories && categories.length > 0 ? (
-                                            categories.map((category) => (
-                                                <button
-                                                    key={category.id || `template-${category.slug}-${category.asset_type}`}
-                                                    onClick={() => setSelectedCategoryId(category.id)}
-                                                    className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
-                                                    style={{
-                                                        backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent',
-                                                        color: textColor,
-                                                    }}
-                                                    onMouseEnter={(e) => {
-                                                        if (selectedCategoryId !== category.id) {
-                                                            e.currentTarget.style.backgroundColor = hoverBgColor
-                                                        }
-                                                    }}
-                                                    onMouseLeave={(e) => {
-                                                        if (selectedCategoryId !== category.id) {
-                                                            e.currentTarget.style.backgroundColor = 'transparent'
-                                                        }
-                                                    }}
-                                                >
-                                                    <CategoryIcon 
-                                                        iconId={category.icon || 'folder'} 
-                                                        className="mr-3 flex-shrink-0 h-5 w-5" 
-                                                        style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
-                                                    />
-                                                    {category.name}
-                                                </button>
-                                            ))
+                                            categories
+                                                .filter(category => category.id != null && category.id !== undefined && category.id !== 0)
+                                                .map((category) => {
+                                                    const isSelected = selectedCategoryId === category.id && selectedCategoryId !== null && selectedCategoryId !== undefined
+                                                    return (
+                                                    <button
+                                                        key={category.id}
+                                                        onClick={() => setSelectedCategoryId(category.id)}
+                                                        className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
+                                                        style={{
+                                                            backgroundColor: isSelected ? activeBgColor : 'transparent',
+                                                            color: textColor,
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            if (!isSelected) {
+                                                                e.currentTarget.style.backgroundColor = hoverBgColor
+                                                            }
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            if (!isSelected) {
+                                                                e.currentTarget.style.backgroundColor = 'transparent'
+                                                            }
+                                                        }}
+                                                    >
+                                                        <CategoryIcon 
+                                                            iconId={category.icon || 'folder'} 
+                                                            className="mr-3 flex-shrink-0 h-5 w-5" 
+                                                            style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
+                                                        />
+                                                        <span className="flex-1">{category.name}</span>
+                                                        {category.is_private && (
+                                                            <div className="relative ml-2 group">
+                                                                <LockClosedIcon 
+                                                                    className="h-4 w-4 flex-shrink-0 cursor-help" 
+                                                                    style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
+                                                                    onMouseEnter={() => setTooltipVisible(category.id)}
+                                                                    onMouseLeave={() => setTooltipVisible(null)}
+                                                                />
+                                                                {tooltipVisible === category.id && (
+                                                                    <div 
+                                                                        className="absolute right-full mr-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-lg shadow-xl z-[9999] pointer-events-none whitespace-normal"
+                                                                        style={{
+                                                                            transform: 'translateY(-50%)',
+                                                                            width: '250px',
+                                                                        }}
+                                                                    >
+                                                                        <div className="p-3">
+                                                                            <div className="font-semibold mb-2.5 text-white">Restricted Category</div>
+                                                                            <div className="space-y-2">
+                                                                                <div className="text-gray-200">Accessible by:</div>
+                                                                                <ul className="list-disc list-outside ml-4 space-y-1 text-gray-200">
+                                                                                    <li>Owners</li>
+                                                                                    <li>Admins</li>
+                                                                                    {category.access_rules && category.access_rules.length > 0 && category.access_rules
+                                                                                        .filter(rule => rule.type === 'role')
+                                                                                        .map((rule, idx) => (
+                                                                                            <li key={idx} className="capitalize">{rule.role.replace('_', ' ')}</li>
+                                                                                        ))
+                                                                                    }
+                                                                                </ul>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="absolute left-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-[6px] border-b-[6px] border-l-[6px] border-transparent border-l-gray-900"></div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </button>
+                                                    )
+                                                })
                                         ) : (
                                             <div className="px-3 py-2 text-sm" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
                                                 No categories yet
@@ -111,15 +155,52 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-y-auto bg-gray-50 h-full">
                     <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Assets Content - Placeholder for now */}
-                        <div className="p-12 text-center">
-                            <FolderIcon className="mx-auto h-12 w-12 text-gray-400" />
-                            <h3 className="mt-2 text-sm font-semibold text-gray-900">No assets</h3>
-                            <p className="mt-1 text-sm text-gray-500">
+                        {/* Assets Content - Empty State */}
+                        <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                            <div className="mb-8">
+                                <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
+                            </div>
+                            <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
+                                {selectedCategoryId ? 'No assets in this category yet' : 'No assets yet'}
+                            </h2>
+                            <p className="mt-4 text-base leading-7 text-gray-600">
                                 {selectedCategoryId
-                                    ? 'Get started by uploading your first asset to this category.'
-                                    : 'Get started by selecting a category or uploading your first asset.'}
+                                    ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
+                                    : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
                             </p>
+                            <div className="mt-8">
+                                <button
+                                    type="button"
+                                    disabled
+                                    className="inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    style={{
+                                        backgroundColor: auth.activeBrand?.primary_color || '#6366f1'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!e.currentTarget.disabled && auth.activeBrand?.primary_color) {
+                                            // Darken the color slightly on hover
+                                            const hex = auth.activeBrand.primary_color.replace('#', '')
+                                            let r = parseInt(hex.substring(0, 2), 16)
+                                            let g = parseInt(hex.substring(2, 4), 16)
+                                            let b = parseInt(hex.substring(4, 6), 16)
+                                            r = Math.max(0, r - 20)
+                                            g = Math.max(0, g - 20)
+                                            b = Math.max(0, b - 20)
+                                            e.currentTarget.style.backgroundColor = `rgb(${r}, ${g}, ${b})`
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (auth.activeBrand?.primary_color) {
+                                            e.currentTarget.style.backgroundColor = auth.activeBrand.primary_color
+                                        }
+                                    }}
+                                >
+                                    <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                                    </svg>
+                                    Add Asset
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

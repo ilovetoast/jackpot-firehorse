@@ -197,6 +197,205 @@ class NotificationTemplateSeeder extends Seeder
                 'variables' => ['tenant_name', 'user_name', 'user_email', 'admin_name', 'admin_email', 'app_name', 'app_url', 'support_url'],
                 'is_active' => true,
             ],
+            [
+                'key' => 'tenant.owner_transfer_requested',
+                'name' => 'Ownership Transfer Requested',
+                'subject' => 'Ownership Transfer Request - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0;">Ownership Transfer Request</h2>
+            
+            <p>Hi {{new_owner_name}},</p>
+            
+            <p>
+                <strong>{{current_owner_name}}</strong> ({{current_owner_email}}) has initiated a request to transfer 
+                ownership of <strong>{{tenant_name}}</strong> to you.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #f0f9ff; border-left: 4px solid #6366f1; border-radius: 4px;">
+                <strong>What happens next:</strong><br>
+                1. The current owner must confirm this transfer via email<br>
+                2. Once confirmed, you will receive an acceptance email<br>
+                3. After you accept, ownership will be transferred
+            </p>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                You will receive another email once the current owner confirms the transfer. 
+                If you did not expect this request, you can safely ignore this email.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Ownership Transfer Request\n\nHi {{new_owner_name}},\n\n{{current_owner_name}} ({{current_owner_email}}) has initiated a request to transfer ownership of {{tenant_name}} to you.\n\nWhat happens next:\n1. The current owner must confirm this transfer via email\n2. Once confirmed, you will receive an acceptance email\n3. After you accept, ownership will be transferred\n\nYou will receive another email once the current owner confirms the transfer. If you did not expect this request, you can safely ignore this email.",
+                'variables' => ['tenant_name', 'current_owner_name', 'current_owner_email', 'new_owner_name', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'tenant.owner_transfer_confirm',
+                'name' => 'Ownership Transfer Confirmation',
+                'subject' => 'Confirm Ownership Transfer - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #d97706;">Confirm Ownership Transfer</h2>
+            
+            <p>Hi {{current_owner_name}},</p>
+            
+            <p>
+                You have initiated a request to transfer ownership of <strong>{{tenant_name}}</strong> to 
+                <strong>{{new_owner_name}}</strong> ({{new_owner_email}}).
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;">
+                <strong>Important:</strong> This action will transfer all ownership rights and responsibilities to {{new_owner_name}}. 
+                You will be downgraded to an Admin role after the transfer is completed.
+            </p>
+            
+            <p>
+                Click the button below to confirm this transfer:
+            </p>
+            
+            <div style="text-align: center;">
+                <a href="{{confirmation_url}}" style="display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 16px 0;">Confirm Transfer</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                Or copy and paste this link into your browser:<br>
+                <a href="{{confirmation_url}}" style="color: #6366f1; word-break: break-all;">{{confirmation_url}}</a>
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px; font-size: 14px;">
+                <strong>Security Note:</strong> This link will expire in 7 days. If you did not initiate this transfer, 
+                please contact support immediately.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Confirm Ownership Transfer\n\nHi {{current_owner_name}},\n\nYou have initiated a request to transfer ownership of {{tenant_name}} to {{new_owner_name}} ({{new_owner_email}}).\n\nImportant: This action will transfer all ownership rights and responsibilities to {{new_owner_name}}. You will be downgraded to an Admin role after the transfer is completed.\n\nConfirm this transfer by visiting: {{confirmation_url}}\n\nSecurity Note: This link will expire in 7 days. If you did not initiate this transfer, please contact support immediately.",
+                'variables' => ['tenant_name', 'current_owner_name', 'new_owner_name', 'new_owner_email', 'confirmation_url', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'tenant.owner_transfer_accept',
+                'name' => 'Ownership Transfer Acceptance',
+                'subject' => 'Accept Ownership Transfer - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #059669;">Accept Ownership Transfer</h2>
+            
+            <p>Hi {{new_owner_name}},</p>
+            
+            <p>
+                <strong>{{current_owner_name}}</strong> ({{current_owner_email}}) has confirmed the transfer of ownership 
+                of <strong>{{tenant_name}}</strong> to you.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #ecfdf5; border-left: 4px solid #10b981; border-radius: 4px;">
+                <strong>What this means:</strong><br>
+                • You will become the owner of {{tenant_name}}<br>
+                • You will have full administrative control<br>
+                • {{current_owner_name}} will be downgraded to Admin role
+            </p>
+            
+            <p>
+                Click the button below to accept this ownership transfer:
+            </p>
+            
+            <div style="text-align: center;">
+                <a href="{{acceptance_url}}" style="display: inline-block; padding: 12px 24px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 16px 0;">Accept Ownership</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                Or copy and paste this link into your browser:<br>
+                <a href="{{acceptance_url}}" style="color: #6366f1; word-break: break-all;">{{acceptance_url}}</a>
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px; font-size: 14px;">
+                <strong>Security Note:</strong> This link will expire in 7 days. If you did not expect this transfer, 
+                please contact support immediately.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Accept Ownership Transfer\n\nHi {{new_owner_name}},\n\n{{current_owner_name}} ({{current_owner_email}}) has confirmed the transfer of ownership of {{tenant_name}} to you.\n\nWhat this means:\n• You will become the owner of {{tenant_name}}\n• You will have full administrative control\n• {{current_owner_name}} will be downgraded to Admin role\n\nAccept this ownership transfer by visiting: {{acceptance_url}}\n\nSecurity Note: This link will expire in 7 days. If you did not expect this transfer, please contact support immediately.",
+                'variables' => ['tenant_name', 'current_owner_name', 'current_owner_email', 'new_owner_name', 'acceptance_url', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'tenant.owner_transfer_completed',
+                'name' => 'Ownership Transfer Completed',
+                'subject' => 'Ownership Transfer Completed - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+            <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #059669;">Ownership Transfer Complete</h2>
+            
+            <p>Hi {{recipient_name}},</p>
+            
+            <p>
+                The ownership transfer of <strong>{{tenant_name}}</strong> has been completed.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #ecfdf5; border-left: 4px solid #10b981; border-radius: 4px;">
+                <strong>Transfer Details:</strong><br>
+                • Previous Owner: {{previous_owner_name}} ({{previous_owner_email}})<br>
+                • New Owner: {{new_owner_name}} ({{new_owner_email}})<br>
+                • Previous owner has been downgraded to Admin role<br>
+                • New owner now has full administrative control
+            </p>
+            
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="{{app_url}}/app/companies/settings" style="display: inline-block; padding: 12px 24px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Access Company Settings</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                This transfer has been logged in the activity history for audit purposes.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Ownership Transfer Complete\n\nHi {{recipient_name}},\n\nThe ownership transfer of {{tenant_name}} has been completed.\n\nTransfer Details:\n• Previous Owner: {{previous_owner_name}} ({{previous_owner_email}})\n• New Owner: {{new_owner_name}} ({{new_owner_email}})\n• Previous owner has been downgraded to Admin role\n• New owner now has full administrative control\n\nAccess your company settings at: {{app_url}}/app/companies/settings\n\nThis transfer has been logged in the activity history for audit purposes.",
+                'variables' => ['tenant_name', 'recipient_name', 'previous_owner_name', 'previous_owner_email', 'new_owner_name', 'new_owner_email', 'app_name', 'app_url'],
+                'is_active' => true,
+            ],
         ];
 
         foreach ($templates as $template) {

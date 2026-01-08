@@ -27,6 +27,13 @@ class EventType
     public const TENANT_CREATED = 'tenant.created';
     public const TENANT_UPDATED = 'tenant.updated';
     public const TENANT_DELETED = 'tenant.deleted';
+    
+    // Tenant ownership transfer events
+    public const TENANT_OWNER_TRANSFER_INITIATED = 'tenant.owner_transfer.initiated';
+    public const TENANT_OWNER_TRANSFER_CONFIRMED = 'tenant.owner_transfer.confirmed';
+    public const TENANT_OWNER_TRANSFER_ACCEPTED = 'tenant.owner_transfer.accepted';
+    public const TENANT_OWNER_TRANSFER_COMPLETED = 'tenant.owner_transfer.completed';
+    public const TENANT_OWNER_TRANSFER_CANCELLED = 'tenant.owner_transfer.cancelled';
 
     // User events
     public const USER_CREATED = 'user.created';
@@ -70,6 +77,8 @@ class EventType
     public const CATEGORY_CREATED = 'category.created';
     public const CATEGORY_UPDATED = 'category.updated';
     public const CATEGORY_DELETED = 'category.deleted';
+    public const CATEGORY_SYSTEM_UPGRADED = 'category.system_upgraded';
+    public const CATEGORY_ACCESS_UPDATED = 'category.access_updated';
 
     // System events
     public const SYSTEM_ERROR = 'system.error';
@@ -99,6 +108,11 @@ class EventType
             self::TENANT_CREATED,
             self::TENANT_UPDATED,
             self::TENANT_DELETED,
+            self::TENANT_OWNER_TRANSFER_INITIATED,
+            self::TENANT_OWNER_TRANSFER_CONFIRMED,
+            self::TENANT_OWNER_TRANSFER_ACCEPTED,
+            self::TENANT_OWNER_TRANSFER_COMPLETED,
+            self::TENANT_OWNER_TRANSFER_CANCELLED,
             self::USER_CREATED,
             self::USER_UPDATED,
             self::USER_DELETED,
@@ -130,6 +144,8 @@ class EventType
             self::CATEGORY_CREATED,
             self::CATEGORY_UPDATED,
             self::CATEGORY_DELETED,
+            self::CATEGORY_SYSTEM_UPGRADED,
+            self::CATEGORY_ACCESS_UPDATED,
             self::SYSTEM_ERROR,
             self::SYSTEM_WARNING,
             self::SYSTEM_INFO,

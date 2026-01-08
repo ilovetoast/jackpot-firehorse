@@ -4,6 +4,7 @@ import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
+import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
 import { CategoryIcon, getIconById } from '../../Helpers/categoryIcons'
 
 export default function CategoriesIndex({ categories, filters, limits, asset_types, plan }) {
@@ -31,6 +32,8 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
     const [editIcon, setEditIcon] = useState('folder')
     const [draggedItem, setDraggedItem] = useState(null)
     const [localCategories, setLocalCategories] = useState(categories || [])
+    const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
+    const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const editInputRef = useRef(null)
 
     // Update local categories when props change
@@ -516,6 +519,11 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                                                             System
                                                                         </span>
                                                                     )}
+                                                                    {category.upgrade_available && category.is_system && (
+                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
+                                                                            Update available
+                                                                        </span>
+                                                                    )}
                                                                     {category.is_private && (
                                                                         <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-indigo-100 text-indigo-800 ring-indigo-600/20">
                                                                             Private
@@ -535,6 +543,21 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2 ml-4">
+                                                    {category.upgrade_available && category.is_system && category.id && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                setSelectedCategoryForUpgrade(category)
+                                                                setUpgradeModalOpen(true)
+                                                            }}
+                                                            onMouseDown={(e) => e.stopPropagation()}
+                                                            className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-amber-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
+                                                            title="Review update"
+                                                        >
+                                                            Review update
+                                                        </button>
+                                                    )}
                                                     {isEditable && editingId !== category.id && (
                                                         <button
                                                             type="button"
@@ -579,6 +602,21 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                 </div>
             </main>
             <AppFooter />
+            {upgradeModalOpen && selectedCategoryForUpgrade && (
+                <CategoryUpgradeModal
+                    category={selectedCategoryForUpgrade}
+                    isOpen={upgradeModalOpen}
+                    onClose={() => {
+                        setUpgradeModalOpen(false)
+                        setSelectedCategoryForUpgrade(null)
+                    }}
+                    onSuccess={() => {
+                        setUpgradeModalOpen(false)
+                        setSelectedCategoryForUpgrade(null)
+                        router.reload()
+                    }}
+                />
+            )}
         </div>
     )
 }

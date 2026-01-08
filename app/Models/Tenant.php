@@ -77,6 +77,14 @@ class Tenant extends Model
     }
 
     /**
+     * Get the ownership transfers for this tenant.
+     */
+    public function ownershipTransfers(): HasMany
+    {
+        return $this->hasMany(\App\Models\OwnershipTransfer::class);
+    }
+
+    /**
      * Get the owner user for this tenant.
      * The database role in tenant_user.role is the SINGLE source of truth.
      * If no user has 'owner' role in the database, automatically set the first user's role to 'owner'.

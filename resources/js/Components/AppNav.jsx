@@ -54,6 +54,22 @@ export default function AppNav({ brand, tenant }) {
     // Team management and activity logs require admin/owner OR manage users permission OR manage brands permission
     const canAccessTeamManagement = hasAdminOrOwnerRole || hasManageUsersPermission || hasManageBrandsPermission
 
+    // Check if user has access to any company menu items
+    const hasCompanies = auth.companies && auth.companies.length > 0
+    const hasCompanySettingsAccess = auth.permissions?.includes('company_settings.view') || false
+    const hasTeamManageAccess = auth.permissions?.includes('team.manage') || false
+    const hasActivityLogsAccess = auth.permissions?.includes('activity_logs.view') || false
+    const hasMultipleCompanies = auth.companies && auth.companies.length > 1
+    // Only show Company section if user has at least one company AND has access to at least one menu item
+    const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess || hasTeamManageAccess || hasActivityLogsAccess || hasAdminOrOwnerRole)
+
+    // Check if user has access to any brand menu items
+    const hasBrands = brands && brands.length > 0
+    const hasBrandSettingsAccess = auth.permissions?.includes('brand_settings.manage') || false
+    const hasMultipleBrands = brands && brands.length > 1
+    // Only show Brands section if user has at least one brand AND (has multiple brands OR has brand settings access)
+    const hasAnyBrandAccess = hasBrands && (hasMultipleBrands || hasBrandSettingsAccess)
+
     // Use default white background for nav (no brand color)
     const navColor = '#ffffff'
     const logoFilter = activeBrand?.logo_filter || 'none'
@@ -375,11 +391,12 @@ export default function AppNav({ brand, tenant }) {
                                         </div>
 
                                         {/* Company Section */}
+                                        {hasAnyCompanyAccess && (
                                         <div className="px-4 py-2 border-b border-gray-200">
                                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Company</p>
                                             
                                             {/* Switch Company - only show if more than one */}
-                                            {auth.companies && auth.companies.length > 1 && (
+                                            {hasMultipleCompanies && (
                                                 <div className="mb-1 rounded-md bg-gray-50 p-1.5 border-l-2 border-primary">
                                                     <p className="text-xs font-medium text-gray-700 px-1 py-0.5 mb-1">Switch Company</p>
                                                     <div className="space-y-0.5">
@@ -451,10 +468,23 @@ export default function AppNav({ brand, tenant }) {
                                                     Activity Logs
                                                 </Link>
                                             </PermissionGate>
+                                            {hasAdminOrOwnerRole && (
+                                                <Link
+                                                    href="/app/companies/permissions"
+                                                    className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
+                                                    onClick={() => setUserMenuOpen(false)}
+                                                >
+                                                    <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                                                    </svg>
+                                                    Permissions
+                                                </Link>
+                                            )}
                                         </div>
+                                        )}
 
                                         {/* Brands Section */}
-                                        {activeBrand && (
+                                        {activeBrand && hasAnyBrandAccess && (
                                             <div className="px-4 py-2 border-b border-gray-200">
                                                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Brands</p>
                                                 <PermissionGate permission="brand_settings.manage">

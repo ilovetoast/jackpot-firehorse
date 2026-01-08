@@ -53,6 +53,7 @@ return [
         'limits' => [
             'max_brands' => 5, // Unlimited
             'max_categories' => 5, // Unlimited
+            'max_private_categories' => 5,
             'max_storage_mb' => 999999, // 10GB
             'max_upload_size_mb' => 999999,
             'max_users' => 20,
@@ -74,9 +75,10 @@ return [
         'limits' => [
             'max_brands' => 25, // Unlimited
             'max_categories' => 10, // Unlimited
+            'max_private_categories' => 10,
             'max_storage_mb' => 999999, // Unlimited
             'max_upload_size_mb' => 999999, // Unlimited
-            'max_users' => PHP_INT_MAX, // Unlimited
+            'max_users' => 200, // Unlimited
         ],
         'features' => [
             'all_asset_types',

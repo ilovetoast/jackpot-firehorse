@@ -8,6 +8,8 @@ use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
 /**
@@ -29,6 +31,7 @@ use Illuminate\Support\Str;
  * - Custom Categories (is_system = false): User-created categories
  *   - Subject to plan limits
  *   - Can be deleted/updated by authorized users
+ *   - Deletions are soft-deleted (deleted_at timestamp) for versioning and potential restoration
  *
  * Visibility:
  * - Private (is_private = true): Only visible to authorized users
@@ -37,7 +40,7 @@ use Illuminate\Support\Str;
  */
 class Category extends Model
 {
-    use RecordsActivity;
+    use RecordsActivity, SoftDeletes;
 
     /**
      * Custom event names for activity logging.
@@ -65,6 +68,10 @@ class Category extends Model
         'is_locked',
         'is_hidden',
         'order',
+        'system_category_id',
+        'system_version',
+        'upgrade_available',
+        'deletion_available',
     ];
 
     /**
@@ -80,6 +87,8 @@ class Category extends Model
             'is_private' => 'boolean',
             'is_locked' => 'boolean',
             'is_hidden' => 'boolean',
+            'upgrade_available' => 'boolean',
+            'deletion_available' => 'boolean',
         ];
     }
 
@@ -97,6 +106,122 @@ class Category extends Model
     public function brand(): BelongsTo
     {
         return $this->belongsTo(Brand::class);
+    }
+
+    /**
+     * Get the system category template this category was created from.
+     */
+    public function systemCategory(): BelongsTo
+    {
+        return $this->belongsTo(SystemCategory::class);
+    }
+
+    /**
+     * Get the access rules for this category.
+     */
+    public function accessRules(): HasMany
+    {
+        return $this->hasMany(CategoryAccess::class);
+    }
+
+    /**
+     * Check if a user has access to this private category.
+     *
+     * @param User $user
+     * @return bool
+     */
+    public function userHasAccess(User $user): bool
+    {
+        // Public categories are accessible to all brand users
+        if (!$this->is_private) {
+            return true;
+        }
+
+        // System categories cannot be private
+        if ($this->is_system) {
+            return true;
+        }
+
+        // Check if user is tenant owner/admin or has 'view any restricted categories' permission
+        // These users can bypass category access rules
+        $tenant = $this->tenant;
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        
+        // Also check brand-level owner/admin role
+        $brand = $this->brand;
+        $isBrandOwnerOrAdmin = false;
+        if ($brand) {
+            $brandRole = $user->getRoleForBrand($brand);
+            $isBrandOwnerOrAdmin = in_array($brandRole, ['owner', 'admin']);
+        }
+
+        // Check for permission to view any restricted categories
+        $canViewAnyRestricted = $user->hasPermissionForTenant($tenant, 'view.restricted.categories');
+
+        // Owners/admins or users with permission can bypass access rules
+        if ($isTenantOwnerOrAdmin || $isBrandOwnerOrAdmin || $canViewAnyRestricted) {
+            return true;
+        }
+
+        // Check if user has access via role or direct user assignment
+        $accessRules = $this->accessRules;
+
+        foreach ($accessRules as $rule) {
+            if ($rule->access_type === 'role') {
+                // Check if user has this role for the brand
+                $userBrandRole = $user->getRoleForBrand($this->brand);
+                if ($userBrandRole === $rule->role) {
+                    return true;
+                }
+            } elseif ($rule->access_type === 'user') {
+                // Check if this is the user
+                if ($rule->user_id === $user->id) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Scope a query to only include categories accessible to a specific user.
+     *
+     * Note: This scope provides basic filtering, but CategoryPolicy::view() provides
+     * the authoritative access control including owner/admin bypass and permission checks.
+     *
+     * @param Builder $query
+     * @param User $user
+     * @return Builder
+     */
+    public function scopeAccessibleToUser(Builder $query, User $user): Builder
+    {
+        return $query->where(function ($q) use ($user) {
+            // Include public categories
+            $q->where('is_private', false)
+                // Include private categories where user has access
+                ->orWhere(function ($privateQuery) use ($user) {
+                    $privateQuery->where('is_private', true)
+                        ->where(function ($accessQuery) use ($user) {
+                            // Check role-based access - user's brand role matches access rule
+                            $accessQuery->whereHas('accessRules', function ($roleQuery) use ($user) {
+                                $roleQuery->where('access_type', 'role')
+                                    ->whereIn('role', function ($subQuery) use ($user) {
+                                        $subQuery->select('role')
+                                            ->from('brand_user')
+                                            ->where('user_id', $user->id)
+                                            ->whereColumn('brand_user.brand_id', 'category_access.brand_id');
+                                    });
+                            })
+                            // Check user-based access
+                            ->orWhereHas('accessRules', function ($userQuery) use ($user) {
+                                $userQuery->where('access_type', 'user')
+                                    ->where('user_id', $user->id);
+                            });
+                        });
+                });
+        });
     }
 
     /**
@@ -153,5 +278,58 @@ class Category extends Model
     public function scopeVisible(Builder $query): Builder
     {
         return $query->where('is_hidden', false);
+    }
+
+    /**
+     * Scope a query to only include categories with upgrades available.
+     */
+    public function scopeWithUpgradeAvailable(Builder $query): Builder
+    {
+        return $query->where('upgrade_available', true);
+    }
+
+    /**
+     * Check if the system template for this category still exists.
+     * Returns true if template exists, false if it's been deleted (orphaned).
+     *
+     * @return bool
+     */
+    public function systemTemplateExists(): bool
+    {
+        if (!$this->is_system) {
+            return false; // Not a system category, so no template to check
+        }
+
+        // Check by system_category_id if available
+        if ($this->system_category_id) {
+            return \App\Models\SystemCategory::where('id', $this->system_category_id)->exists();
+        }
+
+        // Legacy category - check by slug/asset_type
+        return \App\Models\SystemCategory::where('slug', $this->slug)
+            ->where('asset_type', $this->asset_type->value)
+            ->exists();
+    }
+
+    /**
+     * Check if this category can be deleted.
+     * Returns true if deletion is allowed, false otherwise.
+     *
+     * @return bool
+     */
+    public function canBeDeleted(): bool
+    {
+        // Custom categories can be deleted if not locked
+        if (!$this->is_system) {
+            return !$this->is_locked;
+        }
+
+        // System categories can only be deleted if their template is deleted
+        // Even if locked, if the template is gone, the category can be deleted
+        if ($this->is_system) {
+            return !$this->systemTemplateExists();
+        }
+
+        return false;
     }
 }

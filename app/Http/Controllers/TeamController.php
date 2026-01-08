@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\EventType;
 use App\Mail\InviteMember;
+use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
 use App\Models\User;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -69,10 +71,17 @@ class TeamController extends Controller
                 ->where('tenant_id', $tenant->id)
                 ->get()
                 ->map(function ($brand) use ($member) {
+                    $brandRole = $member->getRoleForBrand($brand) ?? 'member';
+                    // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
+                    if ($brandRole === 'owner') {
+                        $brandRole = 'admin';
+                        // Update the database to reflect this change
+                        $member->setRoleForBrand($brand, 'admin');
+                    }
                     return [
                         'id' => $brand->id,
                         'name' => $brand->name,
-                        'role' => $member->getRoleForBrand($brand) ?? 'member',
+                        'role' => $brandRole,
                     ];
                 });
             
@@ -83,6 +92,7 @@ class TeamController extends Controller
                 'email' => $member->email,
                 'avatar_url' => $member->avatar_url,
                 'role' => $roleDisplay,
+                'role_value' => strtolower($role), // Raw role value for selectors
                 'joined_at' => $member->pivot->created_at ?? $member->created_at,
                 'brand_assignments' => $brandAssignments,
             ];
@@ -177,6 +187,141 @@ class TeamController extends Controller
     }
 
     /**
+     * Update a user's tenant-level role.
+     */
+    public function updateTenantRole(Request $request, Tenant $tenant, User $user)
+    {
+        $authUser = Auth::user();
+
+        // Verify user belongs to this company
+        if (! $authUser->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        // Check if user has permission to manage team
+        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+            abort(403, 'Only administrators and owners can manage team members.');
+        }
+
+        // Verify the user to be updated belongs to this company
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(404, 'User is not a member of this company.');
+        }
+
+        // Prevent changing the owner role (must always be one owner)
+        $owner = $tenant->owner();
+        if ($owner && $owner->id === $user->id) {
+            return back()->withErrors([
+                'role' => 'Cannot change the company owner role.',
+            ]);
+        }
+
+        $validated = $request->validate([
+            'role' => 'required|string|in:owner,admin,member,brand_manager',
+        ]);
+
+        // Get old role for logging
+        $oldRole = $user->getRoleForTenant($tenant);
+        $isBecomingOwner = $validated['role'] === 'owner';
+        
+        // If setting a new owner, demote the current owner first
+        if ($isBecomingOwner && $owner && $owner->id !== $user->id) {
+            $owner->setRoleForTenant($tenant, 'admin');
+            
+            ActivityRecorder::record(
+                tenant: $tenant,
+                eventType: EventType::USER_ROLE_UPDATED,
+                subject: $owner,
+                actor: $authUser,
+                brand: null,
+                metadata: [
+                    'old_role' => 'owner',
+                    'new_role' => 'admin',
+                    'reason' => 'Owner changed - automatically demoted',
+                ]
+            );
+        }
+
+        // Update role in pivot table
+        $user->setRoleForTenant($tenant, $validated['role']);
+
+        // Log activity
+        ActivityRecorder::record(
+            tenant: $tenant,
+            eventType: EventType::USER_ROLE_UPDATED,
+            subject: $user,
+            actor: $authUser,
+            brand: null,
+            metadata: [
+                'old_role' => $oldRole,
+                'new_role' => $validated['role'],
+            ]
+        );
+
+        return back()->with('success', 'User role updated successfully.');
+    }
+
+    /**
+     * Update a user's brand-level role.
+     */
+    public function updateBrandRole(Request $request, Tenant $tenant, User $user, Brand $brand)
+    {
+        $authUser = Auth::user();
+
+        // Verify user belongs to this company
+        if (! $authUser->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        // Check if user has permission to manage team
+        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+            abort(403, 'Only administrators and owners can manage team members.');
+        }
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this company.');
+        }
+
+        // Verify the user is assigned to this brand
+        if (! $user->brands()->where('brands.id', $brand->id)->exists()) {
+            abort(404, 'User is not assigned to this brand.');
+        }
+
+        $validated = $request->validate([
+            'role' => 'required|string|in:admin,member,brand_manager',
+        ]);
+
+        // Prevent owner from being a brand role - convert to admin if owner is attempted
+        $brandRole = $validated['role'];
+        if ($brandRole === 'owner') {
+            $brandRole = 'admin';
+        }
+
+        // Get old role for logging
+        $oldRole = $user->getRoleForBrand($brand);
+
+        // Update role
+        $user->setRoleForBrand($brand, $brandRole);
+
+        // Log activity
+        ActivityRecorder::record(
+            tenant: $tenant,
+            eventType: EventType::USER_ROLE_UPDATED,
+            subject: $user,
+            actor: $authUser,
+            brand: $brand,
+            metadata: [
+                'old_role' => $oldRole,
+                'new_role' => $validated['role'],
+                'scope' => 'brand',
+            ]
+        );
+
+        return back()->with('success', 'Brand role updated successfully.');
+    }
+
+    /**
      * Invite a new team member.
      */
     public function invite(Request $request, Tenant $tenant)
@@ -198,8 +343,16 @@ class TeamController extends Controller
             'role' => 'nullable|string|in:owner,admin,member,brand_manager',
             'brands' => 'required|array|min:1',
             'brands.*.brand_id' => 'required|exists:brands,id',
-            'brands.*.role' => 'required|string|in:owner,admin,member,brand_manager',
+            'brands.*.role' => 'required|string|in:admin,member,brand_manager',
         ]);
+
+        // Prevent owner from being assigned as a brand role - convert to admin
+        foreach ($validated['brands'] as &$brandAssignment) {
+            if ($brandAssignment['role'] === 'owner') {
+                $brandAssignment['role'] = 'admin';
+            }
+        }
+        unset($brandAssignment);
 
         // Verify all brands belong to this tenant
         $brandIds = collect($validated['brands'])->pluck('brand_id')->unique();
@@ -430,7 +583,7 @@ class TeamController extends Controller
         if (!$invitation) {
             return back()->withErrors([
                 'invitation' => 'Invalid or expired invitation link.',
-            ])->withInput();
+            ])->withInput($request->only(['first_name', 'last_name', 'country', 'timezone']));
         }
 
         // Find the user
@@ -439,17 +592,54 @@ class TeamController extends Controller
         if (!$user) {
             return back()->withErrors([
                 'email' => 'No account found for this invitation.',
-            ])->withInput();
+            ])->withInput($request->only(['first_name', 'last_name', 'country', 'timezone']));
         }
 
         // Validate registration data
-        $validated = $request->validate([
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'password' => ['required', 'confirmed', PasswordRule::defaults()],
-            'country' => 'nullable|string|max:255',
-            'timezone' => 'nullable|string|max:255',
-        ]);
+        // Manually handle validation to ensure Inertia works correctly
+        try {
+            $validated = $request->validate([
+                'first_name' => 'required|string|max:255',
+                'last_name' => 'required|string|max:255',
+                'password' => ['required', 'confirmed', PasswordRule::defaults()],
+                'country' => 'nullable|string|max:255',
+                'timezone' => 'nullable|string|max:255',
+            ]);
+        } catch (ValidationException $e) {
+            // If this is an Inertia request, return an Inertia response
+            if ($request->header('X-Inertia')) {
+                // Render the same page with errors and old input
+                return Inertia::render('Auth/InviteRegistration', [
+                    'invitation' => [
+                        'token' => $token,
+                        'tenant' => [
+                            'id' => $tenant->id,
+                            'name' => $tenant->name,
+                        ],
+                        'email' => $invitation->email,
+                        'brands' => collect($invitation->brand_assignments ?? [])->map(function ($assignment) use ($tenant) {
+                            $brand = $tenant->brands()->find($assignment['brand_id'] ?? null);
+                            if (!$brand) {
+                                return null;
+                            }
+                            return [
+                                'id' => $brand->id,
+                                'name' => $brand->name,
+                                'role' => $assignment['role'] ?? 'member',
+                            ];
+                        })->filter()->values(),
+                        'inviter' => $invitation->inviter ? [
+                            'name' => $invitation->inviter->name,
+                            'email' => $invitation->inviter->email,
+                        ] : null,
+                    ],
+                    'errors' => $e->errors(),
+                ])->with('old', $request->except('password', 'password_confirmation'));
+            }
+            
+            // For non-Inertia requests, rethrow the exception
+            throw $e;
+        }
 
         // Update user information
         $user->update([

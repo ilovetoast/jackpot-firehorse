@@ -6,6 +6,7 @@ use App\Enums\AssetType;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Services\CategoryService;
+use App\Services\CategoryUpgradeService;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use App\Traits\HandlesFlashMessages;
@@ -20,12 +21,14 @@ class CategoryController extends Controller
     public function __construct(
         protected CategoryService $categoryService,
         protected PlanService $planService,
-        protected SystemCategoryService $systemCategoryService
+        protected SystemCategoryService $systemCategoryService,
+        protected CategoryUpgradeService $categoryUpgradeService
     ) {
     }
 
     /**
      * Display a listing of categories.
+     * DISABLED: Category management moved to brands pages
      *
      * Filters categories based on:
      * - Brand and tenant scope (always enforced)
@@ -33,6 +36,7 @@ class CategoryController extends Controller
      * - System vs custom (optional filter)
      * - Hidden categories (filtered unless user has permission)
      */
+    /*
     public function index(Request $request): Response
     {
         $tenant = app('tenant');
@@ -90,6 +94,8 @@ class CategoryController extends Controller
             'is_hidden' => $category->is_hidden,
             'order' => $category->order ?? 0,
             'is_template' => false, // Existing category
+            'upgrade_available' => $category->upgrade_available ?? false,
+            'system_version' => $category->system_version,
         ]);
 
         // Add system templates that don't have matching brand categories
@@ -113,6 +119,8 @@ class CategoryController extends Controller
                     'is_locked' => true, // Templates are locked
                     'is_hidden' => $template->is_hidden,
                     'is_template' => true, // This is a template, not an existing category
+                    'upgrade_available' => false,
+                    'system_version' => null,
                 ]);
             }
         }
@@ -152,15 +160,20 @@ class CategoryController extends Controller
             ],
         ]);
     }
+    */
 
     /**
      * Store a newly created category.
      */
-    public function store(Request $request)
+    public function store(Request $request, Brand $brand)
     {
         $tenant = app('tenant');
-        $brand = app('brand');
         $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
 
         // Check if user has permission to manage brand categories
         if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
@@ -173,6 +186,10 @@ class CategoryController extends Controller
             'icon' => 'nullable|string|max:255',
             'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
             'is_private' => 'nullable|boolean',
+            'access_rules' => 'nullable|array',
+            'access_rules.*.type' => 'required|string|in:role,user',
+            'access_rules.*.role' => 'required_if:access_rules.*.type,role|nullable|string',
+            'access_rules.*.user_id' => 'required_if:access_rules.*.type,user|nullable|integer|exists:users,id',
         ]);
 
         $validated['asset_type'] = AssetType::from($validated['asset_type']);
@@ -180,7 +197,7 @@ class CategoryController extends Controller
         try {
             $category = $this->categoryService->create($tenant, $brand, $validated);
 
-            return $this->redirectWithSuccess('categories.index', 'Category created successfully.');
+            return redirect()->route('brands.edit', $brand)->with('success', 'Category created successfully.');
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
             return back()->withErrors([
                 'plan_limit' => $e->getMessage(),
@@ -191,11 +208,15 @@ class CategoryController extends Controller
     /**
      * Update the specified category.
      */
-    public function update(Request $request, Category $category)
+    public function update(Request $request, Brand $brand, Category $category)
     {
         $tenant = app('tenant');
-        $brand = app('brand');
         $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
 
         // Verify category belongs to tenant/brand
         if ($category->tenant_id !== $tenant->id) {
@@ -214,12 +235,16 @@ class CategoryController extends Controller
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
             'is_private' => 'nullable|boolean',
+            'access_rules' => 'nullable|array',
+            'access_rules.*.type' => 'required|string|in:role,user',
+            'access_rules.*.role' => 'required_if:access_rules.*.type,role|nullable|string',
+            'access_rules.*.user_id' => 'required_if:access_rules.*.type,user|nullable|integer|exists:users,id',
         ]);
 
         try {
             $this->categoryService->update($category, $validated);
 
-            return redirect()->route('categories.index')->with('success', 'Category updated successfully.');
+            return redirect()->route('brands.edit', $brand)->with('success', 'Category updated successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),
@@ -230,10 +255,14 @@ class CategoryController extends Controller
     /**
      * Remove the specified category.
      */
-    public function destroy(Category $category)
+    public function destroy(Brand $brand, Category $category)
     {
         $tenant = app('tenant');
-        $brand = app('brand');
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
 
         // Verify category belongs to tenant/brand
         if ($category->tenant_id !== $tenant->id) {
@@ -244,13 +273,27 @@ class CategoryController extends Controller
             abort(403, 'Category does not belong to this brand.');
         }
 
+        // Check if category can be deleted (business logic check)
+        if (!$category->canBeDeleted()) {
+            if ($category->is_system && $category->systemTemplateExists()) {
+                return back()->withErrors([
+                    'error' => 'Cannot delete system categories while the template exists.',
+                ]);
+            }
+            // Note: Locked system categories with deleted templates CAN be deleted
+            // The canBeDeleted() method handles this logic
+            return back()->withErrors([
+                'error' => 'This category cannot be deleted.',
+            ]);
+        }
+
         // Check if user has admin/owner role or manage categories/manage brands permission - using policy
         $this->authorize('delete', $category);
 
         try {
             $this->categoryService->delete($category);
 
-            return $this->redirectWithSuccess('categories.index', 'Category deleted successfully.');
+            return redirect()->route('brands.edit', $brand)->with('success', 'Category deleted successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
                 'error' => $e->getMessage(),
@@ -261,11 +304,15 @@ class CategoryController extends Controller
     /**
      * Update the order of categories.
      */
-    public function updateOrder(Request $request)
+    public function updateOrder(Request $request, Brand $brand)
     {
         $tenant = app('tenant');
-        $brand = app('brand');
         $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
 
         // Check if user has permission to manage brand categories
         if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
@@ -288,5 +335,234 @@ class CategoryController extends Controller
         }
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Preview what changes would be applied if upgrading a category.
+     */
+    public function previewUpgrade(Request $request, Brand $brand, Category $category)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Verify category belongs to tenant/brand
+        if ($category->tenant_id !== $tenant->id) {
+            abort(403, 'Category does not belong to this tenant.');
+        }
+
+        if ($category->brand_id !== $brand->id) {
+            abort(403, 'Category does not belong to this brand.');
+        }
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'Only administrators, owners, and brand managers can preview category upgrades.');
+        }
+
+        try {
+            $preview = $this->categoryUpgradeService->previewUpgrade($category);
+            return response()->json($preview);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
+     * Add a system category template to a brand.
+     */
+    public function addSystemTemplate(Request $request, Brand $brand)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'Only administrators, owners, and brand managers can add system categories.');
+        }
+
+        $validated = $request->validate([
+            'system_category_id' => 'required|integer|exists:system_categories,id',
+        ]);
+
+        try {
+            $systemCategory = \App\Models\SystemCategory::findOrFail($validated['system_category_id']);
+            
+            // Verify this is the latest version
+            if (!$systemCategory->isLatestVersion()) {
+                // Get the latest version instead
+                $systemCategory = $systemCategory->getLatestVersion();
+            }
+
+            // Add the template to the brand
+            $category = $this->systemCategoryService->addTemplateToBrand($brand, $systemCategory);
+
+            if (!$category) {
+                return back()->withErrors([
+                    'error' => 'This system category already exists for this brand.',
+                ]);
+            }
+
+            return redirect()->route('brands.edit', $brand)->with('success', 'System category added successfully.');
+        } catch (\Exception $e) {
+            return back()->withErrors([
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Apply an upgrade to a category.
+     */
+    public function applyUpgrade(Request $request, Brand $brand, Category $category)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Verify category belongs to tenant/brand
+        if ($category->tenant_id !== $tenant->id) {
+            abort(403, 'Category does not belong to this tenant.');
+        }
+
+        if ($category->brand_id !== $brand->id) {
+            abort(403, 'Category does not belong to this brand.');
+        }
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => 'Only administrators, owners, and brand managers can upgrade categories.',
+                ], 403);
+            }
+            abort(403, 'Only administrators, owners, and brand managers can upgrade categories.');
+        }
+
+        try {
+            $validated = $request->validate([
+                'approved_fields' => 'nullable|array',
+                'approved_fields.*' => 'string|in:name,icon,is_private,is_hidden',
+            ]);
+            
+            // Ensure approved_fields is always an array (even if empty)
+            $validated['approved_fields'] = $validated['approved_fields'] ?? [];
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => 'Validation failed: ' . implode(', ', array_merge(...array_values($e->errors()))),
+                ], 422);
+            }
+            throw $e;
+        }
+
+        try {
+            $this->categoryUpgradeService->applyUpgrade($category, $validated['approved_fields']);
+
+            // Return JSON for AJAX requests, redirect for regular requests
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Category upgraded successfully.',
+                ]);
+            }
+
+            return redirect()->route('brands.edit', $brand)->with('success', 'Category upgraded successfully.');
+        } catch (\Exception $e) {
+            // Return JSON for AJAX requests, redirect for regular requests
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => $e->getMessage(),
+                ], 400);
+            }
+
+            return back()->withErrors([
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Accept deletion of a category marked for deletion.
+     */
+    public function acceptDeletion(Request $request, Brand $brand, Category $category)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Verify category belongs to tenant/brand
+        if ($category->tenant_id !== $tenant->id) {
+            abort(403, 'Category does not belong to this tenant.');
+        }
+
+        if ($category->brand_id !== $brand->id) {
+            abort(403, 'Category does not belong to this brand.');
+        }
+
+        // Check if user has permission to manage brand categories
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => 'Only administrators, owners, and brand managers can accept category deletions.',
+                ], 403);
+            }
+            abort(403, 'Only administrators, owners, and brand managers can accept category deletions.');
+        }
+
+        try {
+            $this->categoryUpgradeService->acceptDeletion($category);
+
+            // Check if this is an Inertia request
+            if ($request->header('X-Inertia')) {
+                return back()->with('success', 'Category deleted successfully.');
+            }
+
+            // Return JSON for non-Inertia AJAX requests
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Category deleted successfully.',
+                ]);
+            }
+
+            return redirect()->route('brands.edit', $brand)->with('success', 'Category deleted successfully.');
+        } catch (\Exception $e) {
+            // Check if this is an Inertia request
+            if ($request->header('X-Inertia')) {
+                return back()->withErrors([
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => $e->getMessage(),
+                ], 400);
+            }
+
+            return back()->withErrors([
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

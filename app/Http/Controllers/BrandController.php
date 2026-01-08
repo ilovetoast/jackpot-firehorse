@@ -10,10 +10,13 @@ use App\Services\ActivityRecorder;
 use App\Services\BrandService;
 use App\Services\CategoryService;
 use App\Services\PlanService;
+use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -22,7 +25,8 @@ class BrandController extends Controller
     public function __construct(
         protected BrandService $brandService,
         protected PlanService $planService,
-        protected CategoryService $categoryService
+        protected CategoryService $categoryService,
+        protected SystemCategoryService $systemCategoryService
     ) {
     }
 
@@ -88,6 +92,9 @@ class BrandController extends Controller
                     'name' => $brand->name,
                     'slug' => $brand->slug,
                     'logo_path' => $brand->logo_path,
+                    'icon_path' => $brand->icon_path,
+                    'icon' => $brand->icon,
+                    'icon_bg_color' => $brand->icon_bg_color,
                     'is_default' => $brand->is_default,
                     'show_in_selector' => $brand->show_in_selector ?? true,
                     'is_disabled' => $isDisabled, // Mark as disabled if beyond plan limit
@@ -104,6 +111,8 @@ class BrandController extends Controller
                         'is_system' => $category->is_system,
                         'is_private' => $category->is_private,
                         'is_locked' => $category->is_locked,
+                        'upgrade_available' => $category->upgrade_available ?? false,
+                        'system_version' => $category->system_version,
                     ]),
                     'users' => $brand->users->map(fn ($user) => [
                         'id' => $user->id,
@@ -228,11 +237,13 @@ class BrandController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
+            'icon' => 'nullable|mimes:png,webp,svg,avif|max:2048',
+            'icon_id' => 'nullable|string|max:255',
+            'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'primary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'secondary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'accent_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'nav_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
-            'logo_filter' => 'nullable|string|in:none,white,black',
             'settings' => 'nullable|array',
         ]);
 
@@ -244,6 +255,23 @@ class BrandController extends Controller
         } else {
             // No logo uploaded, set to null
             $validated['logo_path'] = null;
+        }
+
+        // Handle icon file upload
+        if ($request->hasFile('icon')) {
+            $iconPath = $request->file('icon')->store("brands/{$tenant->id}", 'public');
+            $validated['icon_path'] = Storage::url($iconPath);
+            unset($validated['icon']); // Remove the file from validated data
+            // Clear icon when uploading a file
+            $validated['icon'] = null;
+        } else {
+            // Keep existing icon_path if no new file is uploaded
+            $validated['icon_path'] = null; // Will be set from existing brand if updating
+        }
+        
+        // Handle icon_bg_color
+        if ($request->has('icon_bg_color')) {
+            $validated['icon_bg_color'] = $request->input('icon_bg_color') ?: null;
         }
 
         try {
@@ -281,6 +309,7 @@ class BrandController extends Controller
                 'name' => $brand->name,
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
+                'icon_path' => $brand->icon_path,
                 'is_default' => $brand->is_default,
             ],
         ]);
@@ -305,11 +334,67 @@ class BrandController extends Controller
         // Get categories for this brand
         $categories = $brand->categories()->orderBy('asset_type')->orderBy('order')->orderBy('name')->get();
 
+        // Get system category templates and find ones that don't exist yet for this brand
+        $systemTemplates = $this->systemCategoryService->getAllTemplates();
+        $availableTemplates = collect();
+
+        foreach ($systemTemplates as $template) {
+            // Check if brand already has a category with this slug and asset_type
+            $exists = $categories->contains(function ($category) use ($template) {
+                return $category->slug === $template->slug && 
+                       $category->asset_type->value === $template->asset_type->value;
+            });
+
+            if (! $exists) {
+                // Add template as available for this brand
+                $availableTemplates->push([
+                    'id' => null, // No ID for templates
+                    'system_category_id' => $template->id,
+                    'name' => $template->name,
+                    'slug' => $template->slug,
+                    'icon' => $template->icon ?? 'folder',
+                    'asset_type' => $template->asset_type->value,
+                    'is_system' => true,
+                    'is_private' => $template->is_private,
+                    'is_locked' => true, // Templates are locked
+                    'is_hidden' => $template->is_hidden,
+                    'is_template' => true, // This is a template, not an existing category
+                    'system_version' => $template->version,
+                ]);
+            }
+        }
+
         // Get plan limits for categories
         $limits = $this->planService->getPlanLimits($tenant);
         // Only count custom (non-system) categories against the limit
         $currentCategoryCount = $brand->categories()->custom()->count();
         $canCreateCategory = $this->categoryService->canCreate($tenant, $brand);
+
+        // Get brand users and their roles for access control UI
+        $brandUsers = $brand->users()->get()->map(function ($user) use ($brand) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->getRoleForBrand($brand) ?? 'member',
+            ];
+        });
+
+        // Get unique brand roles from brand_user table
+        $brandRoles = \DB::table('brand_user')
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('role')
+            ->distinct()
+            ->pluck('role')
+            ->unique()
+            ->values()
+            ->toArray();
+
+        // Get plan info for private categories
+        $currentPlan = $this->planService->getCurrentPlan($tenant);
+        $canCreatePrivateCategory = $this->planService->canCreatePrivateCategory($tenant, $brand);
+        $maxPrivateCategories = $this->planService->getMaxPrivateCategories($tenant);
+        $currentPrivateCount = $brand->categories()->custom()->where('is_private', true)->count();
 
         return Inertia::render('Brands/Edit', [
             'brand' => [
@@ -317,6 +402,9 @@ class BrandController extends Controller
                 'name' => $brand->name,
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
+                'icon_path' => $brand->icon_path,
+                'icon' => $brand->icon,
+                'icon_bg_color' => $brand->icon_bg_color,
                 'is_default' => $brand->is_default,
                 'show_in_selector' => $brand->show_in_selector ?? true,
                 'primary_color' => $brand->primary_color,
@@ -326,20 +414,51 @@ class BrandController extends Controller
                 'logo_filter' => $brand->logo_filter ?? 'none',
                 'settings' => $brand->settings,
             ],
-            'categories' => $categories->map(fn ($category) => [
-                'id' => $category->id,
-                'name' => $category->name,
-                'slug' => $category->slug,
-                'icon' => $category->icon,
-                'asset_type' => $category->asset_type->value,
-                'is_system' => $category->is_system,
-                'is_private' => $category->is_private,
-                'is_locked' => $category->is_locked,
-            ]),
+            'categories' => $categories->map(function ($category) {
+                // Get access rules for private categories
+                $accessRules = [];
+                if ($category->is_private && !$category->is_system) {
+                    $accessRules = $category->accessRules()->get()->map(function ($rule) {
+                        if ($rule->access_type === 'role') {
+                            return ['type' => 'role', 'role' => $rule->role];
+                        } elseif ($rule->access_type === 'user') {
+                            return ['type' => 'user', 'user_id' => $rule->user_id];
+                        }
+                        return null;
+                    })->filter()->values()->toArray();
+                }
+
+                return [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'slug' => $category->slug,
+                    'icon' => $category->icon,
+                    'asset_type' => $category->asset_type->value,
+                    'is_system' => $category->is_system,
+                    'is_private' => $category->is_private,
+                    'is_locked' => $category->is_locked,
+                    'upgrade_available' => $category->upgrade_available ?? false,
+                    'deletion_available' => $category->deletion_available ?? false,
+                    'system_version' => $category->system_version,
+                    'order' => $category->order ?? 0,
+                    'template_exists' => $category->systemTemplateExists(),
+                    'can_be_deleted' => $category->canBeDeleted(),
+                    'access_rules' => $accessRules,
+                ];
+            }),
+            'available_system_templates' => $availableTemplates->values(),
             'category_limits' => [
                 'current' => $currentCategoryCount,
                 'max' => $limits['max_categories'],
                 'can_create' => $canCreateCategory,
+            ],
+            'brand_users' => $brandUsers,
+            'brand_roles' => $brandRoles,
+            'private_category_limits' => [
+                'current' => $currentPrivateCount,
+                'max' => $maxPrivateCategories,
+                'can_create' => $canCreatePrivateCategory,
+                'plan_allows' => in_array($currentPlan, ['pro', 'enterprise']),
             ],
         ]);
     }
@@ -363,12 +482,13 @@ class BrandController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
+            'icon' => 'nullable|mimes:png,webp,svg,avif|max:2048',
+            'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'show_in_selector' => 'nullable|boolean',
             'primary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'secondary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'accent_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'logo_filter' => 'nullable|string|in:none,white,black',
             'settings' => 'nullable|array',
         ]);
 
@@ -386,6 +506,34 @@ class BrandController extends Controller
         } else {
             // Keep existing logo_path if no new file is uploaded
             $validated['logo_path'] = $brand->logo_path;
+        }
+
+        // Handle icon file upload
+        if ($request->hasFile('icon')) {
+            // Delete old icon if it exists and is stored locally
+            if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
+                $oldPath = str_replace('/storage/', '', $brand->icon_path);
+                Storage::disk('public')->delete($oldPath);
+            }
+            
+            $iconPath = $request->file('icon')->store("brands/{$brand->tenant_id}", 'public');
+            $validated['icon_path'] = Storage::url($iconPath);
+            unset($validated['icon']); // Remove the file from validated data
+            // Clear icon when uploading a file
+            $validated['icon'] = null;
+        } else {
+            // Keep existing icon_path if no new file is uploaded
+            $validated['icon_path'] = $brand->icon_path ?? null;
+            // Clear icon when not uploading
+            $validated['icon'] = null;
+        }
+        
+        // Handle icon_bg_color
+        if ($request->has('icon_bg_color')) {
+            $validated['icon_bg_color'] = $request->input('icon_bg_color') ?: null;
+        } else {
+            // Keep existing icon_bg_color if not provided
+            $validated['icon_bg_color'] = $brand->icon_bg_color;
         }
 
         try {
@@ -485,7 +633,7 @@ class BrandController extends Controller
 
         $validated = $request->validate([
             'email' => 'required|email|max:255',
-            'role' => 'nullable|string|in:owner,admin,member,brand_manager',
+            'role' => 'nullable|string|in:admin,member,brand_manager',
         ]);
 
         // Check if user is already on the brand
@@ -577,7 +725,7 @@ class BrandController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'nullable|string|in:owner,admin,member,brand_manager',
+            'role' => 'nullable|string|in:admin,member,brand_manager',
         ]);
 
         // Add user to brand with role
@@ -628,11 +776,17 @@ class BrandController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'required|string|in:owner,admin,member,brand_manager',
+            'role' => 'required|string|in:admin,member,brand_manager',
         ]);
 
+        // Prevent owner from being a brand role - convert to admin if owner is attempted
+        $brandRole = $validated['role'];
+        if ($brandRole === 'owner') {
+            $brandRole = 'admin';
+        }
+
         // Update role
-        $brand->users()->updateExistingPivot($user->id, ['role' => $validated['role']]);
+        $brand->users()->updateExistingPivot($user->id, ['role' => $brandRole]);
 
         // Log activity
         ActivityRecorder::record(

@@ -217,31 +217,42 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         </p>
                     </div>
 
-                    {/* Incomplete Payment Warning */}
-                    {subscription?.has_incomplete_payment && subscription?.payment_url && (
-                        <div className="mb-6 rounded-md bg-yellow-50 p-4 border border-yellow-200">
+                    {/* Incomplete Payment Error - Prominent at top */}
+                    {(subscription?.has_incomplete_payment || subscription?.status === 'Incomplete') && (
+                        <div className="mb-6 rounded-md bg-red-50 p-4 border-2 border-red-200">
                             <div className="flex">
                                 <div className="flex-shrink-0">
-                                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
                                     </svg>
                                 </div>
                                 <div className="ml-3 flex-1">
-                                    <h3 className="text-sm font-medium text-yellow-800">
-                                        Payment Required
+                                    <h3 className="text-sm font-semibold text-red-800">
+                                        Payment Required - Action Needed
                                     </h3>
-                                    <div className="mt-2 text-sm text-yellow-700">
-                                        <p>Your subscription payment is incomplete. Please complete your payment before you can upgrade or change plans.</p>
-                                        <div className="mt-3">
-                                            <a
-                                                href={subscription.payment_url}
-                                                className="inline-flex items-center rounded-md bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500"
+                                    <div className="mt-2 text-sm text-red-700">
+                                        <p className="font-medium">Your subscription payment is incomplete. Please complete your payment to continue service.</p>
+                                        <div className="mt-4 flex flex-wrap gap-3">
+                                            {subscription.payment_url ? (
+                                                <a
+                                                    href={subscription.payment_url}
+                                                    className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                                >
+                                                    Complete Payment Now
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                                                    </svg>
+                                                </a>
+                                            ) : null}
+                                            <button
+                                                onClick={() => window.location.href = '/app/billing/portal'}
+                                                className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-sm ring-1 ring-inset ring-red-300 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                                             >
-                                                Complete Payment
+                                                Update Payment Method
                                                 <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                                                 </svg>
-                                            </a>
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -508,13 +519,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         >
                             View billing overview →
                         </Link>
-                        <span className="text-gray-300">|</span>
-                        <Link
-                            href="/app/billing/invoices"
-                            className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                        >
-                            View all invoices →
-                        </Link>
+                        
                     </div>
                 </div>
             </main>

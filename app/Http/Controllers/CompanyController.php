@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 class CompanyController extends Controller
 {
@@ -230,7 +232,8 @@ class CompanyController extends Controller
         $perPage = (int) $request->get('per_page', 50);
         // Don't eager load actor to avoid errors with string types (system, api, guest)
         // We'll load it manually in the formatting method
-        $events = $query->with(['brand', 'subject'])
+        // Eager load relationships
+        $events = $query->with(['brand', 'subject', 'tenant'])
             ->paginate($perPage)
             ->appends($request->except('page'));
 
@@ -386,55 +389,152 @@ class CompanyController extends Controller
         $eventType = $event->event_type;
         $metadata = $event->metadata ?? [];
         
-        // Get subject name if available
+        // Ensure metadata is an array (it should be cast, but just in case)
+        if (is_string($metadata)) {
+            $metadata = json_decode($metadata, true) ?? [];
+        }
+        
+        // Check if this is a tenant event first (check both enum constants and string values)
+        $tenantEventTypes = [
+            \App\Enums\EventType::TENANT_CREATED,
+            \App\Enums\EventType::TENANT_UPDATED,
+            \App\Enums\EventType::TENANT_DELETED,
+            'tenant.created',
+            'tenant.updated',
+            'tenant.deleted',
+        ];
+        $isTenantEvent = in_array($eventType, $tenantEventTypes, true);
+        
+        // For tenant events, always use "Company" or tenant name, never show ID
+        if ($isTenantEvent) {
+            // For tenant events, the event is always about the current tenant
+            // So we should use the current tenant's name, not try to load from subject
+            // This is more reliable since we're viewing the activity log for a specific tenant
+            $tenantName = $tenant ? $tenant->name : 'Company';
+            
+            // However, if metadata has subject_name, that might be more accurate (e.g., if name changed)
+            if (isset($metadata['subject_name'])) {
+                $tenantName = $metadata['subject_name'];
+            }
+            
+            // Format tenant events
+            if ($eventType === \App\Enums\EventType::TENANT_UPDATED || $eventType === 'tenant.updated') {
+                return "Updated {$tenantName}";
+            }
+            if ($eventType === \App\Enums\EventType::TENANT_CREATED || $eventType === 'tenant.created') {
+                return "Created {$tenantName}";
+            }
+            if ($eventType === \App\Enums\EventType::TENANT_DELETED || $eventType === 'tenant.deleted') {
+                return "Deleted {$tenantName}";
+            }
+        }
+        
+        // Get subject name if available (for non-tenant events)
         $subjectName = null;
-        if ($event->subject) {
-            if (method_exists($event->subject, 'getNameAttribute')) {
+        
+        // PRIORITY 1: Check metadata first (most reliable, always stored for new events)
+        if (isset($metadata['subject_name']) && !empty($metadata['subject_name'])) {
+            $subjectName = $metadata['subject_name'];
+        }
+        
+        // PRIORITY 2: Try to get from subject relationship if metadata doesn't have it
+        if (!$subjectName && $event->subject) {
+            // Check if it's a Tenant model
+            if ($event->subject instanceof \App\Models\Tenant) {
+                $subjectName = $event->subject->name ?? null;
+            } elseif (method_exists($event->subject, 'getNameAttribute')) {
                 $subjectName = $event->subject->name;
             } elseif (isset($event->subject->name)) {
                 $subjectName = $event->subject->name;
+            } elseif (method_exists($event->subject, 'getTitleAttribute')) {
+                $subjectName = $event->subject->title ?? null;
             }
         }
-        if (!$subjectName && isset($metadata['subject_name'])) {
-            $subjectName = $metadata['subject_name'];
-        }
-        if (!$subjectName && $event->tenant) {
-            $subjectName = $event->tenant->name ?? null;
-        }
+        
+        // Try brand name for brand-related events
         if (!$subjectName && $event->brand) {
             $subjectName = $event->brand->name ?? null;
         }
         
+        // If we still don't have a name but have subject_id, try to load it directly from database
+        // This is important because the subject relationship might not be loaded or the model might be soft-deleted
+        if (!$subjectName && $event->subject_id && $event->subject_type) {
+            try {
+                // Try to load the model based on subject_type
+                $subjectClass = $event->subject_type;
+                
+                // Handle different class name formats
+                if (str_contains($subjectClass, '\\')) {
+                    // Full class name like "App\Models\Tenant"
+                    if (class_exists($subjectClass)) {
+                        $subjectModel = $subjectClass::find($event->subject_id);
+                        if ($subjectModel) {
+                            if (isset($subjectModel->name)) {
+                                $subjectName = $subjectModel->name;
+                            } elseif (isset($subjectModel->title)) {
+                                $subjectName = $subjectModel->title;
+                            } elseif (method_exists($subjectModel, 'getNameAttribute')) {
+                                $subjectName = $subjectModel->name ?? null;
+                            }
+                        }
+                    }
+                } else {
+                    // Try common model classes
+                    $possibleClasses = [
+                        "App\\Models\\{$subjectClass}",
+                        "App\\Models\\" . ucfirst($subjectClass),
+                    ];
+                    
+                    foreach ($possibleClasses as $class) {
+                        if (class_exists($class)) {
+                            $subjectModel = $class::find($event->subject_id);
+                            if ($subjectModel) {
+                                if (isset($subjectModel->name)) {
+                                    $subjectName = $subjectModel->name;
+                                    break;
+                                } elseif (isset($subjectModel->title)) {
+                                    $subjectName = $subjectModel->title;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // Ignore errors - model might be deleted or class doesn't exist
+            }
+        }
+        
+        // If no subject name but we have subject_id, use just the number with note
+        $subjectIdentifier = $subjectName;
+        if (!$subjectIdentifier && $event->subject_id) {
+            $subjectIdentifier = "#{$event->subject_id} (no longer exists)";
+        }
+        
         // Format based on event type with human-readable language
         switch ($eventType) {
-            case \App\Enums\EventType::TENANT_UPDATED:
-                return $subjectName ? "{$subjectName} was updated" : ($tenant ? "{$tenant->name} was updated" : 'Company was updated');
-            case \App\Enums\EventType::TENANT_CREATED:
-                return $subjectName ? "{$subjectName} was created" : ($tenant ? "{$tenant->name} was created" : 'Company was created');
-            case \App\Enums\EventType::TENANT_DELETED:
-                return $subjectName ? "{$subjectName} was deleted" : 'Company was deleted';
             case \App\Enums\EventType::BRAND_CREATED:
-                return $subjectName ? "{$subjectName} was created" : 'Brand was created';
+                return $subjectIdentifier ? "Created {$subjectIdentifier}" : 'Created brand';
             case \App\Enums\EventType::BRAND_UPDATED:
-                return $subjectName ? "{$subjectName} was updated" : 'Brand was updated';
+                return $subjectIdentifier ? "Updated {$subjectIdentifier}" : 'Updated brand';
             case \App\Enums\EventType::BRAND_DELETED:
-                return $subjectName ? "{$subjectName} was deleted" : 'Brand was deleted';
+                return $subjectIdentifier ? "Deleted {$subjectIdentifier}" : 'Deleted brand';
             case \App\Enums\EventType::USER_CREATED:
-                return $subjectName ? "{$subjectName} account was created" : 'User account was created';
+                return $subjectIdentifier ? "Created {$subjectIdentifier} account" : 'Created user account';
             case \App\Enums\EventType::USER_UPDATED:
                 $action = $metadata['action'] ?? 'updated';
                 if ($action === 'suspended') {
-                    return $subjectName ? "{$subjectName} account was suspended" : 'Account was suspended';
+                    return $subjectIdentifier ? "Suspended {$subjectIdentifier} account" : 'Suspended account';
                 } elseif ($action === 'unsuspended') {
-                    return $subjectName ? "{$subjectName} account was unsuspended" : 'Account was unsuspended';
+                    return $subjectIdentifier ? "Unsuspended {$subjectIdentifier} account" : 'Unsuspended account';
                 }
-                return $subjectName ? "{$subjectName} account was updated" : 'User account was updated';
+                return $subjectIdentifier ? "Updated {$subjectIdentifier} account" : 'Updated user account';
             case \App\Enums\EventType::USER_DELETED:
-                return $subjectName ? "{$subjectName} account was deleted" : 'User account was deleted';
+                return $subjectIdentifier ? "Deleted {$subjectIdentifier} account" : 'Deleted user account';
             case \App\Enums\EventType::USER_INVITED:
-                return 'User was invited';
+                return 'Invited user';
             case \App\Enums\EventType::USER_REMOVED_FROM_COMPANY:
-                return 'User was removed from company';
+                return 'Removed user from company';
             case \App\Enums\EventType::USER_ADDED_TO_BRAND:
                 $role = $metadata['role'] ?? 'member';
                 $brandName = $event->brand->name ?? null;
@@ -446,25 +546,226 @@ class CompanyController extends Controller
                 $oldRole = $metadata['old_role'] ?? null;
                 $newRole = $metadata['new_role'] ?? null;
                 if ($oldRole && $newRole) {
-                    return "Role changed from {$oldRole} to {$newRole}";
+                    return "Changed role from {$oldRole} to {$newRole}";
                 }
-                return 'Role was updated';
+                return 'Updated role';
             case \App\Enums\EventType::CATEGORY_CREATED:
-                return $subjectName ? "{$subjectName} category was created" : 'Category was created';
+                $brandContext = $event->brand ? " for {$event->brand->name}" : '';
+                return $subjectIdentifier ? "Created {$subjectIdentifier} Category{$brandContext}" : 'Created category';
             case \App\Enums\EventType::CATEGORY_UPDATED:
-                return $subjectName ? "{$subjectName} category was updated" : 'Category was updated';
+                $brandContext = $event->brand ? " for {$event->brand->name}" : '';
+                return $subjectIdentifier ? "Updated {$subjectIdentifier} Category{$brandContext}" : 'Updated category';
             case \App\Enums\EventType::CATEGORY_DELETED:
-                return $subjectName ? "{$subjectName} category was deleted" : 'Category was deleted';
+                $brandContext = $event->brand ? " for {$event->brand->name}" : '';
+                return $subjectIdentifier ? "Deleted {$subjectIdentifier} Category{$brandContext}" : 'Deleted category';
+            case \App\Enums\EventType::CATEGORY_SYSTEM_UPGRADED:
+                $fieldsUpdated = $metadata['fields_updated'] ?? [];
+                $oldVersion = $metadata['old_version'] ?? null;
+                $newVersion = $metadata['new_version'] ?? null;
+                $versionInfo = ($oldVersion && $newVersion) ? " (v{$oldVersion} → v{$newVersion})" : '';
+                if ($subjectIdentifier) {
+                    return "Upgraded {$subjectIdentifier}{$versionInfo}";
+                }
+                return "Upgraded category{$versionInfo}";
             case \App\Enums\EventType::PLAN_UPDATED:
                 $oldPlan = $metadata['old_plan'] ?? null;
                 $newPlan = $metadata['new_plan'] ?? null;
-                if ($oldPlan && $newPlan) {
-                    return "Plan changed from {$oldPlan} to {$newPlan}";
+                $oldPlanName = $oldPlan ? ucfirst($oldPlan) : null;
+                $newPlanName = $newPlan ? ucfirst($newPlan) : null;
+                if ($oldPlanName && $newPlanName) {
+                    return "Changed plan from {$oldPlanName} to {$newPlanName}";
                 }
-                return 'Plan was updated';
+                return 'Updated plan';
+            case \App\Enums\EventType::SUBSCRIPTION_CREATED:
+                $planName = $metadata['plan'] ?? $metadata['new_plan'] ?? $metadata['plan_name'] ?? null;
+                $planDisplayName = $planName ? ucfirst($planName) . ' plan' : 'subscription';
+                return "Started {$planDisplayName} subscription";
+            case \App\Enums\EventType::SUBSCRIPTION_UPDATED:
+                $action = $metadata['action'] ?? null;
+                $oldPlan = $metadata['old_plan'] ?? null;
+                $newPlan = $metadata['new_plan'] ?? null;
+                $oldPlanName = $oldPlan ? ucfirst($oldPlan) : null;
+                $newPlanName = $newPlan ? ucfirst($newPlan) : null;
+                
+                if ($action === 'created' && $newPlanName) {
+                    return "Started {$newPlanName} subscription";
+                } elseif ($action === 'resumed' && $newPlanName) {
+                    return "Resumed {$newPlanName} subscription";
+                } elseif ($action === 'upgrade' && $oldPlanName && $newPlanName) {
+                    return "Upgraded subscription from {$oldPlanName} to {$newPlanName}";
+                } elseif ($action === 'downgrade' && $oldPlanName && $newPlanName) {
+                    return "Downgraded subscription from {$oldPlanName} to {$newPlanName}";
+                } elseif ($oldPlanName && $newPlanName) {
+                    return "Changed subscription from {$oldPlanName} to {$newPlanName}";
+                } elseif ($newPlanName) {
+                    return "Updated subscription to {$newPlanName}";
+                }
+                return 'Updated subscription';
+            case \App\Enums\EventType::SUBSCRIPTION_CANCELED:
+                $planName = $metadata['plan'] ?? $metadata['old_plan'] ?? $metadata['plan_name'] ?? null;
+                $planDisplayName = $planName ? ucfirst($planName) . ' plan' : '';
+                return $planDisplayName ? "Canceled {$planDisplayName} subscription" : 'Canceled subscription';
+            case \App\Enums\EventType::INVOICE_PAID:
+                $amount = $metadata['amount'] ?? null;
+                $currency = $metadata['currency'] ?? 'USD';
+                if ($amount) {
+                    $formattedAmount = is_numeric($amount) ? number_format($amount / 100, 2) : $amount;
+                    return "Paid invoice ({$currency} {$formattedAmount})";
+                }
+                return 'Paid invoice';
+            case \App\Enums\EventType::INVOICE_FAILED:
+                $amount = $metadata['amount'] ?? null;
+                $currency = $metadata['currency'] ?? 'USD';
+                if ($amount) {
+                    $formattedAmount = is_numeric($amount) ? number_format($amount / 100, 2) : $amount;
+                    return "Invoice payment failed ({$currency} {$formattedAmount})";
+                }
+                return 'Invoice payment failed';
             default:
                 // Fallback: format event type nicely
                 return ucfirst(str_replace(['_', '.'], ' ', $eventType));
         }
+    }
+
+    /**
+     * Delete the company (tenant).
+     */
+    public function destroy(Request $request)
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors([
+                'error' => 'You must select a company to delete.',
+            ]);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        // Check if user has permission to delete the company
+        $this->authorize('delete', $tenant);
+
+        // Check if user is the owner (only owners can delete companies)
+        $userRole = $user->getRoleForTenant($tenant);
+        if ($userRole !== 'owner') {
+            return back()->withErrors([
+                'error' => 'Only the company owner can delete the company.',
+            ]);
+        }
+
+        // Prevent deletion if there are other users in the company
+        $otherUsersCount = $tenant->users()->where('users.id', '!=', $user->id)->count();
+        if ($otherUsersCount > 0) {
+            return back()->withErrors([
+                'error' => 'Cannot delete company. Please remove all other team members first.',
+            ]);
+        }
+
+        // Cancel any active subscriptions
+        try {
+            $subscription = $tenant->subscription('default');
+            if ($subscription && $subscription->active()) {
+                $subscription->cancel();
+            }
+        } catch (\Exception $e) {
+            // Log but don't fail deletion if subscription cancellation fails
+            \Log::warning('Failed to cancel subscription during company deletion', [
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Record activity before deletion
+        \App\Services\ActivityRecorder::record(
+            tenant: $tenant->id,
+            eventType: \App\Enums\EventType::TENANT_DELETED,
+            subject: $tenant,
+            actor: $user,
+            brand: null,
+            metadata: [
+                'subject_name' => $tenant->name,
+            ]
+        );
+
+        $tenantName = $tenant->name;
+
+        // Delete the tenant (cascade will handle related data)
+        $tenant->delete();
+
+        // Clear session if this was the active tenant
+        if (session('tenant_id') == $tenant->id) {
+            session()->forget(['tenant_id', 'brand_id']);
+        }
+
+        return redirect()->route('companies.index')
+            ->with('success', "Company '{$tenantName}' has been permanently deleted.");
+    }
+
+    /**
+     * Show the company permissions page.
+     */
+    public function permissions(): Response
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors([
+                'permissions' => 'You must select a company to view permissions.',
+            ]);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return redirect()->route('companies.index')->withErrors([
+                'permissions' => 'You do not have access to this company.',
+            ]);
+        }
+
+        // Check if user has permission to view permissions (owners/admins can view)
+        $tenantRole = $user->getRoleForTenant($tenant);
+        if (!in_array($tenantRole, ['owner', 'admin'])) {
+            abort(403, 'Only administrators and owners can view permissions.');
+        }
+
+        // Get company roles
+        $companyRoles = [
+            ['id' => 'owner', 'name' => 'Owner', 'icon' => '👑'],
+            ['id' => 'admin', 'name' => 'Admin', 'icon' => ''],
+            ['id' => 'brand_manager', 'name' => 'Brand Manager', 'icon' => ''],
+            ['id' => 'member', 'name' => 'Member', 'icon' => ''],
+        ];
+
+        // Get company permissions (all permissions that are NOT site permissions)
+        $companyPermissions = Permission::where(function ($query) {
+                $query->whereNotIn('name', ['company.manage', 'permissions.manage'])
+                    ->where('name', 'not like', 'site.%');
+            })
+            ->orderBy('name')
+            ->pluck('name')
+            ->toArray();
+
+        // Get current role permissions
+        $companyRolePermissions = [];
+        foreach ($companyRoles as $roleData) {
+            $role = Role::where('name', $roleData['id'])->first();
+            if ($role) {
+                $permissions = $role->permissions->pluck('name')->toArray();
+                $companyRolePermissions[$roleData['id']] = array_fill_keys($permissions, true);
+            }
+        }
+
+        return Inertia::render('Companies/Permissions', [
+            'tenant' => [
+                'id' => $tenant->id,
+                'name' => $tenant->name,
+                'slug' => $tenant->slug,
+            ],
+            'company_roles' => $companyRoles,
+            'company_permissions' => $companyPermissions,
+            'company_role_permissions' => $companyRolePermissions,
+        ]);
     }
 }

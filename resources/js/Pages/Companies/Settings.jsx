@@ -1,4 +1,4 @@
-import { Link, useForm, usePage } from '@inertiajs/react'
+import { Link, useForm, usePage, router } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
@@ -385,6 +385,19 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                         </div>
                                         <button
                                             type="button"
+                                            onClick={() => {
+                                                if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE "${tenant.name}"? This action cannot be undone. All data, brands, assets, and team members will be permanently deleted.`)) {
+                                                    if (confirm(`Final confirmation: This will permanently delete "${tenant.name}" and all associated data. Continue?`)) {
+                                                        router.delete('/app/companies/settings', {
+                                                            onError: (errors) => {
+                                                                if (errors.error) {
+                                                                    alert(errors.error)
+                                                                }
+                                                            },
+                                                        })
+                                                    }
+                                                }
+                                            }}
                                             className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                                         >
                                             <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">

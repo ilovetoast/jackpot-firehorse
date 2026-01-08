@@ -13,6 +13,7 @@ import {
     FolderIcon,
     UserPlusIcon,
     XMarkIcon,
+    XCircleIcon,
     TagIcon,
     CheckCircleIcon,
     ExclamationTriangleIcon,
@@ -323,21 +324,23 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                             </span>
                                                                         )}
                                                                         {company.plan_management && !company.plan_management.is_externally_managed && !company.can_manage_plan && (
-                                                                            <span className="inline-flex items-center rounded-md bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800" title="Plan changes are disabled in production for safety">
-                                                                                Production Protected
+                                                                            <span className="inline-flex items-center rounded-md bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800" title={company.stripe_connected ? "Plan changes must be made through Stripe billing portal" : "Plan changes are disabled in production for safety"}>
+                                                                                {company.stripe_connected ? "Stripe Protected" : "Production Protected"}
                                                                             </span>
                                                                         )}
-                                                                        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                                                                            company.stripe_status === 'active' ? 'bg-green-100 text-green-800' :
-                                                                            company.stripe_status === 'incomplete' ? 'bg-yellow-100 text-yellow-800' :
-                                                                            company.stripe_status === 'past_due' ? 'bg-orange-100 text-orange-800' :
-                                                                            company.stripe_status === 'trialing' ? 'bg-blue-100 text-blue-800' :
-                                                                            company.stripe_status === 'canceled' ? 'bg-red-100 text-red-800' :
-                                                                            company.stripe_status === 'inactive' ? 'bg-gray-100 text-gray-800' :
-                                                                            'bg-gray-100 text-gray-800'
-                                                                        }`}>
-                                                                            {company.stripe_status || 'not connected'}
-                                                                        </span>
+                                                                        {company.stripe_connected && company.stripe_status && company.stripe_status !== 'not_connected' && (
+                                                                            <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                                                                                company.stripe_status === 'active' ? 'bg-green-100 text-green-800' :
+                                                                                company.stripe_status === 'incomplete' ? 'bg-yellow-100 text-yellow-800' :
+                                                                                company.stripe_status === 'past_due' ? 'bg-orange-100 text-orange-800' :
+                                                                                company.stripe_status === 'trialing' ? 'bg-blue-100 text-blue-800' :
+                                                                                company.stripe_status === 'canceled' ? 'bg-red-100 text-red-800' :
+                                                                                company.stripe_status === 'inactive' ? 'bg-gray-100 text-gray-800' :
+                                                                                'bg-gray-100 text-gray-800'
+                                                                            }`}>
+                                                                                {company.stripe_status}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
                                                                     <div className="mt-1 text-sm text-gray-500">
                                                                         {company.owner && (
@@ -458,6 +461,12 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                                                     ? `${user.first_name} ${user.last_name}`
                                                                                                     : user.first_name || user.email}
                                                                                             </span>
+                                                                                            {user.is_suspended && (
+                                                                                                <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+                                                                                                    <XCircleIcon className="h-3 w-3 mr-1" />
+                                                                                                    Suspended
+                                                                                                </span>
+                                                                                            )}
                                                                                             {isDisabledByPlanLimit && (
                                                                                                 <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
                                                                                                     Disabled (Plan Limit)
@@ -615,7 +624,6 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                                                                 {company.has_access_to_brand_manager && (
                                                                                                                     <option value="brand_manager">Brand Manager</option>
                                                                                                                 )}
-                                                                                                                <option value="owner">Owner</option>
                                                                                                             </select>
                                                                                                             {hasPendingChange && (
                                                                                                                 <button
@@ -805,6 +813,13 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                             ? `${user.first_name} ${user.last_name}`
                                                                             : user.first_name || user.email}
                                                                     </h3>
+                                                                    {/* Suspended Badge */}
+                                                                    {user.is_suspended && (
+                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-red-100 text-red-800">
+                                                                            <XCircleIcon className="h-3 w-3 mr-1" />
+                                                                            Suspended
+                                                                        </span>
+                                                                    )}
                                                                     {/* Site Roles Only - Remove Duplicates */}
                                                                     {user.site_roles && user.site_roles.length > 0 && (
                                                                         [...new Set(user.site_roles)].map((role) => (
@@ -956,11 +971,15 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                                         : user.email || 'this user'
                                                                                     
                                                                                     if (confirm(`Are you sure you want to UNSUSPEND ${userNameStr}'s account? They will regain access to the platform.`)) {
-                                                                                        router.post(`/app/admin/users/${user.id}/unsuspend`, {
+                                                                                        router.post(`/app/admin/users/${user.id}/unsuspend`, {}, {
                                                                                             preserveScroll: true,
                                                                                             onSuccess: () => {
                                                                                                 setOpenUserDropdown(null)
                                                                                                 router.reload({ only: ['users'] })
+                                                                                            },
+                                                                                            onError: (errors) => {
+                                                                                                console.error('Unsuspend error:', errors)
+                                                                                                alert(errors.user || errors.error || 'Failed to unsuspend account. Please try again.')
                                                                                             },
                                                                                         })
                                                                                     }
@@ -984,11 +1003,15 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                                         : user.email || 'this user'
                                                                                     
                                                                                     if (confirm(`Are you sure you want to SUSPEND ${userNameStr}'s account? This will block them from accessing any pages. They will receive a notification email.`)) {
-                                                                                        router.post(`/app/admin/users/${user.id}/suspend`, {
+                                                                                        router.post(`/app/admin/users/${user.id}/suspend`, {}, {
                                                                                             preserveScroll: true,
                                                                                             onSuccess: () => {
                                                                                                 setOpenUserDropdown(null)
                                                                                                 router.reload({ only: ['users'] })
+                                                                                            },
+                                                                                            onError: (errors) => {
+                                                                                                console.error('Suspend error:', errors)
+                                                                                                alert(errors.user || errors.error || 'Failed to suspend account. Please try again.')
                                                                                             },
                                                                                         })
                                                                                     }

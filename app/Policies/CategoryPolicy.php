@@ -12,7 +12,7 @@ use App\Models\User;
  *
  * Visibility Rules:
  * - Public categories (is_private=false, is_hidden=false): Visible to all brand users
- * - Private categories (is_private=true): Require 'view private category' permission
+ * - Private categories (is_private=true): Require access via category access rules or 'view restricted categories' permission
  * - Hidden categories (is_hidden=true): Require 'manage categories' permission (or specific permission)
  *
  * Mutation Rules:
@@ -36,7 +36,7 @@ class CategoryPolicy
      * Visibility is determined by:
      * - Tenant membership (user must belong to category's tenant)
      * - Brand assignment (user must be assigned to category's brand)
-     * - Private flag (requires 'view private category' permission)
+     * - Private flag (requires access via category access rules or 'view restricted categories' permission)
      * - Hidden flag (requires 'manage categories' permission)
      */
     public function view(User $user, Category $category): bool
@@ -56,9 +56,39 @@ class CategoryPolicy
             }
         }
 
-        // If category is private, user needs view private category permission
-        if ($category->is_private && ! $user->can('view private category')) {
-            return false;
+        // If category is private, check category-level access rules
+        if ($category->is_private) {
+            // System categories cannot be private
+            if ($category->is_system) {
+                return true; // System categories are always accessible
+            }
+
+            // Check if user is tenant owner/admin or has 'view any restricted categories' permission
+            // These users can bypass category access rules
+            $tenant = $category->tenant;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            // Also check brand-level owner/admin role
+            $brand = $category->brand;
+            $isBrandOwnerOrAdmin = false;
+            if ($brand) {
+                $brandRole = $user->getRoleForBrand($brand);
+                $isBrandOwnerOrAdmin = in_array($brandRole, ['owner', 'admin']);
+            }
+
+            // Check for permission to view any restricted categories
+            $canViewAnyRestricted = $user->hasPermissionForTenant($tenant, 'view.restricted.categories');
+
+            // Owners/admins or users with permission can bypass access rules
+            if ($isTenantOwnerOrAdmin || $isBrandOwnerOrAdmin || $canViewAnyRestricted) {
+                return true;
+            }
+
+            // Otherwise, check if user has access via category_access rules
+            if (!$category->userHasAccess($user)) {
+                return false;
+            }
         }
 
         // If category is hidden, user needs manage categories permission
@@ -109,15 +139,41 @@ class CategoryPolicy
             }
         }
 
-        // Cannot update locked categories
+        // Cannot update locked categories (unless their system template is deleted)
         if ($category->is_locked) {
-            return false;
+            // Check if the system template still exists
+            if ($category->is_system && $category->system_category_id) {
+                $templateExists = \App\Models\SystemCategory::where('id', $category->system_category_id)->exists();
+                if ($templateExists) {
+                    return false;
+                }
+                // Template is deleted, allow update
+            } else {
+                return false;
+            }
         }
 
-        // System categories can only be updated if plan has edit_system_categories feature
+        // System categories can only be updated if:
+        // 1. Plan has edit_system_categories feature, OR
+        // 2. The system template no longer exists (orphaned category)
         if ($category->is_system) {
-            $planService = app(\App\Services\PlanService::class);
-            return $planService->hasFeature($tenant, 'edit_system_categories');
+            // Check if template still exists
+            $templateExists = false;
+            if ($category->system_category_id) {
+                $templateExists = \App\Models\SystemCategory::where('id', $category->system_category_id)->exists();
+            } else {
+                // Legacy category - check by slug/asset_type
+                $templateExists = \App\Models\SystemCategory::where('slug', $category->slug)
+                    ->where('asset_type', $category->asset_type->value)
+                    ->exists();
+            }
+            
+            // If template exists, require edit_system_categories feature
+            if ($templateExists) {
+                $planService = app(\App\Services\PlanService::class);
+                return $planService->hasFeature($tenant, 'edit_system_categories');
+            }
+            // Template is deleted, allow update
         }
 
         return true;
@@ -152,8 +208,39 @@ class CategoryPolicy
             }
         }
 
-        // Cannot delete locked/system categories (enforced at both policy and service level)
-        if ($category->is_locked || $category->is_system) {
+        // Use the category's helper method to check if it can be deleted
+        if (!$category->canBeDeleted()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Determine if the user can upgrade the category.
+     *
+     * Only tenant admins/owners can upgrade system categories that have upgrades available.
+     */
+    public function upgrade(User $user, Category $category): bool
+    {
+        // User must belong to the tenant
+        if (! $user->tenants()->where('tenants.id', $category->tenant_id)->exists()) {
+            return false;
+        }
+
+        // User must have brand_categories.manage permission
+        $tenant = $category->tenant;
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            return false;
+        }
+
+        // Category must be a system category
+        if (! $category->is_system) {
+            return false;
+        }
+
+        // Category must have upgrade available
+        if (! $category->upgrade_available) {
             return false;
         }
 

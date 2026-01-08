@@ -215,9 +215,16 @@ export default function BrandsIndex({ brands, limits }) {
 
                                                     {/* Categories Section */}
                                                     <div>
-                                                        <h3 className="text-base font-semibold leading-6 text-gray-900 mb-3">
-                                                            Categories
-                                                        </h3>
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <h3 className="text-base font-semibold leading-6 text-gray-900">
+                                                                Categories
+                                                            </h3>
+                                                            {brand.categories && brand.categories.some(cat => cat.upgrade_available && cat.is_system) && (
+                                                                <span className="inline-flex items-center rounded-md px-2.5 py-1.5 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
+                                                                    Update available
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         {brand.categories && brand.categories.length > 0 ? (
                                                             <div className="overflow-hidden bg-white rounded-lg border border-gray-200">
                                                                 {/* Tab Navigation */}
@@ -455,7 +462,6 @@ function UserInviteForm({ brandId, defaultRole = 'member' }) {
                         <option value="member">Member</option>
                         <option value="admin">Admin</option>
                         <option value="brand_manager">Brand Manager</option>
-                        <option value="owner">Owner</option>
                     </select>
                 </div>
                 <button
@@ -509,7 +515,6 @@ function RecommendedUserCard({ user, brandId }) {
                     <option value="member">Member</option>
                     <option value="admin">Admin</option>
                     <option value="brand_manager">Brand Manager</option>
-                    <option value="owner">Owner</option>
                 </select>
                 <button
                     type="button"
@@ -576,16 +581,23 @@ function PendingInvitationCard({ invitation, brandId }) {
 
 // User Management Card Component
 function UserManagementCard({ user, brandId }) {
-    const { put, delete: destroy, processing } = useForm()
+    const { delete: destroy, processing } = useForm()
     const [isEditing, setIsEditing] = useState(false)
     const [role, setRole] = useState(user.role || 'member')
+    const [updatingRole, setUpdatingRole] = useState(false)
 
     const handleRoleUpdate = () => {
-        put(`/app/brands/${brandId}/users/${user.id}/role`, {
-            data: { role },
+        setUpdatingRole(true)
+        router.put(`/app/brands/${brandId}/users/${user.id}/role`, {
+            role: role,
+        }, {
             preserveScroll: true,
             onSuccess: () => {
                 setIsEditing(false)
+                setUpdatingRole(false)
+            },
+            onError: () => {
+                setUpdatingRole(false)
             },
         })
     }
@@ -625,15 +637,14 @@ function UserManagementCard({ user, brandId }) {
                                 <option value="member">Member</option>
                                 <option value="admin">Admin</option>
                                 <option value="brand_manager">Brand Manager</option>
-                                <option value="owner">Owner</option>
                             </select>
                             <button
                                 type="button"
                                 onClick={handleRoleUpdate}
-                                disabled={processing}
+                                disabled={updatingRole}
                                 className="text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
                             >
-                                Save
+                                {updatingRole ? 'Saving...' : 'Save'}
                             </button>
                             <button
                                 type="button"

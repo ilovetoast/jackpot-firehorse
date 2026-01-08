@@ -76,14 +76,21 @@ class SiteAdminController extends Controller
                         'role' => $role ? ucfirst($role) : null,
                     ];
                 }),
-                'brands' => $user->brands->map(function ($brand) {
+                'brands' => $user->brands->map(function ($brand) use ($user) {
+                    $brandRole = $brand->pivot->role ?? null;
+                    // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
+                    if ($brandRole === 'owner') {
+                        $brandRole = 'admin';
+                        // Update the database to reflect this change
+                        $user->setRoleForBrand($brand, 'admin');
+                    }
                     return [
                         'id' => $brand->id,
                         'name' => $brand->name,
                         'slug' => $brand->slug,
                         'tenant_id' => $brand->tenant_id,
                         'tenant_name' => $brand->tenant->name ?? null,
-                        'role' => $brand->pivot->role ?? null,
+                        'role' => $brandRole,
                     ];
                 }),
             ];
@@ -172,7 +179,7 @@ class SiteAdminController extends Controller
                         'manual_plan_override' => $company->manual_plan_override,
                         'plan_prefix' => $this->getPlanPrefix($company, $planName, $latestSubscription, $planService),
                     ],
-                    'can_manage_plan' => !app()->environment('production'), // Only allow in non-production environments
+                    'can_manage_plan' => !app()->environment('production') && !$stripeConnected, // Only allow in non-production environments and when NOT connected to Stripe
                     'brands' => $allBrands->map(fn ($brand) => [
                         'id' => $brand->id,
                         'name' => $brand->name,
@@ -191,11 +198,18 @@ class SiteAdminController extends Controller
                         
                         // Get brand assignments for this user in this company - map all brands with their roles
                         $brandAssignments = $allBrands->map(function ($brand) use ($user) {
+                            $brandRole = $user->getRoleForBrand($brand); // null if not assigned
+                            // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
+                            if ($brandRole === 'owner') {
+                                $brandRole = 'admin';
+                                // Update the database to reflect this change
+                                $user->setRoleForBrand($brand, 'admin');
+                            }
                             return [
                                 'id' => $brand->id,
                                 'name' => $brand->name,
                                 'is_default' => $brand->is_default,
-                                'role' => $user->getRoleForBrand($brand), // null if not assigned
+                                'role' => $brandRole,
                             ];
                         });
                     
@@ -234,18 +248,33 @@ class SiteAdminController extends Controller
         $planService = app(\App\Services\PlanService::class);
         $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($tenant);
         
-        $allowedRoles = ['owner', 'admin', 'member'];
+        // Tenant roles can include owner
+        $allowedTenantRoles = ['owner', 'admin', 'member'];
         if ($hasAccessToBrandManager) {
-            $allowedRoles[] = 'brand_manager';
+            $allowedTenantRoles[] = 'brand_manager';
+        }
+        
+        // Brand roles cannot include owner
+        $allowedBrandRoles = ['admin', 'member'];
+        if ($hasAccessToBrandManager) {
+            $allowedBrandRoles[] = 'brand_manager';
         }
         
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
-            'role' => ['nullable', 'string', 'in:' . implode(',', $allowedRoles)],
+            'role' => ['nullable', 'string', 'in:' . implode(',', $allowedTenantRoles)],
             'brands' => 'required|array|min:1',
             'brands.*.brand_id' => 'required|exists:brands,id',
-            'brands.*.role' => 'required|string|in:' . implode(',', $allowedRoles),
+            'brands.*.role' => 'required|string|in:' . implode(',', $allowedBrandRoles),
         ]);
+        
+        // Prevent owner from being assigned as a brand role - convert to admin
+        foreach ($validated['brands'] as &$brandAssignment) {
+            if ($brandAssignment['role'] === 'owner') {
+                $brandAssignment['role'] = 'admin';
+            }
+        }
+        unset($brandAssignment);
 
         $user = User::findOrFail($validated['user_id']);
 
@@ -419,7 +448,7 @@ class SiteAdminController extends Controller
         $planService = app(\App\Services\PlanService::class);
         $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($tenant);
         
-        $allowedRoles = ['owner', 'admin', 'member'];
+        $allowedRoles = ['admin', 'member'];
         if ($hasAccessToBrandManager) {
             $allowedRoles[] = 'brand_manager';
         }
@@ -432,6 +461,11 @@ class SiteAdminController extends Controller
         if ($role === '' || $role === null || !$request->has('role')) {
             $role = null;
         } else {
+            // Prevent 'owner' from being a brand role - convert to 'admin' if attempted
+            if ($role === 'owner') {
+                $role = 'admin';
+            }
+            
             // Validate role if provided
             if (!in_array($role, $allowedRoles)) {
                 return back()->withErrors([
@@ -674,6 +708,11 @@ class SiteAdminController extends Controller
 
         // Prevent deleting the company owner (user with 'owner' role or first user)
         if (strtolower($userRole ?? '') === 'owner') {
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => 'Cannot delete the company owner account.',
+                ], 422);
+            }
             return back()->withErrors([
                 'user' => 'Cannot delete the company owner account.',
             ]);
@@ -682,9 +721,43 @@ class SiteAdminController extends Controller
         // Also check if this is the first user (fallback owner detection)
         $firstUser = $tenant->users()->orderBy('created_at')->first();
         if ($firstUser && $firstUser->id === $user->id) {
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => 'Cannot delete the company owner account.',
+                ], 422);
+            }
             return back()->withErrors([
                 'user' => 'Cannot delete the company owner account.',
             ]);
+        }
+
+        // Check if tenant has a Stripe account/subscription
+        // If yes, require user to be suspended before deletion
+        // If no Stripe account, allow deletion directly
+        $hasStripeAccount = !empty($tenant->stripe_id);
+        $hasActiveSubscription = false;
+        
+        if ($hasStripeAccount) {
+            $subscription = $tenant->subscriptions()
+                ->where('name', 'default')
+                ->whereIn('stripe_status', ['active', 'trialing', 'past_due', 'incomplete'])
+                ->first();
+            $hasActiveSubscription = $subscription !== null;
+        }
+
+        // If tenant has Stripe account/subscription, user must be suspended first
+        if ($hasStripeAccount || $hasActiveSubscription) {
+            if (!$user->isSuspended()) {
+                $errorMessage = 'Cannot delete a user whose company has a Stripe account. Please suspend the user first, then delete them.';
+                if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                    return response()->json([
+                        'error' => $errorMessage,
+                    ], 422);
+                }
+                return back()->withErrors([
+                    'user' => $errorMessage,
+                ]);
+            }
         }
 
         // Store user info before deletion for email (user will be deleted)
@@ -724,7 +797,14 @@ class SiteAdminController extends Controller
             ]
         );
 
-        return back()->with('success', 'User account deleted successfully. Notification email sent.');
+        if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+            return response()->json([
+                'success' => true,
+                'message' => 'User account deleted successfully. Notification email sent.',
+            ]);
+        }
+        
+        return redirect()->route('admin.index')->with('success', 'User account deleted successfully. Notification email sent.');
     }
 
     /**
@@ -979,17 +1059,12 @@ class SiteAdminController extends Controller
             ]);
         }
         
-        // Check if tenant has an active Stripe subscription
-        // Prevent manual plan adjustments when there's an active Stripe subscription
+        // Check if tenant is connected to Stripe
+        // Prevent manual plan adjustments when connected to Stripe
         // Plan should be changed through Stripe billing portal or subscription changes
-        $activeSubscription = $tenant->subscriptions()
-            ->where('name', 'default')
-            ->where('stripe_status', 'active')
-            ->first();
-            
-        if ($activeSubscription && $tenant->stripe_id) {
+        if ($tenant->stripe_id) {
             return back()->withErrors([
-                'plan' => 'This company has an active Stripe subscription. Plan changes should be made through Stripe billing portal or by updating the subscription directly. Manual plan overrides are not allowed for active Stripe subscriptions.',
+                'plan' => 'This company is connected to Stripe. Plan changes must be made through the Stripe billing portal or by updating the subscription directly. Manual plan overrides are not allowed for Stripe-connected companies.',
             ]);
         }
 
@@ -1066,33 +1141,33 @@ class SiteAdminController extends Controller
         // Format based on event type with human-readable language
         switch ($eventType) {
             case EventType::TENANT_UPDATED:
-                return $subjectName ? "{$subjectName} was updated" : 'Company was updated';
+                return $subjectName ? "Updated {$subjectName}" : 'Updated company';
             case EventType::TENANT_CREATED:
-                return $subjectName ? "{$subjectName} was created" : 'Company was created';
+                return $subjectName ? "Created {$subjectName}" : 'Created company';
             case EventType::TENANT_DELETED:
-                return $subjectName ? "{$subjectName} was deleted" : 'Company was deleted';
+                return $subjectName ? "Deleted {$subjectName}" : 'Deleted company';
             case EventType::BRAND_CREATED:
-                return $subjectName ? "{$subjectName} was created" : 'Brand was created';
+                return $subjectName ? "Created {$subjectName}" : 'Created brand';
             case EventType::BRAND_UPDATED:
-                return $subjectName ? "{$subjectName} was updated" : 'Brand was updated';
+                return $subjectName ? "Updated {$subjectName}" : 'Updated brand';
             case EventType::BRAND_DELETED:
-                return $subjectName ? "{$subjectName} was deleted" : 'Brand was deleted';
+                return $subjectName ? "Deleted {$subjectName}" : 'Deleted brand';
             case EventType::USER_CREATED:
-                return $subjectName ? "{$subjectName} account was created" : 'User account was created';
+                return $subjectName ? "Created {$subjectName} account" : 'Created user account';
             case EventType::USER_UPDATED:
                 $action = $metadata['action'] ?? 'updated';
                 if ($action === 'suspended') {
-                    return $subjectName ? "{$subjectName} account was suspended" : 'Account was suspended';
+                    return $subjectName ? "Suspended {$subjectName} account" : 'Suspended account';
                 } elseif ($action === 'unsuspended') {
-                    return $subjectName ? "{$subjectName} account was unsuspended" : 'Account was unsuspended';
+                    return $subjectName ? "Unsuspended {$subjectName} account" : 'Unsuspended account';
                 }
-                return $subjectName ? "{$subjectName} account was updated" : 'User account was updated';
+                return $subjectName ? "Updated {$subjectName} account" : 'Updated user account';
             case EventType::USER_DELETED:
-                return $subjectName ? "{$subjectName} account was deleted" : 'User account was deleted';
+                return $subjectName ? "Deleted {$subjectName} account" : 'Deleted user account';
             case EventType::USER_INVITED:
-                return 'User was invited';
+                return 'Invited user';
             case EventType::USER_REMOVED_FROM_COMPANY:
-                return 'User was removed from company';
+                return 'Removed user from company';
             case EventType::USER_ADDED_TO_BRAND:
                 $role = $metadata['role'] ?? 'member';
                 $brandName = $activity->brand->name ?? null;
@@ -1104,22 +1179,31 @@ class SiteAdminController extends Controller
                 $oldRole = $metadata['old_role'] ?? null;
                 $newRole = $metadata['new_role'] ?? null;
                 if ($oldRole && $newRole) {
-                    return "Role changed from {$oldRole} to {$newRole}";
+                    return "Changed role from {$oldRole} to {$newRole}";
                 }
-                return 'Role was updated';
+                return 'Updated role';
             case EventType::CATEGORY_CREATED:
-                return $subjectName ? "{$subjectName} category was created" : 'Category was created';
+                return $subjectName ? "Created {$subjectName}" : 'Created category';
             case EventType::CATEGORY_UPDATED:
-                return $subjectName ? "{$subjectName} category was updated" : 'Category was updated';
+                return $subjectName ? "Updated {$subjectName}" : 'Updated category';
             case EventType::CATEGORY_DELETED:
-                return $subjectName ? "{$subjectName} category was deleted" : 'Category was deleted';
+                return $subjectName ? "Deleted {$subjectName}" : 'Deleted category';
+            case EventType::CATEGORY_SYSTEM_UPGRADED:
+                $fieldsUpdated = $metadata['fields_updated'] ?? [];
+                $oldVersion = $metadata['old_version'] ?? null;
+                $newVersion = $metadata['new_version'] ?? null;
+                $versionInfo = ($oldVersion && $newVersion) ? " (v{$oldVersion} → v{$newVersion})" : '';
+                if ($subjectName) {
+                    return "Upgraded {$subjectName}{$versionInfo}";
+                }
+                return "Upgraded category{$versionInfo}";
             case EventType::PLAN_UPDATED:
                 $oldPlan = $metadata['old_plan'] ?? null;
                 $newPlan = $metadata['new_plan'] ?? null;
                 if ($oldPlan && $newPlan) {
-                    return "Plan changed from {$oldPlan} to {$newPlan}";
+                    return "Changed plan from {$oldPlan} to {$newPlan}";
                 }
-                return 'Plan was updated';
+                return 'Updated plan';
             default:
                 // Fallback: format event type nicely
                 return ucfirst(str_replace(['_', '.'], ' ', $eventType));
@@ -1839,7 +1923,10 @@ class SiteAdminController extends Controller
                     'id' => $event->brand->id,
                     'name' => $event->brand->name,
                     'logo_path' => $event->brand->logo_path,
+                    'icon_path' => $event->brand->icon_path,
                     'primary_color' => $event->brand->primary_color,
+                    'icon' => $event->brand->icon,
+                    'icon_bg_color' => $event->brand->icon_bg_color,
                 ] : null,
                 'actor' => $this->formatActor($event),
                 'subject' => $this->formatSubject($event),
@@ -2001,5 +2088,68 @@ class SiteAdminController extends Controller
         }
         
         return null;
+    }
+
+    /**
+     * Reset/clear all subscriptions for a tenant.
+     * This is useful when a subscription is stuck in an incomplete state
+     * or when payment method issues prevent subscription updates.
+     */
+    public function resetSubscriptions(Request $request, Tenant $tenant)
+    {
+        // Only user ID 1 (Site Owner) can access
+        if (Auth::id() !== 1) {
+            abort(403, 'Only site owners can reset subscriptions.');
+        }
+
+        try {
+            $stripeSecret = env('STRIPE_SECRET');
+            if ($stripeSecret) {
+                Stripe::setApiKey($stripeSecret);
+            }
+
+            // Cancel all subscriptions in Stripe first
+            $subscriptions = $tenant->subscriptions()->get();
+            foreach ($subscriptions as $subscription) {
+                if ($subscription->stripe_id) {
+                    try {
+                        if ($stripeSecret) {
+                            $stripeSubscription = \Stripe\Subscription::retrieve($subscription->stripe_id);
+                            // Only cancel if it's not already canceled
+                            if ($stripeSubscription->status !== 'canceled' && $stripeSubscription->status !== 'incomplete_expired') {
+                                $stripeSubscription->cancel();
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Log but continue - subscription might already be canceled
+                        \Log::warning('Failed to cancel Stripe subscription', [
+                            'subscription_id' => $subscription->stripe_id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+
+            // Delete all subscription records from database
+            $tenant->subscriptions()->delete();
+
+            // Optionally: Clear Stripe customer ID to force fresh subscription creation
+            // Uncomment the line below if you want to completely reset the Stripe relationship
+            // $tenant->stripe_id = null;
+            // $tenant->pm_type = null;
+            // $tenant->pm_last_four = null;
+            // $tenant->trial_ends_at = null;
+            // $tenant->save();
+
+            // Reset manual plan override (force them back to free plan)
+            $tenant->manual_plan_override = null;
+            $tenant->save();
+
+            return back()->with('success', "All subscriptions for {$tenant->name} have been reset. They can now create a new subscription.");
+        } catch (\Exception $e) {
+            return back()->withErrors([
+                'subscription' => 'Failed to reset subscriptions: ' . $e->getMessage(),
+            ]);
+        }
     }
 }

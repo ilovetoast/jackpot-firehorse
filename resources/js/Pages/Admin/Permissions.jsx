@@ -16,7 +16,8 @@ export default function AdminPermissions({
     const [showAddPermissionModal, setShowAddPermissionModal] = useState(false)
     const [newPermissionName, setNewPermissionName] = useState('')
     const [newPermissionType, setNewPermissionType] = useState('company') // 'company' or 'site'
-    const { post: postForm, processing: creatingPermission, errors } = useForm()
+    const [creatingPermission, setCreatingPermission] = useState(false)
+    const [errors, setErrors] = useState({})
 
     // Default roles and permissions structure
     const defaultSiteRoles = site_roles || [
@@ -193,6 +194,9 @@ export default function AdminPermissions({
             return
         }
 
+        // Ensure type is set (default to 'company' if not set)
+        const permissionType = newPermissionType || 'company'
+
         // Convert to slug format (lowercase, dots/underscores allowed)
         const permissionSlug = newPermissionName
             .toLowerCase()
@@ -200,18 +204,30 @@ export default function AdminPermissions({
             .replace(/\s+/g, '.')
             .replace(/[^a-z0-9._]/g, '')
 
-        postForm('/app/admin/permissions/create', {
+        if (!permissionSlug) {
+            return
+        }
+
+        setCreatingPermission(true)
+        setErrors({})
+
+        router.post('/app/admin/permissions/create', {
             name: permissionSlug,
-            type: newPermissionType,
+            type: permissionType,
         }, {
             preserveScroll: true,
             onSuccess: () => {
                 setNewPermissionName('')
                 setShowAddPermissionModal(false)
+                setCreatingPermission(false)
                 router.reload({ 
                     only: ['site_permissions', 'company_permissions'],
                     preserveScroll: true,
                 })
+            },
+            onError: (pageErrors) => {
+                setErrors(pageErrors)
+                setCreatingPermission(false)
             },
         })
     }

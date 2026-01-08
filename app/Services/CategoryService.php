@@ -3,10 +3,14 @@
 namespace App\Services;
 
 use App\Enums\AssetType;
+use App\Enums\EventType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Brand;
 use App\Models\Category;
+use App\Models\CategoryAccess;
 use App\Models\Tenant;
+use App\Services\ActivityRecorder;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 /**
@@ -53,10 +57,12 @@ class CategoryService
         }
 
         // Ensure slug is unique within tenant/brand/asset_type scope
+        // Check including soft-deleted records to avoid unique constraint violations
         $baseSlug = $data['slug'];
         $slug = $baseSlug;
         $counter = 1;
-        while (Category::where('tenant_id', $tenant->id)
+        while (Category::withTrashed()
+            ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('asset_type', $data['asset_type'])
             ->where('slug', $slug)
@@ -73,12 +79,52 @@ class CategoryService
         $data['is_locked'] = false; // User-created categories are never locked
         $data['is_hidden'] = $data['is_hidden'] ?? false; // Default to visible
         
+        // Validate private category requirements
+        $isPrivate = $data['is_private'] ?? false;
+        if ($isPrivate) {
+            // Only custom categories can be private
+            if ($data['is_system'] ?? false) {
+                throw new \Exception('System categories cannot be private.');
+            }
+
+            // Check plan allows private categories
+            if (!$this->planService->canCreatePrivateCategory($tenant, $brand)) {
+                $maxPrivate = $this->planService->getMaxPrivateCategories($tenant);
+                if ($maxPrivate === 0) {
+                    throw new \Exception('Private categories require Pro or Enterprise plan.');
+                } else {
+                    throw new PlanLimitExceededException(
+                        'private_categories',
+                        $brand->categories()->custom()->where('is_private', true)->count(),
+                        $maxPrivate
+                    );
+                }
+            }
+
+            // Validate access rules are provided
+            $accessRules = $data['access_rules'] ?? [];
+            if (empty($accessRules)) {
+                throw new \Exception('Private categories must have at least one access rule (role or user).');
+            }
+        }
+        
         // Auto-assign icon if not provided
         if (!isset($data['icon']) || empty($data['icon'])) {
             $data['icon'] = \App\Helpers\CategoryIcons::getDefaultIcon($data['name'], $data['slug']);
         }
 
-        return Category::create($data);
+        // Remove access_rules from data before creating category
+        $accessRules = $data['access_rules'] ?? [];
+        unset($data['access_rules']);
+
+        $category = Category::create($data);
+
+        // Create access rules if category is private
+        if ($isPrivate && !empty($accessRules)) {
+            $this->syncAccessRules($category, $accessRules);
+        }
+
+        return $category;
     }
 
     /**
@@ -111,6 +157,49 @@ class CategoryService
             unset($data['is_system']);
         }
 
+        // Validate private category requirements if is_private is being set/changed
+        $isPrivate = $data['is_private'] ?? $category->is_private;
+        $wasPrivate = $category->is_private;
+        $isChangingToPrivate = !$wasPrivate && $isPrivate;
+        $isChangingFromPrivate = $wasPrivate && !$isPrivate;
+
+        // Validate private category requirements
+        if ($isPrivate) {
+            // Only custom categories can be private
+            if ($category->is_system) {
+                throw new \Exception('System categories cannot be private.');
+            }
+
+            // Check plan allows private categories (only when changing to private)
+            if ($isChangingToPrivate) {
+                $tenant = $category->tenant;
+                $brand = $category->brand;
+                if (!$this->planService->canCreatePrivateCategory($tenant, $brand)) {
+                    $maxPrivate = $this->planService->getMaxPrivateCategories($tenant);
+                    if ($maxPrivate === 0) {
+                        throw new \Exception('Private categories require Pro or Enterprise plan.');
+                    } else {
+                        throw new PlanLimitExceededException(
+                            'private_categories',
+                            $brand->categories()->custom()->where('is_private', true)->count(),
+                            $maxPrivate
+                        );
+                    }
+                }
+            }
+
+            // Validate access rules are provided (when setting to private or keeping it private)
+            $accessRules = $data['access_rules'] ?? null;
+            // If explicitly setting to private with empty access rules, validate
+            if ($isChangingToPrivate && (empty($accessRules) || $accessRules === [])) {
+                throw new \Exception('Private categories must have at least one access rule (role or user).');
+            }
+            // If updating an existing private category and access_rules is explicitly provided as empty, validate
+            if ($wasPrivate && $accessRules !== null && empty($accessRules)) {
+                throw new \Exception('Private categories must have at least one access rule (role or user).');
+            }
+        }
+
         // Generate slug if name changed and slug not provided
         if (isset($data['name']) && (! isset($data['slug']) || empty($data['slug']))) {
             $data['slug'] = Str::slug($data['name']);
@@ -131,27 +220,60 @@ class CategoryService
             $data['slug'] = $slug;
         }
 
+        // Extract access rules before updating
+        $accessRules = $data['access_rules'] ?? null;
+        unset($data['access_rules']);
+
         $category->update($data);
+
+        // Sync access rules if provided or if changing to/from private
+        if ($accessRules !== null || $isChangingToPrivate || $isChangingFromPrivate) {
+            if ($isChangingFromPrivate) {
+                // Remove all access rules if changing from private
+                $category->accessRules()->delete();
+            } elseif ($isPrivate) {
+                // If access_rules is provided, sync them
+                if ($accessRules !== null) {
+                    if (empty($accessRules)) {
+                        // If explicitly set to empty array and category is private, remove rules
+                        // But this should have been caught by validation above
+                        $category->accessRules()->delete();
+                    } else {
+                        $this->syncAccessRules($category, $accessRules);
+                    }
+                }
+                // If access_rules is null and category stays private, keep existing rules (no change)
+            }
+        }
 
         return $category->fresh();
     }
 
     /**
-     * Delete a category.
+     * Delete a category (soft delete with versioning).
      *
-     * Deletes a custom category. System categories cannot be deleted.
+     * Soft deletes a custom category by setting deleted_at timestamp.
+     * System categories can only be deleted if their system template no longer exists.
+     * This allows for potential restoration and maintains version history.
      *
      * @param Category $category The category to delete
      * @return void
-     * @throws \Exception If category is locked or system
+     * @throws \Exception If category is locked or system (and template still exists)
      */
     public function delete(Category $category): void
     {
-        // Prevent deletion of locked/system categories
-        if ($category->is_locked || $category->is_system) {
-            throw new \Exception('Cannot delete locked or system categories.');
+        // Use the category's helper method to check if it can be deleted
+        if (!$category->canBeDeleted()) {
+            if ($category->is_system && $category->systemTemplateExists()) {
+                throw new \Exception('Cannot delete system categories while the template exists.');
+            }
+            if ($category->is_locked && !$category->is_system) {
+                throw new \Exception('Cannot delete locked categories.');
+            }
+            throw new \Exception('This category cannot be deleted.');
         }
 
+        // Soft delete the category (sets deleted_at timestamp)
         $category->delete();
     }
 
@@ -176,5 +298,66 @@ class CategoryService
         $category->update(['is_hidden' => $hidden]);
 
         return $category->fresh();
+    }
+
+    /**
+     * Sync access rules for a category.
+     *
+     * @param Category $category
+     * @param array $accessRules Array of access rules: [['type' => 'role', 'role' => 'admin'], ['type' => 'user', 'user_id' => 1]]
+     * @return void
+     */
+    public function syncAccessRules(Category $category, array $accessRules): void
+    {
+        // Get existing rules for logging
+        $oldRules = $category->accessRules()->get()->map(function ($rule) {
+            if ($rule->access_type === 'role') {
+                return ['type' => 'role', 'role' => $rule->role];
+            } elseif ($rule->access_type === 'user') {
+                return ['type' => 'user', 'user_id' => $rule->user_id];
+            }
+            return null;
+        })->filter()->values()->toArray();
+
+        // Delete existing access rules
+        $category->accessRules()->delete();
+
+        // Create new access rules
+        $newRules = [];
+        foreach ($accessRules as $rule) {
+            if ($rule['type'] === 'role' && !empty($rule['role'])) {
+                CategoryAccess::create([
+                    'category_id' => $category->id,
+                    'brand_id' => $category->brand_id,
+                    'access_type' => 'role',
+                    'role' => $rule['role'],
+                ]);
+                $newRules[] = ['type' => 'role', 'role' => $rule['role']];
+            } elseif ($rule['type'] === 'user' && !empty($rule['user_id'])) {
+                CategoryAccess::create([
+                    'category_id' => $category->id,
+                    'brand_id' => $category->brand_id,
+                    'access_type' => 'user',
+                    'user_id' => $rule['user_id'],
+                ]);
+                $newRules[] = ['type' => 'user', 'user_id' => $rule['user_id']];
+            }
+        }
+
+        // Log activity if rules changed
+        if ($oldRules !== $newRules) {
+            $user = Auth::user();
+            ActivityRecorder::record(
+                $category->tenant,
+                EventType::CATEGORY_ACCESS_UPDATED,
+                $category,
+                $user,
+                $category->brand,
+                [
+                    'roles' => array_filter($newRules, fn($r) => $r['type'] === 'role'),
+                    'users' => array_filter($newRules, fn($r) => $r['type'] === 'user'),
+                ]
+            );
+        }
     }
 }

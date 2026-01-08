@@ -37,11 +37,28 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::middleware('tenant')->group(function () {
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
+        Route::get('/companies/permissions', [\App\Http\Controllers\CompanyController::class, 'permissions'])->name('companies.permissions');
         Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');
+        Route::put('/companies/{tenant}/team/{user}/role', [\App\Http\Controllers\TeamController::class, 'updateTenantRole'])->name('companies.team.update-role');
+        Route::put('/companies/{tenant}/team/{user}/brands/{brand}/role', [\App\Http\Controllers\TeamController::class, 'updateBrandRole'])->name('companies.team.update-brand-role');
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
+        
+        // Ownership transfer management routes
+        Route::post('/companies/{tenant}/ownership-transfer/initiate', [\App\Http\Controllers\OwnershipTransferController::class, 'initiate'])
+            ->name('ownership-transfer.initiate');
+        Route::post('/ownership-transfer/{transfer}/cancel', [\App\Http\Controllers\OwnershipTransferController::class, 'cancel'])
+            ->name('ownership-transfer.cancel');
     });
+    
+    // Ownership transfer routes (signed URLs for email links - outside tenant middleware for flexibility)
+    Route::get('/ownership-transfer/{transfer}/confirm', [\App\Http\Controllers\OwnershipTransferController::class, 'confirm'])
+        ->name('ownership-transfer.confirm')
+        ->middleware('signed');
+    Route::get('/ownership-transfer/{transfer}/accept', [\App\Http\Controllers\OwnershipTransferController::class, 'accept'])
+        ->name('ownership-transfer.accept')
+        ->middleware('signed');
     
     // Profile routes
     Route::get('/profile', [\App\Http\Controllers\ProfileController::class, 'index'])->name('profile.index');
@@ -63,6 +80,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/email-test/send', [\App\Http\Controllers\Admin\EmailTestController::class, 'send'])->name('admin.email-test.send');
     Route::get('/admin/email-test/log', [\App\Http\Controllers\Admin\EmailTestController::class, 'log'])->name('admin.email-test.log');
     Route::post('/admin/stripe/sync-subscription/{tenant}', [\App\Http\Controllers\SiteAdminController::class, 'syncSubscription'])->name('admin.stripe.sync-subscription');
+    Route::post('/admin/stripe/reset-subscriptions/{tenant}', [\App\Http\Controllers\SiteAdminController::class, 'resetSubscriptions'])->name('admin.stripe.reset-subscriptions');
     Route::post('/admin/stripe/refund', [\App\Http\Controllers\SiteAdminController::class, 'processRefund'])->name('admin.stripe.refund');
     Route::get('/admin/activity-logs', [\App\Http\Controllers\SiteAdminController::class, 'activityLogs'])->name('admin.activity-logs');
     Route::post('/admin/permissions/site-role', [\App\Http\Controllers\SiteAdminController::class, 'saveSiteRolePermissions'])->name('admin.permissions.site-role');
@@ -85,6 +103,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/system-categories', [\App\Http\Controllers\SystemCategoryController::class, 'store'])->name('admin.system-categories.store');
     Route::put('/admin/system-categories/{systemCategory}', [\App\Http\Controllers\SystemCategoryController::class, 'update'])->name('admin.system-categories.update');
     Route::delete('/admin/system-categories/{systemCategory}', [\App\Http\Controllers\SystemCategoryController::class, 'destroy'])->name('admin.system-categories.destroy');
+    Route::post('/admin/system-categories/update-order', [\App\Http\Controllers\SystemCategoryController::class, 'updateOrder'])->name('admin.system-categories.update-order');
     
     // Billing routes (no tenant middleware - billing is company-level)
     Route::get('/billing', [\App\Http\Controllers\BillingController::class, 'index'])->name('billing');
@@ -129,15 +148,31 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/brands/{brand}/invitations/{invitation}/resend', [\App\Http\Controllers\BrandController::class, 'resendInvitation'])->name('brands.invitations.resend');
 
             // Category routes (tenant-scoped)
-            Route::resource('categories', \App\Http\Controllers\CategoryController::class)->except(['create', 'edit', 'show']);
-            Route::post('/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('categories.update-order');
+            // DISABLED: Category management moved to brands pages
+            // Route::resource('categories', \App\Http\Controllers\CategoryController::class)->except(['create', 'edit', 'show']);
+            // Route::post('/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('categories.update-order');
+            // Route::get('/categories/{category}/upgrade/preview', [\App\Http\Controllers\CategoryController::class, 'previewUpgrade'])->name('categories.upgrade.preview');
+            // Route::post('/categories/{category}/upgrade', [\App\Http\Controllers\CategoryController::class, 'applyUpgrade'])->name('categories.upgrade.apply');
+            
+            // Category routes moved to brands
+            Route::post('/brands/{brand}/categories', [\App\Http\Controllers\CategoryController::class, 'store'])->name('brands.categories.store');
+            Route::post('/brands/{brand}/categories/add-system-template', [\App\Http\Controllers\CategoryController::class, 'addSystemTemplate'])->name('brands.categories.add-system-template');
+            Route::put('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'update'])->name('brands.categories.update');
+            Route::delete('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'destroy'])->name('brands.categories.destroy');
+            Route::post('/brands/{brand}/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('brands.categories.update-order');
+            Route::get('/brands/{brand}/categories/{category}/upgrade/preview', [\App\Http\Controllers\CategoryController::class, 'previewUpgrade'])->name('brands.categories.upgrade.preview');
+            Route::post('/brands/{brand}/categories/{category}/upgrade', [\App\Http\Controllers\CategoryController::class, 'applyUpgrade'])->name('brands.categories.upgrade.apply');
+            Route::post('/brands/{brand}/categories/{category}/accept-deletion', [\App\Http\Controllers\CategoryController::class, 'acceptDeletion'])->name('brands.categories.accept-deletion');
         });
         
         // Routes that don't require user to be within plan limit (like billing, company settings)
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
+        Route::delete('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'destroy'])->name('companies.destroy');
         Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');
+        Route::put('/companies/{tenant}/team/{user}/role', [\App\Http\Controllers\TeamController::class, 'updateTenantRole'])->name('companies.team.update-role');
+        Route::put('/companies/{tenant}/team/{user}/brands/{brand}/role', [\App\Http\Controllers\TeamController::class, 'updateBrandRole'])->name('companies.team.update-brand-role');
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
     });

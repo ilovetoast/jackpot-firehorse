@@ -2,14 +2,12 @@ import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id }) {
+export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id, on_demand_usage, monthly_average, currency }) {
     const { auth } = usePage().props
 
     const handleManageBilling = () => {
-        router.visit('/app/billing/portal', {
-            method: 'get',
-            preserveState: false,
-        })
+        // Direct full page redirect for external Stripe portal
+        window.location.href = '/app/billing/portal'
     }
 
     const formatCurrency = (amount, currency = 'USD') => {
@@ -45,6 +43,51 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                         </div>
                     </div>
 
+                    {/* Incomplete Payment Error - Prominent at top */}
+                    {(subscription?.has_incomplete_payment || subscription?.status === 'Incomplete') && (
+                        <div className="mb-6 rounded-md bg-red-50 p-4 border-2 border-red-200">
+                            <div className="flex">
+                                <div className="flex-shrink-0">
+                                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div className="ml-3 flex-1">
+                                    <h3 className="text-sm font-semibold text-red-800">
+                                        Payment Required - Action Needed
+                                    </h3>
+                                    <div className="mt-2 text-sm text-red-700">
+                                        <p className="font-medium">Your subscription payment is incomplete. Please complete your payment to continue service.</p>
+                                        <div className="mt-4 flex flex-wrap gap-3">
+                                            {subscription.payment_url ? (
+                                                <a
+                                                    href={subscription.payment_url}
+                                                    className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                                >
+                                                    Complete Payment Now
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                                                    </svg>
+                                                </a>
+                                            ) : null}
+                                            {has_stripe_id && (
+                                                <button
+                                                    onClick={handleManageBilling}
+                                                    className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-sm ring-1 ring-inset ring-red-300 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                                >
+                                                    Update Payment Method
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                    </svg>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Current Plan Teaser */}
                     <div className="mb-6 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="px-6 py-5 border-b border-gray-200">
@@ -63,15 +106,28 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                                         <label className="block text-sm font-medium text-gray-500">Current Plan</label>
                                         <p className="mt-1 text-lg font-semibold text-gray-900">{current_plan.name}</p>
                                     </div>
-                                    <Link
-                                        href="/app/billing"
-                                        className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
-                                    >
-                                        Manage Plan
-                                        <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                        </svg>
-                                    </Link>
+                                    <div className="flex items-center gap-3">
+                                        <Link
+                                            href="/app/billing"
+                                            className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
+                                        >
+                                            Manage Plan
+                                            <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                            </svg>
+                                        </Link>
+                                        {has_stripe_id && (
+                                            <button
+                                                onClick={handleManageBilling}
+                                                className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
+                                            >
+                                                Manage Subscription
+                                                <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-500">Subscription Status</label>
@@ -92,11 +148,6 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                                             Billing period: {subscription.period_start} - {subscription.period_end}
                                         </p>
                                     )}
-                                    {subscription.status === 'Incomplete' && (
-                                        <p className="mt-2 text-sm text-yellow-600">
-                                            ⚠ Your subscription payment is incomplete. Please update your payment method to continue service.
-                                        </p>
-                                    )}
                                 </div>
                                 {payment_method && (
                                     <div>
@@ -110,20 +161,35 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                         </div>
                     </div>
 
-                    {/* Recent Charges / On-Demand Usage */}
+                    {/* Recent Charges / On-Demand Usage & Monthly Average */}
                     <div className="mb-6 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="px-6 py-5 border-b border-gray-200">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <h2 className="text-lg font-semibold text-gray-900">On-Demand Usage</h2>
-                                    <p className="mt-1 text-sm text-gray-500">Additional charges beyond your plan</p>
+                                    <h2 className="text-lg font-semibold text-gray-900">Usage Overview</h2>
+                                    <p className="mt-1 text-sm text-gray-500">On-demand charges and monthly average</p>
                                 </div>
                             </div>
                         </div>
                         <div className="px-6 py-5">
-                            <div className="text-center py-8">
-                                <p className="text-2xl font-semibold text-gray-900">$0.00</p>
-                                <p className="mt-2 text-sm text-gray-500">No on-demand charges for this period</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* On-Demand Usage */}
+                                <div className="text-center py-6 border-r border-gray-200 md:border-r md:border-b-0 border-b pb-6 md:pb-0">
+                                    <p className="text-sm font-medium text-gray-500 mb-2">On-Demand</p>
+                                    <p className="text-3xl font-semibold text-gray-900">
+                                        {formatCurrency(on_demand_usage || 0, currency)}
+                                    </p>
+                                    <p className="mt-2 text-sm text-gray-500">Additional charges beyond your plan</p>
+                                </div>
+                                
+                                {/* Monthly Average */}
+                                <div className="text-center py-6">
+                                    <p className="text-sm font-medium text-gray-500 mb-2">Monthly Average</p>
+                                    <p className="text-3xl font-semibold text-gray-900">
+                                        {formatCurrency(monthly_average || 0, currency)}
+                                    </p>
+                                    <p className="mt-2 text-sm text-gray-500">Average monthly spend (last 12 months)</p>
+                                </div>
                             </div>
                         </div>
                     </div>

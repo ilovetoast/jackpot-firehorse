@@ -109,6 +109,14 @@ trait RecordsActivity
                     'original' => Arr::only($model->getOriginal(), array_keys($model->getChanges())),
                 ];
             }
+            
+            // Always store subject name in metadata for easier retrieval
+            // This helps when the subject relationship isn't loaded or the model is deleted
+            if (method_exists($model, 'getNameAttribute') || isset($model->name)) {
+                $metadata['subject_name'] = $model->name ?? null;
+            } elseif (method_exists($model, 'getTitleAttribute') || isset($model->title)) {
+                $metadata['subject_name'] = $model->title ?? null;
+            }
 
             // Record the event
             ActivityRecorder::record(

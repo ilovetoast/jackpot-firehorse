@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
@@ -10,6 +10,8 @@ import {
     TrashIcon,
     XMarkIcon,
     CheckIcon,
+    InformationCircleIcon,
+    Bars3Icon,
 } from '@heroicons/react/24/outline'
 
 export default function SystemCategories({ templates, asset_types }) {
@@ -17,13 +19,14 @@ export default function SystemCategories({ templates, asset_types }) {
     const [showForm, setShowForm] = useState(false)
     const [editingTemplate, setEditingTemplate] = useState(null)
     const [deletingTemplate, setDeletingTemplate] = useState(null)
+    const [draggedTemplate, setDraggedTemplate] = useState(null)
+    const [localTemplates, setLocalTemplates] = useState(templates || [])
 
     const { data, setData, post, put, delete: destroy, processing, errors, reset } = useForm({
         name: '',
         slug: '',
         icon: 'folder',
         asset_type: 'basic',
-        is_private: false,
         is_hidden: false,
         sort_order: 0,
     })
@@ -41,7 +44,6 @@ export default function SystemCategories({ templates, asset_types }) {
             slug: template.slug,
             icon: template.icon || 'folder',
             asset_type: template.asset_type,
-            is_private: template.is_private,
             is_hidden: template.is_hidden,
             sort_order: template.sort_order,
         })
@@ -81,6 +83,94 @@ export default function SystemCategories({ templates, asset_types }) {
         }
     }
 
+    // Update local templates when props change
+    useEffect(() => {
+        setLocalTemplates(templates || [])
+    }, [templates])
+
+    const handleDragStart = (e, template) => {
+        setDraggedTemplate(template)
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', template.id?.toString() || '')
+        // Make the dragged element semi-transparent
+        if (e.target) {
+            e.target.style.opacity = '0.5'
+        }
+    }
+
+    const handleDragOver = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+    }
+
+    const handleDragEnter = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+    }
+
+    const handleDrop = (e, targetTemplate, assetType) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!draggedTemplate || draggedTemplate.id === targetTemplate.id || draggedTemplate.asset_type !== assetType) {
+            setDraggedTemplate(null)
+            return
+        }
+
+        const filteredTemplates = localTemplates.filter(t => t.asset_type === assetType)
+        const draggedIndex = filteredTemplates.findIndex(t => t.id === draggedTemplate.id)
+        const targetIndex = filteredTemplates.findIndex(t => t.id === targetTemplate.id)
+
+        if (draggedIndex === -1 || targetIndex === -1) {
+            setDraggedTemplate(null)
+            return
+        }
+
+        // Create new order array
+        const newTemplates = [...filteredTemplates]
+        const [removed] = newTemplates.splice(draggedIndex, 1)
+        newTemplates.splice(targetIndex, 0, removed)
+
+        // Update sort_order values (use increments of 10 for easier reordering)
+        const orderUpdates = newTemplates.map((template, index) => ({
+            id: template.id,
+            sort_order: index * 10,
+        }))
+
+        // Update local state immediately for better UX
+        setLocalTemplates(prev => {
+            const updated = [...prev]
+            orderUpdates.forEach(({ id, sort_order }) => {
+                const idx = updated.findIndex(t => t.id === id)
+                if (idx !== -1) {
+                    updated[idx] = { ...updated[idx], sort_order }
+                }
+            })
+            return updated
+        })
+
+        // Send update to server
+        router.post('/app/admin/system-categories/update-order', {
+            templates: orderUpdates,
+        }, {
+            preserveScroll: true,
+            onError: () => {
+                // Revert on error
+                setLocalTemplates(templates || [])
+            },
+        })
+
+        setDraggedTemplate(null)
+    }
+
+    const handleDragEnd = (e) => {
+        // Reset opacity
+        if (e.target) {
+            e.target.style.opacity = ''
+        }
+        setDraggedTemplate(null)
+    }
+
     return (
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
@@ -94,24 +184,35 @@ export default function SystemCategories({ templates, asset_types }) {
                         >
                             ← Back to Admin
                         </Link>
-                        <div className="flex items-center justify-between">
-                            <div>
+                        <div className="flex items-start justify-between">
+                            <div className="flex-1">
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">System Categories</h1>
                                 <p className="mt-2 text-sm text-gray-700">
                                     Manage global system category templates. These categories are automatically copied to new brands when they are created.
                                 </p>
-                                <p className="mt-1 text-xs text-amber-600">
-                                    Note: Updates to templates only affect new brands. Existing brands have their own copies of these categories.
-                                </p>
+                                <div className="mt-4 rounded-md bg-blue-50 p-4">
+                                    <div className="flex">
+                                        <div className="flex-shrink-0">
+                                            <InformationCircleIcon className="h-5 w-5 text-blue-400" aria-hidden="true" />
+                                        </div>
+                                        <div className="ml-3">
+                                            <p className="text-sm text-blue-700">
+                                                <strong>Note:</strong> When you update a system category template, a new version is created. Existing brands will see an "Update available" badge and can choose to upgrade their category to the latest version while preserving any customizations they've made.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <button
-                                type="button"
-                                onClick={handleCreate}
-                                className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-dark focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                            >
-                                <PlusIcon className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
-                                New Category
-                            </button>
+                            <div className="ml-6 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={handleCreate}
+                                    className="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-dark focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                >
+                                    <PlusIcon className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
+                                    New Category
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -205,7 +306,7 @@ export default function SystemCategories({ templates, asset_types }) {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <div>
                                         <label htmlFor="sort_order" className="block text-sm font-medium leading-6 text-gray-900">
                                             Sort Order
@@ -222,20 +323,6 @@ export default function SystemCategories({ templates, asset_types }) {
                                             />
                                             {errors.sort_order && <p className="mt-1 text-sm text-red-600">{errors.sort_order}</p>}
                                         </div>
-                                    </div>
-
-                                    <div className="flex items-center">
-                                        <input
-                                            id="is_private"
-                                            name="is_private"
-                                            type="checkbox"
-                                            checked={data.is_private}
-                                            onChange={(e) => setData('is_private', e.target.checked)}
-                                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                        />
-                                        <label htmlFor="is_private" className="ml-3 block text-sm font-medium text-gray-900">
-                                            Is Private
-                                        </label>
                                     </div>
 
                                     <div className="flex items-center">
@@ -290,7 +377,7 @@ export default function SystemCategories({ templates, asset_types }) {
                                 </p>
                             </div>
 
-                            {templates.filter(t => t.asset_type === 'basic').length === 0 ? (
+                            {localTemplates.filter(t => t.asset_type === 'basic').length === 0 ? (
                                 <div className="px-6 py-12 text-center">
                                     <p className="text-sm text-gray-500">No basic categories yet.</p>
                                     <button
@@ -322,14 +409,29 @@ export default function SystemCategories({ templates, asset_types }) {
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Flags
                                                 </th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Upgrade Status
+                                                </th>
                                                 <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Actions
                                                 </th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                            {templates.filter(t => t.asset_type === 'basic').map((template) => (
-                                                <tr key={template.id} className="hover:bg-gray-50">
+                                            {localTemplates.filter(t => t.asset_type === 'basic').map((template) => (
+                                                <tr 
+                                                    key={template.id} 
+                                                    className="hover:bg-gray-50"
+                                                    draggable
+                                                    onDragStart={(e) => handleDragStart(e, template)}
+                                                    onDragOver={handleDragOver}
+                                                    onDragEnter={handleDragEnter}
+                                                    onDrop={(e) => handleDrop(e, template, 'basic')}
+                                                    onDragEnd={handleDragEnd}
+                                                >
+                                                    <td className="px-6 py-4 whitespace-nowrap cursor-move">
+                                                        <Bars3Icon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                                                    </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="flex items-center gap-3">
                                                             <CategoryIcon 
@@ -348,17 +450,38 @@ export default function SystemCategories({ templates, asset_types }) {
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="flex gap-2">
-                                                            {template.is_private && (
-                                                                <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-yellow-50 text-yellow-700 ring-yellow-600/20">
-                                                                    Private
-                                                                </span>
-                                                            )}
                                                             {template.is_hidden && (
                                                                 <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-gray-50 text-gray-700 ring-gray-600/20">
                                                                     Hidden
                                                                 </span>
                                                             )}
                                                         </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        {template.upgrade_stats && template.upgrade_stats.total_brands > 0 ? (
+                                                            <div className="text-sm">
+                                                                <div className="flex items-center gap-2">
+                                                                    {template.upgrade_stats.queued_upgrades > 0 && (
+                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
+                                                                            {template.upgrade_stats.queued_upgrades} queued
+                                                                        </span>
+                                                                    )}
+                                                                    {template.upgrade_stats.upgraded > 0 && (
+                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20">
+                                                                            {template.upgrade_stats.upgraded} upgraded
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="mt-1 text-xs text-gray-500">
+                                                                    v{template.version} • {template.upgrade_stats.total_brands} brand{template.upgrade_stats.total_brands !== 1 ? 's' : ''}
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-sm text-gray-400">
+                                                                <div>v{template.version}</div>
+                                                                <div className="text-xs mt-1">No brands yet</div>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                         <div className="flex items-center justify-end gap-2">
@@ -395,7 +518,7 @@ export default function SystemCategories({ templates, asset_types }) {
                                 </p>
                             </div>
 
-                            {templates.filter(t => t.asset_type === 'marketing').length === 0 ? (
+                            {localTemplates.filter(t => t.asset_type === 'marketing').length === 0 ? (
                                 <div className="px-6 py-12 text-center">
                                     <p className="text-sm text-gray-500">No marketing categories yet.</p>
                                     <button
@@ -415,6 +538,9 @@ export default function SystemCategories({ templates, asset_types }) {
                                     <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50">
                                             <tr>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
+                                                    <span className="sr-only">Drag handle</span>
+                                                </th>
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Name
                                                 </th>
@@ -427,14 +553,29 @@ export default function SystemCategories({ templates, asset_types }) {
                                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Flags
                                                 </th>
+                                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Upgrade Status
+                                                </th>
                                                 <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Actions
                                                 </th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                            {templates.filter(t => t.asset_type === 'marketing').map((template) => (
-                                                <tr key={template.id} className="hover:bg-gray-50">
+                                            {localTemplates.filter(t => t.asset_type === 'marketing').map((template) => (
+                                                <tr 
+                                                    key={template.id} 
+                                                    className="hover:bg-gray-50"
+                                                    draggable
+                                                    onDragStart={(e) => handleDragStart(e, template)}
+                                                    onDragOver={handleDragOver}
+                                                    onDragEnter={handleDragEnter}
+                                                    onDrop={(e) => handleDrop(e, template, 'marketing')}
+                                                    onDragEnd={handleDragEnd}
+                                                >
+                                                    <td className="px-6 py-4 whitespace-nowrap cursor-move">
+                                                        <Bars3Icon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                                                    </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="flex items-center gap-3">
                                                             <CategoryIcon 
@@ -453,17 +594,38 @@ export default function SystemCategories({ templates, asset_types }) {
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="flex gap-2">
-                                                            {template.is_private && (
-                                                                <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-yellow-50 text-yellow-700 ring-yellow-600/20">
-                                                                    Private
-                                                                </span>
-                                                            )}
                                                             {template.is_hidden && (
                                                                 <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-gray-50 text-gray-700 ring-gray-600/20">
                                                                     Hidden
                                                                 </span>
                                                             )}
                                                         </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        {template.upgrade_stats && template.upgrade_stats.total_brands > 0 ? (
+                                                            <div className="text-sm">
+                                                                <div className="flex items-center gap-2">
+                                                                    {template.upgrade_stats.queued_upgrades > 0 && (
+                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-700 ring-amber-600/20">
+                                                                            {template.upgrade_stats.queued_upgrades} queued
+                                                                        </span>
+                                                                    )}
+                                                                    {template.upgrade_stats.upgraded > 0 && (
+                                                                        <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20">
+                                                                            {template.upgrade_stats.upgraded} upgraded
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="mt-1 text-xs text-gray-500">
+                                                                    v{template.version} • {template.upgrade_stats.total_brands} brand{template.upgrade_stats.total_brands !== 1 ? 's' : ''}
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-sm text-gray-400">
+                                                                <div>v{template.version}</div>
+                                                                <div className="text-xs mt-1">No brands yet</div>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                         <div className="flex items-center justify-end gap-2">

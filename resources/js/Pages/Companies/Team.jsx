@@ -9,6 +9,7 @@ import BrandRoleSelector from '../../Components/BrandRoleSelector'
 export default function Team({ tenant, members, brands = [], current_user_count, max_users, user_limit_reached }) {
     const { auth } = usePage().props
     const [showInviteModal, setShowInviteModal] = useState(false)
+    const [updatingRoles, setUpdatingRoles] = useState({})
     const { data, setData, post, processing, errors, reset } = useForm({
         email: '',
         role: 'member',
@@ -43,6 +44,38 @@ export default function Team({ tenant, members, brands = [], current_user_count,
         setData('brands', brandAssignments)
     }
 
+    const handleTenantRoleChange = (userId, newRole) => {
+        setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: true }))
+        router.put(`/app/companies/${tenant.id}/team/${userId}/role`, {
+            role: newRole
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: false }))
+                router.reload({ preserveScroll: true })
+            },
+            onError: () => {
+                setUpdatingRoles(prev => ({ ...prev, [`tenant_${userId}`]: false }))
+            }
+        })
+    }
+
+    const handleBrandRoleChange = (userId, brandId, newRole) => {
+        setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: true }))
+        router.put(`/app/companies/${tenant.id}/team/${userId}/brands/${brandId}/role`, {
+            role: newRole
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
+                router.reload({ preserveScroll: true })
+            },
+            onError: () => {
+                setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
+            }
+        })
+    }
+
     const formatDate = (dateString) => {
         const date = new Date(dateString)
         return date.toLocaleDateString('en-US', { 
@@ -50,6 +83,19 @@ export default function Team({ tenant, members, brands = [], current_user_count,
             month: 'short', 
             day: 'numeric' 
         })
+    }
+
+    const getRoleColors = (role) => {
+        const roleLower = role?.toLowerCase()
+        // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
+        const normalizedRole = roleLower === 'owner' ? 'admin' : roleLower
+        const colors = {
+            owner: 'bg-orange-100 text-orange-800 border-orange-200',
+            admin: 'bg-purple-100 text-purple-800 border-purple-200',
+            brand_manager: 'bg-blue-100 text-blue-800 border-blue-200',
+            member: 'bg-gray-100 text-gray-800 border-gray-200',
+        }
+        return colors[normalizedRole] || colors.member
     }
 
     return (
@@ -117,36 +163,70 @@ export default function Team({ tenant, members, brands = [], current_user_count,
 
                                         {/* Member Info */}
                                         <div className="flex-1">
-                                            <div className="flex items-center space-x-2">
+                                            <div className="flex items-center space-x-2 flex-wrap gap-2">
                                                 <span className="text-sm font-medium text-gray-900">
                                                     {member.first_name} {member.last_name}
                                                 </span>
-                                                <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                                                    isOwner 
-                                                        ? 'bg-orange-100 text-orange-800' 
-                                                        : 'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                    {isOwner && (
-                                                        <span className="mr-1">👑</span>
-                                                    )}
-                                                    {member.role}
-                                                </span>
+                                                {/* Tenant Role Selector */}
+                                                <div className="relative inline-flex items-center">
+                                                    <select
+                                                        value={member.role_value || 'member'}
+                                                        onChange={(e) => handleTenantRoleChange(member.id, e.target.value)}
+                                                        disabled={isOwner || updatingRoles[`tenant_${member.id}`]}
+                                                        className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(member.role_value)}`}
+                                                    >
+                                                        <option value="owner">👑 Owner</option>
+                                                        <option value="admin">Admin</option>
+                                                        <option value="brand_manager">Brand Manager</option>
+                                                        <option value="member">Member</option>
+                                                    </select>
+                                                    <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                    </svg>
+                                                </div>
+                                                {updatingRoles[`tenant_${member.id}`] && (
+                                                    <span className="text-xs text-gray-500">Updating...</span>
+                                                )}
                                             </div>
                                             <p className="mt-1 text-sm text-gray-500">{member.email}</p>
+                                            
+                                            {/* Brand Assignments - Displayed prominently with role selectors */}
                                             {member.brand_assignments && member.brand_assignments.length > 0 && (
-                                                <div className="mt-2">
-                                                    <p className="text-xs text-gray-500">
-                                                        Brands: {member.brand_assignments.map((ba, idx) => (
-                                                            <span key={ba.id}>
-                                                                {idx > 0 && ', '}
-                                                                <span className="font-medium">{ba.name}</span>
-                                                                <span className="text-gray-400"> ({ba.role})</span>
-                                                            </span>
-                                                        ))}
-                                                    </p>
+                                                <div className="mt-3">
+                                                    <p className="text-xs font-medium text-gray-700 mb-2">Brand Roles:</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {member.brand_assignments.map((ba) => {
+                                                            const isUpdating = updatingRoles[`brand_${member.id}_${ba.id}`]
+                                                            
+                                                            return (
+                                                                <div key={ba.id} className="flex items-center gap-1.5">
+                                                                    <span className="text-xs font-medium text-gray-700">{ba.name}:</span>
+                                                                    <div className="relative inline-flex items-center">
+                                                                        <select
+                                                                            value={ba.role?.toLowerCase() || 'member'}
+                                                                            onChange={(e) => handleBrandRoleChange(member.id, ba.id, e.target.value)}
+                                                                            disabled={isUpdating}
+                                                                            className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
+                                                                        >
+                                                                            <option value="admin">Admin</option>
+                                                                            <option value="brand_manager">Brand Manager</option>
+                                                                            <option value="member">Member</option>
+                                                                        </select>
+                                                                        <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                                        </svg>
+                                                                    </div>
+                                                                    {isUpdating && (
+                                                                        <span className="text-xs text-gray-500">Updating...</span>
+                                                                    )}
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
                                                 </div>
                                             )}
-                                            <p className="mt-1 text-xs text-gray-400">
+                                            
+                                            <p className="mt-2 text-xs text-gray-400">
                                                 Joined {formatDate(member.joined_at)}
                                             </p>
                                         </div>
@@ -225,6 +305,9 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                                 <option value="brand_manager">Brand Manager</option>
                                                 <option value="owner">Owner</option>
                                             </select>
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                Note: Owner role is for company-level only. Brand roles will default to Admin for owners.
+                                            </p>
                                             {errors.role && (
                                                 <p className="mt-1 text-sm text-red-600">{errors.role}</p>
                                             )}

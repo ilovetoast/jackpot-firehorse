@@ -22,6 +22,7 @@ class PermissionSeeder extends Seeder
             'activity_logs.view',
             'brand_settings.manage',
             'brand_categories.manage',
+            'view.restricted.categories',
         ];
 
         // Site permissions (global)

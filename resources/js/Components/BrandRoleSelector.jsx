@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { TagIcon } from '@heroicons/react/24/outline'
 
 export default function BrandRoleSelector({ 
@@ -14,18 +14,33 @@ export default function BrandRoleSelector({
         if (selectedBrands && selectedBrands.length > 0) {
             return selectedBrands.map(b => ({
                 brand_id: b.brand_id || b.id,
-                role: b.role || 'member',
+                // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
+                role: (b.role === 'owner' ? 'admin' : b.role) || 'member',
             }))
         }
         return []
     })
+    
+    const isInitialMount = useRef(true)
+    const onChangeRef = useRef(onChange)
+    
+    // Keep onChange ref up to date
+    useEffect(() => {
+        onChangeRef.current = onChange
+    }, [onChange])
 
     useEffect(() => {
-        // Notify parent of changes
-        if (onChange) {
-            onChange(brandAssignments)
+        // Skip onChange on initial mount to prevent infinite loop
+        if (isInitialMount.current) {
+            isInitialMount.current = false
+            return
         }
-    }, [brandAssignments, onChange])
+        
+        // Only call onChange if it exists and we're not on initial mount
+        if (onChangeRef.current) {
+            onChangeRef.current(brandAssignments)
+        }
+    }, [brandAssignments])
 
     const toggleBrand = (brandId) => {
         const exists = brandAssignments.find(b => b.brand_id === brandId)
@@ -61,7 +76,11 @@ export default function BrandRoleSelector({
     }
 
     const isValidRole = (role) => {
-        return ['member', 'admin', 'brand_manager', 'owner'].includes(role)
+        // Owner is not a valid brand role - convert to admin
+        if (role === 'owner') {
+            return false
+        }
+        return ['member', 'admin', 'brand_manager'].includes(role)
     }
 
     return (
@@ -117,7 +136,7 @@ export default function BrandRoleSelector({
 
                                 {isSelected && (
                                     <select
-                                        value={assignment.role}
+                                        value={assignment.role === 'owner' ? 'admin' : assignment.role}
                                         onChange={(e) => updateRole(brand.id, e.target.value)}
                                         onClick={(e) => e.stopPropagation()}
                                         className="ml-4 block rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
@@ -125,7 +144,6 @@ export default function BrandRoleSelector({
                                         <option value="member">Member</option>
                                         <option value="admin">Admin</option>
                                         <option value="brand_manager">Brand Manager</option>
-                                        <option value="owner">Owner</option>
                                     </select>
                                 )}
                             </div>

@@ -250,7 +250,7 @@ class HandleInertiaRequests extends Middleware
         }
 
         return [
-            ...parent::share($request),
+            ...parent::share($request), // This automatically includes 'old' input from Laravel
             'flash' => [
                 'success' => $request->session()->get('success'),
                 'error' => $request->session()->get('error'),

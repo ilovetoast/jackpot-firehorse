@@ -37,16 +37,20 @@ class SystemCategoryController extends Controller
         $templates = $this->systemCategoryService->getAllTemplates();
 
         return Inertia::render('Admin/SystemCategories', [
-            'templates' => $templates->map(fn ($template) => [
-                'id' => $template->id,
-                'name' => $template->name,
-                'slug' => $template->slug,
-                'icon' => $template->icon,
-                'asset_type' => $template->asset_type->value,
-                'is_private' => $template->is_private,
-                'is_hidden' => $template->is_hidden,
-                'sort_order' => $template->sort_order,
-            ]),
+            'templates' => $templates->map(function ($template) {
+                $stats = $this->systemCategoryService->getUpgradeStatistics($template);
+                return [
+                    'id' => $template->id,
+                    'name' => $template->name,
+                    'slug' => $template->slug,
+                    'icon' => $template->icon,
+                    'asset_type' => $template->asset_type->value,
+                    'is_hidden' => $template->is_hidden,
+                    'sort_order' => $template->sort_order,
+                    'version' => $template->version,
+                    'upgrade_stats' => $stats,
+                ];
+            }),
             'asset_types' => [
                 ['value' => AssetType::BASIC->value, 'label' => 'Basic'],
                 ['value' => AssetType::MARKETING->value, 'label' => 'Marketing'],
@@ -65,7 +69,6 @@ class SystemCategoryController extends Controller
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
             'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
-            'is_private' => 'boolean',
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
         ]);
@@ -93,7 +96,6 @@ class SystemCategoryController extends Controller
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
             'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
-            'is_private' => 'boolean',
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
         ]);
@@ -125,6 +127,47 @@ class SystemCategoryController extends Controller
             return back()->withErrors([
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Update the sort order of system category templates.
+     */
+    public function updateOrder(Request $request)
+    {
+        $this->checkSiteOwnerAccess();
+        $validated = $request->validate([
+            'templates' => 'required|array',
+            'templates.*.id' => 'required|integer|exists:system_categories,id',
+            'templates.*.sort_order' => 'required|integer|min:0',
+        ]);
+
+        try {
+            foreach ($validated['templates'] as $item) {
+                $template = SystemCategory::find($item['id']);
+                if ($template && $template->isLatestVersion()) {
+                    // Only update sort_order for the latest version
+                    $template->update(['sort_order' => $item['sort_order']]);
+                }
+            }
+
+            // Return JSON for non-Inertia requests, redirect for Inertia requests
+            if ($request->header('X-Inertia')) {
+                return back();
+            }
+
+            return response()->json(['success' => true]);
+        } catch (\Exception $e) {
+            // Return JSON for non-Inertia requests, redirect for Inertia requests
+            if ($request->header('X-Inertia')) {
+                return back()->withErrors([
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 400);
         }
     }
 }

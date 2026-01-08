@@ -1,5 +1,6 @@
 import { useForm, router } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { usePage } from '@inertiajs/react'
 
 // Common countries list
 const countries = [
@@ -81,20 +82,58 @@ const timezones = [
 ]
 
 export default function InviteRegistration({ invitation }) {
+    const pageProps = usePage().props
+    const old = pageProps?.old || {}
+    
+    // Initialize form with old input if available (from validation errors)
     const { data, setData, post, processing, errors } = useForm({
-        first_name: '',
-        last_name: '',
-        password: '',
-        password_confirmation: '',
-        country: '',
-        timezone: '',
+        first_name: old.first_name || '',
+        last_name: old.last_name || '',
+        password: '', // Never restore password for security
+        password_confirmation: '', // Never restore password for security
+        country: old.country || '',
+        timezone: old.timezone || '',
     })
 
     const [showOptional, setShowOptional] = useState(false)
+    
+    // Also update form if old input changes (handles case where it's not available on first render)
+    useEffect(() => {
+        if (old && Object.keys(old).length > 0) {
+            // Check if form needs updating by comparing current values with old input
+            const needsUpdate = 
+                (old.first_name && old.first_name !== data.first_name) ||
+                (old.last_name && old.last_name !== data.last_name) ||
+                (old.country !== undefined && old.country !== data.country) ||
+                (old.timezone !== undefined && old.timezone !== data.timezone)
+            
+            if (needsUpdate) {
+                setData({
+                    first_name: old.first_name !== undefined ? old.first_name : data.first_name,
+                    last_name: old.last_name !== undefined ? old.last_name : data.last_name,
+                    password: '', // Always clear password on error for security
+                    password_confirmation: '', // Always clear password on error for security
+                    country: old.country !== undefined ? old.country : data.country,
+                    timezone: old.timezone !== undefined ? old.timezone : data.timezone,
+                })
+            }
+        }
+    }, [old?.first_name, old?.last_name, old?.country, old?.timezone, data, setData])
 
     const handleSubmit = (e) => {
         e.preventDefault()
-        post(`/invite/complete/${invitation.token}/${invitation.tenant.id}`)
+        // Use Inertia's post method which should handle validation errors without a full page refresh
+        post(`/invite/complete/${invitation.token}/${invitation.tenant.id}`, {
+            preserveScroll: true,
+            onError: (errors) => {
+                // Form data will be restored from old input via the form initialization
+                // Errors are automatically handled by Inertia
+                console.log('Validation errors:', errors)
+            },
+            onSuccess: () => {
+                // Form submitted successfully
+            },
+        })
     }
 
     return (

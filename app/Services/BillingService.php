@@ -68,7 +68,18 @@ class BillingService
             $wasSubscribed = $oldSubscription !== null;
             
             // Check if subscription has incomplete payment
-            if ($wasSubscribed && $oldSubscription->hasIncompletePayment()) {
+            // Only check if subscription has a Stripe customer (stripe_id) - forced plans may not have one
+            if ($wasSubscribed && $oldSubscription->stripe_id && $tenant->stripe_id && $oldSubscription->hasIncompletePayment()) {
+                // Set the owner on the subscription so Cashier methods work properly
+                // When we query subscriptions directly, the owner isn't automatically set
+                if (method_exists($oldSubscription, 'setOwner')) {
+                    $oldSubscription->setOwner($tenant);
+                } elseif (property_exists($oldSubscription, 'owner')) {
+                    $oldSubscription->owner = $tenant;
+                } elseif (method_exists($oldSubscription, 'setRelation')) {
+                    $oldSubscription->setRelation('owner', $tenant);
+                }
+                
                 // Get the latest payment for redirect URL
                 $latestPayment = $oldSubscription->latestPayment();
                 throw new \RuntimeException(
@@ -216,7 +227,22 @@ class BillingService
     {
         try {
             if ($tenant->subscribed()) {
-                $tenant->subscription('default')->cancel();
+                $subscription = $tenant->subscription('default');
+                $planService = new PlanService();
+                $currentPlan = $planService->getCurrentPlan($tenant);
+                
+                $subscription->cancel();
+                
+                // Log activity
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: EventType::SUBSCRIPTION_CANCELED,
+                    actor: auth()->user(),
+                    metadata: [
+                        'plan' => $currentPlan,
+                        'plan_name' => config("plans.{$currentPlan}.name", ucfirst($currentPlan)),
+                    ]
+                );
             }
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to cancel subscription: ' . $e->getMessage());
@@ -229,8 +255,24 @@ class BillingService
     public function resumeSubscription(Tenant $tenant): void
     {
         try {
-            if ($tenant->subscription('default')->canceled()) {
-                $tenant->subscription('default')->resume();
+            $subscription = $tenant->subscription('default');
+            if ($subscription && $subscription->canceled()) {
+                $planService = new PlanService();
+                $currentPlan = $planService->getCurrentPlan($tenant);
+                
+                $subscription->resume();
+                
+                // Log activity
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: EventType::SUBSCRIPTION_UPDATED,
+                    actor: auth()->user(),
+                    metadata: [
+                        'action' => 'resumed',
+                        'plan' => $currentPlan,
+                        'plan_name' => config("plans.{$currentPlan}.name", ucfirst($currentPlan)),
+                    ]
+                );
             }
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to resume subscription: ' . $e->getMessage());

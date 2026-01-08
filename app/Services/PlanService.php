@@ -136,6 +136,47 @@ class PlanService
     }
 
     /**
+     * Check if tenant can create a private category for a brand.
+     * Requires Pro or Enterprise plan, and checks private category limit.
+     */
+    public function canCreatePrivateCategory(Tenant $tenant, Brand $brand): bool
+    {
+        $planName = $this->getCurrentPlan($tenant);
+        
+        // Only Pro and Enterprise plans can create private categories
+        if (!in_array($planName, ['pro', 'enterprise'])) {
+            return false;
+        }
+
+        $limits = $this->getPlanLimits($tenant);
+        $maxPrivateCategories = $limits['max_private_categories'] ?? 0;
+        
+        // Count only private custom (non-system) categories for the brand
+        $currentPrivateCount = $brand->categories()
+            ->custom()
+            ->where('is_private', true)
+            ->count();
+
+        return $currentPrivateCount < $maxPrivateCategories;
+    }
+
+    /**
+     * Get the maximum number of private categories allowed for a tenant.
+     */
+    public function getMaxPrivateCategories(Tenant $tenant): int
+    {
+        $planName = $this->getCurrentPlan($tenant);
+        
+        // Only Pro and Enterprise plans can create private categories
+        if (!in_array($planName, ['pro', 'enterprise'])) {
+            return 0;
+        }
+
+        $limits = $this->getPlanLimits($tenant);
+        return $limits['max_private_categories'] ?? 0;
+    }
+
+    /**
      * Get maximum upload size in bytes.
      */
     public function getMaxUploadSize(Tenant $tenant): int

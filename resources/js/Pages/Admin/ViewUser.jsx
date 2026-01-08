@@ -43,18 +43,55 @@ export default function ViewUser({ user, companies, brand_assignments, activitie
     }
 
     const handleDeleteAccount = () => {
-        if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE ${user.first_name} ${user.last_name}'s account? This action cannot be undone.`)) {
+        const userName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || 'this user'
+        
+        if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE ${userName}'s account? This action cannot be undone.`)) {
             if (confirm(`Final confirmation: This will permanently delete the account. Continue?`)) {
-                if (companies && companies.length > 0) {
-                    router.post(`/app/admin/companies/${companies[0].id}/users/${user.id}/delete`, {
-                        preserveScroll: true,
-                        onSuccess: () => {
-                            router.visit('/app/admin', {
-                                data: { activeTab: 'users' }
-                            })
-                        },
-                    })
+                if (!companies || companies.length === 0) {
+                    alert('Cannot delete account: User is not associated with any company.')
+                    return
                 }
+                
+                const companyId = companies[0].id
+                const userId = user.id
+                
+                if (!companyId || !userId) {
+                    alert('Error: Missing company or user ID. Please refresh the page and try again.')
+                    console.error('Missing IDs:', { companyId, userId, companies, user })
+                    return
+                }
+                
+                const deleteUrl = `/app/admin/companies/${companyId}/users/${userId}/delete`
+                
+                console.log('Deleting account:', { companyId, userId, deleteUrl, companies })
+                
+                router.post(deleteUrl, {}, {
+                    preserveScroll: false,
+                    onSuccess: (page) => {
+                        console.log('Delete successful, redirecting...', page)
+                        router.visit('/app/admin', {
+                            data: { activeTab: 'users' },
+                            preserveState: false,
+                        })
+                    },
+                    onError: (errors) => {
+                        console.error('Delete account error:', errors)
+                        let errorMessage = 'Failed to delete account. '
+                        if (errors.user) {
+                            errorMessage += errors.user
+                        } else if (errors.error) {
+                            errorMessage += errors.error
+                        } else if (typeof errors === 'string') {
+                            errorMessage += errors
+                        } else {
+                            errorMessage += 'Please check the console for details.'
+                        }
+                        alert(errorMessage)
+                    },
+                    onFinish: () => {
+                        console.log('Delete request finished')
+                    },
+                })
             }
         }
     }

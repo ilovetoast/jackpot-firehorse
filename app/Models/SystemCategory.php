@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Enums\AssetType;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 /**
@@ -34,6 +36,8 @@ class SystemCategory extends Model
         'is_private',
         'is_hidden',
         'sort_order',
+        'version',
+        'change_summary',
     ];
 
     /**
@@ -48,6 +52,7 @@ class SystemCategory extends Model
             'is_private' => 'boolean',
             'is_hidden' => 'boolean',
             'sort_order' => 'integer',
+            'version' => 'integer',
         ];
     }
 
@@ -62,6 +67,63 @@ class SystemCategory extends Model
             if (empty($systemCategory->slug)) {
                 $systemCategory->slug = Str::slug($systemCategory->name);
             }
+            // Set default version if not provided
+            if (!isset($systemCategory->version)) {
+                $systemCategory->version = 1;
+            }
         });
+    }
+
+    /**
+     * Scope a query to only include the latest version of each template.
+     * Latest version is the highest version number for each slug/asset_type combination.
+     */
+    public function scopeLatestVersion(Builder $query): Builder
+    {
+        return $query->whereIn('id', function ($subquery) {
+            $subquery->selectRaw('MAX(id) as id')
+                ->from('system_categories as sc2')
+                ->whereColumn('sc2.slug', 'system_categories.slug')
+                ->whereColumn('sc2.asset_type', 'system_categories.asset_type')
+                ->whereRaw('sc2.version = (SELECT MAX(version) FROM system_categories sc3 WHERE sc3.slug = sc2.slug AND sc3.asset_type = sc2.asset_type)');
+        });
+    }
+
+    /**
+     * Get all previous versions of this system category template.
+     * Previous versions are other SystemCategory records with the same slug and asset_type
+     * but lower version numbers.
+     */
+    public function previousVersions(): HasMany
+    {
+        return $this->hasMany(SystemCategory::class, 'slug', 'slug')
+            ->where('asset_type', $this->asset_type)
+            ->where('version', '<', $this->version)
+            ->orderBy('version', 'desc');
+    }
+
+    /**
+     * Get the latest version of this system category template.
+     * Finds the SystemCategory with the same slug and asset_type but highest version.
+     *
+     * @return SystemCategory|null
+     */
+    public function getLatestVersion(): ?SystemCategory
+    {
+        return SystemCategory::where('slug', $this->slug)
+            ->where('asset_type', $this->asset_type)
+            ->orderBy('version', 'desc')
+            ->first();
+    }
+
+    /**
+     * Check if this is the latest version of the template.
+     *
+     * @return bool
+     */
+    public function isLatestVersion(): bool
+    {
+        $latest = $this->getLatestVersion();
+        return $latest && $latest->id === $this->id;
     }
 }

@@ -106,22 +106,50 @@ class BillingController extends Controller
         $sitePrimaryColor = '#6366f1'; // Default Jackpot brand color
 
         // Check for incomplete payment and get payment URL if needed
+        // Only check if subscription has a Stripe customer (stripe_id) - forced plans may not have one
         $paymentUrl = null;
         $hasIncompletePayment = false;
-        if ($subscription && method_exists($subscription, 'hasIncompletePayment') && $subscription->hasIncompletePayment()) {
+        if ($subscription && $subscription->stripe_id && $tenant->stripe_id && method_exists($subscription, 'hasIncompletePayment')) {
             try {
-                $latestPayment = $subscription->latestPayment();
-                if ($latestPayment && $latestPayment->id) {
+                // Set the owner on the subscription so Cashier methods work properly
+                // When we query subscriptions directly, the owner isn't automatically set
+                if (method_exists($subscription, 'setOwner')) {
+                    $subscription->setOwner($tenant);
+                } elseif (property_exists($subscription, 'owner')) {
+                    $subscription->owner = $tenant;
+                } elseif (method_exists($subscription, 'setRelation')) {
+                    $subscription->setRelation('owner', $tenant);
+                }
+                
+                $hasIncomplete = $subscription->hasIncompletePayment();
+                if ($hasIncomplete && method_exists($subscription, 'latestPayment')) {
                     try {
-                        $paymentUrl = route('cashier.payment', $latestPayment->id);
-                    } catch (\Exception $routeError) {
-                        // If route doesn't exist, construct URL manually
-                        $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
+                        $latestPayment = $subscription->latestPayment();
+                        if ($latestPayment && is_object($latestPayment) && isset($latestPayment->id)) {
+                            try {
+                                $paymentUrl = route('cashier.payment', $latestPayment->id);
+                            } catch (\Exception $routeError) {
+                                // If route doesn't exist, construct URL manually
+                                $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
+                            }
+                            $hasIncompletePayment = true;
+                        }
+                    } catch (\Exception $paymentError) {
+                        // If we can't get latest payment, that's okay
+                        // Log the error for debugging but don't break the page
+                        \Log::warning('Failed to get latest payment for subscription', [
+                            'subscription_id' => $subscription->id ?? null,
+                            'error' => $paymentError->getMessage(),
+                        ]);
                     }
-                    $hasIncompletePayment = true;
                 }
             } catch (\Exception $e) {
-                // If we can't get payment URL, that's okay
+                // If hasIncompletePayment() throws an error, that's okay
+                // This can happen if Stripe connection is not properly configured
+                \Log::warning('Failed to check incomplete payment status', [
+                    'subscription_id' => $subscription->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 
@@ -276,9 +304,20 @@ class BillingController extends Controller
             // Check if error is about incomplete payment
             if (str_contains(strtolower($errorMessage), 'incomplete') || str_contains(strtolower($errorMessage), 'payment')) {
                 // Try to get payment confirmation URL
+                // Only check if subscription has a Stripe customer (stripe_id) - forced plans may not have one
                 $subscription = $tenant->subscription('default');
-                if ($subscription && method_exists($subscription, 'hasIncompletePayment') && $subscription->hasIncompletePayment()) {
+                if ($subscription && $subscription->stripe_id && $tenant->stripe_id && method_exists($subscription, 'hasIncompletePayment') && $subscription->hasIncompletePayment()) {
                     try {
+                        // Ensure owner is set on subscription before calling latestPayment()
+                        // Even though subscription() should set it, we add this as a safety check
+                        if (method_exists($subscription, 'setOwner')) {
+                            $subscription->setOwner($tenant);
+                        } elseif (property_exists($subscription, 'owner')) {
+                            $subscription->owner = $tenant;
+                        } elseif (method_exists($subscription, 'setRelation')) {
+                            $subscription->setRelation('owner', $tenant);
+                        }
+                        
                         $latestPayment = $subscription->latestPayment();
                         if ($latestPayment && $latestPayment->id) {
                             // Return error with payment URL - Cashier provides this route
@@ -377,6 +416,76 @@ class BillingController extends Controller
             ];
         })->sortByDesc('date_raw')->values();
 
+        // Calculate on-demand usage and monthly average
+        $onDemandUsage = 0.00;
+        $monthlyAverage = 0.00;
+        $currency = 'USD';
+        
+        if ($tenant->stripe_id && $subscription) {
+            try {
+                $stripeSecret = env('STRIPE_SECRET');
+                if ($stripeSecret) {
+                    \Stripe\Stripe::setApiKey($stripeSecret);
+                    
+                    // Get current subscription price
+                    $subscriptionPrice = 0;
+                    if ($subscription->stripe_id) {
+                        try {
+                            $stripeSubscription = \Stripe\Subscription::retrieve($subscription->stripe_id);
+                            if ($stripeSubscription && isset($stripeSubscription->items->data[0])) {
+                                $priceId = $stripeSubscription->items->data[0]->price->id;
+                                $price = \Stripe\Price::retrieve($priceId);
+                                $subscriptionPrice = ($price->unit_amount ?? 0) / 100;
+                                $currency = strtoupper($price->currency ?? 'usd');
+                            }
+                        } catch (\Exception $e) {
+                            // If we can't get subscription price, continue with 0
+                        }
+                    }
+                    
+                    // Get invoices from the last 12 months
+                    $twelveMonthsAgo = time() - (12 * 30 * 24 * 60 * 60);
+                    $invoices = \Stripe\Invoice::all([
+                        'customer' => $tenant->stripe_id,
+                        'limit' => 100,
+                        'created' => ['gte' => $twelveMonthsAgo],
+                    ]);
+                    
+                    $totalAmount = 0;
+                    $invoiceCount = 0;
+                    $onDemandTotal = 0;
+                    
+                    foreach ($invoices->data as $invoice) {
+                        if ($invoice->status === 'paid' && $invoice->amount_paid > 0) {
+                            $invoiceAmount = $invoice->amount_paid / 100;
+                            $totalAmount += $invoiceAmount;
+                            $invoiceCount++;
+                            
+                            // Calculate on-demand: invoice amount minus subscription price
+                            // This is a simplified calculation - in reality, you'd need to parse line items
+                            $onDemandTotal += max(0, $invoiceAmount - $subscriptionPrice);
+                        }
+                    }
+                    
+                    // Calculate monthly average (total / number of months with invoices)
+                    if ($invoiceCount > 0) {
+                        // Estimate months based on invoice count (assuming monthly billing)
+                        $months = min($invoiceCount, 12);
+                        $monthlyAverage = $totalAmount / $months;
+                    }
+                    
+                    // On-demand usage for current period (simplified - would need to check current period invoices)
+                    $onDemandUsage = $onDemandTotal;
+                }
+            } catch (\Exception $e) {
+                // If we can't calculate, use defaults (0.00)
+                \Log::warning('Failed to calculate on-demand usage and monthly average', [
+                    'tenant_id' => $tenant->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         // Get subscription period dates and latest status from Stripe
         $periodStart = null;
         $periodEnd = null;
@@ -424,6 +533,50 @@ class BillingController extends Controller
             $subscriptionStatus = $statusMap[$statusToDisplay] ?? $statusToDisplay;
         }
 
+        // Check for incomplete payment and get payment URL if needed
+        $hasIncompletePayment = false;
+        $paymentUrl = null;
+        if ($subscription && $subscription->stripe_id && $tenant->stripe_id && method_exists($subscription, 'hasIncompletePayment')) {
+            try {
+                // Set the owner on the subscription so Cashier methods work properly
+                if (method_exists($subscription, 'setOwner')) {
+                    $subscription->setOwner($tenant);
+                } elseif (property_exists($subscription, 'owner')) {
+                    $subscription->owner = $tenant;
+                } elseif (method_exists($subscription, 'setRelation')) {
+                    $subscription->setRelation('owner', $tenant);
+                }
+                
+                $hasIncomplete = $subscription->hasIncompletePayment();
+                if ($hasIncomplete && method_exists($subscription, 'latestPayment')) {
+                    try {
+                        $latestPayment = $subscription->latestPayment();
+                        if ($latestPayment && is_object($latestPayment) && isset($latestPayment->id)) {
+                            try {
+                                $paymentUrl = route('cashier.payment', $latestPayment->id);
+                            } catch (\Exception $routeError) {
+                                // If route doesn't exist, construct URL manually
+                                $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
+                            }
+                            $hasIncompletePayment = true;
+                        }
+                    } catch (\Exception $paymentError) {
+                        // If we can't get latest payment, that's okay
+                        \Log::warning('Failed to get latest payment for subscription in overview', [
+                            'subscription_id' => $subscription->id ?? null,
+                            'error' => $paymentError->getMessage(),
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                // If hasIncompletePayment() throws an error, that's okay
+                \Log::warning('Failed to check incomplete payment status in overview', [
+                    'subscription_id' => $subscription->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         return Inertia::render('Billing/Overview', [
             'tenant' => [
                 'id' => $tenant->id,
@@ -439,6 +592,8 @@ class BillingController extends Controller
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
                 'has_subscription' => $subscription !== null,
+                'has_incomplete_payment' => $hasIncompletePayment,
+                'payment_url' => $paymentUrl,
             ],
             'payment_method' => $paymentMethod ? [
                 'type' => $paymentMethod->type,
@@ -447,6 +602,9 @@ class BillingController extends Controller
             ] : null,
             'recent_invoices' => $recentInvoices,
             'has_stripe_id' => $tenant->stripe_id !== null,
+            'on_demand_usage' => $onDemandUsage,
+            'monthly_average' => $monthlyAverage,
+            'currency' => $currency,
         ]);
     }
 
@@ -620,6 +778,7 @@ class BillingController extends Controller
     /**
      * Handle payment confirmation for incomplete payments.
      * This route mimics Cashier's payment confirmation route for tenants.
+     * Always redirects to Stripe's hosted payment confirmation page.
      */
     public function payment(Request $request, $paymentId)
     {
@@ -646,19 +805,46 @@ class BillingController extends Controller
                 throw new \RuntimeException('Payment not found.');
             }
 
-            // Get redirect URL from query parameter or default to billing page
-            $redirectUrl = $request->get('redirect', route('billing'));
+            // Get redirect URL from query parameter or default to billing overview page
+            $redirectUrl = $request->get('redirect', route('billing.overview'));
             
-            // If payment requires action, redirect to Stripe's hosted confirmation page
+            // Always redirect to Stripe's hosted confirmation page if payment requires action
+            // This ensures we never try to embed Stripe Elements in our React/Inertia app
             if ($paymentIntent->status === 'requires_action' || $paymentIntent->status === 'requires_payment_method') {
-                // For 3D Secure or other payment confirmations, redirect to Stripe's hosted page
+                // For 3D Secure or other payment confirmations, always redirect to Stripe's hosted page
                 if (isset($paymentIntent->next_action->redirect_to_url->url)) {
-                    return redirect($paymentIntent->next_action->redirect_to_url->url);
+                    // Full redirect to Stripe's hosted confirmation page (no Inertia)
+                    return redirect()->away($paymentIntent->next_action->redirect_to_url->url);
                 }
                 
-                // Fallback: redirect to billing with error
+                // If no redirect URL but payment requires confirmation, try to get it
+                try {
+                    // Retrieve the payment intent again to get latest next_action
+                    $updatedPaymentIntent = \Stripe\PaymentIntent::retrieve($paymentId);
+                    
+                    if (isset($updatedPaymentIntent->next_action->redirect_to_url->url)) {
+                        return redirect()->away($updatedPaymentIntent->next_action->redirect_to_url->url);
+                    }
+                } catch (\Exception $retrieveError) {
+                    // Continue to fallback
+                }
+                
+                // Fallback: redirect to Stripe Customer Portal where they can update payment method
+                if ($tenant->stripe_id) {
+                    try {
+                        $portalUrl = $this->billingService->getCustomerPortalUrl(
+                            $tenant,
+                            $redirectUrl
+                        );
+                        return redirect()->away($portalUrl);
+                    } catch (\Exception $portalError) {
+                        // Continue to error message
+                    }
+                }
+                
+                // Final fallback: redirect to billing with error
                 return redirect()->route('billing')->withErrors([
-                    'payment' => 'Payment requires additional confirmation. Please try again or contact support.'
+                    'payment' => 'Payment requires additional confirmation. Please update your payment method in Stripe Customer Portal.'
                 ]);
             }
 
