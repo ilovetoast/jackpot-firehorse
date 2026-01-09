@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Brand;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 class BrandPolicy
 {
@@ -20,14 +21,93 @@ class BrandPolicy
      */
     public function view(User $user, Brand $brand): bool
     {
+        \Log::info('BrandPolicy::view() check', [
+            'user_id' => $user->id,
+            'user_email' => $user->email,
+            'brand_id' => $brand->id,
+            'brand_name' => $brand->name,
+            'tenant_id' => $brand->tenant_id,
+        ]);
+
         // User must belong to the tenant
-        if (!$user->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
+        $belongsToTenant = $user->tenants()->where('tenants.id', $brand->tenant_id)->exists();
+        \Log::info('BrandPolicy::view() - tenant check', [
+            'user_id' => $user->id,
+            'belongs_to_tenant' => $belongsToTenant,
+        ]);
+        
+        if (!$belongsToTenant) {
+            \Log::warning('BrandPolicy::view() - User does not belong to tenant', [
+                'user_id' => $user->id,
+                'brand_id' => $brand->id,
+                'tenant_id' => $brand->tenant_id,
+            ]);
             return false;
         }
 
-        // Check brand-level permission (or tenant-level for admin/owner)
-        return $user->hasPermissionForBrand($brand, 'view brand')
-            || $user->hasPermissionForTenant($brand->tenant, 'view brand');
+        // Get user's tenant role
+        $tenantRole = $user->getRoleForTenant($brand->tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        
+        \Log::info('BrandPolicy::view() - role check', [
+            'user_id' => $user->id,
+            'tenant_role' => $tenantRole,
+            'is_owner_or_admin' => $isTenantOwnerOrAdmin,
+        ]);
+
+        // For tenant owners/admins, they can view all brands in their tenant
+        if ($isTenantOwnerOrAdmin) {
+            $hasPermission = $user->hasPermissionForTenant($brand->tenant, 'view brand');
+            \Log::info('BrandPolicy::view() - owner/admin permission check', [
+                'user_id' => $user->id,
+                'has_permission' => $hasPermission,
+            ]);
+            return $hasPermission;
+        }
+
+        // For regular users, they MUST be assigned to the brand via brand_user pivot table
+        // This is the source of truth - if they're not in brand_user, they can't access the brand
+        $hasBrandAssignment = $user->brands()->where('brands.id', $brand->id)->exists();
+        
+        \Log::info('BrandPolicy::view() - brand assignment check', [
+            'user_id' => $user->id,
+            'brand_id' => $brand->id,
+            'has_brand_assignment' => $hasBrandAssignment,
+        ]);
+        
+        // Also check the database directly for debugging
+        $pivotRecord = \DB::table('brand_user')
+            ->where('user_id', $user->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+        
+        \Log::info('BrandPolicy::view() - direct DB check', [
+            'user_id' => $user->id,
+            'brand_id' => $brand->id,
+            'pivot_record' => $pivotRecord ? [
+                'id' => $pivotRecord->id,
+                'role' => $pivotRecord->role,
+            ] : null,
+        ]);
+        
+        if (!$hasBrandAssignment) {
+            \Log::warning('BrandPolicy::view() - User does not have brand assignment', [
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'brand_id' => $brand->id,
+                'brand_name' => $brand->name,
+            ]);
+            return false;
+        }
+
+        // User is assigned to brand, check if they have permission
+        $hasPermission = $user->hasPermissionForBrand($brand, 'view brand');
+        \Log::info('BrandPolicy::view() - final permission check', [
+            'user_id' => $user->id,
+            'has_permission' => $hasPermission,
+        ]);
+        
+        return $hasPermission;
     }
 
     /**
@@ -48,9 +128,23 @@ class BrandPolicy
             return false;
         }
 
-        // Check brand-level permission (or tenant-level for admin/owner)
-        return $user->hasPermissionForBrand($brand, 'brand_settings.manage')
-            || $user->hasPermissionForTenant($brand->tenant, 'brand_settings.manage');
+        // Get user's tenant role
+        $tenantRole = $user->getRoleForTenant($brand->tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+
+        // For tenant owners/admins, they can manage all brands in their tenant
+        if ($isTenantOwnerOrAdmin) {
+            return $user->hasPermissionForTenant($brand->tenant, 'brand_settings.manage');
+        }
+
+        // For regular users, they MUST be assigned to the brand via brand_user pivot table
+        // This is the source of truth - if they're not in brand_user, they can't manage the brand
+        if (!$user->brands()->where('brands.id', $brand->id)->exists()) {
+            return false;
+        }
+
+        // User is assigned to brand, check if they have permission
+        return $user->hasPermissionForBrand($brand, 'brand_settings.manage');
     }
 
     /**

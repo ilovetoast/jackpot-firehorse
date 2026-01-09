@@ -29,6 +29,10 @@ class UploadSession extends Model
         'uploaded_size',
         'expires_at',
         'failure_reason',
+        'client_reference',
+        'multipart_upload_id', // S3 multipart upload ID for resume support
+        'last_activity_at', // Last activity timestamp for abandoned session detection
+        'last_cleanup_attempt_at', // Optional: Track when cleanup was last attempted (for observability)
     ];
 
     /**
@@ -44,6 +48,8 @@ class UploadSession extends Model
             'expected_size' => 'integer',
             'uploaded_size' => 'integer',
             'expires_at' => 'datetime',
+            'last_activity_at' => 'datetime',
+            'last_cleanup_attempt_at' => 'datetime',
         ];
     }
 
@@ -77,5 +83,90 @@ class UploadSession extends Model
     public function assets(): HasMany
     {
         return $this->hasMany(Asset::class);
+    }
+
+    /**
+     * Check if the upload session can transition to the given status.
+     *
+     * Prevents invalid status transitions to maintain data integrity.
+     * This is critical for resume/retry functionality and prevents state corruption.
+     *
+     * Valid transitions:
+     * - INITIATING → UPLOADING, COMPLETED, CANCELLED, FAILED
+     * - UPLOADING → COMPLETED, CANCELLED, FAILED
+     * - COMPLETED → (terminal, no transitions allowed)
+     * - FAILED → (terminal, no transitions allowed)
+     * - CANCELLED → (terminal, no transitions allowed)
+     *
+     * Invalid transitions (explicitly blocked):
+     * - COMPLETED → CANCELLED ❌
+     * - FAILED → UPLOADING ❌
+     * - CANCELLED → COMPLETED ❌
+     * - EXPIRED sessions → any transition ❌
+     *
+     * @param UploadStatus $newStatus The status to transition to
+     * @return bool True if transition is allowed, false otherwise
+     */
+    public function canTransitionTo(UploadStatus $newStatus): bool
+    {
+        // Check if session is expired - expired sessions cannot transition
+        if ($this->expires_at && $this->expires_at->isPast()) {
+            return false;
+        }
+
+        // Same status is always allowed (idempotent)
+        if ($this->status === $newStatus) {
+            return true;
+        }
+
+        // Terminal states cannot transition to any other state
+        $terminalStates = [
+            UploadStatus::COMPLETED,
+            UploadStatus::FAILED,
+            UploadStatus::CANCELLED,
+        ];
+
+        if (in_array($this->status, $terminalStates)) {
+            return false;
+        }
+
+        // Define allowed transitions from each non-terminal state
+        $allowedTransitions = [
+            UploadStatus::INITIATING->value => [
+                UploadStatus::UPLOADING->value,
+                UploadStatus::COMPLETED->value,
+                UploadStatus::CANCELLED->value,
+                UploadStatus::FAILED->value,
+            ],
+            UploadStatus::UPLOADING->value => [
+                UploadStatus::COMPLETED->value,
+                UploadStatus::CANCELLED->value,
+                UploadStatus::FAILED->value,
+            ],
+        ];
+
+        $currentStatusValue = $this->status->value;
+        $newStatusValue = $newStatus->value;
+
+        // Check if transition is allowed
+        return isset($allowedTransitions[$currentStatusValue]) &&
+               in_array($newStatusValue, $allowedTransitions[$currentStatusValue]);
+    }
+
+    /**
+     * Check if the upload session is in a terminal state.
+     *
+     * @return bool True if in terminal state (COMPLETED, FAILED, CANCELLED) or expired
+     */
+    public function isTerminal(): bool
+    {
+        $terminalStates = [
+            UploadStatus::COMPLETED,
+            UploadStatus::FAILED,
+            UploadStatus::CANCELLED,
+        ];
+
+        return in_array($this->status, $terminalStates) ||
+               ($this->expires_at && $this->expires_at->isPast());
     }
 }

@@ -30,3 +30,16 @@ Schedule::command('ai:reset-monthly-budgets')
     ->monthlyOn(1, '00:00')
     ->withoutOverlapping()
     ->description('Reset monthly AI budget usage records for the new month');
+
+// Abandoned upload session detection (runs every 15 minutes)
+Schedule::command('uploads:detect-abandoned')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping()
+    ->description('Detect and mark abandoned upload sessions as failed');
+
+// Upload cleanup (runs every 3 hours - configurable via env or command)
+// Cleans up expired/terminal upload sessions and orphaned multipart uploads
+Schedule::command('uploads:cleanup-expired')
+    ->everyThreeHours()
+    ->withoutOverlapping()
+    ->description('Cleanup expired upload sessions and orphaned multipart uploads');

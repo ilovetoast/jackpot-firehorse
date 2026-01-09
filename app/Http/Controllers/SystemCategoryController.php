@@ -52,7 +52,7 @@ class SystemCategoryController extends Controller
                 ];
             }),
             'asset_types' => [
-                ['value' => AssetType::BASIC->value, 'label' => 'Basic'],
+                ['value' => AssetType::ASSET->value, 'label' => 'ASSET'],
                 ['value' => AssetType::MARKETING->value, 'label' => 'Marketing'],
             ],
         ]);

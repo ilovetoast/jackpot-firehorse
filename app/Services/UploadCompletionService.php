@@ -10,9 +10,32 @@ use App\Models\Asset;
 use App\Models\UploadSession;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
+/**
+ * Service for completing upload sessions and creating assets.
+ *
+ * TEMPORARY UPLOAD PATH CONTRACT (IMMUTABLE):
+ *
+ * All temporary upload objects must live at:
+ *   temp/uploads/{upload_session_id}/original
+ *
+ * This path format is:
+ *   - Deterministic: Same upload_session_id always produces the same path
+ *   - Never reused: Each upload_session_id is a unique UUID, ensuring path uniqueness
+ *   - Safe to delete independently: Temp uploads are separate from final asset storage
+ *
+ * Why this contract matters:
+ *   - Cleanup: Can safely delete temp uploads without affecting assets
+ *   - Resume: Can locate partial uploads deterministically for retry/resume
+ *   - Isolation: Temporary uploads are clearly separated from permanent asset storage
+ *   - Multi-service coordination: Different services can generate the same path independently
+ *
+ * The path MUST match UploadInitiationService::generateTempUploadPath() exactly.
+ * This contract MUST be maintained across all services that interact with temporary uploads.
+ */
 class UploadCompletionService
 {
     /**
@@ -27,6 +50,18 @@ class UploadCompletionService
     /**
      * Complete an upload session and create an asset.
      *
+     * This method is IDEMPOTENT - if an asset already exists for this upload session,
+     * it returns the existing asset instead of creating a duplicate.
+     *
+     * This prevents duplicate assets from being created if /assets/upload/complete
+     * is called multiple times (e.g., due to network retries or frontend issues).
+     *
+     * RULES:
+     * - Do NOT modify Asset lifecycle or creation logic
+     * - Do NOT create assets during resume
+     * - Do NOT trust client state blindly
+     * - UploadSession remains the source of truth
+     *
      * @param UploadSession $uploadSession
      * @param string|null $assetType
      * @param string|null $originalFilename Optional original filename (from client)
@@ -40,12 +75,62 @@ class UploadCompletionService
         ?string $originalFilename = null,
         ?string $s3Key = null
     ): Asset {
-        // Verify upload session is in valid state
-        if ($uploadSession->status !== UploadStatus::INITIATING && $uploadSession->status !== UploadStatus::UPLOADING) {
-            throw new \RuntimeException("Upload session is in invalid state: {$uploadSession->status->value}. Cannot complete upload.");
+        // Refresh to get latest state
+        $uploadSession->refresh();
+
+        // IDEMPOTENT CHECK: If upload session is already COMPLETED, check for existing asset
+        if ($uploadSession->status === UploadStatus::COMPLETED) {
+            $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->first();
+            
+            if ($existingAsset) {
+                Log::info('Upload completion called but asset already exists (idempotent)', [
+                    'upload_session_id' => $uploadSession->id,
+                    'asset_id' => $existingAsset->id,
+                    'asset_status' => $existingAsset->status->value,
+                ]);
+
+                return $existingAsset;
+            } else {
+                // Status is COMPLETED but no asset found - this is a data inconsistency
+                // Log warning but allow completion to proceed to fix the inconsistency
+                Log::warning('Upload session marked as COMPLETED but no asset found - recreating asset', [
+                    'upload_session_id' => $uploadSession->id,
+                ]);
+
+                // Reset status to allow completion (this should be rare)
+                // Use force transition to fix data inconsistency
+                $uploadSession->update(['status' => UploadStatus::UPLOADING]);
+                $uploadSession->refresh();
+            }
+        }
+
+        // Check for existing asset BEFORE attempting completion (race condition protection)
+        // This handles the case where two requests complete simultaneously
+        $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->first();
+        if ($existingAsset) {
+            Log::info('Asset already exists for upload session (race condition detected)', [
+                'upload_session_id' => $uploadSession->id,
+                'asset_id' => $existingAsset->id,
+            ]);
+
+            // Update session status if not already COMPLETED
+            if ($uploadSession->status !== UploadStatus::COMPLETED) {
+                $uploadSession->update(['status' => UploadStatus::COMPLETED]);
+            }
+
+            return $existingAsset;
+        }
+
+        // Verify upload session can transition to COMPLETED (using guard method)
+        if (!$uploadSession->canTransitionTo(UploadStatus::COMPLETED)) {
+            throw new \RuntimeException(
+                "Cannot transition upload session from {$uploadSession->status->value} to COMPLETED. " .
+                "Upload session must be in INITIATING or UPLOADING status and not expired."
+            );
         }
 
         // Get file info from S3 (never trust client metadata)
+        // This is done outside transaction since it's an external operation
         $fileInfo = $this->getFileInfoFromS3($uploadSession, $s3Key);
 
         // Generate final storage path for asset
@@ -59,39 +144,94 @@ class UploadCompletionService
         // Determine asset type (default to ASSET if not provided)
         $assetTypeEnum = $assetType ? AssetType::from($assetType) : AssetType::ASSET;
 
-        // Create asset (clean boundary - asset creation is separate from upload attempt)
-        $asset = Asset::create([
-            'tenant_id' => $uploadSession->tenant_id,
-            'brand_id' => $uploadSession->brand_id,
-            'upload_session_id' => $uploadSession->id,
-            'storage_bucket_id' => $uploadSession->storage_bucket_id,
-            'status' => AssetStatus::UPLOADED, // Initial state after upload completion
-            'type' => $assetTypeEnum,
-            'original_filename' => $fileInfo['original_filename'],
-            'mime_type' => $fileInfo['mime_type'],
-            'size_bytes' => $fileInfo['size_bytes'],
-            'storage_root_path' => $storagePath,
-            'metadata' => [],
-        ]);
+        // Wrap asset creation and status update in transaction for atomicity
+        // This ensures that if asset creation fails, status doesn't change
+        // The unique constraint on upload_session_id prevents duplicate assets at DB level
+        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath) {
+            // Double-check for existing asset inside transaction (final race condition check)
+            $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
+            if ($existingAsset) {
+                Log::info('Asset already exists for upload session (race condition detected in transaction)', [
+                    'upload_session_id' => $uploadSession->id,
+                    'asset_id' => $existingAsset->id,
+                ]);
 
-        // Update upload session status and uploaded size
-        $uploadSession->update([
-            'status' => UploadStatus::COMPLETED,
-            'uploaded_size' => $fileInfo['size_bytes'],
-        ]);
+                // Update session status if not already COMPLETED
+                if ($uploadSession->status !== UploadStatus::COMPLETED) {
+                    $uploadSession->update(['status' => UploadStatus::COMPLETED]);
+                }
 
-        Log::info('Asset created from upload session', [
-            'asset_id' => $asset->id,
-            'upload_session_id' => $uploadSession->id,
-            'tenant_id' => $uploadSession->tenant_id,
-            'original_filename' => $asset->original_filename,
-            'size_bytes' => $asset->size_bytes,
-        ]);
+                return $existingAsset;
+            }
 
-        // Emit AssetUploaded event
-        event(new AssetUploaded($asset));
+            // Create asset - unique constraint prevents duplicates
+            try {
+                $asset = Asset::create([
+                    'tenant_id' => $uploadSession->tenant_id,
+                    'brand_id' => $uploadSession->brand_id,
+                    'upload_session_id' => $uploadSession->id, // Unique constraint prevents duplicates
+                    'storage_bucket_id' => $uploadSession->storage_bucket_id,
+                    'status' => AssetStatus::UPLOADED, // Initial state after upload completion
+                    'type' => $assetTypeEnum,
+                    'original_filename' => $fileInfo['original_filename'],
+                    'mime_type' => $fileInfo['mime_type'],
+                    'size_bytes' => $fileInfo['size_bytes'],
+                    'storage_root_path' => $storagePath,
+                    'metadata' => [],
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Handle unique constraint violation (duplicate asset detected)
+                // Laravel/PDO throws code 23000 for unique constraint violations
+                // Also check error message for additional safety
+                $errorCode = $e->getCode();
+                $errorMessage = $e->getMessage();
+                
+                if ($errorCode === 23000 || 
+                    $errorCode === '23000' || 
+                    str_contains($errorMessage, 'upload_session_id') ||
+                    str_contains($errorMessage, 'UNIQUE constraint') ||
+                    str_contains($errorMessage, 'Duplicate entry')) {
+                    
+                    Log::info('Duplicate asset creation prevented by unique constraint (race condition)', [
+                        'upload_session_id' => $uploadSession->id,
+                        'error_code' => $errorCode,
+                        'error_message' => $errorMessage,
+                    ]);
 
-        return $asset;
+                    // Fetch the existing asset that was created by the other request
+                    $asset = Asset::where('upload_session_id', $uploadSession->id)->firstOrFail();
+                } else {
+                    // Re-throw if it's a different error
+                    Log::error('Unexpected database error during asset creation', [
+                        'upload_session_id' => $uploadSession->id,
+                        'error_code' => $errorCode,
+                        'error_message' => $errorMessage,
+                    ]);
+                    throw $e;
+                }
+            }
+
+            // Update upload session status and uploaded size (transition already validated above)
+            // This is inside the transaction so status only updates if asset creation succeeds
+            $uploadSession->update([
+                'status' => UploadStatus::COMPLETED,
+                'uploaded_size' => $fileInfo['size_bytes'],
+            ]);
+
+            Log::info('Asset created from upload session', [
+                'asset_id' => $asset->id,
+                'upload_session_id' => $uploadSession->id,
+                'tenant_id' => $uploadSession->tenant_id,
+                'original_filename' => $asset->original_filename,
+                'size_bytes' => $asset->size_bytes,
+            ]);
+
+            // Emit AssetUploaded event (only emit once, even if called multiple times)
+            // The event system should handle duplicate events gracefully
+            event(new AssetUploaded($asset));
+
+            return $asset;
+        });
     }
 
     /**
@@ -107,8 +247,8 @@ class UploadCompletionService
     {
         $bucket = $uploadSession->storageBucket;
 
-        // Generate expected S3 key (deterministic based on upload session)
-        // This is a temporary path used during upload
+        // Generate expected S3 key using immutable contract: temp/uploads/{upload_session_id}/original
+        // This path is deterministic and based solely on upload_session_id
         if (!$s3Key) {
             $s3Key = $this->generateTempUploadPath($uploadSession);
         }
@@ -186,24 +326,33 @@ class UploadCompletionService
 
     /**
      * Generate temporary upload path for S3 (used during upload).
-     * This matches the path generated in UploadInitiationService.
      *
-     * @param UploadSession $uploadSession
-     * @return string
+     * IMMUTABLE CONTRACT - This path format must never change:
+     *
+     * Temporary upload objects must live at:
+     *   temp/uploads/{upload_session_id}/original
+     *
+     * This path is:
+     *   - Deterministic: Same upload_session_id always produces the same path
+     *   - Never reused: Each upload_session_id is unique (UUID), ensuring path uniqueness
+     *   - Safe to delete independently: Temp uploads are separate from final asset storage
+     *
+     * Why this matters:
+     *   - Cleanup: Can safely delete temp uploads without affecting assets
+     *   - Resume: Can locate partial uploads deterministically for retry/resume
+     *   - Isolation: Temporary uploads are clearly separated from permanent asset storage
+     *
+     * The path MUST match UploadInitiationService::generateTempUploadPath() exactly.
+     *
+     * @param UploadSession $uploadSession The upload session
+     * @return string S3 key path: temp/uploads/{upload_session_id}/original
      */
     protected function generateTempUploadPath(UploadSession $uploadSession): string
     {
-        $tenantId = $uploadSession->tenant_id;
-        $brandId = $uploadSession->brand_id;
-        $sessionId = $uploadSession->id;
-
-        $basePath = "uploads/{$tenantId}";
-
-        if ($brandId) {
-            $basePath .= "/{$brandId}";
-        }
-
-        return "{$basePath}/{$sessionId}";
+        // IMMUTABLE: This path format must never change
+        // Path is deterministic and based solely on upload_session_id
+        // MUST match UploadInitiationService::generateTempUploadPath() exactly
+        return "temp/uploads/{$uploadSession->id}/original";
     }
 
     /**

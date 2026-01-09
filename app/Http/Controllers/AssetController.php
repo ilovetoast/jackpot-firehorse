@@ -45,7 +45,7 @@ class AssetController extends Controller
         // Filter out hidden categories unless user has permission
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('asset_type', AssetType::BASIC);
+            ->where('asset_type', AssetType::ASSET);
 
         // If user does not have 'manage categories' permission, filter out hidden categories
         if (! $user || ! $user->can('manage categories')) {
@@ -62,7 +62,7 @@ class AssetController extends Controller
         });
 
         // Get only BASIC system category templates
-        $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::BASIC)
+        $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::ASSET)
             ->filter(fn ($template) => ! $template->is_hidden || ($user && $user->can('manage categories')));
 
         // Create merged list of categories

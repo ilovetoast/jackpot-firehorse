@@ -35,6 +35,11 @@ enum UploadStatus: string
      * Upload failed due to an error.
      * Upload cannot be resumed or retried automatically.
      * Requires user action to retry or investigate.
+     *
+     * NOTE: Currently, expired/abandoned sessions are also marked as FAILED.
+     * Future consideration: If UX needs to distinguish between failure types,
+     * an EXPIRED status could be added as a distinct terminal status.
+     * For now, the failure_reason field provides sufficient differentiation.
      */
     case FAILED = 'failed';
 

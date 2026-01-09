@@ -18,6 +18,11 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/storage/framework/*.pid
+/storage/logs/scheduler.log
+/storage/logs/worker.log
+/storage/logs/npm.log
+/storage/logs/stripe.log
 /vendor
 Homestead.json
 Homestead.yaml

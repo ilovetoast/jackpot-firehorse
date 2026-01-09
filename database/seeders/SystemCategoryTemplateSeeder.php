@@ -11,7 +11,7 @@ use Illuminate\Database\Seeder;
  *
  * Seeds initial system category templates that will be copied to new brands.
  * 
- * Basic asset type categories: Logos, Photography, Graphics
+ * ASSET asset type categories: Logos, Photography, Graphics
  * Marketing asset type categories: Catalogs, Press Releases, Digital Ads, Social Creative, Videos
  */
 class SystemCategoryTemplateSeeder extends Seeder
@@ -22,11 +22,11 @@ class SystemCategoryTemplateSeeder extends Seeder
     public function run(): void
     {
         $templates = [
-            // Basic asset type system categories
+            // ASSET asset type system categories
             [
                 'name' => 'Logos',
                 'slug' => 'logos',
-                'asset_type' => AssetType::BASIC,
+                'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 0,
@@ -34,7 +34,7 @@ class SystemCategoryTemplateSeeder extends Seeder
             [
                 'name' => 'Photography',
                 'slug' => 'photography',
-                'asset_type' => AssetType::BASIC,
+                'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 1,
@@ -42,7 +42,7 @@ class SystemCategoryTemplateSeeder extends Seeder
             [
                 'name' => 'Graphics',
                 'slug' => 'graphics',
-                'asset_type' => AssetType::BASIC,
+                'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 2,

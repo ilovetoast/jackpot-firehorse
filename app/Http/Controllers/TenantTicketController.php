@@ -110,8 +110,22 @@ class TenantTicketController extends Controller
 
         $this->authorize('create', Ticket::class);
 
+        // Get user's tenant role
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isOwner = $tenant->isOwner($user);
+        $isAdmin = $tenantRole === 'admin';
+
         // Get available brands for this tenant
-        $brands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
+        // Owners and admins can see all brands, other users only see brands they're added to
+        if ($isOwner || $isAdmin) {
+            $brands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
+        } else {
+            // Only show brands the user is actually added to
+            $brands = $user->brands()
+                ->where('tenant_id', $tenant->id)
+                ->orderBy('name')
+                ->get(['id', 'name']);
+        }
 
         // Get plan limits and SLA messaging
         $planLimits = [
@@ -163,8 +177,15 @@ class TenantTicketController extends Controller
                 ->withInput($inputToPreserve);
         }
 
-        // Verify brands belong to tenant
+        // Verify brands belong to tenant and user has access
         $brandIds = $validated['brand_ids'];
+        
+        // Get user's tenant role
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isOwner = $tenant->isOwner($user);
+        $isAdmin = $tenantRole === 'admin';
+
+        // Verify brands belong to tenant
         $brands = Brand::whereIn('id', $brandIds)
             ->where('tenant_id', $tenant->id)
             ->get();
@@ -173,6 +194,21 @@ class TenantTicketController extends Controller
             return back()
                 ->withErrors(['brand_ids' => 'One or more selected brands are invalid.'])
                 ->withInput($request->only(['category', 'brand_ids', 'subject', 'description']));
+        }
+
+        // For non-owner/admin users, verify they have access to all selected brands
+        if (!($isOwner || $isAdmin)) {
+            $userBrandIds = $user->brands()
+                ->where('tenant_id', $tenant->id)
+                ->pluck('brands.id')
+                ->toArray();
+
+            $unauthorizedBrands = array_diff($brandIds, $userBrandIds);
+            if (!empty($unauthorizedBrands)) {
+                return back()
+                    ->withErrors(['brand_ids' => 'You do not have access to one or more selected brands.'])
+                    ->withInput($request->only(['category', 'brand_ids', 'subject', 'description']));
+            }
         }
 
         DB::beginTransaction();

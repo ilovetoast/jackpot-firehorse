@@ -781,4 +781,63 @@ class AIDashboardController extends Controller
             return redirect()->back()->with('error', 'Failed to retry job: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Get detailed information about a specific AI agent run.
+     */
+    public function showRun(int $id): \Illuminate\Http\JsonResponse
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $run = AIAgentRun::with(['tenant', 'user'])
+            ->findOrFail($id);
+
+        // Get related tickets
+        $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
+            ->where('linkable_id', $run->id)
+            ->with('ticket:id,ticket_number,subject')
+            ->get()
+            ->pluck('ticket')
+            ->filter();
+
+        return response()->json([
+            'id' => $run->id,
+            'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
+            'agent_id' => $run->agent_id,
+            'agent_name' => $this->getAgentName($run->agent_id),
+            'task_type' => $run->task_type,
+            'triggering_context' => $run->triggering_context,
+            'model_used' => $run->model_used,
+            'tokens_in' => $run->tokens_in,
+            'tokens_out' => $run->tokens_out,
+            'total_tokens' => $run->total_tokens,
+            'estimated_cost' => $run->estimated_cost,
+            'status' => $run->status,
+            'error_message' => $run->error_message,
+            'blocked_reason' => $run->blocked_reason,
+            'duration' => $run->formatted_duration,
+            'started_at' => $run->started_at->toISOString(),
+            'completed_at' => $run->completed_at?->toISOString(),
+            'environment' => $run->environment,
+            'tenant' => $run->tenant ? [
+                'id' => $run->tenant->id,
+                'name' => $run->tenant->name,
+            ] : null,
+            'user' => $run->user ? [
+                'id' => $run->user->id,
+                'name' => $run->user->name,
+                'email' => $run->user->email,
+            ] : null,
+            'related_tickets' => $relatedTickets->map(function ($ticket) {
+                return [
+                    'id' => $ticket->id,
+                    'ticket_number' => $ticket->ticket_number,
+                    'subject' => $ticket->subject,
+                ];
+            })->values(),
+            'metadata' => $run->metadata, // Includes prompts and responses if store_prompts is enabled
+        ]);
+    }
 }

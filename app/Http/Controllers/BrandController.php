@@ -14,6 +14,7 @@ use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -293,14 +294,44 @@ class BrandController extends Controller
         $user = Auth::user();
         $tenant = app('tenant');
 
+        \Log::info('BrandController::show() called', [
+            'user_id' => $user->id,
+            'user_email' => $user->email,
+            'brand_id' => $brand->id,
+            'brand_name' => $brand->name,
+            'tenant_id' => $tenant->id,
+        ]);
+
         // Verify brand belongs to tenant
         if ($brand->tenant_id !== $tenant->id) {
+            \Log::warning('BrandController::show() - Brand does not belong to tenant', [
+                'brand_id' => $brand->id,
+                'brand_tenant_id' => $brand->tenant_id,
+                'current_tenant_id' => $tenant->id,
+            ]);
             abort(403, 'Brand does not belong to this tenant.');
         }
 
-        // Verify user has access to this brand (via brand_user pivot table)
-        if (! $user->brands()->where('brands.id', $brand->id)->exists()) {
-            abort(403, 'You do not have access to this brand.');
+        // Use policy to check access (policy handles owner/admin vs regular users)
+        \Log::info('BrandController::show() - Calling authorize()', [
+            'user_id' => $user->id,
+            'brand_id' => $brand->id,
+        ]);
+        
+        try {
+            $this->authorize('view', $brand);
+            \Log::info('BrandController::show() - Authorization passed', [
+                'user_id' => $user->id,
+                'brand_id' => $brand->id,
+            ]);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            \Log::warning('BrandController::show() - Authorization failed', [
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'brand_id' => $brand->id,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
         }
 
         return Inertia::render('Brands/Show', [

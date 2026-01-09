@@ -5,6 +5,7 @@ import AppFooter from '../../Components/AppFooter'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 
 export default function Team({ tenant, members, brands = [], current_user_count, max_users, user_limit_reached }) {
     const { auth } = usePage().props
@@ -13,16 +14,25 @@ export default function Team({ tenant, members, brands = [], current_user_count,
     const [ownershipTransferTarget, setOwnershipTransferTarget] = useState(null)
     const [ownershipTransferSettingsLink, setOwnershipTransferSettingsLink] = useState(null)
     const [updatingRoles, setUpdatingRoles] = useState({})
+    const [removeBrandConfirm, setRemoveBrandConfirm] = useState({ open: false, userId: null, brandId: null, brandName: '' })
+    const [removeMemberConfirm, setRemoveMemberConfirm] = useState({ open: false, userId: null, userName: '' })
     const { data, setData, post, processing, errors, reset } = useForm({
         email: '',
         role: 'member',
         brands: [],
     })
 
-    const handleRemoveMember = (userId) => {
-        if (confirm('Are you sure you want to remove this team member?')) {
-            router.delete(`/app/companies/${tenant.id}/team/${userId}`, {
+    const handleRemoveMember = (userId, userName) => {
+        setRemoveMemberConfirm({ open: true, userId, userName })
+    }
+
+    const confirmRemoveMember = () => {
+        if (removeMemberConfirm.userId) {
+            router.delete(`/app/companies/${tenant.id}/team/${removeMemberConfirm.userId}`, {
                 preserveScroll: true,
+                onSuccess: () => {
+                    setRemoveMemberConfirm({ open: false, userId: null, userName: '' })
+                }
             })
         }
     }
@@ -103,6 +113,22 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                 setUpdatingRoles(prev => ({ ...prev, [`brand_${userId}_${brandId}`]: false }))
             }
         })
+    }
+
+    const handleRemoveBrandAssignment = (userId, brandId, brandName) => {
+        setRemoveBrandConfirm({ open: true, userId, brandId, brandName })
+    }
+
+    const confirmRemoveBrandAssignment = () => {
+        if (removeBrandConfirm.userId && removeBrandConfirm.brandId) {
+            router.delete(`/app/brands/${removeBrandConfirm.brandId}/users/${removeBrandConfirm.userId}`, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setRemoveBrandConfirm({ open: false, userId: null, brandId: null, brandName: '' })
+                    router.reload({ preserveScroll: true })
+                }
+            })
+        }
     }
 
     const formatDate = (dateString) => {
@@ -196,57 +222,99 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                                 <span className="text-sm font-medium text-gray-900">
                                                     {member.first_name} {member.last_name}
                                                 </span>
-                                                {/* Tenant Role Selector */}
-                                                <div className="relative inline-flex items-center">
-                                                    <select
-                                                        value={member.role_value || 'member'}
-                                                        onChange={(e) => handleTenantRoleChange(member.id, e.target.value)}
-                                                        disabled={isOwner || updatingRoles[`tenant_${member.id}`]}
-                                                        className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(member.role_value)}`}
-                                                    >
-                                                        <option value="owner">👑 Owner</option>
-                                                        <option value="admin">Admin</option>
-                                                        <option value="brand_manager">Brand Manager</option>
-                                                        <option value="member">Member</option>
-                                                    </select>
-                                                    <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                    </svg>
-                                                </div>
-                                                {updatingRoles[`tenant_${member.id}`] && (
-                                                    <span className="text-xs text-gray-500">Updating...</span>
+                                                {member.is_orphaned && (
+                                                    <span className="inline-flex items-center rounded-md bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800 ring-1 ring-inset ring-yellow-600/20">
+                                                        ⚠️ Orphaned Record
+                                                    </span>
+                                                )}
+                                                {!member.is_orphaned && (
+                                                    <>
+                                                        {/* Tenant Role Selector */}
+                                                        <div className="relative inline-flex items-center">
+                                                            <select
+                                                                value={member.role_value || 'member'}
+                                                                onChange={(e) => handleTenantRoleChange(member.id, e.target.value)}
+                                                                disabled={isOwner || updatingRoles[`tenant_${member.id}`]}
+                                                                className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(member.role_value)}`}
+                                                            >
+                                                                <option value="owner">👑 Owner</option>
+                                                                <option value="admin">Admin</option>
+                                                                <option value="brand_manager">Brand Manager</option>
+                                                                <option value="member">Member</option>
+                                                            </select>
+                                                            <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                            </svg>
+                                                        </div>
+                                                        {updatingRoles[`tenant_${member.id}`] && (
+                                                            <span className="text-xs text-gray-500">Updating...</span>
+                                                        )}
+                                                    </>
                                                 )}
                                             </div>
                                             <p className="mt-1 text-sm text-gray-500">{member.email}</p>
+                                            {member.is_orphaned && (
+                                                <p className="mt-1 text-xs text-yellow-700 bg-yellow-50 px-2 py-1 rounded">
+                                                    This user is not a member of the company but has brand assignments. Remove the brand assignment to clean up.
+                                                </p>
+                                            )}
                                             
                                             {/* Brand Assignments - Displayed prominently with role selectors */}
-                                            {member.brand_assignments && member.brand_assignments.length > 0 && (
+                                            {member.brand_assignments && Array.isArray(member.brand_assignments) && member.brand_assignments.length > 0 && (
                                                 <div className="mt-3">
                                                     <p className="text-xs font-medium text-gray-700 mb-2">Brand Roles:</p>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {member.brand_assignments.map((ba) => {
+                                                    <div className="flex flex-col gap-2">
+                                                        {member.brand_assignments.map((ba, index) => {
                                                             const isUpdating = updatingRoles[`brand_${member.id}_${ba.id}`]
                                                             
                                                             return (
-                                                                <div key={ba.id} className="flex items-center gap-1.5">
+                                                                <div key={`${ba.id}-${ba.pivot_id || index}`} className="flex items-center gap-1.5">
                                                                     <span className="text-xs font-medium text-gray-700">{ba.name}:</span>
-                                                                    <div className="relative inline-flex items-center">
-                                                                        <select
-                                                                            value={ba.role?.toLowerCase() || 'member'}
-                                                                            onChange={(e) => handleBrandRoleChange(member.id, ba.id, e.target.value)}
-                                                                            disabled={isUpdating}
-                                                                            className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
-                                                                        >
-                                                                            <option value="admin">Admin</option>
-                                                                            <option value="brand_manager">Brand Manager</option>
-                                                                            <option value="member">Member</option>
-                                                                        </select>
-                                                                        <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                                        </svg>
-                                                                    </div>
-                                                                    {isUpdating && (
-                                                                        <span className="text-xs text-gray-500">Updating...</span>
+                                                                    {member.is_orphaned ? (
+                                                                        // For orphaned records, show role as text and allow removal
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium ${getRoleColors(ba.role)}`}>
+                                                                                {ba.role || 'member'}
+                                                                            </span>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleRemoveBrandAssignment(member.id, ba.id, ba.name)}
+                                                                                className="text-red-600 hover:text-red-800 text-xs"
+                                                                                title="Remove orphaned brand assignment"
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        // For regular members, show role selector and remove button
+                                                                        <>
+                                                                            <div className="relative inline-flex items-center">
+                                                                                <select
+                                                                                    value={ba.role?.toLowerCase() || 'member'}
+                                                                                    onChange={(e) => handleBrandRoleChange(member.id, ba.id, e.target.value)}
+                                                                                    disabled={isUpdating}
+                                                                                    className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
+                                                                                >
+                                                                                    <option value="admin">Admin</option>
+                                                                                    <option value="brand_manager">Brand Manager</option>
+                                                                                    <option value="member">Member</option>
+                                                                                </select>
+                                                                                <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                                                </svg>
+                                                                            </div>
+                                                                            {isUpdating && (
+                                                                                <span className="text-xs text-gray-500">Updating...</span>
+                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleRemoveBrandAssignment(member.id, ba.id, ba.name)}
+                                                                                className="text-red-600 hover:text-red-800 text-xs font-medium ml-2"
+                                                                                title="Remove brand access"
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        </>
                                                                     )}
                                                                 </div>
                                                             )
@@ -265,7 +333,7 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                     {canRemove && (
                                         <button
                                             type="button"
-                                            onClick={() => handleRemoveMember(member.id)}
+                                            onClick={() => handleRemoveMember(member.id, member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email)}
                                             className="text-red-600 hover:text-red-800"
                                         >
                                             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -469,6 +537,34 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                 )}
             </main>
             <AppFooter />
+            
+            {/* Remove Brand Assignment Confirmation Dialog */}
+            <ConfirmDialog
+                open={removeBrandConfirm.open}
+                onClose={() => setRemoveBrandConfirm({ open: false, userId: null, brandId: null, brandName: '' })}
+                onConfirm={confirmRemoveBrandAssignment}
+                title="Remove Brand Access"
+                message={(() => {
+                    const member = members.find(m => m.id === removeBrandConfirm.userId)
+                    const userName = member ? (member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email) : 'this user'
+                    return `Are you sure you want to remove ${userName}'s access to the "${removeBrandConfirm.brandName}" brand?`
+                })()}
+                confirmText="Remove Access"
+                cancelText="Cancel"
+                variant="danger"
+            />
+            
+            {/* Remove Team Member Confirmation Dialog */}
+            <ConfirmDialog
+                open={removeMemberConfirm.open}
+                onClose={() => setRemoveMemberConfirm({ open: false, userId: null, userName: '' })}
+                onConfirm={confirmRemoveMember}
+                title="Remove Team Member"
+                message={`Are you sure you want to remove ${removeMemberConfirm.userName || 'this team member'} from the account? This action cannot be undone.`}
+                confirmText="Remove Member"
+                cancelText="Cancel"
+                variant="danger"
+            />
         </div>
     )
 }

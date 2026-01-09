@@ -50,6 +50,8 @@ class HandleInertiaRequests extends Middleware
         }
         
         // Resolve active brand if not already bound
+        // Note: ResolveTenant middleware will handle brand access verification
+        // This is just for early resolution if tenant is available
         $activeBrand = app()->bound('brand') ? app('brand') : null;
         if (! $activeBrand && $tenant) {
             $brandId = session('brand_id');
@@ -57,9 +59,63 @@ class HandleInertiaRequests extends Middleware
                 $activeBrand = \App\Models\Brand::where('id', $brandId)
                     ->where('tenant_id', $tenant->id)
                     ->first();
+                
+                // Verify user has access to this brand (unless owner/admin)
+                if ($activeBrand && $user) {
+                    $tenantRole = $user->getRoleForTenant($tenant);
+                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+                    
+                    if (! $isTenantOwnerOrAdmin) {
+                        $hasBrandAccess = $user->brands()
+                            ->where('brands.id', $activeBrand->id)
+                            ->where('tenant_id', $tenant->id)
+                            ->exists();
+                        
+                        if (! $hasBrandAccess) {
+                            // User doesn't have access - find a brand they do have access to
+                            $userBrand = $user->brands()
+                                ->where('tenant_id', $tenant->id)
+                                ->first();
+                            
+                            if ($userBrand) {
+                                $activeBrand = $userBrand;
+                                session(['brand_id' => $activeBrand->id]);
+                            } else {
+                                // No accessible brand - use default (policies will restrict access)
+                                $activeBrand = $tenant->defaultBrand;
+                                if ($activeBrand) {
+                                    session(['brand_id' => $activeBrand->id]);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if (! $activeBrand) {
-                $activeBrand = $tenant->defaultBrand;
+                // Try to find a brand the user has access to
+                if ($user) {
+                    $tenantRole = $user->getRoleForTenant($tenant);
+                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+                    
+                    if (! $isTenantOwnerOrAdmin) {
+                        $userBrand = $user->brands()
+                            ->where('tenant_id', $tenant->id)
+                            ->first();
+                        
+                        if ($userBrand) {
+                            $activeBrand = $userBrand;
+                            session(['brand_id' => $activeBrand->id]);
+                        }
+                    }
+                }
+                
+                // Fallback to default brand
+                if (! $activeBrand) {
+                    $activeBrand = $tenant->defaultBrand;
+                    if ($activeBrand) {
+                        session(['brand_id' => $activeBrand->id]);
+                    }
+                }
             }
             if ($activeBrand) {
                 app()->instance('brand', $activeBrand);
@@ -104,12 +160,6 @@ class HandleInertiaRequests extends Middleware
 
                 // Filter brands based on user role and access
                 $accessibleBrands = $allBrands->filter(function ($brand) use ($userBrandIds, $activeBrand, $isTenantOwnerOrAdmin, $tenant, $user) {
-                    // Always include active brand (even if user doesn't have explicit access)
-                    $isActive = $activeBrand && $brand->id === $activeBrand->id;
-                    if ($isActive) {
-                        return true;
-                    }
-                    
                     // Tenant owners/admins see ALL brands (ignoring show_in_selector flag)
                     // This is bulletproof: owners/admins always see all brands for their tenant
                     if ($isTenantOwnerOrAdmin) {
@@ -127,6 +177,8 @@ class HandleInertiaRequests extends Middleware
                     
                     // If user doesn't have explicit brand access, they shouldn't see it
                     // (show_in_selector is only for general visibility, but explicit access trumps it)
+                    // NOTE: We do NOT include active brand if user doesn't have access - this prevents
+                    // orphaned brand access where session has a brand_id but user was removed from brand
                     return false;
                 });
 
