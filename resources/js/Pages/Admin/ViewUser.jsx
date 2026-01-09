@@ -47,11 +47,39 @@ export default function ViewUser({ user, companies, brand_assignments, activitie
         
         if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE ${userName}'s account? This action cannot be undone.`)) {
             if (confirm(`Final confirmation: This will permanently delete the account. Continue?`)) {
-                if (!companies || companies.length === 0) {
-                    alert('Cannot delete account: User is not associated with any company.')
+                // Check if user has no companies
+                const hasNoCompanies = !companies || companies.length === 0
+                
+                // If user has no companies, use direct user deletion route (no company required)
+                if (hasNoCompanies) {
+                    const deleteUrl = `/app/admin/users/${user.id}/delete`
+                    
+                    router.post(deleteUrl, {}, {
+                        preserveScroll: false,
+                        onSuccess: (page) => {
+                            console.log('Delete successful, redirecting...', page)
+                            router.visit('/app/admin', {
+                                data: { activeTab: 'users' },
+                                preserveState: false,
+                            })
+                        },
+                        onError: (errors) => {
+                            console.error('Delete account error:', errors)
+                            let errorMessage = 'Failed to delete account. '
+                            if (errors.user) {
+                                errorMessage += errors.user
+                            } else if (errors.error) {
+                                errorMessage += errors.error
+                            } else {
+                                errorMessage += 'Please try again.'
+                            }
+                            alert(errorMessage)
+                        },
+                    })
                     return
                 }
                 
+                // Normal deletion path (user has companies)
                 const companyId = companies[0].id
                 const userId = user.id
                 

@@ -249,8 +249,16 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
-        return [
-            ...parent::share($request), // This automatically includes 'old' input from Laravel
+        $parentShared = parent::share($request);
+        
+        // Manually ensure 'old' input is included if it exists in session but not in parent shared
+        $sessionOldInput = $request->session()->getOldInput();
+        if (!empty($sessionOldInput) && !isset($parentShared['old'])) {
+            $parentShared['old'] = $sessionOldInput;
+        }
+        
+        $shared = [
+            ...$parentShared,
             'flash' => [
                 'success' => $request->session()->get('success'),
                 'error' => $request->session()->get('error'),
@@ -264,6 +272,7 @@ class HandleInertiaRequests extends Middleware
                     'last_name' => $user->last_name,
                     'email' => $user->email,
                     'avatar_url' => $user->avatar_url,
+                    'site_roles' => $user ? $user->getSiteRoles() : [],
                 ] : null,
                 'companies' => $user ? $user->tenants->map(fn ($tenant) => [
                     'id' => $tenant->id,
@@ -288,5 +297,7 @@ class HandleInertiaRequests extends Middleware
                 'role_permissions' => $rolePermissions, // Mapping of role names to permission arrays
             ],
         ];
+        
+        return $shared;
     }
 }

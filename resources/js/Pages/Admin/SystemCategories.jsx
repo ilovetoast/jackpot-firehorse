@@ -4,6 +4,7 @@ import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 import {
     PlusIcon,
     PencilIcon,
@@ -21,6 +22,7 @@ export default function SystemCategories({ templates, asset_types }) {
     const [deletingTemplate, setDeletingTemplate] = useState(null)
     const [draggedTemplate, setDraggedTemplate] = useState(null)
     const [localTemplates, setLocalTemplates] = useState(templates || [])
+    const [deleteConfirm, setDeleteConfirm] = useState({ open: false, template: null })
 
     const { data, setData, post, put, delete: destroy, processing, errors, reset } = useForm({
         name: '',
@@ -74,9 +76,14 @@ export default function SystemCategories({ templates, asset_types }) {
     }
 
     const handleDelete = (template) => {
-        if (confirm(`Are you sure you want to delete the system category "${template.name}"? This will only affect new brands created after this change.`)) {
-            destroy(`/app/admin/system-categories/${template.id}`, {
+        setDeleteConfirm({ open: true, template })
+    }
+
+    const confirmDelete = () => {
+        if (deleteConfirm.template) {
+            destroy(`/app/admin/system-categories/${deleteConfirm.template.id}`, {
                 onSuccess: () => {
+                    setDeleteConfirm({ open: false, template: null })
                     setDeletingTemplate(null)
                 },
             })

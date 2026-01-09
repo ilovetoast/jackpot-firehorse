@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AssetType;
+use App\Models\Asset;
 use App\Models\Category;
+use App\Services\AssetDeletionService;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
@@ -15,7 +18,8 @@ class AssetController extends Controller
 {
     public function __construct(
         protected SystemCategoryService $systemCategoryService,
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected AssetDeletionService $deletionService
     ) {
     }
 
@@ -141,5 +145,48 @@ class AssetController extends Controller
             'selected_category' => $request->get('category'),
             'show_all_button' => $showAllButton,
         ]);
+    }
+
+    /**
+     * Delete an asset.
+     *
+     * DELETE /assets/{asset}
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function destroy(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Verify asset is not already deleted
+        if ($asset->trashed()) {
+            return response()->json([
+                'message' => 'Asset is already deleted',
+            ], 409);
+        }
+
+        try {
+            // Soft delete the asset (pass user context)
+            $this->deletionService->softDelete($asset, $user?->id);
+
+            return response()->json([
+                'message' => 'Asset deleted successfully',
+                'asset_id' => $asset->id,
+                'grace_period_days' => config('assets.deletion_grace_period_days', 30),
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to delete asset: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

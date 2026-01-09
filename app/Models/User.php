@@ -104,6 +104,38 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the tickets created by this user.
+     */
+    public function createdTickets(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Ticket::class, 'created_by_user_id');
+    }
+
+    /**
+     * Get the tickets assigned to this user.
+     */
+    public function assignedTickets(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Ticket::class, 'assigned_to_user_id');
+    }
+
+    /**
+     * Get the ticket messages created by this user.
+     */
+    public function ticketMessages(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(TicketMessage::class);
+    }
+
+    /**
+     * Get the ticket attachments uploaded by this user.
+     */
+    public function ticketAttachments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(TicketAttachment::class);
+    }
+
+    /**
      * Get the user's role for a specific tenant.
      */
     public function getRoleForTenant(Tenant $tenant): ?string
@@ -157,14 +189,22 @@ class User extends Authenticatable
     }
 
     /**
-     * Get all site-wide roles (roles that contain 'site' in the name).
+     * Get all site-wide roles (roles that contain 'site' in the name, plus 'compliance').
+     * Site-wide roles are: site_owner, site_admin, site_support, site_engineering, compliance
+     * Returns array_values() to ensure it's a proper array, not an object with numeric keys
      */
     public function getSiteRoles(): array
     {
-        return array_filter(
-            $this->getRoleNames()->toArray(),
-            fn($role) => str_contains(strtolower($role), 'site')
+        $allRoles = $this->getRoleNames()->toArray();
+        $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance'];
+        
+        $filtered = array_filter(
+            $allRoles,
+            fn($role) => in_array($role, $siteRoleNames)
         );
+        
+        // Use array_values to ensure it's a proper array, not an object with numeric keys
+        return array_values($filtered);
     }
 
     /**

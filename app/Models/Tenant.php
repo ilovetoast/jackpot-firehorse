@@ -77,6 +77,14 @@ class Tenant extends Model
     }
 
     /**
+     * Get the tickets for this tenant.
+     */
+    public function tickets(): HasMany
+    {
+        return $this->hasMany(Ticket::class);
+    }
+
+    /**
      * Get the ownership transfers for this tenant.
      */
     public function ownershipTransfers(): HasMany

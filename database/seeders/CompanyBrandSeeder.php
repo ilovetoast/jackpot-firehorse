@@ -50,8 +50,9 @@ class CompanyBrandSeeder extends Seeder
             ]);
         }
 
-        // Create a site owner user for secondary companies (will be user ID 2+ if user 1 exists)
-        $siteOwner = User::firstOrCreate(
+        // Create a secondary user for testing/development (will be user ID 2+ if user 1 exists)
+        // NOTE: This user should NEVER have site_owner role - only user ID 1 can be site_owner
+        $secondaryUser = User::firstOrCreate(
             ['email' => 'johndoe@example.com'],
             [
                 'first_name' => 'John',
@@ -60,10 +61,9 @@ class CompanyBrandSeeder extends Seeder
             ]
         );
 
-        // Assign site_owner role to the site owner user
-        $siteOwnerRole = Role::where('name', 'site_owner')->first();
-        if ($siteOwnerRole && !$siteOwner->hasRole('site_owner')) {
-            $siteOwner->assignRole('site_owner');
+        // Remove site_owner role if it was previously assigned (safety check)
+        if ($secondaryUser->hasRole('site_owner')) {
+            $secondaryUser->removeRole('site_owner');
         }
 
         // Define secondary companies and their brands
@@ -88,8 +88,8 @@ class CompanyBrandSeeder extends Seeder
                 $tenant->update(['name' => $companyName]);
             }
 
-            // Attach site owner to every company
-            $siteOwner->tenants()->syncWithoutDetaching([$tenant->id]);
+            // Attach secondary user to every company
+            $secondaryUser->tenants()->syncWithoutDetaching([$tenant->id]);
 
             // Get the first brand name we want
             $firstBrandName = $brandNames[0];

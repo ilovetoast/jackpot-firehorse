@@ -2,24 +2,32 @@
 
 namespace App\Enums;
 
+/**
+ * Asset type classification.
+ *
+ * Defines the category or purpose of an asset within the DAM system.
+ * Used for organizational purposes and may affect processing pipelines.
+ */
 enum AssetType: string
 {
-    case BASIC = 'basic';
+    /**
+     * General asset type for standard digital assets.
+     * Default classification for uploaded files.
+     * Applies to all standard asset categories.
+     */
+    case ASSET = 'asset';
+
+    /**
+     * Marketing-specific assets.
+     * Used for marketing materials, campaigns, and promotional content.
+     * May have different processing or access rules.
+     */
     case MARKETING = 'marketing';
 
     /**
-     * Get all asset type values.
+     * AI-generated content.
+     * Assets created or modified by AI services.
+     * Used to track and manage AI-generated materials separately.
      */
-    public static function values(): array
-    {
-        return array_column(self::cases(), 'value');
-    }
-
-    /**
-     * Get all asset type names.
-     */
-    public static function names(): array
-    {
-        return array_column(self::cases(), 'name');
-    }
+    case AI_GENERATED = 'ai_generated';
 }

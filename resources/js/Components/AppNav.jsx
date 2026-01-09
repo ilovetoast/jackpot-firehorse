@@ -506,12 +506,9 @@ export default function AppNav({ brand, tenant }) {
                                         {/* Support */}
                                         <div className="px-4 py-2 border-b border-gray-200">
                                             <Link
-                                                href="#"
+                                                href="/app/support/tickets"
                                                 className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                onClick={(e) => {
-                                                    e.preventDefault()
-                                                    setUserMenuOpen(false)
-                                                }}
+                                                onClick={() => setUserMenuOpen(false)}
                                             >
                                                 <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
@@ -533,6 +530,23 @@ export default function AppNav({ brand, tenant }) {
                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                                                     </svg>
                                                     Admin Dashboard
+                                                </Link>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Support Section - Only show for site_support role */}
+                                        {Array.isArray(auth.user?.site_roles) && auth.user.site_roles.includes('site_support') && (
+                                            <div className="px-4 py-2 border-b border-gray-200">
+                                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Support</p>
+                                                <Link
+                                                    href="/app/admin/support/tickets"
+                                                    className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
+                                                    onClick={() => setUserMenuOpen(false)}
+                                                >
+                                                    <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                    </svg>
+                                                    Support Tickets
                                                 </Link>
                                             </div>
                                         )}

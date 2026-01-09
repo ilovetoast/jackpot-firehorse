@@ -117,6 +117,31 @@ class ActivityEvent extends Model
     protected static array $stringActorTypes = ['system', 'api', 'guest'];
 
     /**
+     * Normalize actor_type value.
+     */
+    protected function normalizeActorType(?string $value): ?string
+    {
+        if (!$value || str_contains($value, '\\') || in_array($value, static::$stringActorTypes, true)) {
+            return $value; // Already normalized or is a string type
+        }
+
+        // Map short names to full class names
+        $typeMap = [
+            'user' => \App\Models\User::class,
+        ];
+        
+        return $typeMap[strtolower($value)] ?? $value;
+    }
+
+    /**
+     * Set the actor_type attribute with normalization.
+     */
+    public function setActorTypeAttribute($value): void
+    {
+        $this->attributes['actor_type'] = $this->normalizeActorType($value);
+    }
+
+    /**
      * Get the actor (polymorphic).
      * Can be User, System, API, or Guest.
      * Handles string actor types (system, api, guest) that aren't model classes.
@@ -126,6 +151,18 @@ class ActivityEvent extends Model
      */
     public function actor(): MorphTo
     {
+        // Normalize actor_type if needed before relationship resolves
+        $rawType = $this->getRawOriginal('actor_type');
+        if ($rawType && !str_contains($rawType, '\\') && !in_array($rawType, static::$stringActorTypes, true)) {
+            $normalized = $this->normalizeActorType($rawType);
+            if ($normalized !== $rawType) {
+                $this->setAttribute('actor_type', $normalized);
+                $attributes = $this->getAttributes();
+                $attributes['actor_type'] = $normalized;
+                $this->setRawAttributes($attributes, false);
+            }
+        }
+        
         return $this->morphTo('actor', 'actor_type', 'actor_id');
     }
 

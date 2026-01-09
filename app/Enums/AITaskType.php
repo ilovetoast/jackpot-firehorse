@@ -1,0 +1,88 @@
+<?php
+
+namespace App\Enums;
+
+/**
+ * AI Task Type Registry
+ *
+ * Centralized registry for all AI task types.
+ * Defines what agents are doing (e.g., summarizing tickets, generating reports).
+ *
+ * Task types are used for:
+ * - Routing agent runs to appropriate handlers
+ * - Reporting and cost analysis
+ * - Filtering agent run history
+ * - Defining agent capabilities
+ *
+ * Naming convention: Use snake_case descriptive names
+ * Examples: support_ticket_summary, audit_report_generation
+ */
+class AITaskType
+{
+    // Support ticket tasks
+    public const SUPPORT_TICKET_SUMMARY = 'support_ticket_summary';
+    public const TICKET_CLASSIFICATION = 'ticket_classification';
+    public const SLA_RISK_DETECTION = 'sla_risk_detection';
+    public const ERROR_PATTERN_ANALYSIS = 'error_pattern_analysis';
+    public const DUPLICATE_TICKET_DETECTION = 'duplicate_ticket_detection';
+    
+    // Audit and reporting tasks
+    public const AUDIT_REPORT_GENERATION = 'audit_report_generation';
+    public const PERFORMANCE_ANALYSIS = 'performance_analysis';
+    
+    // Asset management tasks (future)
+    public const ASSET_TAG_SUGGESTION = 'asset_tag_suggestion';
+    
+    /**
+     * Get all task types as an array.
+     *
+     * @return array<string>
+     */
+    public static function all(): array
+    {
+        return [
+            self::SUPPORT_TICKET_SUMMARY,
+            self::TICKET_CLASSIFICATION,
+            self::SLA_RISK_DETECTION,
+            self::ERROR_PATTERN_ANALYSIS,
+            self::DUPLICATE_TICKET_DETECTION,
+            self::AUDIT_REPORT_GENERATION,
+            self::PERFORMANCE_ANALYSIS,
+            self::ASSET_TAG_SUGGESTION,
+        ];
+    }
+    
+    /**
+     * Validate if a task type is valid.
+     *
+     * @param string $taskType
+     * @return bool
+     */
+    public static function isValid(string $taskType): bool
+    {
+        return in_array($taskType, self::all(), true);
+    }
+    
+    /**
+     * Get task types by category/domain.
+     *
+     * @param string $category (e.g., 'support', 'audit', 'asset')
+     * @return array<string>
+     */
+    public static function byCategory(string $category): array
+    {
+        $mapping = [
+            'support' => [
+                self::SUPPORT_TICKET_SUMMARY,
+                self::TICKET_CLASSIFICATION,
+                self::SLA_RISK_DETECTION,
+                self::DUPLICATE_TICKET_DETECTION,
+            ],
+            'engineering' => [self::ERROR_PATTERN_ANALYSIS],
+            'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS],
+            'asset' => [self::ASSET_TAG_SUGGESTION],
+        ];
+        
+        return $mapping[$category] ?? [];
+    }
+}

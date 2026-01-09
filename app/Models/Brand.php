@@ -131,4 +131,12 @@ class Brand extends Model
     {
         return $this->hasMany(BrandInvitation::class);
     }
+
+    /**
+     * Get the tickets associated with this brand.
+     */
+    public function tickets(): BelongsToMany
+    {
+        return $this->belongsToMany(Ticket::class)->withTimestamps();
+    }
 }

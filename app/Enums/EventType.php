@@ -97,6 +97,40 @@ class EventType
     public const INVOICE_PAID = 'invoice.paid';
     public const INVOICE_FAILED = 'invoice.failed';
 
+    // Ticket events
+    public const TICKET_CREATED = 'ticket.created';
+    public const TICKET_UPDATED = 'ticket.updated';
+    public const TICKET_DELETED = 'ticket.deleted';
+    public const TICKET_MESSAGE_CREATED = 'ticket.message.created';
+    public const TICKET_ATTACHMENT_CREATED = 'ticket.attachment.created';
+    public const TICKET_ASSIGNED = 'ticket.assigned';
+    public const TICKET_STATUS_CHANGED = 'ticket.status_changed';
+    public const TICKET_CONVERTED = 'ticket.converted';
+    public const TICKET_INTERNAL_NOTE_ADDED = 'ticket.internal_note_added';
+    public const TICKET_LINKED = 'ticket.linked';
+    public const TICKET_SUGGESTION_CREATED = 'ticket.suggestion.created';
+    public const TICKET_SUGGESTION_UPDATED = 'ticket.suggestion.updated';
+
+    // AI Agent events
+    public const AI_AGENT_RUN_STARTED = 'ai.agent_run.started';
+    public const AI_AGENT_RUN_COMPLETED = 'ai.agent_run.completed';
+    public const AI_AGENT_RUN_FAILED = 'ai.agent_run.failed';
+
+    // AI Configuration Override events
+    public const AI_MODEL_OVERRIDE_CREATED = 'ai.model_override.created';
+    public const AI_MODEL_OVERRIDE_UPDATED = 'ai.model_override.updated';
+    public const AI_AGENT_OVERRIDE_CREATED = 'ai.agent_override.created';
+    public const AI_AGENT_OVERRIDE_UPDATED = 'ai.agent_override.updated';
+    public const AI_AUTOMATION_OVERRIDE_CREATED = 'ai.automation_override.created';
+    public const AI_AUTOMATION_OVERRIDE_UPDATED = 'ai.automation_override.updated';
+
+    // AI Budget events
+    public const AI_BUDGET_OVERRIDE_CREATED = 'ai.budget_override.created';
+    public const AI_BUDGET_OVERRIDE_UPDATED = 'ai.budget_override.updated';
+    public const AI_BUDGET_WARNING_TRIGGERED = 'ai.budget.warning_triggered';
+    public const AI_BUDGET_EXCEEDED = 'ai.budget.exceeded';
+    public const AI_BUDGET_BLOCKED = 'ai.budget.blocked';
+
     /**
      * Get all event types as an array.
      * 
@@ -157,6 +191,32 @@ class EventType
             self::PLAN_UPDATED,
             self::INVOICE_PAID,
             self::INVOICE_FAILED,
+            self::TICKET_CREATED,
+            self::TICKET_UPDATED,
+            self::TICKET_DELETED,
+            self::TICKET_MESSAGE_CREATED,
+            self::TICKET_ATTACHMENT_CREATED,
+            self::TICKET_ASSIGNED,
+            self::TICKET_STATUS_CHANGED,
+            self::TICKET_CONVERTED,
+            self::TICKET_INTERNAL_NOTE_ADDED,
+            self::TICKET_LINKED,
+            self::TICKET_SUGGESTION_CREATED,
+            self::TICKET_SUGGESTION_UPDATED,
+            self::AI_AGENT_RUN_STARTED,
+            self::AI_AGENT_RUN_COMPLETED,
+            self::AI_AGENT_RUN_FAILED,
+            self::AI_MODEL_OVERRIDE_CREATED,
+            self::AI_MODEL_OVERRIDE_UPDATED,
+            self::AI_AGENT_OVERRIDE_CREATED,
+            self::AI_AGENT_OVERRIDE_UPDATED,
+            self::AI_AUTOMATION_OVERRIDE_CREATED,
+            self::AI_AUTOMATION_OVERRIDE_UPDATED,
+            self::AI_BUDGET_OVERRIDE_CREATED,
+            self::AI_BUDGET_OVERRIDE_UPDATED,
+            self::AI_BUDGET_WARNING_TRIGGERED,
+            self::AI_BUDGET_EXCEEDED,
+            self::AI_BUDGET_BLOCKED,
         ];
     }
 

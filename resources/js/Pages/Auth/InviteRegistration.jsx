@@ -1,5 +1,5 @@
 import { useForm, router } from '@inertiajs/react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 
 // Common countries list
@@ -82,43 +82,53 @@ const timezones = [
 ]
 
 export default function InviteRegistration({ invitation }) {
-    const pageProps = usePage().props
-    const old = pageProps?.old || {}
+    const { old } = usePage().props
     
-    // Initialize form with old input if available (from validation errors)
-    const { data, setData, post, processing, errors } = useForm({
-        first_name: old.first_name || '',
-        last_name: old.last_name || '',
+    // Initialize useForm with old values if they exist (from validation errors)
+    // Use useMemo to ensure we always use the latest old values
+    const initialFormData = useMemo(() => ({
+        first_name: old?.first_name || '',
+        last_name: old?.last_name || '',
         password: '', // Never restore password for security
         password_confirmation: '', // Never restore password for security
-        country: old.country || '',
-        timezone: old.timezone || '',
-    })
+        country: old?.country || '',
+        timezone: old?.timezone || '',
+    }), [old])
+
+    const { data, setData, post, processing, errors } = useForm(initialFormData)
 
     const [showOptional, setShowOptional] = useState(false)
+    const hasSyncedOldRef = useRef(false)
     
-    // Also update form if old input changes (handles case where it's not available on first render)
+    // Sync form data with old input when validation errors occur
+    // This ensures form data is preserved after validation errors
+    // Use a ref to track if we've synced to avoid infinite loops
     useEffect(() => {
-        if (old && Object.keys(old).length > 0) {
-            // Check if form needs updating by comparing current values with old input
-            const needsUpdate = 
-                (old.first_name && old.first_name !== data.first_name) ||
-                (old.last_name && old.last_name !== data.last_name) ||
-                (old.country !== undefined && old.country !== data.country) ||
-                (old.timezone !== undefined && old.timezone !== data.timezone)
+        // Only sync once when old becomes available
+        if (old && !hasSyncedOldRef.current) {
+            hasSyncedOldRef.current = true
             
-            if (needsUpdate) {
-                setData({
-                    first_name: old.first_name !== undefined ? old.first_name : data.first_name,
-                    last_name: old.last_name !== undefined ? old.last_name : data.last_name,
-                    password: '', // Always clear password on error for security
-                    password_confirmation: '', // Always clear password on error for security
-                    country: old.country !== undefined ? old.country : data.country,
-                    timezone: old.timezone !== undefined ? old.timezone : data.timezone,
-                })
+            // Update all fields from old input (except passwords for security)
+            if (old.first_name !== undefined) {
+                setData('first_name', old.first_name)
             }
+            if (old.last_name !== undefined) {
+                setData('last_name', old.last_name)
+            }
+            if (old.country !== undefined) {
+                setData('country', old.country)
+            }
+            if (old.timezone !== undefined) {
+                setData('timezone', old.timezone)
+            }
+            // Passwords are intentionally not restored for security
         }
-    }, [old?.first_name, old?.last_name, old?.country, old?.timezone, data, setData])
+        
+        // Reset sync flag when old becomes unavailable (new form submission)
+        if (!old) {
+            hasSyncedOldRef.current = false
+        }
+    }, [old, setData])
 
     const handleSubmit = (e) => {
         e.preventDefault()

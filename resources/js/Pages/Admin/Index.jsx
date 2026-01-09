@@ -54,13 +54,16 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
     // Close dropdown when clicking outside - using backdrop overlay instead of document listener
     // This is more reliable and doesn't interfere with button clicks
 
+    // Check if user has AI dashboard view permission
+    const canViewAIDashboard = auth.permissions?.includes('ai.dashboard.view') || false
+
     const adminTools = [
         { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
         { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },
         { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
-        { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '#' },
+        { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
         { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '#' },
-        { name: 'AI Agents', icon: BoltIcon, description: 'Manage AI agents', href: '#' },
+        ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
         { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
         { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },
         { name: 'Permissions', icon: LockClosedIcon, description: 'Manage role permissions', href: '/app/admin/permissions' },
@@ -72,7 +75,7 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
         { name: 'Total Users', value: stats.total_users, subtitle: 'Across all companies', icon: UsersIcon },
         { name: 'Active Subscriptions', value: stats.active_subscriptions || 0, subtitle: 'Currently active', icon: DocumentIcon },
         { name: 'Stripe Accounts', value: stats.stripe_accounts || 0, subtitle: 'Connected to Stripe', icon: ChartBarIcon },
-        { name: 'Support Tickets', value: stats.support_tickets || 0, subtitle: '0 waiting on support', icon: QuestionMarkCircleIcon },
+        { name: 'Support Tickets', value: stats.support_tickets || 0, subtitle: `${stats.waiting_on_support || 0} waiting on support`, icon: QuestionMarkCircleIcon },
     ]
 
     return (
@@ -1138,6 +1141,7 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                                     <option value="site_owner">Site Owner</option>
                                                                                     <option value="site_admin">Site Admin</option>
                                                                                     <option value="site_support">Site Support</option>
+                                                                                    <option value="site_engineering">Site Engineering</option>
                                                                                     <option value="compliance">Compliance</option>
                                                                                 </select>
                                                                             </div>

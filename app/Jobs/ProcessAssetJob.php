@@ -1,0 +1,110 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Enums\AssetStatus;
+use App\Models\Asset;
+use App\Models\AssetEvent;
+use App\Services\AssetProcessingFailureService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+
+class ProcessAssetJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * The number of times the job may be attempted.
+     * Never retry forever - enforce maximum attempts.
+     *
+     * @var int
+     */
+    public $tries = 3; // Maximum retry attempts (enforced by AssetProcessingFailureService)
+
+    /**
+     * The number of seconds to wait before retrying the job.
+     *
+     * @var int
+     */
+    public $backoff = [60, 300, 900]; // 1 minute, 5 minutes, 15 minutes
+
+    /**
+     * Create a new job instance.
+     */
+    public function __construct(
+        public readonly string $assetId
+    ) {}
+
+    /**
+     * Execute the job.
+     */
+    public function handle(): void
+    {
+        $asset = Asset::findOrFail($this->assetId);
+
+        // Idempotency: Skip if already processing or completed
+        if ($asset->status === AssetStatus::PROCESSING || $asset->status === AssetStatus::READY) {
+            Log::info('Asset processing skipped - already processing or ready', [
+                'asset_id' => $asset->id,
+                'status' => $asset->status->value,
+            ]);
+            return;
+        }
+
+        // Skip if failed (don't reprocess failed assets automatically)
+        if ($asset->status === AssetStatus::FAILED) {
+            Log::warning('Asset processing skipped - asset is in failed state', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Update status to PROCESSING
+        $asset->update([
+            'status' => AssetStatus::PROCESSING,
+        ]);
+
+        // Emit processing started event
+        AssetEvent::create([
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'asset_id' => $asset->id,
+            'user_id' => null, // System event
+            'event_type' => 'processing.started',
+            'metadata' => [
+                'job' => 'ProcessAssetJob',
+            ],
+            'created_at' => now(),
+        ]);
+
+        Log::info('Asset processing started', [
+            'asset_id' => $asset->id,
+            'file_name' => $asset->file_name,
+        ]);
+
+        // Dispatch next job in chain
+        ExtractMetadataJob::dispatch($asset->id);
+    }
+
+    /**
+     * Handle a job failure.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        $asset = Asset::find($this->assetId);
+
+        if ($asset) {
+            // Use centralized failure recording service
+            app(AssetProcessingFailureService::class)->recordFailure(
+                $asset,
+                self::class,
+                $exception,
+                $this->attempts()
+            );
+        }
+    }
+}

@@ -6,17 +6,26 @@ import AppNav from '../../Components/AppNav'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 import BrandAvatar from '../../Components/BrandAvatar'
 import Avatar from '../../Components/Avatar'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 
 export default function BrandsIndex({ brands, limits }) {
     const { auth } = usePage().props
     const { post, processing } = useForm()
     const [expandedBrand, setExpandedBrand] = useState(null)
     const [categoryTab, setCategoryTab] = useState({}) // Track active tab per brand: { brandId: 'basic' | 'marketing' }
+    const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
 
     const handleDelete = (brandId, brandName) => {
-        if (confirm(`Are you sure you want to delete "${brandName}"?`)) {
-            router.delete(`/app/brands/${brandId}`, {
+        setDeleteConfirm({ open: true, brandId, brandName })
+    }
+
+    const confirmDelete = () => {
+        if (deleteConfirm.brandId) {
+            router.delete(`/app/brands/${deleteConfirm.brandId}`, {
                 preserveScroll: true,
+                onSuccess: () => {
+                    setDeleteConfirm({ open: false, brandId: null, brandName: '' })
+                },
             })
         }
     }
@@ -416,6 +425,15 @@ export default function BrandsIndex({ brands, limits }) {
                     </div>
                 </div>
             </main>
+            <ConfirmDialog
+                open={deleteConfirm.open}
+                onClose={() => setDeleteConfirm({ open: false, brandId: null, brandName: '' })}
+                onConfirm={confirmDelete}
+                title="Delete Brand"
+                message={`Are you sure you want to delete "${deleteConfirm.brandName}"?`}
+                variant="danger"
+                confirmText="Delete"
+            />
         </div>
     )
 }
@@ -585,6 +603,7 @@ function UserManagementCard({ user, brandId }) {
     const [isEditing, setIsEditing] = useState(false)
     const [role, setRole] = useState(user.role || 'member')
     const [updatingRole, setUpdatingRole] = useState(false)
+    const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
 
     const handleRoleUpdate = () => {
         setUpdatingRole(true)
@@ -603,11 +622,16 @@ function UserManagementCard({ user, brandId }) {
     }
 
     const handleRemove = () => {
-        if (confirm(`Are you sure you want to remove ${user.name || user.email} from this brand?`)) {
-            destroy(`/app/brands/${brandId}/users/${user.id}`, {
-                preserveScroll: true,
-            })
-        }
+        setShowRemoveConfirm(true)
+    }
+
+    const confirmRemove = () => {
+        destroy(`/app/brands/${brandId}/users/${user.id}`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setShowRemoveConfirm(false)
+            },
+        })
     }
 
     return (
@@ -683,6 +707,15 @@ function UserManagementCard({ user, brandId }) {
                     )}
                 </div>
             </div>
+            <ConfirmDialog
+                open={showRemoveConfirm}
+                onClose={() => setShowRemoveConfirm(false)}
+                onConfirm={confirmRemove}
+                title="Remove User"
+                message={`Are you sure you want to remove ${user.name || user.email} from this brand?`}
+                variant="warning"
+                confirmText="Remove"
+            />
         </li>
     )
 }

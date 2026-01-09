@@ -84,6 +84,16 @@ trait RecordsActivity
             // Get tenant ID from model
             $tenantId = static::getTenantIdFromModel($model);
             
+            // For AI agent runs in system context, skip activity logging
+            // System runs don't have a tenant, and ActivityRecorder requires tenant
+            // Agent runs are still tracked in ai_agent_runs table for audit
+            if ($model instanceof \App\Models\AIAgentRun && 
+                ($model->triggering_context ?? null) === 'system' && 
+                !$tenantId) {
+                // System context runs are tracked in ai_agent_runs table only
+                return;
+            }
+            
             if (!$tenantId) {
                 // Can't record without tenant
                 return;

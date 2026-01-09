@@ -1,0 +1,784 @@
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
+use App\Models\AIAgentRun;
+use App\Models\Ticket;
+use App\Models\TicketLink;
+use App\Services\AIConfigService;
+use App\Services\AICostReportingService;
+use App\Services\AIBudgetService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Gate;
+use Inertia\Inertia;
+use Inertia\Response;
+
+/**
+ * AI Dashboard Controller
+ *
+ * Provides admin interface for observing and managing AI operations.
+ * System-facing only - no tenant-facing features.
+ *
+ * Features:
+ * - AI Activity observability (read-only)
+ * - AI Models management (with DB overrides)
+ * - AI Agents management (with DB overrides)
+ * - AI Automations & Triggers management (with DB overrides)
+ *
+ * Authorization:
+ * - All methods check AIDashboardPolicy
+ * - ai.dashboard.view: Read-only access
+ * - ai.dashboard.manage: Can edit overrides
+ */
+class AIDashboardController extends Controller
+{
+    public function __construct(
+        protected AIConfigService $configService,
+        protected AICostReportingService $reportingService,
+        protected AIBudgetService $budgetService
+    ) {
+    }
+
+    /**
+     * Display the main AI Dashboard with tabs.
+     */
+    public function index(): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $environment = app()->environment();
+
+        // Get summary stats
+        $stats = [
+            'total_runs' => AIAgentRun::count(),
+            'successful_runs' => AIAgentRun::where('status', 'success')->count(),
+            'failed_runs' => AIAgentRun::where('status', 'failed')->count(),
+            'total_cost' => (float) (AIAgentRun::sum('estimated_cost') ?? 0),
+            'total_tokens_in' => (int) (AIAgentRun::sum('tokens_in') ?? 0),
+            'total_tokens_out' => (int) (AIAgentRun::sum('tokens_out') ?? 0),
+        ];
+
+        // Get budget status
+        $systemBudget = $this->budgetService->getSystemBudget($environment);
+        $budgetStatus = null;
+        $budgetRemaining = null;
+        $currentMonthCost = null;
+        $costTrends = null;
+        $costSpikes = null;
+
+        if ($systemBudget) {
+            $budgetStatus = $this->budgetService->getBudgetStatus($systemBudget, $environment);
+            $budgetRemaining = $systemBudget->getRemaining($environment);
+            
+            // Get current month cost
+            $currentMonthStart = now()->startOfMonth();
+            $currentMonthEnd = now()->endOfMonth();
+            $currentMonthCost = AIAgentRun::whereBetween('started_at', [$currentMonthStart, $currentMonthEnd])
+                ->sum('estimated_cost');
+
+            // Get cost trends (last 7 days)
+            $costTrends = $this->reportingService->getCostTrends('day', 7);
+            
+            // Detect cost spikes
+            $costSpikes = $this->reportingService->detectCostSpikes(50);
+        }
+
+        // Get tab parameter to determine which tab content to load
+        $activeTab = request()->get('tab', 'activity');
+
+        // Load tab-specific data
+        $tabContent = [];
+        
+        if ($activeTab === 'activity') {
+            // Load activity data (first page only for initial load)
+            $query = AIAgentRun::with(['tenant', 'user'])
+                ->orderBy('started_at', 'desc');
+
+            // Apply filters from request
+            $request = request();
+            if ($request->filled('agent_id')) {
+                $query->where('agent_id', $request->agent_id);
+            }
+            if ($request->filled('model_used')) {
+                $query->where('model_used', 'like', '%' . $request->model_used . '%');
+            }
+            if ($request->filled('task_type')) {
+                $query->where('task_type', $request->task_type);
+            }
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
+            if ($request->filled('environment')) {
+                $query->where('environment', $request->environment);
+            }
+            if ($request->filled('date_from')) {
+                $query->where('started_at', '>=', $request->date_from);
+            }
+            if ($request->filled('date_to')) {
+                $query->where('started_at', '<=', $request->date_to . ' 23:59:59');
+            }
+            
+            $runs = $query->paginate(50)->through(function ($run) {
+                $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
+                    ->where('linkable_id', $run->id)
+                    ->with('ticket:id,ticket_number,subject')
+                    ->get()
+                    ->pluck('ticket')
+                    ->filter();
+
+                return [
+                    'id' => $run->id,
+                    'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
+                    'agent_id' => $run->agent_id,
+                    'agent_name' => $this->getAgentName($run->agent_id),
+                    'task_type' => $run->task_type,
+                    'triggering_context' => $run->triggering_context,
+                    'model_used' => $run->model_used,
+                    'tokens_in' => $run->tokens_in,
+                    'tokens_out' => $run->tokens_out,
+                    'estimated_cost' => $run->estimated_cost,
+                    'status' => $run->status,
+                    'error_message' => $run->error_message,
+                    'blocked_reason' => $run->blocked_reason,
+                    'duration' => $run->formatted_duration,
+                    'tenant' => $run->tenant ? [
+                        'id' => $run->tenant->id,
+                        'name' => $run->tenant->name,
+                    ] : null,
+                    'user' => $run->user ? [
+                        'id' => $run->user->id,
+                        'name' => $run->user->name,
+                        'email' => $run->user->email,
+                    ] : null,
+                    'environment' => $run->environment,
+                    'related_tickets' => $relatedTickets->map(function ($ticket) {
+                        return [
+                            'id' => $ticket->id,
+                            'ticket_number' => $ticket->ticket_number,
+                            'subject' => $ticket->subject,
+                        ];
+                    })->values(),
+                ];
+            });
+
+            // Load failed automation jobs
+            $failedJobs = \Illuminate\Support\Facades\DB::table('failed_jobs')
+                ->where('queue', 'default')
+                ->orderBy('failed_at', 'desc')
+                ->limit(20)
+                ->get()
+                ->map(function ($job) {
+                    $payload = json_decode($job->payload, true);
+                    $displayName = $payload['displayName'] ?? 'Unknown Job';
+                    
+                    // Only show automation jobs
+                    if (!str_contains($displayName, 'App\\Jobs\\Automation\\')) {
+                        return null;
+                    }
+                    
+                    // Extract job class name
+                    $jobClass = str_replace('App\\Jobs\\Automation\\', '', $displayName);
+                    
+                    // Extract exception message (first line)
+                    $exception = $job->exception;
+                    $exceptionLines = explode("\n", $exception);
+                    $errorMessage = $exceptionLines[0] ?? 'Unknown error';
+                    
+                    // Try to extract ticket ID or other context from payload
+                    $command = $payload['data']['command'] ?? null;
+                    $ticketId = null;
+                    if ($command) {
+                        $unserialized = unserialize($command);
+                        if (is_object($unserialized) && property_exists($unserialized, 'ticketId')) {
+                            $ticketId = $unserialized->ticketId;
+                        }
+                    }
+                    
+                    return [
+                        'id' => $job->id,
+                        'uuid' => $job->uuid,
+                        'job_class' => $jobClass,
+                        'job_name' => $displayName,
+                        'failed_at' => \Carbon\Carbon::parse($job->failed_at)->format('Y-m-d H:i:s'),
+                        'error_message' => $errorMessage,
+                        'full_exception' => $exception,
+                        'ticket_id' => $ticketId,
+                    ];
+                })
+                ->filter()
+                ->values();
+
+            $tabContent['activity'] = [
+                'runs' => $runs,
+                'failedJobs' => $failedJobs,
+                'filterOptions' => [
+                    'agents' => $this->getAgentOptions(),
+                    'models' => $this->getModelOptions(),
+                    'task_types' => $this->getTaskTypeOptions(),
+                    'environments' => $this->getEnvironmentOptions(),
+                ],
+            ];
+        } elseif ($activeTab === 'models') {
+            $tabContent['models'] = [
+                'models' => $this->configService->getAllModelsWithOverrides($environment),
+            ];
+        } elseif ($activeTab === 'agents') {
+            $tabContent['agents'] = [
+                'agents' => $this->configService->getAllAgentsWithOverrides($environment),
+                'availableModels' => array_keys(config('ai.models', [])),
+            ];
+        } elseif ($activeTab === 'automations') {
+            $automations = $this->configService->getAllAutomationsWithOverrides($environment);
+            foreach ($automations as &$automation) {
+                $agentId = $this->getAgentIdForTrigger($automation['key']);
+                if ($agentId) {
+                    $lastRun = AIAgentRun::where('agent_id', $agentId)
+                        ->orderBy('started_at', 'desc')
+                        ->first();
+                    $automation['last_triggered_at'] = $lastRun?->started_at?->toISOString();
+                } else {
+                    $automation['last_triggered_at'] = null;
+                }
+            }
+            $tabContent['automations'] = [
+                'automations' => $automations,
+            ];
+        } elseif ($activeTab === 'reports') {
+            $filters = request()->only([
+                'start_date',
+                'end_date',
+                'agent_id',
+                'model_used',
+                'task_type',
+                'triggering_context',
+                'environment',
+                'group_by',
+            ]);
+            
+            // Remove null/empty values
+            $filters = array_filter($filters, fn($value) => $value !== null && $value !== '');
+            
+            // Default to last 30 days if no date range specified
+            if (!isset($filters['start_date'])) {
+                $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
+            }
+            if (!isset($filters['end_date'])) {
+                $filters['end_date'] = now()->format('Y-m-d');
+            }
+
+            $report = $this->reportingService->generateReport($filters);
+            
+            $tabContent['reports'] = [
+                'report' => $report,
+                'filters' => $filters,
+                'filterOptions' => [
+                    'agents' => $this->getAgentOptions(),
+                    'models' => $this->getModelOptions(),
+                    'task_types' => $this->getTaskTypeOptions(),
+                    'environments' => $this->getEnvironmentOptions(),
+                    'contexts' => [
+                        ['value' => 'system', 'label' => 'System'],
+                        ['value' => 'tenant', 'label' => 'Tenant'],
+                        ['value' => 'user', 'label' => 'User'],
+                    ],
+                ],
+            ];
+        } elseif ($activeTab === 'budgets' && Auth::user()->can('ai.budgets.view')) {
+            $budgets = $this->configService->getAllBudgetsWithOverrides($environment);
+            foreach ($budgets as &$budget) {
+                if ($budget['id']) {
+                    $budgetModel = \App\Models\AIBudget::find($budget['id']);
+                    if ($budgetModel) {
+                        $budget['status'] = $this->budgetService->getBudgetStatus($budgetModel, $environment);
+                        $budget['current_usage'] = $budgetModel->getCurrentUsage($environment);
+                        $budget['effective_amount'] = $budgetModel->getEffectiveAmount($environment);
+                        $budget['remaining'] = $budgetModel->getRemaining($environment);
+                        $budget['warning_threshold'] = $budgetModel->getEffectiveWarningThreshold($environment);
+                        $budget['hard_limit_enabled'] = $budgetModel->isHardLimitEnabled($environment);
+                    }
+                }
+            }
+            $tabContent['budgets'] = [
+                'budgets' => $budgets,
+            ];
+        }
+
+        return Inertia::render('Admin/AI/Index', [
+            'stats' => $stats,
+            'environment' => $environment,
+            'canManage' => Auth::user()->can('ai.dashboard.manage'),
+            'budgetStatus' => $budgetStatus,
+            'budgetRemaining' => $budgetRemaining,
+            'currentMonthCost' => $currentMonthCost,
+            'costTrends' => $costTrends,
+            'costSpikes' => $costSpikes,
+            'canViewBudgets' => Auth::user()->can('ai.budgets.view'),
+            'activeTab' => $activeTab,
+            'tabContent' => $tabContent,
+        ]);
+    }
+
+    /**
+     * Display AI Activity timeline/table.
+     */
+    public function activity(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $query = AIAgentRun::with(['tenant', 'user'])
+            ->orderBy('started_at', 'desc');
+
+        // Apply filters
+        if ($request->filled('agent_id')) {
+            $query->where('agent_id', $request->agent_id);
+        }
+
+        if ($request->filled('model_used')) {
+            $query->where('model_used', 'like', '%' . $request->model_used . '%');
+        }
+
+        if ($request->filled('task_type')) {
+            $query->where('task_type', $request->task_type);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('environment')) {
+            $query->where('environment', $request->environment);
+        }
+
+        if ($request->filled('date_from')) {
+            $query->where('started_at', '>=', $request->date_from);
+        }
+
+        if ($request->filled('date_to')) {
+            $query->where('started_at', '<=', $request->date_to . ' 23:59:59');
+        }
+
+        $runs = $query->paginate(50)->through(function ($run) {
+            // Get related entities (tickets linked to this agent run)
+            $relatedTickets = TicketLink::where('linkable_type', AIAgentRun::class)
+                ->where('linkable_id', $run->id)
+                ->with('ticket:id,ticket_number,subject')
+                ->get()
+                ->pluck('ticket')
+                ->filter();
+
+            return [
+                'id' => $run->id,
+                'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
+                'agent_id' => $run->agent_id,
+                'agent_name' => $this->getAgentName($run->agent_id),
+                'task_type' => $run->task_type,
+                'triggering_context' => $run->triggering_context,
+                'model_used' => $run->model_used,
+                'tokens_in' => $run->tokens_in,
+                'tokens_out' => $run->tokens_out,
+                'estimated_cost' => $run->estimated_cost,
+                'status' => $run->status,
+                'error_message' => $run->error_message,
+                'duration' => $run->formatted_duration,
+                'tenant' => $run->tenant ? [
+                    'id' => $run->tenant->id,
+                    'name' => $run->tenant->name,
+                ] : null,
+                'user' => $run->user ? [
+                    'id' => $run->user->id,
+                    'name' => $run->user->name,
+                    'email' => $run->user->email,
+                ] : null,
+                'environment' => $run->environment,
+                'related_tickets' => $relatedTickets->map(function ($ticket) {
+                    return [
+                        'id' => $ticket->id,
+                        'ticket_number' => $ticket->ticket_number,
+                        'subject' => $ticket->subject,
+                    ];
+                })->values(),
+            ];
+        });
+
+        // Get filter options
+        $filterOptions = [
+            'agents' => $this->getAgentOptions(),
+            'models' => $this->getModelOptions(),
+            'task_types' => $this->getTaskTypeOptions(),
+            'environments' => $this->getEnvironmentOptions(),
+        ];
+
+        return Inertia::render('Admin/AI/Activity', [
+            'runs' => $runs,
+            'filters' => $request->only(['agent_id', 'model_used', 'task_type', 'status', 'environment', 'date_from', 'date_to']),
+            'filterOptions' => $filterOptions,
+        ]);
+    }
+
+    /**
+     * Display AI Models management view.
+     */
+    public function models(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $environment = $request->get('environment', app()->environment());
+        $models = $this->configService->getAllModelsWithOverrides($environment);
+
+        return Inertia::render('Admin/AI/Models', [
+            'models' => $models,
+            'environment' => $environment,
+            'canManage' => Auth::user()->can('ai.dashboard.manage'),
+        ]);
+    }
+
+    /**
+     * Display AI Agents management view.
+     */
+    public function agents(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $environment = $request->get('environment', app()->environment());
+        $agents = $this->configService->getAllAgentsWithOverrides($environment);
+
+        $availableModels = array_keys(config('ai.models', []));
+
+        return Inertia::render('Admin/AI/Agents', [
+            'agents' => $agents,
+            'environment' => $environment,
+            'availableModels' => $availableModels,
+            'canManage' => Auth::user()->can('ai.dashboard.manage'),
+        ]);
+    }
+
+    /**
+     * Display AI Automations & Triggers management view.
+     */
+    public function automations(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $environment = $request->get('environment', app()->environment());
+        $automations = $this->configService->getAllAutomationsWithOverrides($environment);
+
+        // Get last triggered timestamps for each automation
+        foreach ($automations as &$automation) {
+            $agentId = $this->getAgentIdForTrigger($automation['key']);
+            if ($agentId) {
+                $lastRun = AIAgentRun::where('agent_id', $agentId)
+                    ->orderBy('started_at', 'desc')
+                    ->first();
+
+                $automation['last_triggered_at'] = $lastRun?->started_at?->toISOString();
+            } else {
+                $automation['last_triggered_at'] = null;
+            }
+        }
+
+        return Inertia::render('Admin/AI/Automations', [
+            'automations' => $automations,
+            'environment' => $environment,
+            'canManage' => Auth::user()->can('ai.dashboard.manage'),
+        ]);
+    }
+
+    /**
+     * Update or create a model override.
+     */
+    public function updateModelOverride(Request $request, string $modelKey)
+    {
+        if (!Auth::user()->can('ai.dashboard.manage')) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'active' => 'nullable|boolean',
+            'default_for_tasks' => 'nullable|array',
+            'default_for_tasks.*' => 'string',
+            'environment' => 'nullable|string',
+        ]);
+
+        $override = $this->configService->updateModelOverride(
+            $modelKey,
+            $validated,
+            Auth::user()
+        );
+
+        return redirect()->back()->with('success', 'Model override updated successfully.');
+    }
+
+    /**
+     * Update or create an agent override.
+     */
+    public function updateAgentOverride(Request $request, string $agentId)
+    {
+        if (!Auth::user()->can('ai.dashboard.manage')) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'active' => 'nullable|boolean',
+            'default_model' => 'nullable|string',
+            'environment' => 'nullable|string',
+        ]);
+
+        $override = $this->configService->updateAgentOverride(
+            $agentId,
+            $validated,
+            Auth::user()
+        );
+
+        return redirect()->back()->with('success', 'Agent override updated successfully.');
+    }
+
+    /**
+     * Update or create an automation override.
+     */
+    public function updateAutomationOverride(Request $request, string $triggerKey)
+    {
+        if (!Auth::user()->can('ai.dashboard.manage')) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'enabled' => 'nullable|boolean',
+            'thresholds' => 'nullable|array',
+            'environment' => 'nullable|string',
+        ]);
+
+        $override = $this->configService->updateAutomationOverride(
+            $triggerKey,
+            $validated,
+            Auth::user()
+        );
+
+        return redirect()->back()->with('success', 'Automation override updated successfully.');
+    }
+
+    /**
+     * Get agent name from config.
+     */
+    protected function getAgentName(string $agentId): string
+    {
+        $config = config("ai.agents.{$agentId}");
+        return $config['name'] ?? $agentId;
+    }
+
+    /**
+     * Get agent options for filter dropdown.
+     */
+    protected function getAgentOptions(): array
+    {
+        $agents = config('ai.agents', []);
+        return collect($agents)->map(function ($config, $id) {
+            return [
+                'value' => $id,
+                'label' => $config['name'] ?? $id,
+            ];
+        })->values()->toArray();
+    }
+
+    /**
+     * Get model options for filter dropdown.
+     */
+    protected function getModelOptions(): array
+    {
+        $models = config('ai.models', []);
+        $uniqueModels = AIAgentRun::distinct('model_used')->pluck('model_used')->filter();
+        
+        return $uniqueModels->map(function ($model) {
+            return [
+                'value' => $model,
+                'label' => $model,
+            ];
+        })->values()->toArray();
+    }
+
+    /**
+     * Get task type options for filter dropdown.
+     */
+    protected function getTaskTypeOptions(): array
+    {
+        $uniqueTaskTypes = AIAgentRun::distinct('task_type')->pluck('task_type')->filter();
+        
+        return $uniqueTaskTypes->map(function ($taskType) {
+            return [
+                'value' => $taskType,
+                'label' => $taskType,
+            ];
+        })->values()->toArray();
+    }
+
+    /**
+     * Get environment options for filter dropdown.
+     */
+    protected function getEnvironmentOptions(): array
+    {
+        $uniqueEnvironments = AIAgentRun::distinct('environment')->pluck('environment')->filter();
+        
+        return $uniqueEnvironments->map(function ($env) {
+            return [
+                'value' => $env,
+                'label' => ucfirst($env),
+            ];
+        })->values()->toArray();
+    }
+
+    /**
+     * Get agent ID for a given trigger key.
+     * Maps automation triggers to their associated agents.
+     */
+    protected function getAgentIdForTrigger(string $triggerKey): ?string
+    {
+        $mapping = [
+            'ticket_summarization' => 'ticket_summarizer',
+            'ticket_classification' => 'ticket_classifier',
+            'sla_risk_detection' => 'sla_risk_analyzer',
+            'error_pattern_detection' => 'error_pattern_analyzer',
+            'duplicate_detection' => 'duplicate_detector',
+        ];
+
+        return $mapping[$triggerKey] ?? null;
+    }
+
+    /**
+     * Display AI Cost Reports.
+     */
+    public function reports(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $filters = $request->only([
+            'start_date',
+            'end_date',
+            'agent_id',
+            'model_used',
+            'task_type',
+            'triggering_context',
+            'environment',
+            'group_by',
+        ]);
+
+        // Default to last 30 days if no date range specified
+        if (!isset($filters['start_date'])) {
+            $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
+        }
+        if (!isset($filters['end_date'])) {
+            $filters['end_date'] = now()->format('Y-m-d');
+        }
+
+        $report = $this->reportingService->generateReport($filters);
+
+        // Get filter options
+        $filterOptions = [
+            'agents' => $this->getAgentOptions(),
+            'models' => $this->getModelOptions(),
+            'task_types' => $this->getTaskTypeOptions(),
+            'environments' => $this->getEnvironmentOptions(),
+            'contexts' => [
+                ['value' => 'system', 'label' => 'System'],
+                ['value' => 'tenant', 'label' => 'Tenant'],
+                ['value' => 'user', 'label' => 'User'],
+            ],
+        ];
+
+        return Inertia::render('Admin/AI/Reports', [
+            'report' => $report,
+            'filters' => $filters,
+            'filterOptions' => $filterOptions,
+            'environment' => app()->environment(),
+        ]);
+    }
+
+    /**
+     * Display AI Budgets management view.
+     */
+    public function budgets(Request $request): Response
+    {
+        if (!Auth::user()->can('ai.budgets.view')) {
+            abort(403);
+        }
+
+        $environment = $request->get('environment', app()->environment());
+        $budgets = $this->configService->getAllBudgetsWithOverrides($environment);
+
+        // Get budget status and usage for each budget
+        foreach ($budgets as &$budget) {
+            if ($budget['id']) {
+                $budgetModel = \App\Models\AIBudget::find($budget['id']);
+                if ($budgetModel) {
+                    $budget['status'] = $this->budgetService->getBudgetStatus($budgetModel, $environment);
+                    $budget['current_usage'] = $budgetModel->getCurrentUsage($environment);
+                    $budget['effective_amount'] = $budgetModel->getEffectiveAmount($environment);
+                    $budget['remaining'] = $budgetModel->getRemaining($environment);
+                    $budget['warning_threshold'] = $budgetModel->getEffectiveWarningThreshold($environment);
+                    $budget['hard_limit_enabled'] = $budgetModel->isHardLimitEnabled($environment);
+                }
+            }
+        }
+
+        return Inertia::render('Admin/AI/Budgets', [
+            'budgets' => $budgets,
+            'environment' => $environment,
+            'canManage' => Auth::user()->can('ai.budgets.manage'),
+        ]);
+    }
+
+    /**
+     * Update or create a budget override.
+     */
+    public function updateBudgetOverride(Request $request, int $budgetId)
+    {
+        if (!Auth::user()->can('ai.budgets.manage')) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'amount' => 'nullable|numeric|min:0',
+            'warning_threshold_percent' => 'nullable|integer|min:0|max:100',
+            'hard_limit_enabled' => 'nullable|boolean',
+            'environment' => 'nullable|string',
+        ]);
+
+        $override = $this->configService->updateBudgetOverride(
+            $budgetId,
+            $validated,
+            Auth::user()
+        );
+
+        return redirect()->back()->with('success', 'Budget override updated successfully.');
+    }
+
+    /**
+     * Retry a failed queue job.
+     */
+    public function retryFailedJob(string $uuid): \Illuminate\Http\RedirectResponse
+    {
+        if (!Auth::user()->can('ai.dashboard.manage')) {
+            abort(403);
+        }
+
+        try {
+            \Illuminate\Support\Facades\Artisan::call('queue:retry', ['id' => $uuid]);
+            
+            return redirect()->back()->with('success', 'Failed job has been queued for retry.');
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Failed to retry job: ' . $e->getMessage());
+        }
+    }
+}

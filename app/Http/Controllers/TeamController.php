@@ -616,39 +616,16 @@ class TeamController extends Controller
                 'timezone' => 'nullable|string|max:255',
             ]);
         } catch (ValidationException $e) {
-            // If this is an Inertia request, return an Inertia response
-            if ($request->header('X-Inertia')) {
-                // Render the same page with errors and old input
-                return Inertia::render('Auth/InviteRegistration', [
-                    'invitation' => [
-                        'token' => $token,
-                        'tenant' => [
-                            'id' => $tenant->id,
-                            'name' => $tenant->name,
-                        ],
-                        'email' => $invitation->email,
-                        'brands' => collect($invitation->brand_assignments ?? [])->map(function ($assignment) use ($tenant) {
-                            $brand = $tenant->brands()->find($assignment['brand_id'] ?? null);
-                            if (!$brand) {
-                                return null;
-                            }
-                            return [
-                                'id' => $brand->id,
-                                'name' => $brand->name,
-                                'role' => $assignment['role'] ?? 'member',
-                            ];
-                        })->filter()->values(),
-                        'inviter' => $invitation->inviter ? [
-                            'name' => $invitation->inviter->name,
-                            'email' => $invitation->inviter->email,
-                        ] : null,
-                    ],
-                    'errors' => $e->errors(),
-                ])->with('old', $request->except('password', 'password_confirmation'));
-            }
+            // Manually preserve old input for Inertia
+            // Extract input directly from request since $request->old() may be empty at this point
+            // Exclude passwords for security
+            $inputToPreserve = $request->only(['first_name', 'last_name', 'country', 'timezone']);
             
-            // For non-Inertia requests, rethrow the exception
-            throw $e;
+            // Redirect back to the invite acceptance page with errors and old input
+            // Inertia will automatically pick up errors and old input from the session
+            return redirect()->route('invite.accept', ['token' => $token, 'tenant' => $tenant->id])
+                ->withErrors($e->errors())
+                ->withInput($inputToPreserve);
         }
 
         // Update user information

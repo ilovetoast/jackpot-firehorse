@@ -6,9 +6,11 @@ use App\Enums\EventType;
 use App\Mail\AccountCanceled;
 use App\Mail\AccountDeleted;
 use App\Mail\AccountSuspended;
+use App\Enums\TicketStatus;
 use App\Models\ActivityEvent;
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\Ticket;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use Illuminate\Http\Request;
@@ -45,7 +47,11 @@ class SiteAdminController extends Controller
             'total_users' => User::count(),
             'active_subscriptions' => Subscription::where('stripe_status', 'active')->count(),
             'stripe_accounts' => Tenant::whereNotNull('stripe_id')->count(),
-            'support_tickets' => 0, // Placeholder for future implementation
+            'support_tickets' => Ticket::count(),
+            'waiting_on_support' => Ticket::whereIn('status', [
+                TicketStatus::OPEN->value,
+                TicketStatus::WAITING_ON_SUPPORT->value,
+            ])->count(),
         ];
 
         // Get all users with their companies and roles
@@ -534,16 +540,21 @@ class SiteAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'required|string|in:site_owner,site_admin,site_support,compliance',
+            'role' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,compliance',
         ]);
+
+        // CRITICAL: Only user ID 1 can have site_owner role
+        if ($validated['role'] === 'site_owner' && $user->id !== 1) {
+            return redirect()->back()->withErrors(['role' => 'Only user ID 1 can have the site_owner role.']);
+        }
 
         // Get old site roles for logging
         $oldSiteRoles = $user->getRoleNames()->filter(function ($role) {
-            return in_array($role, ['site_owner', 'site_admin', 'site_support', 'compliance']);
+            return in_array($role, ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance']);
         })->toArray();
         
         // Remove existing site roles
-        $user->removeRole(['site_owner', 'site_admin', 'site_support', 'compliance']);
+        $user->removeRole(['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance']);
         
         // Assign the new site role
         $user->assignRole($validated['role']);
@@ -819,6 +830,65 @@ class SiteAdminController extends Controller
         }
         
         return redirect()->route('admin.index')->with('success', 'User account deleted successfully. Notification email sent.');
+    }
+
+    /**
+     * Delete a user's account completely (without requiring a tenant).
+     * Used for users with no companies associated.
+     */
+    public function deleteUserAccount(Request $request, User $user)
+    {
+        // Only user ID 1 (Site Owner) can access
+        if (Auth::id() !== 1) {
+            abort(403, 'Only site owners can access this page.');
+        }
+
+        // Check if user has no companies
+        $hasNoCompanies = $user->tenants()->count() === 0;
+
+        if (!$hasNoCompanies) {
+            $errorMessage = 'Cannot delete account: User is associated with companies. Use the company-specific deletion route instead.';
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'error' => $errorMessage,
+                ], 422);
+            }
+            return back()->withErrors([
+                'user' => $errorMessage,
+            ]);
+        }
+
+        // Store user info before deletion
+        $userEmail = $user->email;
+        $userName = $user->name;
+        $admin = Auth::user();
+
+        // Remove user from all brands (if any)
+        foreach ($user->brands as $brand) {
+            $brand->users()->detach($user->id);
+        }
+
+        // Note: No tenant to send email from, so skip email notification
+        // No activity log since there's no tenant
+
+        // Delete the user account completely
+        $user->delete();
+
+        // Check if this is an Inertia request
+        if ($request->header('X-Inertia')) {
+            return redirect()->route('admin.index')
+                ->with('success', 'User account deleted successfully.');
+        }
+
+        // For non-Inertia requests (API, etc.)
+        if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+            return response()->json([
+                'success' => 'User account deleted successfully.',
+            ]);
+        }
+
+        return redirect()->route('admin.index')
+            ->with('success', 'User account deleted successfully.');
     }
 
     /**
@@ -1239,6 +1309,7 @@ class SiteAdminController extends Controller
             ['id' => 'site_owner', 'name' => 'Site Owner', 'icon' => '👑'],
             ['id' => 'site_admin', 'name' => 'Site Admin', 'icon' => ''],
             ['id' => 'site_support', 'name' => 'Site Support', 'icon' => ''],
+            ['id' => 'site_engineering', 'name' => 'Site Engineering', 'icon' => ''],
             ['id' => 'compliance', 'name' => 'Compliance', 'icon' => ''],
         ];
 
@@ -1250,10 +1321,28 @@ class SiteAdminController extends Controller
             ['id' => 'member', 'name' => 'Member', 'icon' => ''],
         ];
 
-        // Get site permissions (company.manage and permissions.manage, plus any custom site permissions)
+        // Get site permissions (company.manage, permissions.manage, ticket permissions, AI dashboard permissions, plus any custom site permissions)
         // Site permissions are identified by being in the site permissions list or having 'site.' prefix
         $sitePermissions = Permission::where(function ($query) {
-                $query->whereIn('name', ['company.manage', 'permissions.manage'])
+                $query->whereIn('name', [
+                    'company.manage',
+                    'permissions.manage',
+                    'tickets.view_any',
+                    'tickets.view_tenant',
+                    'tickets.create',
+                    'tickets.reply',
+                    'tickets.view_staff',
+                    'tickets.assign',
+                    'tickets.add_internal_note',
+                    'tickets.convert',
+                    'tickets.view_sla',
+                    'tickets.view_audit_log',
+                    'tickets.create_engineering',
+                    'tickets.view_engineering',
+                    'tickets.link_diagnostic',
+                    'ai.dashboard.view',
+                    'ai.dashboard.manage',
+                ])
                     ->orWhere('name', 'like', 'site.%');
             })
             ->orderBy('name')
@@ -1261,13 +1350,40 @@ class SiteAdminController extends Controller
             ->toArray();
 
         // Get company permissions - get all permissions that are NOT site permissions
+        // Exclude staff-only ticket permissions (view_staff, assign, add_internal_note, convert, view_sla, view_audit_log, create_engineering, view_engineering, link_diagnostic)
+        // Company roles should only have tenant-facing ticket permissions (create, reply, view_tenant, view_any)
+        // Note: tickets.view_any and tickets.view_tenant are site permissions (for staff), but can also be assigned to company roles for tenant users
         $companyPermissions = Permission::where(function ($query) {
-                $query->whereNotIn('name', ['company.manage', 'permissions.manage'])
+                $query->whereNotIn('name', [
+                    'company.manage',
+                    'permissions.manage',
+                    'tickets.view_staff',
+                    'tickets.assign',
+                    'tickets.add_internal_note',
+                    'tickets.convert',
+                    'tickets.view_sla',
+                    'tickets.view_audit_log',
+                    'tickets.create_engineering',
+                    'tickets.view_engineering',
+                    'tickets.link_diagnostic',
+                    'ai.dashboard.view',
+                    'ai.dashboard.manage',
+                ])
                     ->where('name', 'not like', 'site.%');
             })
             ->orderBy('name')
             ->pluck('name')
             ->toArray();
+        
+        // Add tenant-facing ticket permissions to company permissions (these can be assigned to company roles)
+        // These are also site permissions, but they're dual-purpose: staff can use them, and tenant users can too
+        $tenantTicketPermissions = ['tickets.create', 'tickets.reply', 'tickets.view_tenant', 'tickets.view_any'];
+        foreach ($tenantTicketPermissions as $perm) {
+            if (!in_array($perm, $companyPermissions)) {
+                $companyPermissions[] = $perm;
+            }
+        }
+        sort($companyPermissions);
 
         // Get current role permissions
         $siteRolePermissions = [];
@@ -1564,16 +1680,32 @@ class SiteAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'role_id' => 'required|string|in:site_owner,site_admin,site_support,compliance',
+            'role_id' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,compliance',
             'permissions' => 'required|array',
         ]);
 
         $role = Role::where('name', $validated['role_id'])->firstOrFail();
         
-        // Get only valid site permissions
+        // Get only valid site permissions (all site permissions start with specific prefixes)
         $validPermissions = Permission::where(function ($query) {
-                $query->whereIn('name', ['company.manage', 'permissions.manage'])
-                    ->orWhere('name', 'like', 'site.%');
+                $query->whereIn('name', [
+                    'company.manage',
+                    'permissions.manage',
+                    'tickets.view_any',
+                    'tickets.view_tenant',
+                    'tickets.create',
+                    'tickets.reply',
+                    'tickets.view_staff',
+                    'tickets.assign',
+                    'tickets.add_internal_note',
+                    'tickets.convert',
+                    'tickets.view_sla',
+                    'tickets.view_audit_log',
+                    'tickets.create_engineering',
+                    'tickets.view_engineering',
+                    'tickets.link_diagnostic',
+                ])
+                ->orWhere('name', 'like', 'site.%');
             })
             ->pluck('name')
             ->toArray();

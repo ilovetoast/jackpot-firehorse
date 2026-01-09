@@ -2,6 +2,7 @@ import { Link, usePage, router, useForm } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import { ChevronDownIcon, ChevronRightIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 
 export default function AdminPermissions({ 
     site_roles, 
@@ -18,12 +19,23 @@ export default function AdminPermissions({
     const [newPermissionType, setNewPermissionType] = useState('company') // 'company' or 'site'
     const [creatingPermission, setCreatingPermission] = useState(false)
     const [errors, setErrors] = useState({})
+    const [activeTab, setActiveTab] = useState('system') // 'system' or 'tenant'
+    const [collapsedSections, setCollapsedSections] = useState({
+        systemManagement: false,
+        ticketManagement: false,
+        ticketViewing: false,
+        ticketActions: false,
+        ticketEngineering: false,
+        aiDashboard: false,
+    })
+    const [showTenantInfo, setShowTenantInfo] = useState(false)
 
     // Default roles and permissions structure
     const defaultSiteRoles = site_roles || [
         { id: 'site_owner', name: 'Site Owner', icon: '👑' },
         { id: 'site_admin', name: 'Site Admin', icon: '' },
         { id: 'site_support', name: 'Site Support', icon: '' },
+        { id: 'site_engineering', name: 'Site Engineering', icon: '' },
         { id: 'compliance', name: 'Compliance', icon: '' },
     ]
 
@@ -34,19 +46,140 @@ export default function AdminPermissions({
         { id: 'member', name: 'Member', icon: '' },
     ]
 
-    const defaultSitePermissions = site_permissions || [
-        'company.manage',
-        'permissions.manage',
-    ]
+    // Default permission assignments (from PermissionSeeder)
+    const defaultSiteRolePermissions = {
+        site_owner: [
+            'company.manage',
+            'permissions.manage',
+            'tickets.view_any',
+            'tickets.view_tenant',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_staff',
+            'tickets.assign',
+            'tickets.add_internal_note',
+            'tickets.convert',
+            'tickets.view_sla',
+            'tickets.view_audit_log',
+            'tickets.create_engineering',
+            'tickets.view_engineering',
+            'tickets.link_diagnostic',
+        ],
+        site_admin: [
+            'tickets.view_staff',
+            'tickets.assign',
+            'tickets.add_internal_note',
+            'tickets.convert',
+            'tickets.view_sla',
+            'tickets.create_engineering',
+            'tickets.view_engineering',
+            'tickets.link_diagnostic',
+            'ai.dashboard.view',
+            'ai.dashboard.manage',
+        ],
+        site_support: [
+            'tickets.view_staff',
+            'tickets.assign',
+            'tickets.add_internal_note',
+            'tickets.view_sla',
+        ],
+        site_engineering: [
+            'tickets.view_staff',
+            'tickets.view_engineering',
+            'tickets.create_engineering',
+            'tickets.add_internal_note',
+            'tickets.link_diagnostic',
+            'tickets.view_sla',
+        ],
+        compliance: [
+            'tickets.view_staff',
+            'tickets.view_engineering',
+            'tickets.view_audit_log',
+            'ai.dashboard.view',
+        ],
+    }
 
-    const defaultCompanyPermissions = company_permissions || [
-        'billing.view',
-        'billing.manage',
-        'company_settings.view',
-        'team.manage',
-        'activity_logs.view',
-        'brand_settings.manage',
-        'brand_categories.manage',
+    const defaultCompanyRolePermissions = {
+        owner: [
+            'billing.view',
+            'billing.manage',
+            'company_settings.view',
+            'team.manage',
+            'activity_logs.view',
+            'brand_settings.manage',
+            'brand_categories.manage',
+            'view.restricted.categories',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+            'tickets.view_any',
+        ],
+        admin: [
+            'billing.view',
+            'billing.manage',
+            'company_settings.view',
+            'team.manage',
+            'activity_logs.view',
+            'brand_settings.manage',
+            'brand_categories.manage',
+            'view.restricted.categories',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+            'tickets.view_any',
+        ],
+        brand_manager: [
+            'brand_settings.manage',
+            'brand_categories.manage',
+            'billing.view',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+        ],
+        member: [
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+        ],
+    }
+
+    // Group site permissions by category
+    const sitePermissionGroups = {
+        systemManagement: {
+            title: 'System Management',
+            permissions: ['company.manage', 'permissions.manage'],
+        },
+        ticketViewing: {
+            title: 'Ticket Viewing',
+            permissions: ['tickets.view_any', 'tickets.view_tenant', 'tickets.view_staff', 'tickets.view_engineering'],
+        },
+        ticketActions: {
+            title: 'Ticket Actions',
+            permissions: ['tickets.create', 'tickets.reply', 'tickets.assign', 'tickets.add_internal_note', 'tickets.convert'],
+        },
+        ticketEngineering: {
+            title: 'Engineering Tickets',
+            permissions: ['tickets.create_engineering', 'tickets.view_engineering', 'tickets.link_diagnostic'],
+        },
+        ticketManagement: {
+            title: 'Ticket Management',
+            permissions: ['tickets.view_sla', 'tickets.view_audit_log'],
+        },
+        aiDashboard: {
+            title: 'AI Dashboard',
+            permissions: ['ai.dashboard.view', 'ai.dashboard.manage'],
+        },
+    }
+
+    // Get all site permissions from groups and any additional ones
+    const allSitePermissions = [
+        ...sitePermissionGroups.systemManagement.permissions,
+        ...sitePermissionGroups.ticketViewing.permissions,
+        ...sitePermissionGroups.ticketActions.permissions,
+        ...sitePermissionGroups.ticketEngineering.permissions,
+        ...sitePermissionGroups.ticketManagement.permissions,
+        // Add any permissions from backend that aren't in groups
+        ...(site_permissions || []).filter(p => !Object.values(sitePermissionGroups).some(g => g.permissions.includes(p))),
     ]
 
     // State for permissions (loaded from backend props)
@@ -79,6 +212,13 @@ export default function AdminPermissions({
                 ...prev[roleId],
                 [permission]: !prev[roleId]?.[permission],
             },
+        }))
+    }
+
+    const toggleSection = (sectionKey) => {
+        setCollapsedSections(prev => ({
+            ...prev,
+            [sectionKey]: !prev[sectionKey],
         }))
     }
 
@@ -187,6 +327,11 @@ export default function AdminPermissions({
             .join(' ')
     }
 
+    const isDefaultPermission = (roleId, permission, isSite = true) => {
+        const defaults = isSite ? defaultSiteRolePermissions : defaultCompanyRolePermissions
+        return defaults[roleId]?.includes(permission) ?? false
+    }
+
     const handleAddPermission = (e) => {
         e.preventDefault()
         
@@ -232,6 +377,386 @@ export default function AdminPermissions({
         })
     }
 
+    const renderSitePermissionsTable = () => {
+        return (
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                        <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Permission</th>
+                            {defaultSiteRoles.map((role) => (
+                                <th key={role.id} className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">
+                                    <div className="flex items-center justify-center gap-1">
+                                        {role.icon && <span>{role.icon}</span>}
+                                        <span>{role.name}</span>
+                                    </div>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white">
+                        {/* System Management Section */}
+                        <tr className="bg-gray-50">
+                            <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSection('systemManagement')}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                                >
+                                    {collapsedSections.systemManagement ? (
+                                        <ChevronRightIcon className="h-5 w-5" />
+                                    ) : (
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    )}
+                                    {sitePermissionGroups.systemManagement.title}
+                                </button>
+                            </td>
+                        </tr>
+                        {!collapsedSections.systemManagement && sitePermissionGroups.systemManagement.permissions.map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                    {formatPermissionName(permission)}
+                                </td>
+                                {defaultSiteRoles.map((role) => {
+                                    const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, true)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'site_owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+
+                        {/* Ticket Viewing Section */}
+                        <tr className="bg-gray-50">
+                            <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSection('ticketViewing')}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                                >
+                                    {collapsedSections.ticketViewing ? (
+                                        <ChevronRightIcon className="h-5 w-5" />
+                                    ) : (
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    )}
+                                    {sitePermissionGroups.ticketViewing.title}
+                                </button>
+                            </td>
+                        </tr>
+                        {!collapsedSections.ticketViewing && sitePermissionGroups.ticketViewing.permissions.map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                    {formatPermissionName(permission)}
+                                </td>
+                                {defaultSiteRoles.map((role) => {
+                                    const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, true)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'site_owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+
+                        {/* Ticket Actions Section */}
+                        <tr className="bg-gray-50">
+                            <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSection('ticketActions')}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                                >
+                                    {collapsedSections.ticketActions ? (
+                                        <ChevronRightIcon className="h-5 w-5" />
+                                    ) : (
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    )}
+                                    {sitePermissionGroups.ticketActions.title}
+                                </button>
+                            </td>
+                        </tr>
+                        {!collapsedSections.ticketActions && sitePermissionGroups.ticketActions.permissions.map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                    {formatPermissionName(permission)}
+                                </td>
+                                {defaultSiteRoles.map((role) => {
+                                    const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, true)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'site_owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+
+                        {/* Engineering Tickets Section */}
+                        <tr className="bg-gray-50">
+                            <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSection('ticketEngineering')}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                                >
+                                    {collapsedSections.ticketEngineering ? (
+                                        <ChevronRightIcon className="h-5 w-5" />
+                                    ) : (
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    )}
+                                    {sitePermissionGroups.ticketEngineering.title}
+                                </button>
+                            </td>
+                        </tr>
+                        {!collapsedSections.ticketEngineering && sitePermissionGroups.ticketEngineering.permissions.map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                    {formatPermissionName(permission)}
+                                </td>
+                                {defaultSiteRoles.map((role) => {
+                                    const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, true)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'site_owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+
+                        {/* Ticket Management Section */}
+                        <tr className="bg-gray-50">
+                            <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSection('ticketManagement')}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                                >
+                                    {collapsedSections.ticketManagement ? (
+                                        <ChevronRightIcon className="h-5 w-5" />
+                                    ) : (
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    )}
+                                    {sitePermissionGroups.ticketManagement.title}
+                                </button>
+                            </td>
+                        </tr>
+                        {!collapsedSections.ticketManagement && sitePermissionGroups.ticketManagement.permissions.map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                    {formatPermissionName(permission)}
+                                </td>
+                                {defaultSiteRoles.map((role) => {
+                                    const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, true)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'site_owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+
+                        {/* AI Dashboard Section */}
+                        <tr className="bg-gray-50">
+                            <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSection('aiDashboard')}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                                >
+                                    {collapsedSections.aiDashboard ? (
+                                        <ChevronRightIcon className="h-5 w-5" />
+                                    ) : (
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    )}
+                                    {sitePermissionGroups.aiDashboard.title}
+                                </button>
+                            </td>
+                        </tr>
+                        {!collapsedSections.aiDashboard && sitePermissionGroups.aiDashboard.permissions.map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                    {formatPermissionName(permission)}
+                                </td>
+                                {defaultSiteRoles.map((role) => {
+                                    const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, true)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'site_owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+
+                        {/* Any additional permissions not in groups */}
+                        {(site_permissions || []).filter(p => !Object.values(sitePermissionGroups).some(g => g.permissions.includes(p))).length > 0 && (
+                            <>
+                                <tr className="bg-gray-50">
+                                    <td colSpan={defaultSiteRoles.length + 1} className="px-4 py-2">
+                                        <span className="text-sm font-semibold text-gray-900">Other Permissions</span>
+                                    </td>
+                                </tr>
+                                {(site_permissions || []).filter(p => !Object.values(sitePermissionGroups).some(g => g.permissions.includes(p))).map((permission) => (
+                                    <tr key={permission}>
+                                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                            {formatPermissionName(permission)}
+                                        </td>
+                                        {defaultSiteRoles.map((role) => {
+                                            const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
+                                            const isDefault = isDefaultPermission(role.id, permission, true)
+                                            return (
+                                                <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            onChange={() => handleSitePermissionChange(role.id, permission)}
+                                                            disabled={role.id === 'site_owner'}
+                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                        />
+                                                        {isDefault && (
+                                                            <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            )
+                                        })}
+                                    </tr>
+                                ))}
+                            </>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        )
+    }
+
+    const renderCompanyPermissionsTable = () => {
+        return (
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                        <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Permission</th>
+                            {defaultCompanyRoles.map((role) => (
+                                <th key={role.id} className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">
+                                    <div className="flex items-center justify-center gap-1">
+                                        {role.icon && <span>{role.icon}</span>}
+                                        <span>{role.name}</span>
+                                    </div>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white">
+                        {(company_permissions || []).map((permission) => (
+                            <tr key={permission}>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{formatPermissionName(permission)}</td>
+                                {defaultCompanyRoles.map((role) => {
+                                    const isChecked = companyPermissionsState[role.id]?.[permission] ?? false
+                                    const isDefault = isDefaultPermission(role.id, permission, false)
+                                    return (
+                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => handleCompanyPermissionChange(role.id, permission)}
+                                                    disabled={role.id === 'owner'}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                />
+                                                {isDefault && (
+                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        )
+    }
+
     return (
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
@@ -243,198 +768,173 @@ export default function AdminPermissions({
                         <p className="mt-2 text-sm text-gray-700">Manage role permissions for site and company levels</p>
                     </div>
 
-                    {/* Site Roles & Permissions */}
-                    <div className="mb-8 rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="border-b border-gray-200 px-6 py-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 mr-3">
-                                        <span className="text-indigo-600">🔒</span>
+                    {/* Tabs */}
+                    <div className="mb-6 border-b border-gray-200">
+                        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                            <button
+                                onClick={() => setActiveTab('system')}
+                                className={`
+                                    ${activeTab === 'system' 
+                                        ? 'border-indigo-500 text-indigo-600' 
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }
+                                    whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium
+                                `}
+                            >
+                                System Permissions
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('tenant')}
+                                className={`
+                                    ${activeTab === 'tenant' 
+                                        ? 'border-indigo-500 text-indigo-600' 
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }
+                                    whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium
+                                `}
+                            >
+                                Tenant Permissions
+                            </button>
+                        </nav>
+                    </div>
+
+                    {/* System Permissions Tab */}
+                    {activeTab === 'system' && (
+                        <div className="mb-8 rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="border-b border-gray-200 px-6 py-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 mr-3">
+                                            <span className="text-indigo-600">🔒</span>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-lg font-semibold text-gray-900">Site Roles & Permissions</h2>
+                                            <p className="mt-1 text-sm text-gray-500">Manage which site-wide permissions each site role has access to</p>
+                                            <p className="mt-1 text-xs text-gray-400">● indicates default permissions for each role</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <h2 className="text-lg font-semibold text-gray-900">Site Roles & Permissions</h2>
-                                        <p className="mt-1 text-sm text-gray-500">Manage which site-wide permissions each site role has access to</p>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setNewPermissionType('site')
+                                            setShowAddPermissionModal(true)
+                                        }}
+                                        className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    >
+                                        ➕ Add Permission
+                                    </button>
                                 </div>
+                            </div>
+                            <div className="px-6 py-4">
+                                {renderSitePermissionsTable()}
+                            </div>
+                            <div className="border-t border-gray-200 px-6 py-4 flex justify-end">
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        setNewPermissionType('site')
-                                        setShowAddPermissionModal(true)
-                                    }}
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    onClick={handleSaveSiteRoles}
+                                    disabled={saving}
+                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
                                 >
-                                    ➕ Add Permission
+                                    {saving ? 'Saving...' : '💾 Save Site Permissions'}
                                 </button>
                             </div>
                         </div>
-                        <div className="px-6 py-4 overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead>
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Permission</th>
-                                        {defaultSiteRoles.map((role) => (
-                                            <th key={role.id} className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">
-                                                <div className="flex items-center justify-center gap-1">
-                                                    {role.icon && <span>{role.icon}</span>}
-                                                    <span>{role.name}</span>
-                                                </div>
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200 bg-white">
-                                    {defaultSitePermissions.map((permission) => (
-                                        <tr key={permission}>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{formatPermissionName(permission)}</td>
-                                            {defaultSiteRoles.map((role) => {
-                                                const isChecked = sitePermissionsState[role.id]?.[permission] ?? false
-                                                return (
-                                                    <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isChecked}
-                                                            onChange={() => handleSitePermissionChange(role.id, permission)}
-                                                            disabled={role.id === 'site_owner'}
-                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                        />
-                                                    </td>
-                                                )
-                                            })}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="border-t border-gray-200 px-6 py-4 flex justify-end">
-                            <button
-                                type="button"
-                                onClick={handleSaveSiteRoles}
-                                disabled={saving}
-                                className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
-                            >
-                                {saving ? 'Saving...' : '💾 Save Site Permissions'}
-                            </button>
-                        </div>
-                    </div>
+                    )}
 
-                    {/* Role Architecture Explanation */}
-                    <div className="mb-8 rounded-lg bg-blue-50 border border-blue-200">
-                        <div className="px-6 py-4">
-                            <div className="flex items-start">
-                                <div className="flex-shrink-0">
-                                    <svg className="h-5 w-5 text-blue-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                    </svg>
-                                </div>
-                                <div className="ml-3 flex-1">
-                                    <h3 className="text-sm font-semibold text-blue-900 mb-2">Understanding Tenant Roles vs Brand Roles</h3>
-                                    <div className="text-sm text-blue-800 space-y-2">
-                                        <p>
-                                            <strong>Tenant-level roles</strong> (shown below) and <strong>brand-level roles</strong> are <strong>separate and can be different</strong>. Both use the same role names (owner, admin, brand_manager, member), but they control different scopes:
-                                        </p>
-                                        <div className="ml-4 space-y-1">
-                                            <p>
-                                                <strong>Tenant Roles:</strong> Control access to company-wide features like billing, team management, company settings, and activity logs. Each user has ONE tenant role per company.
-                                            </p>
-                                            <p>
-                                                <strong>Brand Roles:</strong> Control access to brand-specific features like brand settings and brand categories. Each user can have DIFFERENT roles in different brands within the same company.
-                                            </p>
-                                        </div>
-                                        <div className="mt-3 p-3 bg-blue-100 rounded border border-blue-200">
-                                            <p className="font-semibold mb-1">Example:</p>
-                                            <p>
-                                                A user might be <strong>"admin"</strong> at the tenant level (full company access) but <strong>"member"</strong> in a specific brand (limited brand access). 
-                                                Conversely, a user might be <strong>"member"</strong> at the tenant level but <strong>"brand_manager"</strong> in a specific brand they manage.
-                                            </p>
-                                        </div>
-                                        <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
-                                            <p className="font-semibold mb-1 text-yellow-900">Important:</p>
-                                            <p className="text-yellow-800">
-                                                Tenant-level <strong>admins</strong> and <strong>owners</strong> automatically have full access to ALL brands in that company, regardless of their brand-specific role assignments. This prevents locking out company administrators.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Company Roles & Permissions */}
-                    <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="border-b border-gray-200 px-6 py-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 mr-3">
-                                        <span className="text-indigo-600">🏢</span>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-lg font-semibold text-gray-900">Company Roles & Permissions (Tenant-Level)</h2>
-                                        <p className="mt-1 text-sm text-gray-500">Manage which permissions each tenant-level role has. These permissions apply to company-wide features.</p>
-                                        <p className="mt-1 text-xs text-gray-400">Note: The same role names are used for brand-level roles, but brand roles are assigned per-brand when adding users.</p>
-                                    </div>
-                                </div>
+                    {/* Tenant Permissions Tab */}
+                    {activeTab === 'tenant' && (
+                        <>
+                            {/* Collapsible Info Box */}
+                            <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200">
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        setNewPermissionType('company')
-                                        setShowAddPermissionModal(true)
-                                    }}
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    onClick={() => setShowTenantInfo(!showTenantInfo)}
+                                    className="w-full px-6 py-4 flex items-center justify-between text-left"
                                 >
-                                    ➕ Add Permission
+                                    <div className="flex items-center gap-3">
+                                        <InformationCircleIcon className="h-5 w-5 text-blue-400 flex-shrink-0" />
+                                        <h3 className="text-sm font-semibold text-blue-900">Understanding Tenant Roles vs Brand Roles</h3>
+                                    </div>
+                                    {showTenantInfo ? (
+                                        <ChevronDownIcon className="h-5 w-5 text-blue-400" />
+                                    ) : (
+                                        <ChevronRightIcon className="h-5 w-5 text-blue-400" />
+                                    )}
                                 </button>
+                                {showTenantInfo && (
+                                    <div className="px-6 pb-4">
+                                        <div className="text-sm text-blue-800 space-y-2">
+                                            <p>
+                                                <strong>Tenant-level roles</strong> (shown below) and <strong>brand-level roles</strong> are <strong>separate and can be different</strong>. Both use the same role names (owner, admin, brand_manager, member), but they control different scopes:
+                                            </p>
+                                            <div className="ml-4 space-y-1">
+                                                <p>
+                                                    <strong>Tenant Roles:</strong> Control access to company-wide features like billing, team management, company settings, and activity logs. Each user has ONE tenant role per company.
+                                                </p>
+                                                <p>
+                                                    <strong>Brand Roles:</strong> Control access to brand-specific features like brand settings and brand categories. Each user can have DIFFERENT roles in different brands within the same company.
+                                                </p>
+                                            </div>
+                                            <div className="mt-3 p-3 bg-blue-100 rounded border border-blue-200">
+                                                <p className="font-semibold mb-1">Example:</p>
+                                                <p>
+                                                    A user might be <strong>"admin"</strong> at the tenant level (full company access) but <strong>"member"</strong> in a specific brand (limited brand access). 
+                                                    Conversely, a user might be <strong>"member"</strong> at the tenant level but <strong>"brand_manager"</strong> in a specific brand they manage.
+                                                </p>
+                                            </div>
+                                            <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                                                <p className="font-semibold mb-1 text-yellow-900">Important:</p>
+                                                <p className="text-yellow-800">
+                                                    Tenant-level <strong>admins</strong> and <strong>owners</strong> automatically have full access to ALL brands in that company, regardless of their brand-specific role assignments. This prevents locking out company administrators.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                        <div className="px-6 py-4 overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead>
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Permission</th>
-                                        {defaultCompanyRoles.map((role) => (
-                                            <th key={role.id} className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">
-                                                <div className="flex items-center justify-center gap-1">
-                                                    {role.icon && <span>{role.icon}</span>}
-                                                    <span>{role.name}</span>
-                                                </div>
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200 bg-white">
-                                    {defaultCompanyPermissions.map((permission) => (
-                                        <tr key={permission}>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{formatPermissionName(permission)}</td>
-                                            {defaultCompanyRoles.map((role) => {
-                                                const isChecked = companyPermissionsState[role.id]?.[permission] ?? false
-                                                return (
-                                                    <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isChecked}
-                                                            onChange={() => handleCompanyPermissionChange(role.id, permission)}
-                                                            disabled={role.id === 'owner'}
-                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                        />
-                                                    </td>
-                                                )
-                                            })}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="border-t border-gray-200 px-6 py-4 flex justify-end">
-                            <button
-                                type="button"
-                                onClick={handleSaveCompanyRoles}
-                                disabled={saving}
-                                className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
-                            >
-                                {saving ? 'Saving...' : '💾 Save Company Permissions'}
-                            </button>
-                        </div>
-                    </div>
+
+                            {/* Company Roles & Permissions */}
+                            <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="border-b border-gray-200 px-6 py-4">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 mr-3">
+                                                <span className="text-indigo-600">🏢</span>
+                                            </div>
+                                            <div>
+                                                <h2 className="text-lg font-semibold text-gray-900">Company Roles & Permissions (Tenant-Level)</h2>
+                                                <p className="mt-1 text-sm text-gray-500">Manage which permissions each tenant-level role has. These permissions apply to company-wide features.</p>
+                                                <p className="mt-1 text-xs text-gray-400">Note: The same role names are used for brand-level roles, but brand roles are assigned per-brand when adding users. ● indicates default permissions.</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setNewPermissionType('company')
+                                                setShowAddPermissionModal(true)
+                                            }}
+                                            className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                        >
+                                            ➕ Add Permission
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="px-6 py-4">
+                                    {renderCompanyPermissionsTable()}
+                                </div>
+                                <div className="border-t border-gray-200 px-6 py-4 flex justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveCompanyRoles}
+                                        disabled={saving}
+                                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                    >
+                                        {saving ? 'Saving...' : '💾 Save Company Permissions'}
+                                    </button>
+                                </div>
+                            </div>
+                        </>
+                    )}
 
                     {/* Add Permission Modal */}
                     {showAddPermissionModal && (

@@ -29,6 +29,26 @@ class PermissionSeeder extends Seeder
         $sitePermissions = [
             'company.manage',
             'permissions.manage',
+            // Support ticket permissions
+            'tickets.view_any',
+            'tickets.view_tenant',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_staff',
+            'tickets.assign',
+            'tickets.add_internal_note',
+            'tickets.convert',
+            'tickets.view_sla',
+            'tickets.view_audit_log',
+            'tickets.create_engineering',
+            'tickets.view_engineering',
+            'tickets.link_diagnostic',
+            // AI Dashboard permissions
+            'ai.dashboard.view',
+            'ai.dashboard.manage',
+            // AI Budget permissions
+            'ai.budgets.view',
+            'ai.budgets.manage',
         ];
 
         // Create all permissions
@@ -45,34 +65,91 @@ class PermissionSeeder extends Seeder
         $brandManager = Role::firstOrCreate(['name' => 'brand_manager', 'guard_name' => 'web']);
         $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']);
 
-        // Owner has all company permissions
-        $owner->syncPermissions($companyPermissions);
+        // Owner has all company permissions + tenant-facing ticket permissions
+        $owner->syncPermissions(array_merge($companyPermissions, [
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+            'tickets.view_any',
+        ]));
 
-        // Admin has all company permissions
-        $admin->syncPermissions($companyPermissions);
+        // Admin has all company permissions + tenant-facing ticket permissions
+        $admin->syncPermissions(array_merge($companyPermissions, [
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+            'tickets.view_any',
+        ]));
 
-        // Brand Manager has brand-related permissions and billing view
+        // Brand Manager has brand-related permissions, billing view, and basic ticket permissions
         $brandManager->syncPermissions([
             'brand_settings.manage',
             'brand_categories.manage',
             'billing.view',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
         ]);
 
-        // Member has no special permissions (basic access only)
-        $member->syncPermissions([]);
+        // Member has basic ticket permissions (create, reply, view own tenant tickets)
+        $member->syncPermissions([
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+        ]);
 
         // Create and assign permissions to site roles
         $siteOwner = Role::firstOrCreate(['name' => 'site_owner', 'guard_name' => 'web']);
         $siteAdmin = Role::firstOrCreate(['name' => 'site_admin', 'guard_name' => 'web']);
         $siteSupport = Role::firstOrCreate(['name' => 'site_support', 'guard_name' => 'web']);
+        $siteEngineering = Role::firstOrCreate(['name' => 'site_engineering', 'guard_name' => 'web']);
         $compliance = Role::firstOrCreate(['name' => 'compliance', 'guard_name' => 'web']);
 
-        // Site Owner has all site permissions
+        // Site Owner has all site permissions by default
         $siteOwner->syncPermissions($sitePermissions);
-
-        // Site Admin, Site Support, and Compliance start with no permissions (can be assigned via UI)
-        $siteAdmin->syncPermissions([]);
-        $siteSupport->syncPermissions([]);
-        $compliance->syncPermissions([]);
+        
+        // Assign default ticket permissions to other roles based on their typical access
+        // Site Admin: Full ticket access + AI Dashboard manage + AI Budgets manage
+        $siteAdmin->syncPermissions([
+            'tickets.view_staff',
+            'tickets.assign',
+            'tickets.add_internal_note',
+            'tickets.convert',
+            'tickets.view_sla',
+            'tickets.create_engineering',
+            'tickets.view_engineering',
+            'tickets.link_diagnostic',
+            'ai.dashboard.view',
+            'ai.dashboard.manage',
+            'ai.budgets.view',
+            'ai.budgets.manage',
+        ]);
+        
+        // Site Support: Can manage tenant tickets and add internal notes
+        $siteSupport->syncPermissions([
+            'tickets.view_staff',
+            'tickets.assign',
+            'tickets.add_internal_note',
+            'tickets.view_sla',
+        ]);
+        
+        // Site Engineering: Can view and manage internal tickets
+        $siteEngineering->syncPermissions([
+            'tickets.view_staff',
+            'tickets.view_engineering',
+            'tickets.create_engineering',
+            'tickets.add_internal_note',
+            'tickets.link_diagnostic',
+            'tickets.view_sla',
+        ]);
+        
+        // Compliance: View-only access (including AI Dashboard and AI Budgets view-only)
+        $compliance->syncPermissions([
+            'tickets.view_staff',
+            'tickets.view_engineering',
+            'tickets.view_audit_log',
+            'ai.dashboard.view',
+            'ai.budgets.view',
+        ]);
     }
 }
