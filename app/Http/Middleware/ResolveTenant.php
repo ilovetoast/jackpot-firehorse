@@ -19,6 +19,18 @@ class ResolveTenant
      */
     public function handle(Request $request, Closure $next): Response
     {
+        // Skip brand resolution for error pages to prevent redirect loops
+        if ($request->routeIs('errors.no-brand-assignment')) {
+            $tenantId = session('tenant_id');
+            if ($tenantId) {
+                $tenant = Tenant::find($tenantId);
+                if ($tenant) {
+                    app()->instance('tenant', $tenant);
+                }
+            }
+            return $next($request);
+        }
+
         $tenantId = session('tenant_id');
 
         if (! $tenantId) {
@@ -107,6 +119,8 @@ class ResolveTenant
                         } else {
                             // User has no brand access - redirect to error page
                             // Don't allow access to default brand if user isn't assigned to any brand
+                            // Clear the brand_id from session to prevent loop
+                            session()->forget('brand_id');
                             return redirect()->route('errors.no-brand-assignment');
                         }
                     }
@@ -133,6 +147,8 @@ class ResolveTenant
                 } else {
                     // User has no brand access - redirect to error page
                     // Don't allow access to default brand if user isn't assigned to any brand
+                    // Clear the brand_id from session to prevent loop
+                    session()->forget('brand_id');
                     return redirect()->route('errors.no-brand-assignment');
                 }
             } else {
@@ -171,6 +187,8 @@ class ResolveTenant
                         session(['brand_id' => $brand->id]);
                     } else {
                         // No accessible brand - redirect to error page
+                        // Clear the brand_id from session to prevent loop
+                        session()->forget('brand_id');
                         return redirect()->route('errors.no-brand-assignment');
                     }
                 }

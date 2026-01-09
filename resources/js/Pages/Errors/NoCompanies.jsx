@@ -2,7 +2,7 @@ import { Link } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function NoBrandAssignment({ tenant, user }) {
+export default function NoCompanies({ user }) {
     return (
         <div className="min-h-screen bg-gray-50">
             <AppNav />
@@ -28,12 +28,12 @@ export default function NoBrandAssignment({ tenant, user }) {
 
                         {/* Error Title */}
                         <h1 className="mt-6 text-3xl font-bold text-gray-900">
-                            Brand Access Required
+                            No Company Access
                         </h1>
 
                         {/* Error Message */}
                         <p className="mt-4 text-lg text-gray-600">
-                            You haven't been assigned to any brands yet.
+                            Your account is not associated with any company or organization.
                         </p>
 
                         <div className="mt-6 rounded-lg bg-yellow-50 p-6 text-left">
@@ -57,13 +57,8 @@ export default function NoBrandAssignment({ tenant, user }) {
                                     </h3>
                                     <div className="mt-2 text-sm text-yellow-700">
                                         <p>
-                                            You've been added to {' '}
-                                            {tenant ? (
-                                                <span className="font-semibold">{tenant.name}</span>
-                                            ) : (
-                                                'the company'
-                                            )}{' '}
-                                            but haven't been assigned to any brands yet. Brand assignments are required to access the platform features.
+                                            You've successfully logged in, but your account hasn't been added to any company or organization yet. 
+                                            You need to be invited to a company before you can access the platform.
                                         </p>
                                     </div>
                                 </div>
@@ -79,19 +74,19 @@ export default function NoBrandAssignment({ tenant, user }) {
                                 <li className="flex items-start">
                                     <span className="mr-2 font-semibold text-indigo-600">1.</span>
                                     <span>
-                                        Contact your company administrator to request access to one or more brands.
+                                        Wait for a company administrator to invite you to their organization.
                                     </span>
                                 </li>
                                 <li className="flex items-start">
                                     <span className="mr-2 font-semibold text-indigo-600">2.</span>
                                     <span>
-                                        Once you've been assigned to a brand, you'll be able to access the platform features.
+                                        Check your email for an invitation link. Click the link to accept the invitation and join the company.
                                     </span>
                                 </li>
                                 <li className="flex items-start">
                                     <span className="mr-2 font-semibold text-indigo-600">3.</span>
                                     <span>
-                                        If you're an administrator or owner, please ensure you've been assigned to brands even though you may have broader access.
+                                        If you believe you should have access to a company, contact the company administrator or support.
                                     </span>
                                 </li>
                             </ul>
@@ -100,35 +95,17 @@ export default function NoBrandAssignment({ tenant, user }) {
                             <div className="mt-6 rounded-md bg-gray-50 p-4 border-l-4 border-indigo-500">
                                 <h3 className="text-sm font-semibold text-gray-900 mb-2">TODO: Future Actions</h3>
                                 <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
-                                    <li>Add "Request Brand Access" button that sends notification to company admins</li>
-                                    <li>Add ability for admins to assign brands directly from this page (if user has admin role)</li>
-                                    <li>Add link to contact support if user believes this is an error</li>
-                                    <li>Show list of available brands in the company (if user has permission to view them)</li>
+                                    <li>Add "Create New Company" button for users who want to start their own organization</li>
+                                    <li>Add "Request Company Access" form that sends notification to site admins</li>
+                                    <li>Show pending invitations if any exist for this user</li>
+                                    <li>Add link to contact support</li>
+                                    <li>Add ability to resend invitation emails if user has pending invitations</li>
                                 </ul>
                             </div>
                         </div>
 
                         {/* Actions */}
                         <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:justify-center">
-                            <Link
-                                href="/app/companies"
-                                className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                            >
-                                <svg
-                                    className="mr-2 h-4 w-4"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    strokeWidth="1.5"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                                    />
-                                </svg>
-                                View Companies
-                            </Link>
                             <form
                                 method="POST"
                                 action="/app/logout"
@@ -151,17 +128,12 @@ export default function NoBrandAssignment({ tenant, user }) {
                             </form>
                         </div>
 
-                        {/* Tenant Info */}
-                        {tenant && (
+                        {/* User Info */}
+                        {user && (
                             <div className="mt-8 text-sm text-gray-500">
                                 <p>
-                                    Company: <span className="font-medium text-gray-700">{tenant.name}</span>
+                                    User: <span className="font-medium text-gray-700">{user.email}</span>
                                 </p>
-                                {user && (
-                                    <p className="mt-1">
-                                        User: <span className="font-medium text-gray-700">{user.email}</span>
-                                    </p>
-                                )}
                             </div>
                         )}
                     </div>

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Brand;
 use App\Models\UploadSession;
 use App\Services\AbandonedSessionService;
+use App\Services\MultipartUploadUrlService;
 use App\Services\ResumeMetadataService;
 use App\Services\UploadCompletionService;
 use App\Services\UploadInitiationService;
@@ -22,7 +23,8 @@ class UploadController extends Controller
         protected UploadInitiationService $uploadService,
         protected UploadCompletionService $completionService,
         protected ResumeMetadataService $resumeService,
-        protected AbandonedSessionService $abandonedService
+        protected AbandonedSessionService $abandonedService,
+        protected MultipartUploadUrlService $multipartUrlService
     ) {
     }
 
@@ -556,6 +558,144 @@ class UploadController extends Controller
 
             return response()->json([
                 'message' => 'Failed to mark as UPLOADING: ' . $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 500);
+        }
+    }
+
+    /**
+     * Get presigned URL for a multipart upload part.
+     *
+     * POST /uploads/{uploadSession}/multipart-part-url
+     *
+     * Generates a secure, time-limited presigned URL for uploading
+     * a single part of a multipart upload directly to S3.
+     *
+     * @param Request $request
+     * @param UploadSession $uploadSession
+     * @return JsonResponse
+     */
+    public function getMultipartPartUrl(Request $request, UploadSession $uploadSession): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Verify upload session belongs to tenant
+        if ($uploadSession->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Upload session not found',
+            ], 404);
+        }
+
+        // Validate request input
+        $validated = $request->validate([
+            'part_number' => 'required|integer|min:1',
+        ]);
+
+        $partNumber = $validated['part_number'];
+
+        try {
+            // Refresh to get latest state
+            $uploadSession->refresh();
+
+            Log::info('Multipart part URL requested', [
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $partNumber,
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+                'current_status' => $uploadSession->status->value,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+            ]);
+
+            // Generate presigned URL (service validates state)
+            $result = $this->multipartUrlService->generatePartUploadUrl($uploadSession, $partNumber);
+
+            return response()->json($result, 200);
+        } catch (\RuntimeException $e) {
+            // Handle validation errors with appropriate HTTP status codes
+            $errorMessage = $e->getMessage();
+
+            // Check for specific error conditions
+            if (str_contains($errorMessage, 'terminal state')) {
+                // Upload already completed or in terminal state
+                Log::warning('Multipart part URL requested for terminal session', [
+                    'upload_session_id' => $uploadSession->id,
+                    'part_number' => $partNumber,
+                    'status' => $uploadSession->status->value,
+                    'error' => $errorMessage,
+                ]);
+
+                return response()->json([
+                    'message' => $errorMessage,
+                    'upload_session_id' => $uploadSession->id,
+                    'upload_session_status' => $uploadSession->status->value,
+                ], 409); // Conflict - resource state doesn't allow operation
+            }
+
+            if (str_contains($errorMessage, 'expired')) {
+                // Upload session expired
+                Log::warning('Multipart part URL requested for expired session', [
+                    'upload_session_id' => $uploadSession->id,
+                    'part_number' => $partNumber,
+                    'expires_at' => $uploadSession->expires_at?->toIso8601String(),
+                    'error' => $errorMessage,
+                ]);
+
+                return response()->json([
+                    'message' => $errorMessage,
+                    'upload_session_id' => $uploadSession->id,
+                    'is_expired' => true,
+                    'expires_at' => $uploadSession->expires_at?->toIso8601String(),
+                ], 410); // Gone - resource no longer available
+            }
+
+            if (str_contains($errorMessage, 'invalid state') || str_contains($errorMessage, 'does not have a multipart upload ID')) {
+                // Invalid state or missing multipart_upload_id
+                Log::warning('Multipart part URL requested but session is in invalid state', [
+                    'upload_session_id' => $uploadSession->id,
+                    'part_number' => $partNumber,
+                    'status' => $uploadSession->status->value,
+                    'has_multipart_upload_id' => !empty($uploadSession->multipart_upload_id),
+                    'error' => $errorMessage,
+                ]);
+
+                return response()->json([
+                    'message' => $errorMessage,
+                    'upload_session_id' => $uploadSession->id,
+                    'upload_session_status' => $uploadSession->status->value,
+                ], 409); // Conflict - resource state doesn't allow operation
+            }
+
+            // Generic runtime exception
+            Log::error('Failed to generate multipart part URL', [
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $partNumber,
+                'error' => $errorMessage,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => $errorMessage,
+                'upload_session_id' => $uploadSession->id,
+            ], 400);
+        } catch (\Exception $e) {
+            // Unexpected error
+            Log::error('Unexpected error generating multipart part URL', [
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $partNumber,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate multipart part URL: ' . $e->getMessage(),
                 'upload_session_id' => $uploadSession->id,
             ], 500);
         }

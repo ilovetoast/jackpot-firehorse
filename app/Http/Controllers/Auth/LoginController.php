@@ -61,11 +61,8 @@ class LoginController extends Controller
                 return redirect()->intended('/app/dashboard');
             }
 
-            // User has no tenants - redirect back with error
-            Auth::logout();
-            return back()->withErrors([
-                'email' => 'Your account is not associated with any organization.',
-            ])->onlyInput('email');
+            // User has no tenants - redirect to no companies error page
+            return redirect()->route('errors.no-companies');
         }
 
         return back()->withErrors([

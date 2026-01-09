@@ -61,4 +61,21 @@ class ErrorController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Display the no companies error page.
+     * This is shown when a user has no companies/tenants associated with their account.
+     */
+    public function noCompanies(): Response
+    {
+        $user = auth()->user();
+
+        return Inertia::render('Errors/NoCompanies', [
+            'user' => $user ? [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+            ] : null,
+        ]);
+    }
 }

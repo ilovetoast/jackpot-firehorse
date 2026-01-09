@@ -30,10 +30,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/companies', [\App\Http\Controllers\CompanyController::class, 'index'])->name('companies.index');
     Route::post('/companies/{tenant}/switch', [\App\Http\Controllers\CompanyController::class, 'switch'])->name('companies.switch');
     
-    // Error pages (tenant-scoped, but user limit error doesn't require tenant middleware since user is blocked)
-    Route::middleware('tenant')->group(function () {
-        Route::get('/errors/no-brand-assignment', [\App\Http\Controllers\ErrorController::class, 'noBrandAssignment'])->name('errors.no-brand-assignment');
-    });
+    // Error pages
+    // No companies error - doesn't require tenant (user has no companies)
+    Route::get('/errors/no-companies', [\App\Http\Controllers\ErrorController::class, 'noCompanies'])->name('errors.no-companies');
+    
+    // No brand assignment error - requires tenant but should be accessible even if brand resolution fails
+    // We'll handle this route specially in ResolveTenant middleware to prevent loops
+    Route::get('/errors/no-brand-assignment', [\App\Http\Controllers\ErrorController::class, 'noBrandAssignment'])->name('errors.no-brand-assignment');
+    
     // User limit error can be accessed even if tenant is resolved (user just can't access other routes)
     Route::get('/errors/user-limit-exceeded', [\App\Http\Controllers\ErrorController::class, 'userLimitExceeded'])->name('errors.user-limit-exceeded');
     
@@ -175,6 +179,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
             Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
             Route::get('/uploads/{uploadSession}/resume', [\App\Http\Controllers\UploadController::class, 'resume'])->name('uploads.resume');
+            Route::post('/uploads/{uploadSession}/multipart-part-url', [\App\Http\Controllers\UploadController::class, 'getMultipartPartUrl'])->name('uploads.multipart-part-url');
             Route::put('/uploads/{uploadSession}/activity', [\App\Http\Controllers\UploadController::class, 'updateActivity'])->name('uploads.update-activity');
             Route::put('/uploads/{uploadSession}/start', [\App\Http\Controllers\UploadController::class, 'markAsUploading'])->name('uploads.start');
             Route::post('/uploads/{uploadSession}/cancel', [\App\Http\Controllers\UploadController::class, 'cancel'])->name('uploads.cancel');
@@ -230,3 +235,5 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
 
 // Stripe webhook (no auth, no CSRF)
 Route::post('/webhook/stripe', [\App\Http\Controllers\WebhookController::class, 'handleWebhook'])->name('webhook.stripe');
+
+
