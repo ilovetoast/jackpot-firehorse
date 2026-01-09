@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
@@ -51,8 +52,18 @@ class AITaggingJob implements ShouldQueue
             Log::info('AI tagging skipped - already completed', [
                 'asset_id' => $asset->id,
             ]);
-            // Still dispatch next job
-            FinalizeAssetJob::dispatch($asset->id);
+            // Job chaining is handled by Bus::chain() in ProcessAssetJob
+            // Chain will continue to next job automatically
+            return;
+        }
+
+        // Ensure asset is in THUMBNAIL_GENERATED status (from GeneratePreviewJob which should maintain status)
+        // Actually, preview generation doesn't change status, so we check for THUMBNAIL_GENERATED
+        if ($asset->status !== AssetStatus::THUMBNAIL_GENERATED) {
+            Log::warning('AI tagging skipped - asset has not completed thumbnail generation', [
+                'asset_id' => $asset->id,
+                'status' => $asset->status->value,
+            ]);
             return;
         }
 
@@ -67,7 +78,9 @@ class AITaggingJob implements ShouldQueue
             $currentMetadata['ai_tags'] = $tags;
         }
 
+        // Update status to AI_TAGGED
         $asset->update([
+            'status' => AssetStatus::AI_TAGGED,
             'metadata' => $currentMetadata,
         ]);
 
@@ -77,7 +90,7 @@ class AITaggingJob implements ShouldQueue
             'brand_id' => $asset->brand_id,
             'asset_id' => $asset->id,
             'user_id' => null,
-            'event_type' => 'ai_tagging.completed',
+            'event_type' => 'asset.ai_tagging.completed',
             'metadata' => [
                 'job' => 'AITaggingJob',
                 'tag_count' => count($tags),
@@ -90,8 +103,8 @@ class AITaggingJob implements ShouldQueue
             'tag_count' => count($tags),
         ]);
 
-        // Dispatch next job in chain
-        FinalizeAssetJob::dispatch($asset->id);
+        // Job chaining is handled by Bus::chain() in ProcessAssetJob
+        // No need to dispatch next job here
     }
 
     /**

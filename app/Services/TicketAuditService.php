@@ -39,18 +39,21 @@ class TicketAuditService
                 $query->where('event_type', EventType::TICKET_CONVERTED)
                     ->whereJsonContains('metadata->original_ticket_id', $ticket->id);
             })
-            ->with(['actor', 'subject'])
+            ->with(['subject']) // Only eager load subject, not actor (handles string types like "system")
             ->orderBy('created_at', 'desc')
             ->get();
 
         return $events->map(function ($event) {
+            // Use getActorModel() to safely get actor, handling string types like "system"
+            $actorModel = $event->getActorModel();
+            
             return [
                 'id' => $event->id,
                 'event_type' => $event->event_type,
-                'actor' => $event->actor ? [
-                    'id' => $event->actor->id,
-                    'name' => $event->actor->name,
-                    'email' => $event->actor->email,
+                'actor' => $actorModel ? [
+                    'id' => $actorModel->id,
+                    'name' => $actorModel->name,
+                    'email' => $actorModel->email,
                 ] : null,
                 'timestamp' => $event->created_at,
                 'metadata' => $event->metadata,
@@ -67,7 +70,8 @@ class TicketAuditService
      */
     protected function formatEventDescription(ActivityEvent $event): string
     {
-        $actor = $event->actor ? $event->actor->name : 'System';
+        $actorModel = $event->getActorModel();
+        $actor = $actorModel ? $actorModel->name : 'System';
         $metadata = $event->metadata ?? [];
 
         return match ($event->event_type) {

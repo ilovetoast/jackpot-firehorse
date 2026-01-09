@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
@@ -51,8 +52,17 @@ class GeneratePreviewJob implements ShouldQueue
             Log::info('Preview generation skipped - already generated', [
                 'asset_id' => $asset->id,
             ]);
-            // Still dispatch next job
-            AITaggingJob::dispatch($asset->id);
+            // Job chaining is handled by Bus::chain() in ProcessAssetJob
+            // Chain will continue to next job automatically
+            return;
+        }
+
+        // Ensure asset is in THUMBNAIL_GENERATED status (from GenerateThumbnailsJob)
+        if ($asset->status !== AssetStatus::THUMBNAIL_GENERATED) {
+            Log::warning('Preview generation skipped - asset has not completed thumbnail generation', [
+                'asset_id' => $asset->id,
+                'status' => $asset->status->value,
+            ]);
             return;
         }
 
@@ -77,7 +87,7 @@ class GeneratePreviewJob implements ShouldQueue
             'brand_id' => $asset->brand_id,
             'asset_id' => $asset->id,
             'user_id' => null,
-            'event_type' => 'preview.generated',
+            'event_type' => 'asset.preview.generated',
             'metadata' => [
                 'job' => 'GeneratePreviewJob',
                 'has_preview' => !empty($preview),
@@ -90,8 +100,8 @@ class GeneratePreviewJob implements ShouldQueue
             'has_preview' => !empty($preview),
         ]);
 
-        // Dispatch next job in chain
-        AITaggingJob::dispatch($asset->id);
+        // Job chaining is handled by Bus::chain() in ProcessAssetJob
+        // No need to dispatch next job here
     }
 
     /**

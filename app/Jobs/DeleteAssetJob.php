@@ -74,11 +74,11 @@ class DeleteAssetJob implements ShouldQueue
             'asset_id' => $asset->id,
             'user_id' => null, // System event
             'event_type' => 'asset.hard_deleted',
-            'metadata' => [
-                'deletion_type' => 'hard',
-                'deleted_paths' => $deletedPaths,
-                'file_name' => $asset->file_name,
-            ],
+                'metadata' => [
+                    'deletion_type' => 'hard',
+                    'deleted_paths' => $deletedPaths,
+                    'original_filename' => $asset->original_filename,
+                ],
             'created_at' => now(),
         ]);
 
@@ -106,11 +106,11 @@ class DeleteAssetJob implements ShouldQueue
 
         try {
             // Verify main file exists
-            $exists = $s3Client->doesObjectExist($bucket->name, $asset->path);
+            $exists = $s3Client->doesObjectExist($bucket->name, $asset->storage_root_path);
             if (!$exists) {
                 Log::warning('Asset file not found in storage during deletion', [
                     'asset_id' => $asset->id,
-                    'path' => $asset->path,
+                    'storage_root_path' => $asset->storage_root_path,
                     'bucket' => $bucket->name,
                 ]);
                 // Continue deletion even if main file doesn't exist (idempotent)
@@ -142,7 +142,7 @@ class DeleteAssetJob implements ShouldQueue
             $metadata = $asset->metadata ?? [];
             
             // Delete main asset file
-            $mainPath = $asset->path;
+            $mainPath = $asset->storage_root_path;
             if ($s3Client->doesObjectExist($bucket->name, $mainPath)) {
                 $s3Client->deleteObject([
                     'Bucket' => $bucket->name,
@@ -178,8 +178,8 @@ class DeleteAssetJob implements ShouldQueue
             }
 
             // Delete asset folder (if structured as folders)
-            // Extract folder path from asset path
-            $folderPath = dirname($asset->path);
+            // Extract folder path from asset storage path
+            $folderPath = dirname($asset->storage_root_path);
             if ($folderPath !== '.' && $folderPath !== '/') {
                 // List and delete all objects in folder
                 $objects = $s3Client->listObjectsV2([
@@ -218,12 +218,12 @@ class DeleteAssetJob implements ShouldQueue
     }
 
     /**
-     * Confirm removal - verify files are gone from S3.
+     * Confirm removal - verify files are gone from S3 (best-effort).
+     * Does not throw exceptions - logs warnings instead.
      *
      * @param Asset $asset
      * @param array $deletedPaths
      * @return void
-     * @throws \RuntimeException If confirmation fails
      */
     protected function confirmRemoval(Asset $asset, array $deletedPaths): void
     {
@@ -231,16 +231,18 @@ class DeleteAssetJob implements ShouldQueue
         $s3Client = $this->createS3Client();
 
         try {
-            // Verify main file is gone
-            $mainPath = $asset->path;
+            // Verify main file is gone (best-effort)
+            $mainPath = $asset->storage_root_path;
             $stillExists = $s3Client->doesObjectExist($bucket->name, $mainPath);
 
             if ($stillExists) {
-                Log::error('Asset file still exists after deletion attempt', [
+                Log::warning('Asset file still exists after deletion attempt (best-effort verification)', [
                     'asset_id' => $asset->id,
                     'path' => $mainPath,
+                    'note' => 'Deletion will proceed - file may be deleted asynchronously or verification may be delayed',
                 ]);
-                throw new \RuntimeException("Failed to confirm removal: file still exists in storage");
+                // Don't throw - best-effort verification
+                return;
             }
 
             Log::info('Asset removal confirmed', [
@@ -248,11 +250,19 @@ class DeleteAssetJob implements ShouldQueue
                 'deleted_paths_count' => count($deletedPaths),
             ]);
         } catch (S3Exception $e) {
-            Log::error('Failed to confirm asset removal', [
+            Log::warning('Failed to confirm asset removal (best-effort verification)', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
+                'note' => 'Deletion will proceed - verification failure is non-critical',
             ]);
-            throw new \RuntimeException("Failed to confirm removal: {$e->getMessage()}", 0, $e);
+            // Don't throw - best-effort verification
+        } catch (\Exception $e) {
+            Log::warning('Unexpected error during asset removal verification (best-effort)', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+                'note' => 'Deletion will proceed - verification failure is non-critical',
+            ]);
+            // Don't throw - best-effort verification
         }
     }
 

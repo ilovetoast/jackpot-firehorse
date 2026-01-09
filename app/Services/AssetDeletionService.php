@@ -23,13 +23,11 @@ class AssetDeletionService
         $assetId = $asset->id;
         $tenantId = $asset->tenant_id;
         $brandId = $asset->brand_id;
-        $fileName = $asset->file_name;
-        $fileSize = $asset->file_size;
+        $originalFilename = $asset->original_filename;
+        $sizeBytes = $asset->size_bytes;
 
-        // Update status to DELETED before soft delete
-        $asset->update([
-            'status' => AssetStatus::DELETED,
-        ]);
+        // Note: We don't update status to DELETED since we use soft deletes
+        // The asset's status remains as-is, but the record is soft-deleted
 
         // Soft delete the asset
         $asset->delete();
@@ -43,15 +41,15 @@ class AssetDeletionService
             'event_type' => 'asset.deleted',
             'metadata' => [
                 'deletion_type' => 'soft',
-                'file_name' => $fileName,
-                'file_size' => $fileSize,
+                'original_filename' => $originalFilename,
+                'size_bytes' => $sizeBytes,
             ],
             'created_at' => now(),
         ]);
 
         Log::info('Asset soft deleted', [
             'asset_id' => $assetId,
-            'file_name' => $fileName,
+            'original_filename' => $originalFilename,
             'grace_period_days' => config('assets.deletion_grace_period_days', 30),
         ]);
 
@@ -72,9 +70,10 @@ class AssetDeletionService
         $gracePeriodDays = config('assets.deletion_grace_period_days', 30);
         $cutoffDate = now()->subDays($gracePeriodDays);
 
+        // Get soft-deleted assets that are past grace period
+        // Note: Status doesn't matter for soft-deleted assets - they're deleted
         return Asset::onlyTrashed()
             ->where('deleted_at', '<=', $cutoffDate)
-            ->where('status', AssetStatus::DELETED)
             ->limit($batchSize)
             ->get();
     }

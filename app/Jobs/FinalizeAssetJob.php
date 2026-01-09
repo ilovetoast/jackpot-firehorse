@@ -46,17 +46,26 @@ class FinalizeAssetJob implements ShouldQueue
     {
         $asset = Asset::findOrFail($this->assetId);
 
-        // Idempotency: Skip if already ready
-        if ($asset->status === AssetStatus::READY) {
-            Log::info('Asset finalization skipped - already ready', [
+        // Idempotency: Skip if already completed
+        if ($asset->status === AssetStatus::COMPLETED) {
+            Log::info('Asset finalization skipped - already completed', [
                 'asset_id' => $asset->id,
             ]);
             return;
         }
 
-        // Update status to READY
+        // Only finalize assets that have completed AI tagging
+        if ($asset->status !== AssetStatus::AI_TAGGED) {
+            Log::warning('Asset finalization skipped - asset has not completed AI tagging', [
+                'asset_id' => $asset->id,
+                'status' => $asset->status->value,
+            ]);
+            return;
+        }
+
+        // Update status to COMPLETED
         $asset->update([
-            'status' => AssetStatus::READY,
+            'status' => AssetStatus::COMPLETED,
         ]);
 
         // Update metadata with finalization timestamp
@@ -77,15 +86,15 @@ class FinalizeAssetJob implements ShouldQueue
             'event_type' => 'asset.finalized',
             'metadata' => [
                 'job' => 'FinalizeAssetJob',
-                'status' => AssetStatus::READY->value,
+                'status' => AssetStatus::COMPLETED->value,
             ],
             'created_at' => now(),
         ]);
 
         Log::info('Asset finalized', [
             'asset_id' => $asset->id,
-            'file_name' => $asset->file_name,
-            'status' => AssetStatus::READY->value,
+            'original_filename' => $asset->original_filename,
+            'status' => AssetStatus::COMPLETED->value,
         ]);
     }
 

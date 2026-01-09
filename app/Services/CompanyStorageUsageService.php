@@ -45,9 +45,9 @@ class CompanyStorageUsageService
         // Note: Asset records represent original files only.
         // Thumbnails and previews are stored in metadata and don't have separate Asset records.
         $totalBytes = Asset::where('tenant_id', $tenant->id)
-            ->whereNotIn('status', [AssetStatus::FAILED, AssetStatus::DELETED])
-            ->whereNotNull('path')
-            ->sum('file_size') ?? 0;
+            ->where('status', '!=', AssetStatus::FAILED)
+            ->whereNotNull('storage_root_path')
+            ->sum('size_bytes') ?? 0;
 
         return (int) $totalBytes;
     }
@@ -173,8 +173,8 @@ class CompanyStorageUsageService
     public function getStorageBreakdown(Tenant $tenant): array
     {
         $breakdown = Asset::where('tenant_id', $tenant->id)
-            ->whereNotIn('status', [AssetStatus::FAILED, AssetStatus::DELETED])
-            ->selectRaw('status, COUNT(*) as count, SUM(file_size) as total_bytes')
+            ->where('status', '!=', AssetStatus::FAILED)
+            ->selectRaw('status, COUNT(*) as count, SUM(size_bytes) as total_bytes')
             ->groupBy('status')
             ->get()
             ->mapWithKeys(function ($item) {
@@ -218,7 +218,7 @@ class CompanyStorageUsageService
         try {
             // Find assets with inconsistencies
             $assets = Asset::where('tenant_id', $tenant->id)
-                ->whereNotIn('status', [AssetStatus::FAILED, AssetStatus::DELETED])
+                ->where('status', '!=', AssetStatus::FAILED)
                 ->get();
 
             foreach ($assets as $asset) {
@@ -226,14 +226,14 @@ class CompanyStorageUsageService
                     // Verify file exists and get actual size
                     $actualSize = $this->verifyAssetSize($asset);
 
-                    if ($actualSize !== null && $actualSize !== $asset->file_size) {
+                    if ($actualSize !== null && $actualSize !== $asset->size_bytes) {
                         // Update asset with correct size
-                        $asset->update(['file_size' => $actualSize]);
+                        $asset->update(['size_bytes' => $actualSize]);
                         $results['fixed_assets']++;
 
                         Log::info('Fixed asset file size', [
                             'asset_id' => $asset->id,
-                            'old_size' => $asset->file_size,
+                            'old_size' => $asset->size_bytes,
                             'new_size' => $actualSize,
                         ]);
                     }
@@ -290,7 +290,7 @@ class CompanyStorageUsageService
         try {
             $result = $s3Client->headObject([
                 'Bucket' => $bucket->name,
-                'Key' => $asset->path,
+                'Key' => $asset->storage_root_path,
             ]);
 
             return (int) ($result['ContentLength'] ?? null);

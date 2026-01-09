@@ -25,11 +25,10 @@ class UploadSession extends Model
         'storage_bucket_id',
         'status',
         'type',
-        'file_name',
-        'file_size',
-        'mime_type',
-        'path',
-        'metadata',
+        'expected_size',
+        'uploaded_size',
+        'expires_at',
+        'failure_reason',
     ];
 
     /**
@@ -42,8 +41,9 @@ class UploadSession extends Model
         return [
             'status' => UploadStatus::class,
             'type' => UploadType::class,
-            'file_size' => 'integer',
-            'metadata' => 'array',
+            'expected_size' => 'integer',
+            'uploaded_size' => 'integer',
+            'expires_at' => 'datetime',
         ];
     }
 

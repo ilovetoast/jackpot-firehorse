@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
@@ -51,8 +52,8 @@ class GenerateThumbnailsJob implements ShouldQueue
             Log::info('Thumbnail generation skipped - already generated', [
                 'asset_id' => $asset->id,
             ]);
-            // Still dispatch next job
-            GeneratePreviewJob::dispatch($asset->id);
+            // Job chaining is handled by Bus::chain() in ProcessAssetJob
+            // Chain will continue to next job automatically
             return;
         }
 
@@ -65,7 +66,9 @@ class GenerateThumbnailsJob implements ShouldQueue
         $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
         $currentMetadata['thumbnails'] = $thumbnails;
 
+        // Update status to THUMBNAIL_GENERATED
         $asset->update([
+            'status' => AssetStatus::THUMBNAIL_GENERATED,
             'metadata' => $currentMetadata,
         ]);
 
@@ -75,7 +78,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             'brand_id' => $asset->brand_id,
             'asset_id' => $asset->id,
             'user_id' => null,
-            'event_type' => 'thumbnails.generated',
+            'event_type' => 'asset.thumbnails.generated',
             'metadata' => [
                 'job' => 'GenerateThumbnailsJob',
                 'thumbnail_count' => count($thumbnails),
@@ -88,8 +91,8 @@ class GenerateThumbnailsJob implements ShouldQueue
             'thumbnail_count' => count($thumbnails),
         ]);
 
-        // Dispatch next job in chain
-        GeneratePreviewJob::dispatch($asset->id);
+        // Job chaining is handled by Bus::chain() in ProcessAssetJob
+        // No need to dispatch next job here
     }
 
     /**

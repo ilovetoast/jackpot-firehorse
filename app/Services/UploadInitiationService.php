@@ -70,25 +70,26 @@ class UploadInitiationService
         // Determine upload type
         $uploadType = $this->determineUploadType($fileSize);
 
-        // Generate S3 path
-        $path = $this->generatePath($tenant, $brand, $fileName);
+        // Calculate expiration time
+        $expiresAt = now()->addMinutes(self::DEFAULT_EXPIRATION_MINUTES);
 
-        // Create upload session
+        // Create upload session (represents upload attempt, not resulting asset)
         $uploadSession = UploadSession::create([
             'tenant_id' => $tenant->id,
             'brand_id' => $brand?->id,
             'storage_bucket_id' => $bucket->id,
             'status' => UploadStatus::INITIATING,
             'type' => $uploadType,
-            'file_name' => $fileName,
-            'file_size' => $fileSize,
-            'mime_type' => $mimeType,
-            'path' => $path,
+            'expected_size' => $fileSize,
+            'uploaded_size' => null, // Will be updated as upload progresses
+            'expires_at' => $expiresAt,
+            'failure_reason' => null,
         ]);
 
-        // Generate signed URLs
-        $expiresAt = now()->addMinutes(self::DEFAULT_EXPIRATION_MINUTES);
+        // Generate S3 path using upload_session_id (deterministic, temporary path for upload)
+        $path = $this->generateTempUploadPath($tenant, $brand, $uploadSession->id);
 
+        // Generate signed URLs
         if ($uploadType === UploadType::DIRECT) {
             $uploadUrl = $this->generateDirectUploadUrl($bucket, $path, $mimeType, $expiresAt);
             $multipartUploadId = null;
@@ -100,23 +101,18 @@ class UploadInitiationService
             $multipartUploadId = $multipartUpload['UploadId'];
             $chunkSize = self::DEFAULT_CHUNK_SIZE;
 
-            // Store multipart upload ID in metadata
-            $uploadSession->update([
-                'metadata' => [
-                    'multipart_upload_id' => $multipartUploadId,
-                    'chunk_size' => $chunkSize,
-                    'total_chunks' => (int) ceil($fileSize / $chunkSize),
-                ],
-            ]);
+            // Store multipart upload info (temporary, will be cleaned up after completion)
+            // Note: We can't store this in UploadSession metadata anymore, so we'll handle it differently
+            // For now, the multipart upload ID is returned to the client
         }
 
         Log::info('Upload session initiated', [
             'upload_session_id' => $uploadSession->id,
             'tenant_id' => $tenant->id,
             'brand_id' => $brand?->id,
-            'file_name' => $fileName,
-            'file_size' => $fileSize,
+            'expected_size' => $fileSize,
             'upload_type' => $uploadType->value,
+            'expires_at' => $expiresAt->toIso8601String(),
         ]);
 
         return [
@@ -192,14 +188,14 @@ class UploadInitiationService
     }
 
     /**
-     * Generate S3 path for the upload.
+     * Generate temporary S3 path for upload (deterministic based on upload_session_id).
      *
      * @param Tenant $tenant
      * @param Brand|null $brand
-     * @param string $fileName
+     * @param string $uploadSessionId
      * @return string
      */
-    protected function generatePath(Tenant $tenant, ?Brand $brand, string $fileName): string
+    protected function generateTempUploadPath(Tenant $tenant, ?Brand $brand, string $uploadSessionId): string
     {
         $basePath = "uploads/{$tenant->id}";
 
@@ -207,10 +203,8 @@ class UploadInitiationService
             $basePath .= "/{$brand->id}";
         }
 
-        // Generate unique filename to avoid conflicts
-        $uniqueFileName = Str::uuid()->toString() . '_' . $fileName;
-
-        return "{$basePath}/{$uniqueFileName}";
+        // Use upload_session_id as the path (deterministic, temporary)
+        return "{$basePath}/{$uploadSessionId}";
     }
 
     /**

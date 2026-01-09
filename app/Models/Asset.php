@@ -26,10 +26,10 @@ class Asset extends Model
         'storage_bucket_id',
         'status',
         'type',
-        'file_name',
-        'file_size',
+        'original_filename',
         'mime_type',
-        'path',
+        'size_bytes',
+        'storage_root_path',
         'metadata',
     ];
 
@@ -43,7 +43,7 @@ class Asset extends Model
         return [
             'status' => AssetStatus::class,
             'type' => AssetType::class,
-            'file_size' => 'integer',
+            'size_bytes' => 'integer',
             'metadata' => 'array',
         ];
     }

@@ -61,7 +61,7 @@ class AssetProcessingFailureService
             'brand_id' => $asset->brand_id,
             'asset_id' => $asset->id,
             'user_id' => null, // System event
-            'event_type' => 'processing.failed',
+            'event_type' => 'asset.processing.failed',
             'metadata' => [
                 'job' => $jobClass,
                 'failure_reason' => $failureReason,
@@ -76,7 +76,7 @@ class AssetProcessingFailureService
         // Log failure (never hide failures - comprehensive logging)
         Log::error('Asset processing failed', [
             'asset_id' => $asset->id,
-            'asset_file_name' => $asset->file_name,
+            'asset_original_filename' => $asset->original_filename,
             'job_class' => $jobClass,
             'failure_reason' => $failureReason,
             'error_message' => $exception->getMessage(),

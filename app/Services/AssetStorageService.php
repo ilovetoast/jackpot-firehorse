@@ -18,7 +18,7 @@ class AssetStorageService
     {
         // Query only non-soft-deleted assets
         return Asset::where('tenant_id', $tenant->id)
-            ->sum('file_size') ?? 0;
+            ->sum('size_bytes') ?? 0;
     }
 
     /**
@@ -34,7 +34,7 @@ class AssetStorageService
         // Query only non-soft-deleted assets
         return Asset::where('tenant_id', $tenantId)
             ->where('brand_id', $brandId)
-            ->sum('file_size') ?? 0;
+            ->sum('size_bytes') ?? 0;
     }
 
     /**
@@ -47,7 +47,7 @@ class AssetStorageService
     {
         // Query only non-soft-deleted assets grouped by status
         $breakdown = Asset::where('tenant_id', $tenant->id)
-            ->selectRaw('status, SUM(file_size) as total_size')
+            ->selectRaw('status, SUM(size_bytes) as total_size')
             ->groupBy('status')
             ->pluck('total_size', 'status')
             ->toArray();

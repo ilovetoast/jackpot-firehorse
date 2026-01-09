@@ -7,29 +7,55 @@ namespace App\Enums;
  *
  * Tracks the full lifecycle of an asset from upload through processing to availability.
  * Assets progress through these states asynchronously via queue jobs.
+ *
+ * Status flow:
+ * INITIATED → UPLOADING → UPLOADED → PROCESSING → THUMBNAIL_GENERATED → AI_TAGGED → COMPLETED
+ * Any stage can transition to FAILED on error.
  */
 enum AssetStatus: string
 {
     /**
-     * Asset has been uploaded but processing has not yet started.
-     * Initial state after successful upload completion.
-     * Assets in this state are queued for processing.
+     * Upload session has been initiated but file upload has not started.
+     * Initial state when UploadSession is created.
      */
-    case PENDING = 'pending';
+    case INITIATED = 'initiated';
 
     /**
-     * Asset is currently being processed (transcoding, thumbnail generation, metadata extraction, etc.).
-     * Processing occurs asynchronously via queue jobs.
-     * Assets should not be accessible to users in this state.
+     * File is currently being uploaded to S3.
+     * Asset record may not exist yet (upload happens before asset creation).
+     */
+    case UPLOADING = 'uploading';
+
+    /**
+     * File has been successfully uploaded to S3 and asset record created.
+     * Upload verification completed. Ready for processing pipeline.
+     */
+    case UPLOADED = 'uploaded';
+
+    /**
+     * Asset is currently being processed (metadata extraction, etc.).
+     * Initial processing stage after upload completion.
      */
     case PROCESSING = 'processing';
+
+    /**
+     * Thumbnails have been generated successfully.
+     * Asset has completed thumbnail generation step.
+     */
+    case THUMBNAIL_GENERATED = 'thumbnail_generated';
+
+    /**
+     * AI tagging has been completed successfully.
+     * Asset has been analyzed and tagged by AI system.
+     */
+    case AI_TAGGED = 'ai_tagged';
 
     /**
      * Asset has been fully processed and is ready for use.
      * All processing jobs have completed successfully.
      * Assets in this state are available to users via signed URLs.
      */
-    case READY = 'ready';
+    case COMPLETED = 'completed';
 
     /**
      * Processing failed and the asset cannot be made available.
@@ -37,18 +63,4 @@ enum AssetStatus: string
      * May be retried or require manual intervention.
      */
     case FAILED = 'failed';
-
-    /**
-     * Asset has been archived (soft deleted or moved to archive).
-     * Asset is not shown in normal listings but may be recoverable.
-     * Original file remains in storage.
-     */
-    case ARCHIVED = 'archived';
-
-    /**
-     * Asset has been marked for deletion.
-     * Asset will be permanently deleted from storage asynchronously.
-     * This is the final state before physical file removal.
-     */
-    case DELETED = 'deleted';
 }

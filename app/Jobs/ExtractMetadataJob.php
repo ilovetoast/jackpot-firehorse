@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
@@ -51,8 +52,17 @@ class ExtractMetadataJob implements ShouldQueue
             Log::info('Metadata extraction skipped - already extracted', [
                 'asset_id' => $asset->id,
             ]);
-            // Still dispatch next job
-            GenerateThumbnailsJob::dispatch($asset->id);
+            // Job chaining is handled by Bus::chain() in ProcessAssetJob
+            // Chain will continue to next job automatically
+            return;
+        }
+
+        // Ensure asset is in PROCESSING status (set by ProcessAssetJob)
+        if ($asset->status !== AssetStatus::PROCESSING) {
+            Log::warning('Metadata extraction skipped - asset is not in processing state', [
+                'asset_id' => $asset->id,
+                'status' => $asset->status->value,
+            ]);
             return;
         }
 
@@ -75,7 +85,7 @@ class ExtractMetadataJob implements ShouldQueue
             'brand_id' => $asset->brand_id,
             'asset_id' => $asset->id,
             'user_id' => null,
-            'event_type' => 'metadata.extracted',
+            'event_type' => 'asset.metadata.extracted',
             'metadata' => [
                 'job' => 'ExtractMetadataJob',
                 'metadata_keys' => array_keys($metadata),
@@ -88,8 +98,8 @@ class ExtractMetadataJob implements ShouldQueue
             'metadata_keys' => array_keys($metadata),
         ]);
 
-        // Dispatch next job in chain
-        GenerateThumbnailsJob::dispatch($asset->id);
+        // Job chaining is handled by Bus::chain() in ProcessAssetJob
+        // No need to dispatch next job here
     }
 
     /**
@@ -103,8 +113,8 @@ class ExtractMetadataJob implements ShouldQueue
         // Stub implementation - future phase will add actual metadata extraction
         // For now, return basic metadata from file properties
         return [
-            'file_name' => $asset->file_name,
-            'file_size' => $asset->file_size,
+            'original_filename' => $asset->original_filename,
+            'size_bytes' => $asset->size_bytes,
             'mime_type' => $asset->mime_type,
             'extracted_by' => 'stub',
         ];

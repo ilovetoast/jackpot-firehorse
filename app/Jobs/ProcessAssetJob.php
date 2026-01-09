@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 
 class ProcessAssetJob implements ShouldQueue
@@ -47,8 +48,13 @@ class ProcessAssetJob implements ShouldQueue
         $asset = Asset::findOrFail($this->assetId);
 
         // Idempotency: Skip if already processing or completed
-        if ($asset->status === AssetStatus::PROCESSING || $asset->status === AssetStatus::READY) {
-            Log::info('Asset processing skipped - already processing or ready', [
+        if (in_array($asset->status, [
+            AssetStatus::PROCESSING,
+            AssetStatus::THUMBNAIL_GENERATED,
+            AssetStatus::AI_TAGGED,
+            AssetStatus::COMPLETED,
+        ])) {
+            Log::info('Asset processing skipped - already processing or completed', [
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);
@@ -59,6 +65,15 @@ class ProcessAssetJob implements ShouldQueue
         if ($asset->status === AssetStatus::FAILED) {
             Log::warning('Asset processing skipped - asset is in failed state', [
                 'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Only process assets that are in UPLOADED state
+        if ($asset->status !== AssetStatus::UPLOADED) {
+            Log::warning('Asset processing skipped - asset is not in uploaded state', [
+                'asset_id' => $asset->id,
+                'status' => $asset->status->value,
             ]);
             return;
         }
@@ -74,7 +89,7 @@ class ProcessAssetJob implements ShouldQueue
             'brand_id' => $asset->brand_id,
             'asset_id' => $asset->id,
             'user_id' => null, // System event
-            'event_type' => 'processing.started',
+            'event_type' => 'asset.processing.started',
             'metadata' => [
                 'job' => 'ProcessAssetJob',
             ],
@@ -83,11 +98,17 @@ class ProcessAssetJob implements ShouldQueue
 
         Log::info('Asset processing started', [
             'asset_id' => $asset->id,
-            'file_name' => $asset->file_name,
+            'original_filename' => $asset->original_filename,
         ]);
 
-        // Dispatch next job in chain
-        ExtractMetadataJob::dispatch($asset->id);
+        // Dispatch processing chain using Bus::chain()
+        Bus::chain([
+            new ExtractMetadataJob($asset->id),
+            new GenerateThumbnailsJob($asset->id),
+            new GeneratePreviewJob($asset->id),
+            new AITaggingJob($asset->id),
+            new FinalizeAssetJob($asset->id),
+        ])->dispatch();
     }
 
     /**
