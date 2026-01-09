@@ -1,0 +1,23 @@
+IMPORTANT — READ FIRST
+
+
+- use sail for interacting with PHP
+
+Phase 2 (Upload System) is production-ready and LOCKED.
+
+You MUST:
+- Read the Phase 2 documentation before making changes
+- Treat all Phase 2 backend code as immutable
+- NOT refactor, rename, move, or “clean up” any Phase 2 services, jobs, models, migrations, or events
+- NOT modify UploadSession, Asset upload lifecycle, or S3 logic
+- NOT introduce “improvements” or abstractions to Phase 2 code
+
+Allowed work is LIMITED to:
+- Phase 2.5: troubleshooting the temporary UI uploader ONLY
+- UI wiring, bug fixes, and diagnostics
+- Documentation and comments
+
+If a backend issue is discovered:
+- STOP
+- Report it
+- Do NOT refactor

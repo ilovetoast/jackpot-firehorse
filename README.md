@@ -7,6 +7,18 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+---
+
+## ⚠️ Phase 2 is Locked
+
+**Phase 2 (Upload System) is production-ready and locked.**
+
+- ✅ Production-ready upload infrastructure (multipart, resume, cleanup)
+- ⚠️ **No new features or refactors should be added without starting Phase 3**
+- 📚 See [docs/PHASE_2_UPLOAD_SYSTEM.md](./docs/PHASE_2_UPLOAD_SYSTEM.md) for full documentation
+
+---
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

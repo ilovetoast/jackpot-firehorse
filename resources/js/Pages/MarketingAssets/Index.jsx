@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
+import AddAssetButton from '../../Components/AddAssetButton'
 import {
     TagIcon,
     SparklesIcon,
@@ -163,37 +164,10 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                     : 'Get started by selecting a category or uploading your first marketing asset. Manage your brand assets with ease and keep everything in sync.'}
                             </p>
                             <div className="mt-8">
-                                <button
-                                    type="button"
-                                    disabled
-                                    className="inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                    style={{
-                                        backgroundColor: auth.activeBrand?.primary_color || '#6366f1'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        if (!e.currentTarget.disabled && auth.activeBrand?.primary_color) {
-                                            // Darken the color slightly on hover
-                                            const hex = auth.activeBrand.primary_color.replace('#', '')
-                                            let r = parseInt(hex.substring(0, 2), 16)
-                                            let g = parseInt(hex.substring(2, 4), 16)
-                                            let b = parseInt(hex.substring(4, 6), 16)
-                                            r = Math.max(0, r - 20)
-                                            g = Math.max(0, g - 20)
-                                            b = Math.max(0, b - 20)
-                                            e.currentTarget.style.backgroundColor = `rgb(${r}, ${g}, ${b})`
-                                        }
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        if (auth.activeBrand?.primary_color) {
-                                            e.currentTarget.style.backgroundColor = auth.activeBrand.primary_color
-                                        }
-                                    }}
-                                >
-                                    <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
-                                    </svg>
-                                    Add Marketing Asset
-                                </button>
+                                <AddAssetButton 
+                                    defaultAssetType="marketing" 
+                                    categories={categories || []}
+                                />
                             </div>
                         </div>
                     </div>
