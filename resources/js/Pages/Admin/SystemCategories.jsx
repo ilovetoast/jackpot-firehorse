@@ -28,7 +28,7 @@ export default function SystemCategories({ templates, asset_types }) {
         name: '',
         slug: '',
         icon: 'folder',
-        asset_type: 'basic',
+        asset_type: 'asset',
         is_hidden: false,
         sort_order: 0,
     })
@@ -375,28 +375,28 @@ export default function SystemCategories({ templates, asset_types }) {
 
                     {/* Categories Tables - Separated by Asset Type */}
                     <div className="space-y-6">
-                        {/* Basic Asset Categories */}
+                        {/* Asset Categories */}
                         <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="px-6 py-4 border-b border-gray-200">
-                                <h2 className="text-lg font-semibold text-gray-900">Basic Asset Categories</h2>
+                                <h2 className="text-lg font-semibold text-gray-900">Asset Categories</h2>
                                 <p className="mt-1 text-sm text-gray-500">
-                                    Categories for basic assets (logos, graphics, photography, etc.)
+                                    Categories for assets (logos, graphics, photography, etc.)
                                 </p>
                             </div>
 
-                            {localTemplates.filter(t => t.asset_type === 'basic').length === 0 ? (
+                            {localTemplates.filter(t => t.asset_type === 'asset').length === 0 ? (
                                 <div className="px-6 py-12 text-center">
-                                    <p className="text-sm text-gray-500">No basic categories yet.</p>
+                                    <p className="text-sm text-gray-500">No asset categories yet.</p>
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            setData('asset_type', 'basic')
+                                            setData('asset_type', 'asset')
                                             handleCreate()
                                         }}
                                         className="mt-4 inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-dark"
                                     >
                                         <PlusIcon className="-ml-0.5 mr-1.5 h-5 w-5" aria-hidden="true" />
-                                        Create Basic Category
+                                        Create Asset Category
                                     </button>
                                 </div>
                             ) : (
@@ -425,7 +425,7 @@ export default function SystemCategories({ templates, asset_types }) {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                            {localTemplates.filter(t => t.asset_type === 'basic').map((template) => (
+                                            {localTemplates.filter(t => t.asset_type === 'asset').map((template) => (
                                                 <tr 
                                                     key={template.id} 
                                                     className="hover:bg-gray-50"
@@ -433,7 +433,7 @@ export default function SystemCategories({ templates, asset_types }) {
                                                     onDragStart={(e) => handleDragStart(e, template)}
                                                     onDragOver={handleDragOver}
                                                     onDragEnter={handleDragEnter}
-                                                    onDrop={(e) => handleDrop(e, template, 'basic')}
+                                                    onDrop={(e) => handleDrop(e, template, 'asset')}
                                                     onDragEnd={handleDragEnd}
                                                 >
                                                     <td className="px-6 py-4 whitespace-nowrap cursor-move">

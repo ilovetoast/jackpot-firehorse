@@ -150,7 +150,7 @@ class CategoryController extends Controller
                 'can_create' => $canCreate,
             ],
             'asset_types' => [
-                ['value' => AssetType::BASIC->value, 'label' => 'Basic'],
+                ['value' => AssetType::ASSET->value, 'label' => 'Asset'],
                 ['value' => AssetType::MARKETING->value, 'label' => 'Marketing'],
             ],
             'plan' => [
@@ -184,7 +184,7 @@ class CategoryController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
-            'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
+            'asset_type' => 'required|string|in:' . implode(',', array_column(AssetType::cases(), 'value')),
             'is_private' => 'nullable|boolean',
             'access_rules' => 'nullable|array',
             'access_rules.*.type' => 'required|string|in:role,user',

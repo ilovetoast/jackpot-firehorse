@@ -171,7 +171,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             </p>
                             <div className="mt-8">
                                 <AddAssetButton 
-                                    defaultAssetType="basic" 
+                                    defaultAssetType="asset" 
                                     categories={categories || []}
                                 />
                             </div>

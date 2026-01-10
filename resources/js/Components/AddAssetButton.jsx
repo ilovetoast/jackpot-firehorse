@@ -12,19 +12,19 @@ import UploadAssetDialog from './UploadAssetDialog'
  * ⚠️ Phase 2 verification UI — NOT final UX.
  * Safe to refactor or remove in Phase 3.
  * 
- * @param {string} defaultAssetType - Default asset type ('basic' or 'marketing')
+ * @param {string} defaultAssetType - Default asset type ('asset' or 'marketing')
  * @param {Array} categories - Categories array from page props
  * @param {string} buttonText - Optional button text override
  */
 export default function AddAssetButton({ 
-    defaultAssetType = 'basic', 
+    defaultAssetType = 'asset', 
     categories = [],
     buttonText = null 
 }) {
     const { auth } = usePage().props
     const [dialogOpen, setDialogOpen] = useState(false)
     
-    const defaultText = defaultAssetType === 'basic' 
+    const defaultText = defaultAssetType === 'asset' 
         ? 'Add Asset' 
         : 'Add Marketing Asset'
 

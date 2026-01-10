@@ -94,6 +94,105 @@ class UploadManager {
     }
 
     /**
+     * Classify upload error into structured format
+     * Phase 2.5: Dev-only error classification for better diagnostics
+     * @param {Error|Response|any} error - The error to classify
+     * @param {number} [httpStatus] - HTTP status code if available
+     * @param {string} [presignedUrl] - Presigned URL (for expiration detection)
+     * @returns {{type: string, http_status?: number, message: string, raw_error?: any}}
+     */
+    classifyError(error, httpStatus = null, presignedUrl = null) {
+        // CORS errors: fetch throws, no response, network error
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+            return {
+                type: 'cors',
+                message: 'Upload blocked by browser security (dev config issue)',
+                raw_error: error
+            }
+        }
+
+        // Network errors: AbortError, connection refused, etc.
+        if (error.name === 'AbortError' || error.name === 'NetworkError') {
+            return {
+                type: 'network',
+                message: 'Network connection failed',
+                raw_error: error
+            }
+        }
+
+        // If we have HTTP status, classify based on status
+        if (httpStatus !== null) {
+            // 403 can be auth error or expired URL
+            if (httpStatus === 403) {
+                // Check if response body contains XML (S3 error response)
+                if (error instanceof Response || (error.body && typeof error.body === 'string' && error.body.includes('<?xml'))) {
+                    // Try to determine if it's expired or auth error
+                    // Expired URLs often have specific error codes in S3 XML responses
+                    const bodyText = error instanceof Response ? '' : String(error.body || '')
+                    if (bodyText.includes('ExpiredToken') || bodyText.includes('RequestTimeTooSkewed') || 
+                        (presignedUrl && Date.now() > new Date(presignedUrl.split('X-Amz-Expires=')[1]?.split('&')[0] * 1000 + Date.parse(new URL(presignedUrl).searchParams.get('X-Amz-Date') || '')))) {
+                        return {
+                            type: 'expired',
+                            http_status: 403,
+                            message: 'Upload link expired, retrying…',
+                            raw_error: error
+                        }
+                    }
+                    return {
+                        type: 'auth',
+                        http_status: 403,
+                        message: 'Upload permission denied',
+                        raw_error: error
+                    }
+                }
+                // Generic 403 - likely expired if presigned URL
+                if (presignedUrl) {
+                    return {
+                        type: 'expired',
+                        http_status: 403,
+                        message: 'Upload link expired, retrying…',
+                        raw_error: error
+                    }
+                }
+                return {
+                    type: 'auth',
+                    http_status: 403,
+                    message: 'Upload permission denied',
+                    raw_error: error
+                }
+            }
+
+            // 4xx client errors
+            if (httpStatus >= 400 && httpStatus < 500) {
+                return {
+                    type: 'auth',
+                    http_status: httpStatus,
+                    message: `Upload failed: ${error.message || `HTTP ${httpStatus}`}`,
+                    raw_error: error
+                }
+            }
+
+            // 5xx server errors
+            if (httpStatus >= 500) {
+                return {
+                    type: 'network',
+                    http_status: httpStatus,
+                    message: 'Upload server error, please retry',
+                    raw_error: error
+                }
+            }
+        }
+
+        // Fallback to unknown
+        return {
+            type: 'unknown',
+            http_status: httpStatus || undefined,
+            message: error.message || 'Unknown upload error',
+            raw_error: error
+        }
+    }
+
+    /**
      * Persist upload state to localStorage (without File objects)
      */
     persistToStorage() {
@@ -171,6 +270,8 @@ class UploadManager {
                 status: 'pending',
                 progress: 0,
                 error: null,
+                errorInfo: null,
+                diagnostics: null,
                 lastUpdatedAt: Date.now(),
                 brandId: options.brandId,
                 batchReference: options.batchReference,
@@ -342,6 +443,31 @@ class UploadManager {
             upload.multipartUploadId = result.multipart_upload_id || null
             upload.status = result.upload_session_status === 'initiating' ? 'initiating' : 'uploading'
             upload.uploadUrl = result.upload_url || null // Store pre-signed URL for direct uploads
+            
+            // Phase 2.5: Store diagnostics
+            upload.diagnostics = upload.diagnostics || {}
+            upload.diagnostics.upload_session_id = result.upload_session_id
+            upload.diagnostics.s3_key = `temp/uploads/${result.upload_session_id}/original`
+            if (result.multipart_upload_id) {
+                upload.diagnostics.multipart_upload_id = result.multipart_upload_id
+            }
+            if (result.upload_url) {
+                try {
+                    const url = new URL(result.upload_url)
+                    upload.diagnostics.s3_bucket = url.hostname.split('.')[0]
+                    // Extract expiration from presigned URL if present
+                    const expiresParam = url.searchParams.get('X-Amz-Expires')
+                    const dateParam = url.searchParams.get('X-Amz-Date')
+                    if (expiresParam && dateParam) {
+                        const expiresSeconds = parseInt(expiresParam, 10)
+                        const dateMs = Date.parse(dateParam.substring(0, 8) + 'T' + dateParam.substring(9))
+                        upload.diagnostics.presigned_url_expires_at = new Date(dateMs + expiresSeconds * 1000).toISOString()
+                    }
+                } catch (e) {
+                    // Ignore URL parsing errors
+                }
+            }
+            
             upload.lastUpdatedAt = Date.now()
 
             this.persistToStorage()
@@ -413,6 +539,11 @@ class UploadManager {
                         upload.progress = 100
                         upload.status = 'uploading'
                         upload.lastUpdatedAt = Date.now()
+                        // Phase 2.5: Clear errors on success
+                        upload.error = null
+                        upload.errorInfo = null
+                        upload.diagnostics = upload.diagnostics || {}
+                        upload.diagnostics.last_http_status = xhr.status
                         this.persistToStorage()
                         this.notifyListeners()
 
@@ -423,12 +554,28 @@ class UploadManager {
                             reject(error)
                         }
                     } else {
-                        reject(new Error(`Upload failed: ${xhr.statusText}`))
+                        // Phase 2.5: Classify error
+                        const errorObj = new Error(`Upload failed: ${xhr.statusText}`)
+                        errorObj.status = xhr.status
+                        const errorInfo = this.classifyError(errorObj, xhr.status, presignedUrl)
+                        upload.errorInfo = errorInfo
+                        upload.diagnostics = upload.diagnostics || {}
+                        upload.diagnostics.last_http_status = xhr.status
+                        upload.diagnostics.last_error_type = errorInfo.type
+                        upload.diagnostics.last_error_message = errorInfo.message
+                        reject(errorObj)
                     }
                 })
 
                 xhr.addEventListener('error', () => {
-                    reject(new Error('Upload failed'))
+                    // Phase 2.5: Classify network error
+                    const errorObj = new Error('Upload failed')
+                    const errorInfo = this.classifyError(errorObj, null, presignedUrl)
+                    upload.errorInfo = errorInfo
+                    upload.diagnostics = upload.diagnostics || {}
+                    upload.diagnostics.last_error_type = errorInfo.type
+                    upload.diagnostics.last_error_message = errorInfo.message
+                    reject(errorObj)
                 })
 
                 xhr.addEventListener('abort', () => {
@@ -455,9 +602,19 @@ class UploadManager {
             if (error.name === 'AbortError' || error.message === 'Upload cancelled') {
                 upload.status = 'cancelled'
                 upload.error = null
+                upload.errorInfo = null
             } else {
                 upload.status = 'failed'
-                upload.error = error.message || 'Direct upload failed'
+                // Phase 2.5: Classify and store structured error
+                const errorInfo = this.classifyError(error, error.status, uploadUrl || upload.uploadUrl)
+                upload.error = errorInfo.message
+                upload.errorInfo = errorInfo
+                upload.diagnostics = upload.diagnostics || {}
+                upload.diagnostics.last_error_type = errorInfo.type
+                upload.diagnostics.last_error_message = errorInfo.message
+                if (errorInfo.http_status) {
+                    upload.diagnostics.last_http_status = errorInfo.http_status
+                }
             }
             upload.lastUpdatedAt = Date.now()
             this.activeUploads.delete(clientReference)
@@ -524,15 +681,42 @@ class UploadManager {
                     partNumber
                 )
 
+                // Phase 2.5: Store diagnostics
+                upload.diagnostics = upload.diagnostics || {}
+                upload.diagnostics.part_number = partNumber
+                upload.diagnostics.last_presigned_url = partUrl
+
                 // Upload chunk to S3
-                const partResponse = await fetch(partUrl, {
-                    method: 'PUT',
-                    body: chunk,
-                    signal: abortController.signal,
-                })
+                let partResponse
+                try {
+                    partResponse = await fetch(partUrl, {
+                        method: 'PUT',
+                        body: chunk,
+                        signal: abortController.signal,
+                    })
+                } catch (fetchError) {
+                    // Phase 2.5: Classify fetch errors (CORS, network)
+                    const errorInfo = this.classifyError(fetchError, null, partUrl)
+                    upload.errorInfo = errorInfo
+                    upload.diagnostics.last_error_type = errorInfo.type
+                    upload.diagnostics.last_error_message = errorInfo.message
+                    throw new Error(errorInfo.message)
+                }
+
+                // Phase 2.5: Store HTTP status
+                upload.diagnostics.last_http_status = partResponse.status
 
                 if (!partResponse.ok) {
-                    throw new Error(`Failed to upload part ${partNumber}: ${partResponse.statusText}`)
+                    // Phase 2.5: Classify HTTP error
+                    const errorBody = await partResponse.text().catch(() => '')
+                    const errorObj = new Error(`Failed to upload part ${partNumber}: ${partResponse.statusText}`)
+                    errorObj.body = errorBody
+                    errorObj.status = partResponse.status
+                    const errorInfo = this.classifyError(errorObj, partResponse.status, partUrl)
+                    upload.errorInfo = errorInfo
+                    upload.diagnostics.last_error_type = errorInfo.type
+                    upload.diagnostics.last_error_message = errorInfo.message
+                    throw errorObj
                 }
 
                 const etag = partResponse.headers.get('ETag')?.replace(/"/g, '')
@@ -561,9 +745,21 @@ class UploadManager {
             if (error.name === 'AbortError') {
                 upload.status = 'cancelled'
                 upload.error = null
+                upload.errorInfo = null
             } else {
                 upload.status = 'failed'
-                upload.error = error.message || 'Multipart upload failed'
+                // Phase 2.5: Classify and store structured error
+                const errorInfo = upload.errorInfo || this.classifyError(error, error.status)
+                upload.error = errorInfo.message || error.message || 'Multipart upload failed'
+                upload.errorInfo = errorInfo
+                upload.diagnostics = upload.diagnostics || {}
+                if (!upload.diagnostics.last_error_type) {
+                    upload.diagnostics.last_error_type = errorInfo.type
+                    upload.diagnostics.last_error_message = errorInfo.message
+                    if (errorInfo.http_status) {
+                        upload.diagnostics.last_http_status = errorInfo.http_status
+                    }
+                }
             }
             upload.lastUpdatedAt = Date.now()
             this.activeUploads.delete(clientReference)

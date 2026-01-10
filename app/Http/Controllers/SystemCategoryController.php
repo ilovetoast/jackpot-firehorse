@@ -68,7 +68,7 @@ class SystemCategoryController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
-            'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
+            'asset_type' => 'required|string|in:' . implode(',', array_column(AssetType::cases(), 'value')),
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
         ]);
@@ -95,7 +95,7 @@ class SystemCategoryController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'icon' => 'nullable|string|max:255',
-            'asset_type' => 'required|string|in:' . implode(',', AssetType::values()),
+            'asset_type' => 'required|string|in:' . implode(',', array_column(AssetType::cases(), 'value')),
             'is_hidden' => 'boolean',
             'sort_order' => 'integer|min:0',
         ]);

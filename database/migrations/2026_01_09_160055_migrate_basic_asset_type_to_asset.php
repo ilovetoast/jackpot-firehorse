@@ -9,11 +9,19 @@ return new class extends Migration {
         DB::table('categories')
             ->where('asset_type', 'basic')
             ->update(['asset_type' => 'asset']);
+
+        DB::table('system_categories')
+            ->where('asset_type', 'basic')
+            ->update(['asset_type' => 'asset']);
     }
 
     public function down(): void
     {
         DB::table('categories')
+            ->where('asset_type', 'asset')
+            ->update(['asset_type' => 'basic']);
+
+        DB::table('system_categories')
             ->where('asset_type', 'asset')
             ->update(['asset_type' => 'basic']);
     }

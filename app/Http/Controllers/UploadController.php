@@ -126,6 +126,8 @@ class UploadController extends Controller
         $validated = $request->validate([
             'upload_session_id' => 'required|uuid|exists:upload_sessions,id',
             'asset_type' => 'nullable|string|in:asset,marketing,ai_generated',
+            'title' => 'nullable|string|max:255',
+            'filename' => 'nullable|string|max:255',
         ]);
 
         // Get upload session
@@ -136,7 +138,9 @@ class UploadController extends Controller
         try {
             $asset = $this->completionService->complete(
                 $uploadSession,
-                $validated['asset_type'] ?? null
+                $validated['asset_type'] ?? null,
+                $validated['filename'] ?? null,
+                $validated['title'] ?? null
             );
 
             // Refresh upload session to get updated status

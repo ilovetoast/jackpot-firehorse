@@ -26,6 +26,7 @@ class Asset extends Model
         'storage_bucket_id',
         'status',
         'type',
+        'title',
         'original_filename',
         'mime_type',
         'size_bytes',

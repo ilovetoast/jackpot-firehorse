@@ -413,7 +413,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     const [imageToCrop, setImageToCrop] = useState(null)
     const [iconImageToCrop, setIconImageToCrop] = useState(null)
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
-    const [activeCategoryTab, setActiveCategoryTab] = useState('basic')
+    const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const [activeSection, setActiveSection] = useState('basic-information')
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
@@ -424,15 +424,15 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     const { data: categoryFormData, setData: setCategoryFormData, post: postCategory, processing: creatingCategory, reset: resetCategoryForm } = useForm({
         name: '',
         icon: 'folder',
-        asset_type: 'basic',
+        asset_type: 'asset',
         is_private: false,
         access_rules: [],
     })
     
     // Update form asset_type when tab changes
     useEffect(() => {
-        if (activeCategoryTab === 'basic') {
-            setCategoryFormData('asset_type', 'basic')
+        if (activeCategoryTab === 'asset') {
+            setCategoryFormData('asset_type', 'asset')
         } else if (activeCategoryTab === 'marketing') {
             setCategoryFormData('asset_type', 'marketing')
         }
@@ -1262,7 +1262,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                             onChange={(e) => setCategoryFormData('asset_type', e.target.value)}
                                                             className="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                                         >
-                                                            <option value="basic">Asset</option>
+                                                            <option value="asset">Asset</option>
                                                             <option value="marketing">Marketing Asset</option>
                                                         </select>
                                                     </div>
@@ -1429,10 +1429,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         <nav className="-mb-px flex space-x-8" aria-label="Tabs">
                                             <button
                                                 type="button"
-                                                onClick={() => setActiveCategoryTab('basic')}
+                                                onClick={() => setActiveCategoryTab('asset')}
                                                 className={`
                                                     group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
-                                                    ${activeCategoryTab === 'basic'
+                                                    ${activeCategoryTab === 'asset'
                                                         ? 'border-indigo-500 text-indigo-600'
                                                         : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                                     }
@@ -1441,7 +1441,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 <svg
                                                     className={`
                                                         -ml-0.5 mr-2 h-5 w-5
-                                                        ${activeCategoryTab === 'basic' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                        ${activeCategoryTab === 'asset' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
                                                     `}
                                                     fill="none"
                                                     viewBox="0 0 24 24"
@@ -1576,7 +1576,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                             {categories.filter(cat => cat.asset_type === activeCategoryTab).length === 0 && 
                                              (available_system_templates || []).filter(t => t.asset_type === activeCategoryTab).length === 0 && (
                                                 <div className="px-6 py-8 text-center text-sm text-gray-500">
-                                                    No {activeCategoryTab === 'basic' ? 'Asset' : 'Marketing Asset'} categories yet.
+                                                    No {activeCategoryTab === 'asset' ? 'Asset' : 'Marketing Asset'} categories yet.
                                                 </div>
                                             )}
                                         </div>

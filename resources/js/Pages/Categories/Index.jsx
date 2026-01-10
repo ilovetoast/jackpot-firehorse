@@ -13,17 +13,17 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
         name: '',
         slug: '',
         icon: 'folder',
-        asset_type: 'basic', // Default to 'basic' to match initial activeTab
+        asset_type: 'asset', // Default to 'asset' to match initial activeTab
         is_private: false,
     })
     const [showCreateForm, setShowCreateForm] = useState(false)
-    const [activeTab, setActiveTab] = useState('basic') // 'basic' or 'marketing'
+    const [activeTab, setActiveTab] = useState('asset') // 'asset' or 'marketing'
     const [editingId, setEditingId] = useState(null)
     
     // Update form asset_type when tab changes
     useEffect(() => {
-        if (activeTab === 'basic') {
-            setData('asset_type', 'basic')
+        if (activeTab === 'asset') {
+            setData('asset_type', 'asset')
         } else if (activeTab === 'marketing') {
             setData('asset_type', 'marketing')
         }
@@ -51,7 +51,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
 
     // Filter categories by active tab
     const filteredCategories = localCategories.filter(cat => {
-        if (activeTab === 'basic') return cat.asset_type === 'basic'
+        if (activeTab === 'asset') return cat.asset_type === 'asset'
         if (activeTab === 'marketing') return cat.asset_type === 'marketing'
         return true
     }).sort((a, b) => {
@@ -297,7 +297,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                             ))}
                                         </select>
                                         <p className="mt-1 text-xs text-gray-500">
-                                            Creating a {data.asset_type === 'basic' ? 'Asset' : 'Marketing Asset'} category
+                                            Creating a {data.asset_type === 'asset' ? 'Asset' : 'Marketing Asset'} category
                                         </p>
                                     </div>
                                     <div>
@@ -347,10 +347,10 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                         <div className="border-b border-gray-200">
                             <nav className="-mb-px flex space-x-8" aria-label="Tabs">
                                 <button
-                                    onClick={() => setActiveTab('basic')}
+                                    onClick={() => setActiveTab('asset')}
                                     className={`
                                         group inline-flex items-center border-b-2 py-4 px-1 text-sm font-medium transition-colors
-                                        ${activeTab === 'basic'
+                                        ${activeTab === 'asset'
                                             ? 'border-indigo-500 text-indigo-600'
                                             : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                         }
@@ -359,7 +359,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                     <svg
                                         className={`
                                             -ml-0.5 mr-2 h-5 w-5
-                                            ${activeTab === 'basic' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                            ${activeTab === 'asset' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
                                         `}
                                         fill="none"
                                         viewBox="0 0 24 24"

@@ -64,7 +64,8 @@ class UploadCompletionService
      *
      * @param UploadSession $uploadSession
      * @param string|null $assetType
-     * @param string|null $originalFilename Optional original filename (from client)
+     * @param string|null $filename Optional resolved filename (from client - derived from title + extension)
+     * @param string|null $title Optional asset title (from client - human-facing, no extension)
      * @param string|null $s3Key Optional S3 key if known, otherwise will be determined
      * @return Asset
      * @throws \Exception
@@ -72,7 +73,8 @@ class UploadCompletionService
     public function complete(
         UploadSession $uploadSession,
         ?string $assetType = null,
-        ?string $originalFilename = null,
+        ?string $filename = null,
+        ?string $title = null,
         ?string $s3Key = null
     ): Asset {
         // Refresh to get latest state
@@ -133,11 +135,20 @@ class UploadCompletionService
         // This is done outside transaction since it's an external operation
         $fileInfo = $this->getFileInfoFromS3($uploadSession, $s3Key);
 
+        // Use provided filename (resolvedFilename from frontend) or fall back to original filename
+        // Frontend derives resolvedFilename from title + extension, so this respects user's title
+        $finalFilename = $filename ?? $fileInfo['original_filename'];
+
+        // Derive title from filename if not provided
+        // Strip extension and convert slug to human-readable form
+        $derivedTitle = $title ?? $this->deriveTitleFromFilename($finalFilename);
+
         // Generate final storage path for asset
+        // Use finalFilename (which may be the resolvedFilename from frontend)
         $storagePath = $this->generateStoragePath(
             $uploadSession->tenant_id,
             $uploadSession->brand_id,
-            $fileInfo['original_filename'],
+            $finalFilename,
             $uploadSession->id
         );
 
@@ -147,7 +158,7 @@ class UploadCompletionService
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
-        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath) {
+        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename) {
             // Double-check for existing asset inside transaction (final race condition check)
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
             if ($existingAsset) {
@@ -173,10 +184,11 @@ class UploadCompletionService
                     'storage_bucket_id' => $uploadSession->storage_bucket_id,
                     'status' => AssetStatus::UPLOADED, // Initial state after upload completion
                     'type' => $assetTypeEnum,
-                    'original_filename' => $fileInfo['original_filename'],
+                    'title' => $derivedTitle, // Persist human-facing title
+                    'original_filename' => $fileInfo['original_filename'], // Always use actual original filename from S3
                     'mime_type' => $fileInfo['mime_type'],
                     'size_bytes' => $fileInfo['size_bytes'],
-                    'storage_root_path' => $storagePath,
+                    'storage_root_path' => $storagePath, // Uses finalFilename (resolvedFilename from frontend if provided)
                     'metadata' => [],
                 ]);
             } catch (\Illuminate\Database\QueryException $e) {
@@ -222,6 +234,7 @@ class UploadCompletionService
                 'asset_id' => $asset->id,
                 'upload_session_id' => $uploadSession->id,
                 'tenant_id' => $uploadSession->tenant_id,
+                'title' => $asset->title,
                 'original_filename' => $asset->original_filename,
                 'size_bytes' => $asset->size_bytes,
             ]);
@@ -358,16 +371,19 @@ class UploadCompletionService
     /**
      * Generate final storage path for asset.
      *
+     * Uses the provided filename (which may be the resolvedFilename from frontend,
+     * derived from title + extension) for storage path generation.
+     *
      * @param int $tenantId
      * @param int|null $brandId
-     * @param string $originalFilename
+     * @param string $filename Filename to use for storage (resolvedFilename from frontend, or original_filename from S3)
      * @param string $uploadSessionId
      * @return string
      */
     protected function generateStoragePath(
         int $tenantId,
         ?int $brandId,
-        string $originalFilename,
+        string $filename,
         string $uploadSessionId
     ): string {
         $basePath = "assets/{$tenantId}";
@@ -377,7 +393,8 @@ class UploadCompletionService
         }
 
         // Generate unique filename to avoid conflicts
-        $uniqueFileName = \Illuminate\Support\Str::uuid()->toString() . '_' . $originalFilename;
+        // Uses provided filename (which respects user's title-derived filename if provided)
+        $uniqueFileName = \Illuminate\Support\Str::uuid()->toString() . '_' . $filename;
 
         return "{$basePath}/{$uniqueFileName}";
     }
@@ -403,6 +420,32 @@ class UploadCompletionService
         }
 
         return null;
+    }
+
+    /**
+     * Derive human-readable title from filename.
+     * 
+     * For backfill: strips extension and converts slug to human-readable form.
+     * Example: "my-awesome-image.jpg" -> "My Awesome Image"
+     * Example: "MY_FILE_NAME.PNG" -> "My File Name"
+     * 
+     * @param string $filename
+     * @return string
+     */
+    protected function deriveTitleFromFilename(string $filename): string
+    {
+        // Strip extension
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
+        $nameWithoutExtension = $extension ? substr($filename, 0, -(strlen($extension) + 1)) : $filename;
+        
+        // Replace hyphens and underscores with spaces
+        $withSpaces = str_replace(['-', '_'], ' ', $nameWithoutExtension);
+        
+        // Trim and collapse multiple spaces
+        $trimmed = trim(preg_replace('/\s+/', ' ', $withSpaces));
+        
+        // Capitalize first letter of each word
+        return ucwords(strtolower($trimmed));
     }
 
     /**
