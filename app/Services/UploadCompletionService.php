@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\UploadStatus;
+use App\Enums\UploadType;
 use App\Events\AssetUploaded;
 use App\Models\Asset;
 use App\Models\UploadSession;
@@ -131,8 +132,34 @@ class UploadCompletionService
             );
         }
 
+        // CRITICAL: For multipart (chunked) uploads, finalize the multipart upload in S3 BEFORE checking if object exists
+        // For multipart uploads, all parts are uploaded but not assembled yet - the object doesn't exist until CompleteMultipartUpload is called
+        if ($uploadSession->type === UploadType::CHUNKED && $uploadSession->multipart_upload_id) {
+            Log::info('Finalizing multipart upload before completion', [
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+            ]);
+            
+            try {
+                $this->finalizeMultipartUpload($uploadSession);
+            } catch (\Exception $e) {
+                Log::error('Failed to finalize multipart upload', [
+                    'upload_session_id' => $uploadSession->id,
+                    'multipart_upload_id' => $uploadSession->multipart_upload_id,
+                    'error' => $e->getMessage(),
+                ]);
+                
+                throw new \RuntimeException(
+                    "Failed to finalize multipart upload: {$e->getMessage()}",
+                    0,
+                    $e
+                );
+            }
+        }
+
         // Get file info from S3 (never trust client metadata)
         // This is done outside transaction since it's an external operation
+        // For multipart uploads, the object should now exist after finalization
         $fileInfo = $this->getFileInfoFromS3($uploadSession, $s3Key);
 
         // Use provided filename (resolvedFilename from frontend) or fall back to original filename
@@ -245,6 +272,115 @@ class UploadCompletionService
 
             return $asset;
         });
+    }
+
+    /**
+     * Finalize a multipart upload in S3 by assembling all uploaded parts.
+     * This must be called before checking if the object exists, as the object
+     * doesn't exist until all parts are assembled.
+     *
+     * @param UploadSession $uploadSession
+     * @return void
+     * @throws \RuntimeException If finalization fails
+     */
+    protected function finalizeMultipartUpload(UploadSession $uploadSession): void
+    {
+        if (!$uploadSession->multipart_upload_id) {
+            throw new \RuntimeException('Multipart upload ID is required to finalize multipart upload.');
+        }
+
+        $bucket = $uploadSession->storageBucket;
+        if (!$bucket) {
+            throw new \RuntimeException('Storage bucket not found for upload session.');
+        }
+
+        $s3Key = $this->generateTempUploadPath($uploadSession);
+
+        try {
+            // List all parts that have been uploaded for this multipart upload
+            $partsList = $this->s3Client->listParts([
+                'Bucket' => $bucket->name,
+                'Key' => $s3Key,
+                'UploadId' => $uploadSession->multipart_upload_id,
+            ]);
+
+            $parts = [];
+            foreach ($partsList->get('Parts') ?? [] as $part) {
+                $parts[] = [
+                    'PartNumber' => (int) $part['PartNumber'],
+                    'ETag' => $part['ETag'],
+                ];
+            }
+
+            if (empty($parts)) {
+                throw new \RuntimeException('No parts found for multipart upload. Cannot finalize empty upload.');
+            }
+
+            // Sort parts by part number (required by S3)
+            usort($parts, fn($a, $b) => $a['PartNumber'] <=> $b['PartNumber']);
+
+            Log::info('Finalizing multipart upload with parts', [
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+                'parts_count' => count($parts),
+                'bucket' => $bucket->name,
+                's3_key' => $s3Key,
+            ]);
+
+            // Complete the multipart upload by assembling all parts
+            $this->s3Client->completeMultipartUpload([
+                'Bucket' => $bucket->name,
+                'Key' => $s3Key,
+                'UploadId' => $uploadSession->multipart_upload_id,
+                'MultipartUpload' => [
+                    'Parts' => $parts,
+                ],
+            ]);
+
+            Log::info('Multipart upload finalized successfully', [
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+                'parts_count' => count($parts),
+                'bucket' => $bucket->name,
+                's3_key' => $s3Key,
+            ]);
+        } catch (S3Exception $e) {
+            Log::error('Failed to finalize multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+                'bucket' => $bucket->name,
+                's3_key' => $s3Key,
+                'error' => $e->getMessage(),
+                'aws_error_code' => $e->getAwsErrorCode(),
+            ]);
+
+            // Check if multipart upload was already completed
+            if ($e->getAwsErrorCode() === 'NoSuchUpload') {
+                Log::warning('Multipart upload not found - may have been already finalized or aborted', [
+                    'upload_session_id' => $uploadSession->id,
+                    'multipart_upload_id' => $uploadSession->multipart_upload_id,
+                ]);
+                // If upload was already completed, verify object exists
+                $exists = $this->s3Client->doesObjectExist($bucket->name, $s3Key);
+                if ($exists) {
+                    Log::info('Multipart upload was already finalized - object exists in S3', [
+                        'upload_session_id' => $uploadSession->id,
+                        's3_key' => $s3Key,
+                    ]);
+                    return; // Object exists, can proceed
+                }
+                // Object doesn't exist - this is an error
+                throw new \RuntimeException(
+                    "Multipart upload was not found and object does not exist in S3. The upload may have been aborted or expired."
+                );
+            }
+
+            throw new \RuntimeException(
+                "Failed to finalize multipart upload: {$e->getMessage()}",
+                0,
+                $e
+            );
+        }
     }
 
     /**

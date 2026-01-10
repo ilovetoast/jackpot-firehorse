@@ -1,4 +1,13 @@
-// Phase 3.4 — Upload Asset Dialog with Phase 3 Upload Manager
+/**
+ * ⚠️ PHASE 3 LOCKED
+ *
+ * This uploader (Phase 3) is production-ready and frozen.
+ * Do NOT refactor logic, effects, or data flow.
+ * Only cosmetic UI changes are allowed without explicit approval.
+ *
+ * See project notes for Phase 4+ work.
+ */
+
 // Replaces legacy Phase 2 verification UI
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
@@ -158,16 +167,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             const phase3ClientIds = new Set(currentPhase3Items.map(item => item.clientId))
             
             // Remove uploads that:
-            // 1. Don't have a file attached (old rehydrated uploads)
-            // 2. Don't belong to current Phase 3 items
+            // 1. Don't have a file attached (old rehydrated uploads) OR
+            // 2. Have uploadSessionId but don't belong to Phase 3 (old uploads trying to resume) OR
             // 3. Are not currently being added
+            // This prevents old uploads from interfering with new uploads
             const uploadsToRemove = allUploads.filter(([key, upload]) => {
                 const belongsToPhase3 = phase3ClientIds.has(upload.clientReference)
                 const isCurrentlyAdding = currentlyAddingRef.current.has(upload.clientReference)
                 const hasNoFile = !upload.file
+                const hasUploadSessionId = !!upload.uploadSessionId
                 
-                // Remove if it doesn't belong to Phase 3 AND has no file (old rehydrated upload)
-                return !belongsToPhase3 && !isCurrentlyAdding && hasNoFile
+                // Remove if:
+                // - Doesn't belong to Phase 3 AND (has no file OR has uploadSessionId)
+                // Old uploads with uploadSessionId are likely expired and will fail on resume
+                // Old uploads without file are rehydrated and cannot be resumed
+                return !belongsToPhase3 && !isCurrentlyAdding && (hasNoFile || hasUploadSessionId)
             })
             
             if (uploadsToRemove.length > 0) {
@@ -278,7 +292,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // Add directly to Phase 2's uploads map using Phase 3's clientId as the key
             // Overwrite any existing upload (shouldn't exist after cleanup above)
             phase2Manager.uploads.set(clientId, upload)
-            phase2Manager.persistToStorage()
+            // OPTIMIZATION 3: Don't persist during file add - large files cause blocking serialization
+            // Persistence will happen on start/complete/fail when needed
             // Don't call notifyListeners() here - we'll do it manually after state update
         })
         
@@ -322,79 +337,25 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             newClientIdsSet.has(upload.clientReference)
         )
         
+        // OPTIMIZATION 6: Reduce logging during file add - only log errors
         if (phase2UploadsWithNewIds.length !== newClientIdsSet.size) {
             console.error('[FileSelect] Phase 2 uploads missing or incorrect clientReference!', {
                 expectedCount: newClientIdsSet.size,
                 actualCount: phase2UploadsWithNewIds.length,
-                newClientIds: Array.from(newClientIdsSet),
-                phase2UploadClientRefs: phase2UploadsWithNewIds.map(u => u.clientReference),
-                allUploadClientRefs: allUploads.map(u => u.clientReference).slice(0, 10)
+                newClientIds: Array.from(newClientIdsSet)
             })
         }
-        
-        console.log('[FileSelect] Added files and updated phase2Uploads', {
-            filesCount: fileArray.length,
-            clientIds,
-            existingPhase3ClientIds: Array.from(existingPhase3ClientIds),
-            newClientIds: Array.from(newClientIdsSet),
-            allPhase3ClientIds: Array.from(allPhase3ClientIds),
-            allUploadsCount: allUploads.length,
-            filteredUploadsCount: filteredUploads.length,
-            newlyAddedUploadsCount: newlyAddedUploads.length,
-            phase3ItemsCount: currentPhase3Items.length,
-            phase3ItemsClientIds: currentPhase3Items.map(i => i.clientId),
-            allUploadClientRefs: allUploads.map(u => u.clientReference).slice(0, 10),
-            filteredUploadClientRefs: filteredUploads.map(u => u.clientReference),
-            newlyAddedClientRefs: newlyAddedUploads.map(u => u.clientReference)
-        })
         
         // Set state with filtered uploads (ensures new uploads are included, excludes old uploads)
         setPhase2Uploads(filteredUploads)
         
-        // DO NOT clear currentlyAddingRef yet - keep it until uploads are confirmed in Phase 3 items
-        // The subscription filter needs this to include newly added uploads until state updates
-        // We'll clear it in the next effect cycle after Phase 3 items are confirmed updated
+        // OPTIMIZATION 5: Simplify currentlyAddingRef lifecycle
+        // currentlyAddingRef will be cleared automatically when uploads start (in auto-start effect)
+        // No need for complex requestAnimationFrame logic - auto-start effect handles it
         
         // Notify listeners after state update
         // This triggers the subscription, which will update state again (but should be idempotent)
         phase2Manager.notifyListeners()
-        
-        // Clear currently adding ref after React state update cycle
-        // Use requestAnimationFrame to wait for React to process state updates
-        // This ensures phase3Manager.items is updated before we clear the ref
-        // CRITICAL: Only clear if all uploads are in Phase 3 items AND they're not actively uploading
-        // Active uploads should stay in the ref to prevent them from being filtered out
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                // After two animation frames, React state should be updated
-                const currentPhase3Items = phase3Manager.items
-                const phase3ClientIds = new Set(currentPhase3Items.map(item => item.clientId))
-                const currentlyAddingIds = Array.from(currentlyAddingRef.current)
-                
-                // Check if all currently adding uploads are in Phase 3 items
-                const allAreInPhase3 = currentlyAddingIds.every(id => phase3ClientIds.has(id))
-                
-                // Check if any are actively uploading - if so, don't clear yet
-                // This prevents the subscription filter from removing active uploads
-                const allManagerUploads = Array.from(phase2ManagerRef.current.getUploads())
-                const hasActiveUploads = currentlyAddingIds.some(id => {
-                    const upload = allManagerUploads.find(u => u.clientReference === id)
-                    return upload && (upload.status === 'uploading' || upload.status === 'initiating')
-                })
-                
-                if (allAreInPhase3 && !hasActiveUploads && currentlyAddingIds.length > 0) {
-                    console.log('[FileSelect] Clearing currentlyAddingRef - all uploads are in Phase 3 items and none are actively uploading')
-                    currentlyAddingRef.current.clear()
-                } else if (hasActiveUploads) {
-                    console.log('[FileSelect] Keeping currentlyAddingRef - some uploads are actively uploading', {
-                        currentlyAdding: currentlyAddingIds,
-                        hasActiveUploads
-                    })
-                }
-                // If not all are in Phase 3 items yet, keep the ref - will retry in next effect cycle
-                // The subscription filter will continue to include them via currentlyAddingRef
-            })
-        })
         
         // DO NOT call startUpload here - let the auto-start effect handle it
         // This ensures slot-based queue advancement works correctly
@@ -453,16 +414,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         markUploadStarted
     } = phase3Manager
 
+    // OPTIMIZATION 2: Memoize Phase 3 clientId set to avoid repeated Set() and map() calls
+    const phase3ClientIdSet = useMemo(() => {
+        return new Set(phase3Items.map(item => item.clientId))
+    }, [phase3Items])
+    
     useEffect(() => {
-        // Guard: Only sync Phase 2 uploads that belong to Phase 3 items
-        // Phase 2's clientReference should match Phase 3's clientId (we set this in handleFileSelect)
-        
-        console.log('[Sync] Effect running', {
-            phase2UploadsCount: phase2Uploads.length,
-            phase3ItemsCount: phase3Items.length,
-            phase2Uploads: phase2Uploads.map(u => ({ clientRef: u.clientReference, status: u.status, progress: u.progress })),
-            phase3Items: phase3Items.map(i => ({ clientId: i.clientId, status: i.uploadStatus }))
-        })
+        // OPTIMIZATION 6: Remove verbose logging from tight loops
+        // Only log when there's a significant state change or error
         
         phase2Uploads.forEach(phase2Upload => {
             // Phase 2's clientReference now matches Phase 3's clientId (we set it in handleFileSelect)
@@ -481,54 +440,101 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // Get last synced state for this clientId
             const lastSynced = lastSyncedRef.current.get(clientId) || {}
             
-            // Guard: Only update if something actually changed
-            const hasProgressChanged = phase2Upload.progress !== lastSynced.progress
+            // OPTIMIZATION 6: Reduce logging - only log on state transitions and errors
+            // Don't log every progress tick for large files
             const hasSessionIdChanged = phase2Upload.uploadSessionId !== lastSynced.uploadSessionId
             const hasStatusChanged = phase2Upload.status !== lastSynced.status
+            const isStateTransition = hasStatusChanged || hasSessionIdChanged || 
+                                     (phase2Upload.status === 'failed' || phase2Upload.status === 'completed')
             
-            // Debug: Only log if something actually changed to reduce console noise
-            if (hasProgressChanged || hasSessionIdChanged || hasStatusChanged || 
-                phase2Upload.status === 'uploading' || phase2Upload.status === 'initiating') {
-                console.log('[Sync] Checking upload', {
+            // Only log on state transitions or errors, not on every progress update
+            if (isStateTransition) {
+                console.log('[Sync] State transition', {
                     clientId,
                     phase2Status: phase2Upload.status,
                     phase3Status: phase3Item.uploadStatus,
                     phase2Progress: phase2Upload.progress,
-                    phase3Progress: phase3Item.progress,
-                    lastSyncedStatus: lastSynced.status,
-                    hasProgressChanged,
                     hasSessionIdChanged,
                     hasStatusChanged
                 })
             }
             
-            // Additional guard: Check if Phase 3 item actually needs updating
-            // CRITICAL: Always update progress if it's different from Phase 3 (not just from lastSynced)
-            // This ensures progress bar updates in real-time during upload
-            // Compare directly to Phase 3 progress, not just lastSynced, to handle stale lastSyncedRef
-            const needsProgressUpdate = phase2Upload.progress !== phase3Item.progress && 
-                                       phase2Upload.progress !== undefined && 
-                                       phase2Upload.progress !== null
+            // OPTIMIZATION 1: Throttle progress syncing for large files (relaxed for visibility + heartbeat)
+            // Sync progress when any of these are true:
+            // 1. Terminal state (completed/failed) - always sync
+            // 2. First update (Phase 3 progress is 0 and Phase 2 has progress > 0)
+            // 3. Meaningful visual change (delta >= 0.5%)
+            // 4. UI heartbeat (timeElapsed >= 750ms) - prevents frozen bar during slow multipart phases
+            // Compare against Phase 3's actual progress (what's displayed) to ensure visual updates
+            const phase3CurrentProgress = phase3Item.progress ?? 0
+            const currentProgress = phase2Upload.progress ?? 0
+            const delta = Math.abs(currentProgress - phase3CurrentProgress)
+            const lastProgressSyncAt = lastSynced.lastProgressSyncAt ?? 0
+            const timeElapsed = Date.now() - lastProgressSyncAt
+            const isTerminalState = phase2Upload.status === 'completed' || phase2Upload.status === 'failed'
+            const isFirstUpdate = phase3CurrentProgress === 0 && currentProgress > 0
+            const shouldSync = (
+                isTerminalState ||
+                isFirstUpdate ||
+                delta >= 0.5 ||
+                timeElapsed >= 750
+            )
+            const needsProgressUpdate = (
+                phase2Upload.progress !== undefined && 
+                phase2Upload.progress !== null &&
+                currentProgress !== phase3CurrentProgress &&
+                shouldSync
+            )
             const needsSessionUpdate = hasSessionIdChanged && phase2Upload.uploadSessionId && !phase3Item.uploadSessionId
             // CRITICAL: Check status changes based on current Phase 3 status, not just if status changed
             // This handles cases where Phase 3 is out of sync (e.g., 'uploading' when Phase 2 is 'failed')
-            const needsStatusUpdate = (
-                (phase2Upload.status === 'completed' && phase3Item.uploadStatus !== 'complete') ||
-                (phase2Upload.status === 'failed' && phase3Item.uploadStatus !== 'failed') ||
-                ((phase2Upload.status === 'uploading' || phase2Upload.status === 'initiating') && 
-                 phase3Item.uploadStatus !== 'uploading' && phase3Item.uploadStatus !== 'complete' && phase3Item.uploadStatus !== 'failed') ||
-                (phase2Upload.status === 'pending' && phase3Item.uploadStatus === 'uploading' && !phase2Upload.uploadSessionId) // Revert if upload was reset
-            )
+            // Always sync Phase 3 to Phase 2's actual status - priority order: failed > complete > uploading > pending
+            const phase2Status = phase2Upload.status
+            const phase3Status = phase3Item.uploadStatus
             
-            if (!needsProgressUpdate && !needsSessionUpdate && !needsStatusUpdate) {
+            // OPTIMIZATION 4: Reduce "smart correction" during active uploads
+            // Only sync status for terminal states (failed/completed) during active upload
+            // Trust Phase 2 status for uploading/initiating - avoid progress-based failure detection
+            const isActiveUpload = phase2Status === 'uploading' || phase2Status === 'initiating'
+            const needsStatusUpdate = 
+                // Terminal states - always sync
+                (phase2Status === 'failed' && phase3Status !== 'failed') ||
+                (phase2Status === 'completed' && phase3Status !== 'complete') ||
+                // Status transitions - only sync if not already active (avoid mid-upload corrections)
+                (!isActiveUpload && (
+                    // Uploading/initiating - sync if Phase 3 is queued/pending (initial transition only)
+                    ((phase2Status === 'uploading' || phase2Status === 'initiating') && 
+                     phase3Status !== 'uploading' && phase3Status !== 'complete' && phase3Status !== 'failed') ||
+                    // Revert if Phase 2 is pending but Phase 3 thinks it's uploading (upload was reset)
+                    (phase2Status === 'pending' && phase3Status === 'uploading' && !phase2Upload.uploadSessionId)
+                ))
+            
+            // CRITICAL: Always sync failed status immediately, even if nothing else changed
+            // Failed is a terminal state and must take priority over all other status checks
+            const isFailedMismatch = phase2Upload.status === 'failed' && phase3Item.uploadStatus !== 'failed'
+            
+            // CRITICAL FIX: Immediately transition Phase 3 from queued to uploading when Phase 2 enters initiating
+            // This must happen BEFORE early return check to ensure large files show "Uploading" immediately
+            // Do NOT wait for progress or uploadSessionId - just transition status
+            const needsInitiatingTransition = phase2Upload.status === 'initiating' && phase3Item.uploadStatus === 'queued'
+            
+            // CRITICAL: Force status update if there's a failed mismatch (bypass normal needsStatusUpdate check)
+            // This ensures failed status always syncs, even if needsStatusUpdate calculation is wrong
+            const shouldUpdateStatus = needsStatusUpdate || isFailedMismatch
+            
+            if (!needsProgressUpdate && !needsInitiatingTransition && !needsSessionUpdate && !shouldUpdateStatus) {
                 // Nothing changed - skip update to prevent infinite loop
-                // Still update lastSyncedRef to track current state
-                lastSyncedRef.current.set(clientId, {
-                    progress: phase2Upload.progress,
-                    uploadSessionId: phase2Upload.uploadSessionId,
-                    status: phase2Upload.status
-                })
+                // Don't update lastSyncedRef here - we only update it after actually syncing values
                 return
+            }
+            
+            // OPTIMIZATION 6: Only log errors and critical state transitions
+            if (isFailedMismatch && !needsStatusUpdate) {
+                console.warn('[Sync] Forcing failed status sync (critical terminal state)', {
+                    clientId,
+                    phase2Status: phase2Upload.status,
+                    phase3Status: phase3Item.uploadStatus
+                })
             }
 
             // Update session ID if needed (always do this first)
@@ -536,43 +542,83 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 setUploadSessionId(clientId, phase2Upload.uploadSessionId)
             }
 
-            // Update progress if needed (always update if different from Phase 3, regardless of lastSynced)
-            // This ensures progress bar updates in real-time during upload
-            // CRITICAL: Update progress even if lastSynced hasn't changed, as long as Phase 3 progress is stale
+            // CRITICAL FIX: Immediately transition Phase 3 from queued to uploading when Phase 2 enters initiating
+            // This must happen BEFORE progress/status updates to ensure large files show "Uploading" immediately
+            // Do NOT wait for progress or uploadSessionId - just transition status
+            if (needsInitiatingTransition) {
+                currentlyAddingRef.current.delete(clientId)
+                markUploadStarted(clientId)
+            }
+
+            // OPTIMIZATION 1: Update progress only when throttled threshold is met (≥0.5% or terminal)
+            // Progress updates are throttled to reduce React churn while maintaining visible updates
             if (needsProgressUpdate) {
-                console.log('[Sync] Updating progress', {
-                    clientId,
-                    phase2Progress: phase2Upload.progress,
-                    phase3Progress: phase3Item.progress,
-                    lastSyncedProgress: lastSynced.progress
-                })
                 updateUploadProgress(clientId, phase2Upload.progress)
             }
 
             // Update status if needed (always sync Phase 3 status to Phase 2 status)
-            if (needsStatusUpdate) {
-                if (phase2Upload.status === 'completed' && phase3Item.uploadStatus !== 'complete') {
-                    console.log('[Sync] Marking upload complete', { clientId, phase2Status: phase2Upload.status, phase3Status: phase3Item.uploadStatus })
-                    markUploadComplete(clientId, phase2Upload.uploadSessionId || phase3Item.uploadSessionId)
-                } else if (phase2Upload.status === 'failed' && phase3Item.uploadStatus !== 'failed') {
-                    console.log('[Sync] Marking upload failed', { clientId, phase2Status: phase2Upload.status, phase3Status: phase3Item.uploadStatus, error: phase2Upload.error })
+            // Priority order: failed first (terminal), then completed, then uploading
+            if (shouldUpdateStatus) {
+                // CRITICAL: Check failed status FIRST (terminal state)
+                // This must take priority over any other status mismatch
+                if (phase2Upload.status === 'failed' && phase3Item.uploadStatus !== 'failed') {
+                    console.log('[Sync] Marking upload failed', { 
+                        clientId, 
+                        phase2Status: phase2Upload.status, 
+                        phase3Status: phase3Item.uploadStatus, 
+                        error: phase2Upload.error,
+                        errorInfo: phase2Upload.errorInfo
+                    })
                     markUploadFailed(clientId, {
                         message: phase2Upload.error || phase2Upload.errorInfo?.message || 'Upload failed',
                         type: phase2Upload.errorInfo?.type || 'unknown',
                         httpStatus: phase2Upload.errorInfo?.http_status,
                         rawError: phase2Upload.errorInfo?.raw_error
                     })
+                } else if (phase2Upload.status === 'completed' && phase3Item.uploadStatus !== 'complete') {
+                    // Defensive check: Ensure upload has uploadSessionId before marking complete
+                    // This prevents marking as complete if Phase 2 incorrectly reported completion
+                    // (e.g., timeout during multipart upload where S3 object doesn't exist)
+                    const sessionId = phase2Upload.uploadSessionId || phase3Item.uploadSessionId
+                    if (!sessionId) {
+                        // OPTIMIZATION 6: Only log errors (missing session is an error)
+                        console.error('[Sync] Phase 2 marked as completed but no uploadSessionId', { clientId })
+                        // If Phase 2 says completed but no session ID, something went wrong
+                        // Mark as failed instead to prevent S3 "object does not exist" error
+                        markUploadFailed(clientId, {
+                            message: 'Upload session was interrupted. Please retry the upload.',
+                            type: 'session_missing',
+                        })
+                    } else {
+                        // OPTIMIZATION 4: Trust Phase 2 status - don't use progress to detect failures
+                        // Check if Phase 2 has an error (backend /complete call might have failed)
+                        if (phase2Upload.error || phase2Upload.errorInfo) {
+                            // OPTIMIZATION 6: Only log errors (completion errors are errors)
+                            console.error('[Sync] Phase 2 marked as completed but has error', {
+                                clientId,
+                                error: phase2Upload.error || phase2Upload.errorInfo?.message
+                            })
+                            // If there's an error, treat as failed even if status is 'completed'
+                            // This catches cases where /complete endpoint failed but status wasn't updated correctly
+                            markUploadFailed(clientId, {
+                                message: phase2Upload.error || phase2Upload.errorInfo?.message || 'Upload completion failed',
+                                type: phase2Upload.errorInfo?.type || 'completion_error',
+                                httpStatus: phase2Upload.errorInfo?.http_status,
+                            })
+                        } else {
+                            // OPTIMIZATION 4: Trust Phase 2 status - don't use progress to detect failures
+                            // Backend finalize is the true validator for multipart uploads
+                            // If Phase 2 says completed, trust it (backend will validate S3 object exists)
+                            markUploadComplete(clientId, sessionId)
+                        }
+                    }
                 } else if ((phase2Upload.status === 'uploading' || phase2Upload.status === 'initiating') && 
                            phase3Item.uploadStatus !== 'uploading' && phase3Item.uploadStatus !== 'complete' && phase3Item.uploadStatus !== 'failed') {
+                    // OPTIMIZATION 5: Clear currentlyAddingRef when upload starts
+                    currentlyAddingRef.current.delete(clientId)
+                    
                     // Update to uploading status - do this even if uploadSessionId doesn't exist yet
                     // The status change happens immediately when startUpload is called
-                    console.log('[Sync] Updating Phase 3 status to uploading', {
-                        clientId,
-                        phase2Status: phase2Upload.status,
-                        phase3Status: phase3Item.uploadStatus,
-                        uploadSessionId: phase2Upload.uploadSessionId
-                    })
-                    
                     if (phase2Upload.uploadSessionId) {
                         // Update status and session ID together
                         setUploadSessionId(clientId, phase2Upload.uploadSessionId)
@@ -583,20 +629,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     }
                 } else if (phase2Upload.status === 'pending' && phase3Item.uploadStatus === 'uploading' && !phase2Upload.uploadSessionId) {
                     // Upload was reset - revert Phase 3 status to queued
-                    console.log('[Sync] Upload reset - reverting Phase 3 status to queued', { clientId })
                     // Don't need to do anything - Phase 3 should already be queued
                 }
             }
 
             // Update last synced state AFTER all updates are complete
-            // This ensures we track the final state after all updates
+            // Track what we actually synced to Phase 3 (use Phase 3's current progress after update)
+            // Also track lastProgressSyncAt timestamp for heartbeat calculation (only update if we synced)
             lastSyncedRef.current.set(clientId, {
-                progress: phase2Upload.progress,
+                progress: needsProgressUpdate ? phase2Upload.progress : phase3Item.progress,
                 uploadSessionId: phase2Upload.uploadSessionId,
-                status: phase2Upload.status
+                status: phase2Upload.status,
+                lastProgressSyncAt: needsProgressUpdate ? Date.now() : (lastSynced.lastProgressSyncAt ?? 0)
             })
         })
-    }, [phase2Uploads, phase3Items, setUploadSessionId, updateUploadProgress, markUploadComplete, markUploadFailed, markUploadStarted])
+    }, [phase2Uploads, phase3Items, phase3ClientIdSet, setUploadSessionId, updateUploadProgress, markUploadComplete, markUploadFailed, markUploadStarted, currentlyAddingRef])
     
     // Clean up ref when dialog closes
     useEffect(() => {
@@ -624,70 +671,33 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const startingUploadsRef = useRef(new Set()) // Track uploads currently being started
     const MAX_CONCURRENT_UPLOADS = 1 // Sequential by default (can be increased later)
     
-    // Track queued items count to ensure effect runs when it changes
-    const queuedItemsCount = phase3Items.filter(item => item.uploadStatus === 'queued').length
-    const activeUploadsCount = phase2Uploads.filter(upload => 
-        upload.status === 'uploading' || upload.status === 'initiating'
-    ).length
+    // OPTIMIZATION 2: Memoize queued items and active uploads to avoid repeated filtering
+    const queuedItems = useMemo(() => 
+        phase3Items.filter(item => item.uploadStatus === 'queued'),
+        [phase3Items]
+    )
+    
+    const activeUploads = useMemo(() =>
+        phase2Uploads.filter(upload => 
+            upload.status === 'uploading' || upload.status === 'initiating'
+        ),
+        [phase2Uploads]
+    )
+    
+    const activeCount = activeUploads.length
+    const availableSlots = MAX_CONCURRENT_UPLOADS - activeCount
 
     useEffect(() => {
         const phase2Manager = phase2ManagerRef.current
         
-        console.log('[Auto-start] Effect running', {
-            phase3ItemsCount: phase3Items.length,
-            phase2UploadsCount: phase2Uploads.length,
-            queuedItemsCount,
-            activeUploadsCount,
-            phase3Items: phase3Items.map(i => ({ clientId: i.clientId, status: i.uploadStatus }))
-        })
-        
-        // Get queued Phase 3 items (only items that can be started)
-        // Always pick the oldest queued item first (array order is chronological)
-        // phase3Items comes from phase3Manager.items, which is updated when files are added
-        // The effect runs when phase3Items changes (via queuedItemsCount dependency)
-        const queuedItems = phase3Items.filter(item => item.uploadStatus === 'queued')
-        
-        console.log('[Auto-start] Queued items found', {
-            queuedItemsCount: queuedItems.length,
-            queuedItems: queuedItems.map(i => ({ clientId: i.clientId, status: i.uploadStatus }))
-        })
+        // OPTIMIZATION 6: Remove verbose logging from auto-start effect
+        // Only log on actual start attempts or errors
         
         if (queuedItems.length === 0) {
-            console.log('[Auto-start] No queued items - exiting')
             return // No queued items - nothing to start
         }
 
-        // Count currently active uploads
-        // ONLY count uploads as active if status is 'uploading' or 'initiating'
-        // DO NOT count: 'queued', 'complete', 'failed'
-        const activeUploads = phase2Uploads.filter(upload => 
-            upload.status === 'uploading' || upload.status === 'initiating'
-        )
-        
-        // CRITICAL: Only count Phase 2 uploads with active status
-        // Phase 3 status can be out of sync (e.g., 'uploading' when Phase 2 is 'failed'),
-        // so we should NOT use Phase 3 status for slot calculation
-        // Only 'uploading' and 'initiating' count as active
-        // 'failed', 'completed', 'pending', 'paused' are NOT active and should free slots
-        const activeCount = activeUploads.length
-        
-        // CANONICAL RULE: Calculate available slots
-        // availableSlots = MAX_CONCURRENT_UPLOADS - activeUploads
-        const availableSlots = MAX_CONCURRENT_UPLOADS - activeCount
-        
-        // CANONICAL RULE: If activeUploads < MAX_CONCURRENT_UPLOADS AND queuedUploads > 0
-        // → start next queued upload
-        console.log('[Auto-start] Slot calculation', {
-            activeCount,
-            availableSlots,
-            MAX_CONCURRENT_UPLOADS,
-            activeUploads: activeUploads.map(u => ({ clientRef: u.clientReference, status: u.status })),
-            totalPhase2Uploads: phase2Uploads.length,
-            phase2Statuses: phase2Uploads.map(u => ({ clientRef: u.clientReference, status: u.status }))
-        })
-        
         if (availableSlots <= 0) {
-            console.log('[Auto-start] No available slots - queue is full')
             return // No available slots - queue is full
         }
         
@@ -701,6 +711,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
         // Start uploads for queued items (up to available slots)
         // Always pick the oldest queued item first (array order is chronological)
+        // OPTIMIZATION 2: Use memoized queuedItems
         queuedItems.slice(0, availableSlots).forEach(item => {
             const clientId = item.clientId
             
@@ -751,85 +762,61 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 phase2ClientRef: phase2Upload.clientReference
             })
             
-            // Verify this upload belongs to current Phase 3 items (not an old upload)
-            // Also check currentlyAddingRef for newly added uploads that might not be in state yet
-            const belongsToPhase3 = phase3Items.some(item => item.clientId === clientId)
+            // OPTIMIZATION 2: Use memoized clientId set for fast lookup
+            const belongsToPhase3 = phase3ClientIdSet.has(clientId)
             const isCurrentlyAdding = currentlyAddingRef.current.has(clientId)
             
             if (!belongsToPhase3 && !isCurrentlyAdding) {
                 // Phase 2 upload exists but doesn't belong to current Phase 3 items and isn't being added
                 // This is likely an old upload - skip it
-                // console.log('[Auto-start] Phase 2 upload exists but doesn\'t belong to current Phase 3 items - skipping (old upload)', { clientId })
                 return
             }
 
-            // Guard: Only start if Phase 2 upload is in a startable state
-            // Do NOT restart failed or completed uploads - they're terminal
-            if (phase2Upload.status !== 'pending' && phase2Upload.status !== 'paused') {
-                console.log('[Auto-start] Skipping - Phase 2 upload not in startable state', {
-                    clientId,
-                    phase2Status: phase2Upload.status,
-                    expected: ['pending', 'paused']
+            // OPTIMIZATION 6: Reduced logging - only log errors
+            // CRITICAL: Check for rehydrated uploads BEFORE checking status
+            if (!phase2Upload.file) {
+                console.error('[Auto-start] Rehydrated upload detected (no file object)', { clientId })
+                phase2Manager.removeUpload(clientId)
+                startingUploadsRef.current.delete(clientId)
+                markUploadFailed(clientId, {
+                    message: 'Previous upload session expired. Please upload again.',
+                    type: 'rehydrated_expired',
                 })
+                return
+            }
+            
+            // Guard: Only start if Phase 2 upload is in a startable state
+            if (phase2Upload.status !== 'pending' && phase2Upload.status !== 'paused') {
                 return
             }
 
             // Guard: Do NOT restart if Phase 3 item is already terminal
-            // This prevents trying to restart failed/completed items
             if (item.uploadStatus !== 'queued') {
-                console.log('[Auto-start] Skipping - Phase 3 item not in queued state', {
-                    clientId,
-                    phase3Status: item.uploadStatus
-                })
                 return
             }
 
             // Mark as starting to prevent double-start
             startingUploadsRef.current.add(clientId)
             
-            // CRITICAL: Verify we're about to start the correct upload
-            // Check that it's our new upload (no uploadSessionId) and not an old one
+            // CRITICAL: Verify it's a new upload (no uploadSessionId) - old uploads have sessionId
             if (phase2Upload.uploadSessionId) {
-                console.error('[Auto-start] WARNING: Upload has uploadSessionId before start - this is an old upload!', {
-                    clientId,
-                    uploadSessionId: phase2Upload.uploadSessionId,
-                    status: phase2Upload.status,
-                    hasFile: !!phase2Upload.file,
-                    fileName: phase2Upload.fileName,
-                    clientReference: phase2Upload.clientReference
-                })
-                // Remove this old upload and mark as failed - don't try to resume it
+                console.error('[Auto-start] Old upload detected (has uploadSessionId before start)', { clientId })
                 phase2Manager.removeUpload(clientId)
                 startingUploadsRef.current.delete(clientId)
                 markUploadFailed(clientId, {
-                    message: 'Old upload detected - please try again',
-                    type: 'unknown'
+                    message: 'Previous upload session expired. Please upload the file again.',
+                    type: 'old_upload_expired',
                 })
                 return
             }
-            
-            console.log('[Auto-start] Starting upload', { 
-                clientId, 
-                phase2Status: phase2Upload.status,
-                uploadSessionId: phase2Upload.uploadSessionId,
-                hasFile: !!phase2Upload.file,
-                fileName: phase2Upload.fileName,
-                clientReference: phase2Upload.clientReference
-            })
 
             // Start the upload
             phase2Manager.startUpload(clientId)
                 .then(() => {
-                    // Upload started successfully
-                    console.log('[Auto-start] Upload started successfully', { clientId })
                     startingUploadsRef.current.delete(clientId)
                     
-                    // CRITICAL: Keep upload in currentlyAddingRef until it's confirmed in Phase 3 items with 'uploading' status
-                    // This prevents the subscription filter from removing it before Phase 3 state updates
-                    currentlyAddingRef.current.add(clientId)
-                    
-                    // CRITICAL: Wait a tiny bit for Phase 2 to update status after startUpload()
-                    // startUpload() is async and might not update status synchronously
+                    // OPTIMIZATION 5: Simplify currentlyAddingRef lifecycle - clear immediately when upload starts
+                    // Wait briefly for Phase 2 to update status, then clear ref and update Phase 3
                     setTimeout(() => {
                         // Get the upload directly from manager (most reliable source)
                         let phase2UploadAfterStart = phase2Manager.uploads.get(clientId)
@@ -839,32 +826,26 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             const allManagerUploads = Array.from(phase2Manager.uploads.entries())
                             const uploadByClientRef = allManagerUploads.find(([key, upload]) => upload.clientReference === clientId)
                             if (uploadByClientRef) {
-                                console.log('[Auto-start] Found upload by clientReference after start', {
-                                    clientId,
-                                    key: uploadByClientRef[0],
-                                    status: uploadByClientRef[1].status
-                                })
                                 phase2UploadAfterStart = uploadByClientRef[1]
                             }
                         }
                         
                         if (!phase2UploadAfterStart) {
-                            console.error('[Auto-start] Upload not found after startUpload() - this should not happen', { clientId })
+                            console.error('[Auto-start] Upload not found after startUpload()', { clientId })
                             markUploadFailed(clientId, {
                                 message: 'Upload disappeared after starting',
                                 type: 'unknown'
                             })
+                            currentlyAddingRef.current.delete(clientId)
                             return
                         }
                         
+                        // OPTIMIZATION 5: Clear currentlyAddingRef immediately when upload starts
+                        // Upload is now in uploading/initiating state - safe to clear
+                        currentlyAddingRef.current.delete(clientId)
+                        
                         // Update Phase 3 status based on Phase 2 status
                         if (phase2UploadAfterStart.status === 'uploading' || phase2UploadAfterStart.status === 'initiating') {
-                            console.log('[Auto-start] Manually updating Phase 3 status to uploading', {
-                                clientId,
-                                phase2Status: phase2UploadAfterStart.status,
-                                uploadSessionId: phase2UploadAfterStart.uploadSessionId
-                            })
-                            
                             if (phase2UploadAfterStart.uploadSessionId) {
                                 setUploadSessionId(clientId, phase2UploadAfterStart.uploadSessionId)
         } else {
@@ -872,31 +853,36 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             }
                         } else if (phase2UploadAfterStart.status === 'completed') {
                             // Upload was already completed (old upload that was rehydrated)
-                            console.warn('[Auto-start] Upload already completed - this is an old upload that was rehydrated', {
-                                clientId,
-                                uploadSessionId: phase2UploadAfterStart.uploadSessionId,
-                                lastUpdatedAt: phase2UploadAfterStart.lastUpdatedAt
-                            })
-                            // Mark as complete in Phase 3 (but don't finalize - let user retry if needed)
-                            markUploadComplete(clientId)
+                            // OPTIMIZATION 6: Only log errors/warnings for unexpected states
+                            console.warn('[Auto-start] Upload already completed (rehydrated)', { clientId })
+                            markUploadComplete(clientId, phase2UploadAfterStart.uploadSessionId)
                         } else if (phase2UploadAfterStart.status === 'failed') {
-                            // Upload failed to start
+                            // Upload failed to start - classify error for better user messaging
+                            const errorMessage = phase2UploadAfterStart.error || phase2UploadAfterStart.errorInfo?.message || 'Upload failed to start'
+                            const isCorsError = errorMessage.includes('browser security') || 
+                                               errorMessage.includes('dev config issue') ||
+                                               (phase2UploadAfterStart.errorInfo?.type === 'cors')
+                            
                             console.error('[Auto-start] Upload failed to start', {
                                 clientId,
-                                error: phase2UploadAfterStart.error
+                                error: errorMessage,
+                                errorType: phase2UploadAfterStart.errorInfo?.type
                             })
+                            
                             markUploadFailed(clientId, {
-                                message: phase2UploadAfterStart.error || 'Upload failed to start',
-                                type: 'unknown'
+                                message: isCorsError 
+                                    ? 'Upload blocked by browser security. This is typically a development environment configuration issue (CORS).'
+                                    : errorMessage,
+                                type: phase2UploadAfterStart.errorInfo?.type || (isCorsError ? 'cors' : 'unknown'),
+                                httpStatus: phase2UploadAfterStart.errorInfo?.http_status
                             })
+                            
+                            // Remove from Phase 2 if it's a CORS error (likely config issue, won't retry successfully)
+                            if (isCorsError) {
+                                phase2Manager.removeUpload(clientId)
+                            }
                         } else {
-                            // Unexpected status (pending, paused, etc.)
-                            console.warn('[Auto-start] Upload started but status not uploading/initiating', {
-                                clientId,
-                                phase2Status: phase2UploadAfterStart.status,
-                                uploadSessionId: phase2UploadAfterStart.uploadSessionId
-                            })
-                            // Still mark as started - sync effect will handle status update
+                            // Unexpected status - sync effect will handle
                             markUploadStarted(clientId)
                         }
                     }, 50) // Small delay to let Phase 2 update status
@@ -905,21 +891,55 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     // and check for more queued items
                 })
                 .catch(error => {
-                    // Upload failed to start
-                    console.error('[Auto-start] Upload failed to start', { clientId, error })
+                    // OPTIMIZATION 6: Reduced logging - only log errors (not debug info)
+                    console.error('[Auto-start] Upload failed to start', { 
+                        clientId, 
+                        errorMessage: error.message, 
+                        httpStatus: error.response?.status 
+                    })
                     startingUploadsRef.current.delete(clientId)
+                    currentlyAddingRef.current.delete(clientId)
+                    
+                    // Classify error type for better user messaging
+                    const errorMessage = error.response?.data?.message || error.message || error.toString() || ''
+                    const isS3NotFoundError = errorMessage.includes('does not exist in S3') || 
+                                            errorMessage.includes('object does not exist') ||
+                                            error.response?.status === 400
+                    const isExpiredUpload = isS3NotFoundError || 
+                                          errorMessage.includes('expired') ||
+                                          (errorMessage.includes('session') && errorMessage.includes('expired'))
+                    const isCorsError = errorMessage.includes('browser security') || 
+                                       errorMessage.includes('dev config issue') ||
+                                       (error instanceof TypeError && errorMessage.includes('fetch'))
                     
                     // Mark as failed in Phase 3 (this frees up a slot)
                     // Failed uploads are terminal and MUST free a slot
+                    let failureType = 'unknown'
+                    let failureMessage = errorMessage || 'Failed to start upload'
+                    
+                    if (isExpiredUpload) {
+                        failureType = 'old_upload_expired'
+                        failureMessage = 'Previous upload session expired. Please upload the file again.'
+                    } else if (isCorsError) {
+                        failureType = 'cors'
+                        failureMessage = 'Upload blocked by browser security. This is typically a development environment configuration issue (CORS).'
+                    }
+                    
                     markUploadFailed(clientId, {
-                        message: error.message || 'Failed to start upload',
-                        type: 'unknown'
+                        message: failureMessage,
+                        type: failureType,
+                        httpStatus: error.response?.status,
+                        rawError: error.response?.data
                     })
-                    // Effect will re-run when phase3Items changes (item status → 'failed')
-                    // and start the next queued item (slot is now available)
+                    
+                    // If this was a rehydrated/expired upload, remove it from Phase 2
+                    // This prevents it from being retried
+                    if (isExpiredUpload || isCorsError) {
+                        phase2Manager.removeUpload(clientId)
+                    }
                 })
         })
-    }, [phase3Items, phase2Uploads, markUploadFailed, queuedItemsCount, activeUploadsCount, setUploadSessionId, markUploadStarted])
+    }, [queuedItems, activeUploads, activeCount, availableSlots, phase3ClientIdSet, markUploadFailed, setUploadSessionId, markUploadStarted])
 
     // Clean up starting ref and currently adding ref when dialog closes
     useEffect(() => {
@@ -1149,19 +1169,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             )}
                         </div>
 
-                            {/* Asset Type (read-only) */}
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Asset Type
-                                </label>
-                                <input
-                                    type="text"
-                                value={defaultAssetType === 'asset' ? 'Asset' : 'Marketing Asset'}
-                                    readOnly
-                                    disabled
-                                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm bg-gray-50"
-                                />
-                            </div>
+                            {/* Asset Type - Hidden (used internally for filtering and finalization) */}
 
                         {/* File Drop Zone - always visible */}
                         {!hasFiles ? (
@@ -1232,8 +1240,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                             className="hidden"
                                             onChange={(e) => handleFileSelect(e.target.files)}
                                         />
-                                    </div>
-                                </div>
+                                                </div>
+                                            </div>
 
                                 {/* Upload Tray */}
                                 <UploadTray 
@@ -1247,8 +1255,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         phase2Manager.removeUpload(clientId);
                                     }}
                                 />
-                            </div>
-                        )}
+                                    </div>
+                                )}
 
                         {/* Form-level validation alert */}
                         {hasFiles && blockingErrors.length > 0 && (

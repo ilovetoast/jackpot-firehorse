@@ -281,7 +281,10 @@ class UploadManager {
             clientReferences.push(clientReference)
         })
 
-        this.persistToStorage()
+        // OPTIMIZATION 3: Don't persist during file add - large files cause blocking serialization
+        // Persistence will happen later (on start/complete/fail) when needed
+        // Large files inside a modal don't need crash-resume during add
+        // Only notify listeners (async state update) - don't block on persistence
         this.notifyListeners()
 
         return clientReferences
@@ -735,7 +738,13 @@ class UploadManager {
                 const uploadedSize = uploadedParts.reduce((sum, p) => sum + p.Size, 0)
                 upload.progress = Math.round((uploadedSize / file.size) * 100)
                 upload.lastUpdatedAt = Date.now()
-                this.persistToStorage()
+                // OPTIMIZATION 3: Throttle persistence during multipart upload
+                // Only persist on terminal states (complete/fail) or every 10% progress change
+                // Reduces blocking serialization during large file uploads
+                const shouldPersist = upload.progress % 10 === 0 || upload.progress === 100
+                if (shouldPersist) {
+                    this.persistToStorage()
+                }
                 this.notifyListeners()
             }
 
@@ -823,7 +832,16 @@ class UploadManager {
             }, 5000)
         } catch (error) {
             upload.status = 'failed'
-            upload.error = error.response?.data?.message || error.message || 'Failed to complete upload'
+            // Phase 2.5: Classify and store structured error
+            const errorInfo = this.classifyError(error, error.response?.status, null)
+            upload.error = errorInfo.message || error.response?.data?.message || error.message || 'Failed to complete upload'
+            upload.errorInfo = errorInfo
+            upload.diagnostics = upload.diagnostics || {}
+            upload.diagnostics.last_error_type = errorInfo.type
+            upload.diagnostics.last_error_message = errorInfo.message
+            if (errorInfo.http_status) {
+                upload.diagnostics.last_http_status = errorInfo.http_status
+            }
             upload.lastUpdatedAt = Date.now()
             this.activeUploads.delete(clientReference)
             this.stopActivityUpdates(clientReference)

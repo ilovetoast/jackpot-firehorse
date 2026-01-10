@@ -22,6 +22,63 @@ import {
 import MetadataFieldRenderer from './MetadataFieldRenderer';
 
 /**
+ * Heartbeat fallback for large multipart uploads
+ * 
+ * For large files, the first progress event may not fire for 30-60 seconds.
+ * During this window, uploads are active (network activity) but progress is still 0.
+ * This causes the UI to show "Queued" even though uploads are happening.
+ * 
+ * Solution: If upload status is 'queued' and enough time has elapsed (>7.5s),
+ * show "Uploading..." state anyway (with indeterminate progress animation).
+ * 
+ * This is a UI-only change - does not affect actual upload state or finalization logic.
+ */
+function useUploadHeartbeat(item) {
+    const queuedSinceRef = useRef(null)
+    const [heartbeatActive, setHeartbeatActive] = useState(false)
+    
+    useEffect(() => {
+        // Track when upload first enters 'queued' state
+        if (item.uploadStatus === 'queued' && queuedSinceRef.current === null && (item.progress || 0) === 0) {
+            queuedSinceRef.current = Date.now()
+            setHeartbeatActive(false) // Reset heartbeat state
+        }
+        
+        // Reset timestamp when status changes away from 'queued' or progress appears
+        if (item.uploadStatus !== 'queued' || (item.progress || 0) > 0) {
+            queuedSinceRef.current = null
+            setHeartbeatActive(false)
+            return
+        }
+        
+        // Only set up interval if item is queued and has no progress
+        if ((item.progress || 0) > 0 || queuedSinceRef.current === null) {
+            return
+        }
+        
+        // Check every second if we should trigger heartbeat
+        const interval = setInterval(() => {
+            if (queuedSinceRef.current === null) {
+                setHeartbeatActive(false)
+                clearInterval(interval)
+                return
+            }
+            
+            const timeElapsed = Date.now() - queuedSinceRef.current
+            if (timeElapsed >= 7500) {
+                setHeartbeatActive(true) // Trigger heartbeat UI update
+                clearInterval(interval)
+            }
+        }, 1000) // Check every second
+        
+        return () => clearInterval(interval)
+    }, [item.uploadStatus, item.progress])
+    
+    // Return heartbeat active state (only true if queued, no progress, and >7.5s elapsed)
+    return heartbeatActive
+}
+
+/**
  * Get status badge configuration
  * @param {string} status - Upload status
  * @returns {Object} Badge config with color and icon
@@ -35,6 +92,14 @@ function getStatusConfig(status) {
                 textColor: 'text-gray-700',
                 icon: ClockIcon,
                 iconColor: 'text-gray-500'
+            };
+        case 'initiating':
+            return {
+                label: 'Preparing upload…',
+                bgColor: 'bg-blue-100',
+                textColor: 'text-blue-700',
+                icon: ArrowPathIcon,
+                iconColor: 'text-blue-500'
             };
         case 'uploading':
             return {
@@ -104,7 +169,14 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
     const [editedFilename, setEditedFilename] = useState(item.resolvedFilename || item.originalFilename);
     const filenameInputRef = useRef(null);
     
-    const statusConfig = getStatusConfig(item.uploadStatus);
+    // Heartbeat fallback for large multipart uploads (shows "Uploading..." when queued >7.5s with no progress)
+    const shouldShowUploadingHeartbeat = useUploadHeartbeat(item);
+    
+    // Use heartbeat status override if active (shows "Uploading..." even when Phase 3 status is 'queued')
+    // Also check if we should show "Preparing upload..." (uploading status with 0% progress = initiating phase)
+    const isLikelyInitiating = item.uploadStatus === 'uploading' && (item.progress || 0) === 0 && !shouldShowUploadingHeartbeat;
+    const displayStatus = shouldShowUploadingHeartbeat ? 'uploading' : (isLikelyInitiating ? 'initiating' : item.uploadStatus);
+    const statusConfig = getStatusConfig(displayStatus);
     const StatusIcon = statusConfig.icon;
     
     // Helper to get extension from original filename
@@ -268,11 +340,12 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
         }
     };
 
-    // Get progress bar color based on status
+    // Get progress bar color based on display status (includes heartbeat override)
     const getProgressBarColor = () => {
-        switch (item.uploadStatus) {
+        switch (displayStatus) {
             case 'queued':
                 return 'bg-gray-300';
+            case 'initiating':
             case 'uploading':
                 return 'bg-blue-600';
             case 'complete':
@@ -283,11 +356,21 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                 return 'bg-gray-300';
         }
     };
+    
+    // Check if we should show animated sheen (uploading or initiating status, including heartbeat)
+    // Sheen indicates active work is happening even if progress hasn't updated yet
+    const shouldShowSheen = displayStatus === 'uploading' || displayStatus === 'initiating';
 
-    // Get progress percentage
+    // Get progress percentage (heartbeat shows indeterminate progress)
     const getProgressPercentage = () => {
         if (item.uploadStatus === 'complete') return 100;
         if (item.uploadStatus === 'failed') return 0;
+        
+        // If heartbeat is active, show small indeterminate progress (5% with pulse animation)
+        if (shouldShowUploadingHeartbeat) {
+            return 5; // Small visual progress to show activity
+        }
+        
         return item.progress || 0;
     };
 
@@ -364,24 +447,46 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                             
                             {/* Inline progress bar - always visible */}
                             <div className="mt-2 w-full">
-                                <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
+                                <div className="relative h-1 w-full overflow-hidden rounded-full bg-gray-200">
                                     <div
-                                        className={`h-full transition-all duration-300 ${getProgressBarColor()} ${
-                                            item.uploadStatus === 'uploading' ? 'animate-pulse' : ''
-                                        }`}
+                                        className={`h-full transition-[width] duration-300 ${getProgressBarColor()}`}
                                         style={{ width: `${getProgressPercentage()}%` }}
                                     />
+                                    {/* Animated sheen overlay (uploading/initiating only) */}
+                                    {shouldShowSheen && (
+                                        <div className="absolute inset-0 overflow-hidden rounded-full">
+                                            <div 
+                                                className="upload-sheen"
+                                                style={{
+                                                    position: 'absolute',
+                                                    inset: 0,
+                                                    background: 'linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.35) 37%, transparent 63%)',
+                                                    backgroundSize: '200% 100%',
+                                                    animation: 'upload-sheen-animation 1.6s linear infinite'
+                                                }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
 
                         {/* Status badge */}
-                        <div className="flex-shrink-0 mr-4">
+                        <div className="flex-shrink-0 mr-4 flex items-center gap-2">
                             <span
                                 className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}
                             >
                                 {statusConfig.label}
                             </span>
+                            {/* Show "Expired" badge for rehydrated/expired uploads */}
+                            {(item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired') && (
+                                <span
+                                    className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700"
+                                    title="This upload was from a previous session and cannot be resumed"
+                                >
+                                    Expired
+                                </span>
+                            )}
                         </div>
                     </div>
 
@@ -420,9 +525,18 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                     <div className="mt-2 ml-8">
                         <div className="flex items-start">
                             <ExclamationCircleIcon className="h-4 w-4 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
-                            <p className="text-sm text-red-600">
-                                {item.error.message || 'Upload failed'}
-                            </p>
+                            <div className="flex-1">
+                                <p className="text-sm text-red-600">
+                                    {item.error.message || 'Upload failed'}
+                                </p>
+                                {/* Show indicator if this was a rehydrated/expired upload */}
+                                {(item.error.type === 'rehydrated_expired' || item.error.type === 'old_upload_expired' || 
+                                  (item.error.message && (item.error.message.includes('expired') || item.error.message.includes('Previous upload session') || item.error.message.includes('does not exist in S3')))) && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        This upload was from a previous session and cannot be resumed. Remove it and upload the file again.
+                                    </p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
