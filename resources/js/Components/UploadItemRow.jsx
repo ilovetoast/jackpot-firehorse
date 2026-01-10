@@ -99,6 +99,11 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
     const [showEditIcon, setShowEditIcon] = useState(false);
     const titleInputRef = useRef(null);
     
+    // Resolved filename editing state (power-user control)
+    const [filenameEditing, setFilenameEditing] = useState(false);
+    const [editedFilename, setEditedFilename] = useState(item.resolvedFilename || item.originalFilename);
+    const filenameInputRef = useRef(null);
+    
     const statusConfig = getStatusConfig(item.uploadStatus);
     const StatusIcon = statusConfig.icon;
     
@@ -129,6 +134,13 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
         }
     }, [item.title, item.originalFilename, titleEditing]);
     
+    // Sync editedFilename when item.resolvedFilename changes (but not when editing)
+    useEffect(() => {
+        if (!filenameEditing) {
+            setEditedFilename(item.resolvedFilename || item.originalFilename);
+        }
+    }, [item.resolvedFilename, item.originalFilename, filenameEditing]);
+    
     // Focus input when entering edit mode
     useEffect(() => {
         if (titleEditing && titleInputRef.current) {
@@ -136,6 +148,14 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
             titleInputRef.current.select();
         }
     }, [titleEditing]);
+    
+    // Focus filename input when entering edit mode
+    useEffect(() => {
+        if (filenameEditing && filenameInputRef.current) {
+            filenameInputRef.current.focus();
+            filenameInputRef.current.select();
+        }
+    }, [filenameEditing]);
     
     // Image preview for image files
     const isImage = item.file.type.startsWith('image/');
@@ -171,9 +191,8 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
         return item.isMetadataOverridden[fieldKey] === true;
     };
     
-    // Check if title is overridden (if title differs from original filename without extension)
+    // Original title for fallback display (title is primary, not an override)
     const originalTitle = getFilenameWithoutExtension(item.originalFilename);
-    const isTitleOverridden = item.title !== originalTitle;
     
     // Handle title save
     const handleTitleSave = () => {
@@ -205,6 +224,38 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
         } else if (e.key === 'Escape') {
             e.preventDefault();
             handleTitleCancel();
+        }
+    };
+    
+    // Handle filename save
+    const handleFilenameSave = () => {
+        const newFilename = editedFilename.trim() || item.resolvedFilename || item.originalFilename;
+        if (newFilename !== item.resolvedFilename) {
+            uploadManager.setResolvedFilename(item.clientId, newFilename);
+        }
+        setFilenameEditing(false);
+    };
+    
+    // Handle filename cancel
+    const handleFilenameCancel = () => {
+        setEditedFilename(item.resolvedFilename || item.originalFilename);
+        setFilenameEditing(false);
+    };
+    
+    // Handle filename edit start
+    const handleFilenameEdit = (e) => {
+        e.stopPropagation(); // Prevent row expansion
+        setFilenameEditing(true);
+    };
+    
+    // Handle keydown in filename input
+    const handleFilenameKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleFilenameSave();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            handleFilenameCancel();
         }
     };
 
@@ -306,11 +357,6 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                         )}
                                     </div>
                                 )}
-                                {isTitleOverridden && !titleEditing && (
-                                    <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 flex-shrink-0">
-                                        Overridden
-                                    </span>
-                                )}
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5">
                                 {formatFileSize(item.file.size)}
@@ -399,8 +445,31 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                 </div>
                                 <div>
                                     <dt className="text-gray-500 mb-1">Resolved filename</dt>
-                                    <dd className="text-gray-900 font-mono text-xs break-all" title="Automatically derived from title + extension (read-only)">
-                                        {item.resolvedFilename || item.originalFilename}
+                                    <dd className="text-gray-900">
+                                        {filenameEditing ? (
+                                            <input
+                                                ref={filenameInputRef}
+                                                type="text"
+                                                value={editedFilename}
+                                                onChange={(e) => setEditedFilename(e.target.value)}
+                                                onBlur={handleFilenameSave}
+                                                onKeyDown={handleFilenameKeyDown}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                                                placeholder={item.originalFilename}
+                                            />
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={handleFilenameEdit}
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                className="text-left w-full px-2 py-1 text-xs font-mono break-all hover:bg-gray-50 rounded border border-transparent hover:border-gray-300 transition-colors group"
+                                                title="Click to edit (used for storage and URLs)"
+                                            >
+                                                {item.resolvedFilename || item.originalFilename}
+                                            </button>
+                                        )}
+                                        <p className="mt-1 text-xs text-gray-400">Used for storage and URLs</p>
                                     </dd>
                                 </div>
                                 <div>

@@ -1163,8 +1163,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 />
                             </div>
 
-                        {/* File Drop Zone - only show if no files */}
-                        {!hasFiles && (
+                        {/* File Drop Zone - always visible */}
+                        {!hasFiles ? (
                             <div className="mb-4">
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Files
@@ -1175,11 +1175,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     onDragLeave={handleDragLeave}
                                     onDragOver={handleDragOver}
                                     onDrop={handleDrop}
-                                    className={`border-2 border-dashed rounded-lg p-6 text-center ${
+                                    className={`border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors p-6 ${
                                         isDragging
                                             ? 'border-indigo-500 bg-indigo-50'
                                             : 'border-gray-300 hover:border-gray-400'
-                                    } cursor-pointer`}
+                                    }`}
                                     onClick={() => fileInputRef.current?.click()}
                                 >
                                     <CloudArrowUpIcon className="mx-auto h-12 w-12 text-gray-400" />
@@ -1196,18 +1196,44 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         onChange={(e) => handleFileSelect(e.target.files)}
                                     />
                                 </div>
-                                    </div>
-                                )}
-
-                        {/* Phase 3 Components - show when files exist */}
-                        {hasFiles && (
+                            </div>
+                        ) : (
                             <div className="space-y-4">
+                                {/* Phase 3 Components - show when files exist */}
                                 {/* Global Metadata Panel */}
                                 <GlobalMetadataPanel
                                     uploadManager={phase3Manager}
                                     categories={filteredCategories}
                                     onCategoryChange={handleCategoryChange}
                                 />
+
+                                {/* Compact Drop Zone - above uploads list, always visible */}
+                                <div className="mb-4">
+                                    <div
+                                        ref={dropZoneRef}
+                                        onDragEnter={handleDragEnter}
+                                        onDragLeave={handleDragLeave}
+                                        onDragOver={handleDragOver}
+                                        onDrop={handleDrop}
+                                        className={`border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors p-3 border-gray-300 bg-gray-50 hover:bg-gray-100 ${
+                                            isDragging ? 'border-indigo-400 bg-indigo-50' : ''
+                                        }`}
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <p className="text-sm text-gray-600">
+                                            {isDragging
+                                                ? 'Drop files here'
+                                                : 'Add more files (drag & drop or click)'}
+                                        </p>
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            multiple
+                                            className="hidden"
+                                            onChange={(e) => handleFileSelect(e.target.files)}
+                                        />
+                                    </div>
+                                </div>
 
                                 {/* Upload Tray */}
                                 <UploadTray 
@@ -1222,7 +1248,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     }}
                                 />
                             </div>
-                            )}
+                        )}
 
                         {/* Form-level validation alert */}
                         {hasFiles && blockingErrors.length > 0 && (
