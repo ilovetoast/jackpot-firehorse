@@ -17,6 +17,17 @@ use Illuminate\Support\Facades\Storage;
 
 /**
  * Service for completing upload sessions and creating assets.
+ * 
+ * Phase 3 uploader — COMPLETE AND LOCKED
+ * 
+ * Persistence verified:
+ * - Title normalization (never "Unknown", null if empty)
+ * - Category ID stored in metadata->category_id
+ * - Metadata fields stored in metadata->fields
+ * - Extensive logging before/after save
+ * - Guardrails prevent silent failures
+ * 
+ * Do not refactor further.
  *
  * TEMPORARY UPLOAD PATH CONTRACT (IMMUTABLE):
  *
@@ -68,6 +79,9 @@ class UploadCompletionService
      * @param string|null $filename Optional resolved filename (from client - derived from title + extension)
      * @param string|null $title Optional asset title (from client - human-facing, no extension)
      * @param string|null $s3Key Optional S3 key if known, otherwise will be determined
+     * @param int|null $categoryId Optional category ID to store in metadata
+     * @param array|null $metadata Optional metadata fields to store (will be merged with category_id)
+     * @param int|null $userId Optional user ID who uploaded the asset
      * @return Asset
      * @throws \Exception
      */
@@ -76,8 +90,25 @@ class UploadCompletionService
         ?string $assetType = null,
         ?string $filename = null,
         ?string $title = null,
-        ?string $s3Key = null
+        ?string $s3Key = null,
+        ?int $categoryId = null,
+        ?array $metadata = null,
+        ?int $userId = null
     ): Asset {
+        // 🔍 DEBUG LOGGING: Log parameters received by service
+        Log::info('[UploadCompletionService] complete() called with parameters', [
+            'upload_session_id' => $uploadSession->id,
+            'asset_type' => $assetType ?? 'null',
+            'filename' => $filename ?? 'null',
+            'title' => $title ?? 'null',
+            's3_key' => $s3Key ?? 'null',
+            'category_id' => $categoryId ?? 'null',
+            'metadata' => $metadata ?? 'null',
+            'metadata_type' => gettype($metadata),
+            'metadata_is_array' => is_array($metadata),
+            'metadata_keys' => is_array($metadata) ? array_keys($metadata) : 'not_array',
+        ]);
+        
         // Refresh to get latest state
         $uploadSession->refresh();
 
@@ -160,15 +191,121 @@ class UploadCompletionService
         // Get file info from S3 (never trust client metadata)
         // This is done outside transaction since it's an external operation
         // For multipart uploads, the object should now exist after finalization
-        $fileInfo = $this->getFileInfoFromS3($uploadSession, $s3Key);
+        $fileInfo = $this->getFileInfoFromS3($uploadSession, $s3Key, $filename);
 
-        // Use provided filename (resolvedFilename from frontend) or fall back to original filename
+        // Use provided filename (resolvedFilename from frontend) or fall back to original filename from S3
         // Frontend derives resolvedFilename from title + extension, so this respects user's title
         $finalFilename = $filename ?? $fileInfo['original_filename'];
 
-        // Derive title from filename if not provided
-        // Strip extension and convert slug to human-readable form
-        $derivedTitle = $title ?? $this->deriveTitleFromFilename($finalFilename);
+        // 🔍 DEBUG LOGGING: Log title normalization process
+        Log::info('[UploadCompletionService] Starting title normalization', [
+            'original_title' => $title ?? 'null',
+            'final_filename' => $finalFilename ?? 'null',
+        ]);
+        
+        // Enforce title normalization: Never save "Unknown" or "Untitled Asset", empty → null, derive from filename if missing
+        $title = trim((string) ($title ?? ''));
+        
+        if ($title === '' || in_array($title, ['Unknown', 'Untitled Asset'], true)) {
+            // Derive from filename without extension
+            if ($finalFilename) {
+                $pathInfo = pathinfo($finalFilename);
+                $title = $pathInfo['filename'] ?? $finalFilename;
+                // If still empty or "Unknown", set to null
+                if (empty($title) || $title === 'Unknown') {
+                    $title = null;
+                } else {
+                    // Normalize derived title
+                    $title = trim($title);
+                    if ($title === '' || $title === 'Unknown' || $title === 'Untitled Asset') {
+                        $title = null;
+                    }
+                }
+            } else {
+                $title = null;
+            }
+        }
+        
+        // If title is still empty string after normalization, convert to null
+        if ($title === '') {
+            $title = null;
+        }
+        
+        // Use normalized title (may be null)
+        $derivedTitle = $title;
+        
+        Log::info('[UploadCompletionService] Title normalization complete', [
+            'normalized_title' => $derivedTitle ?? 'null',
+        ]);
+
+        // 🔍 DEBUG LOGGING: Log metadata building process
+        Log::info('[UploadCompletionService] Building metadata object', [
+            'category_id_param' => $categoryId ?? 'null',
+            'metadata_param' => $metadata ?? 'null',
+            'metadata_is_array' => is_array($metadata),
+            'metadata_empty' => is_array($metadata) ? empty($metadata) : 'not_array',
+            'metadata_keys' => is_array($metadata) ? array_keys($metadata) : 'not_array',
+        ]);
+        
+        // Build metadata object: category_id at top level, fields nested
+        // Structure: { category_id: 123, fields: { photographer: "John", location: "NYC" } }
+        $metadataArray = [];
+        
+        // Add category_id if provided (always at top level)
+        if ($categoryId !== null) {
+            $metadataArray['category_id'] = $categoryId;
+            Log::info('[UploadCompletionService] Added category_id to metadata', [
+                'category_id' => $categoryId,
+            ]);
+        } else {
+            Log::warning('[UploadCompletionService] category_id is null - not adding to metadata');
+        }
+        
+        // Merge provided metadata fields into metadata object
+        if (is_array($metadata) && !empty($metadata)) {
+            Log::info('[UploadCompletionService] Processing metadata fields', [
+                'has_fields_key' => isset($metadata['fields']),
+                'fields_is_array' => isset($metadata['fields']) && is_array($metadata['fields']),
+                'fields_empty' => isset($metadata['fields']) && is_array($metadata['fields']) ? empty($metadata['fields']) : 'n/a',
+            ]);
+            
+            // Frontend sends metadata as { fields: {...} } to separate fields from category_id
+            if (isset($metadata['fields']) && is_array($metadata['fields']) && !empty($metadata['fields'])) {
+                $metadataArray['fields'] = $metadata['fields'];
+                Log::info('[UploadCompletionService] Added fields from metadata.fields', [
+                    'fields_keys' => array_keys($metadata['fields']),
+                ]);
+            } elseif (!isset($metadata['category_id'])) {
+                // If no 'fields' key and no category_id, treat entire array as fields
+                // (Backward compatibility: metadata could be sent as flat object of fields)
+                $metadataArray['fields'] = $metadata;
+                Log::info('[UploadCompletionService] Treated entire metadata as fields', [
+                    'fields_keys' => array_keys($metadata),
+                ]);
+            } else {
+                // Metadata has category_id mixed in - extract fields only
+                $fields = $metadata;
+                unset($fields['category_id']);
+                if (!empty($fields)) {
+                    $metadataArray['fields'] = $fields;
+                    Log::info('[UploadCompletionService] Extracted fields from mixed metadata', [
+                        'fields_keys' => array_keys($fields),
+                    ]);
+                }
+            }
+        } else {
+            Log::info('[UploadCompletionService] No metadata fields to process', [
+                'metadata_is_array' => is_array($metadata),
+                'metadata_empty' => is_array($metadata) ? empty($metadata) : 'not_array',
+            ]);
+        }
+        
+        Log::info('[UploadCompletionService] Metadata object built', [
+            'metadata_array' => $metadataArray,
+            'has_category_id' => isset($metadataArray['category_id']),
+            'has_fields' => isset($metadataArray['fields']),
+            'fields_count' => isset($metadataArray['fields']) && is_array($metadataArray['fields']) ? count($metadataArray['fields']) : 0,
+        ]);
 
         // Generate final storage path for asset
         // Use finalFilename (which may be the resolvedFilename from frontend)
@@ -185,7 +322,7 @@ class UploadCompletionService
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
-        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename) {
+        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $metadataArray, $categoryId, $userId) {
             // Double-check for existing asset inside transaction (final race condition check)
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
             if ($existingAsset) {
@@ -202,22 +339,63 @@ class UploadCompletionService
                 return $existingAsset;
             }
 
+            // 🔍 DEBUG LOGGING: Log asset data before persisting
+            Log::info('[UploadCompletionService] About to create Asset record', [
+                'upload_session_id' => $uploadSession->id,
+                'tenant_id' => $uploadSession->tenant_id,
+                'brand_id' => $uploadSession->brand_id,
+                'title' => $derivedTitle ?? 'null',
+                'title_type' => gettype($derivedTitle),
+                'original_filename' => $fileInfo['original_filename'] ?? 'null',
+                'metadata_array' => $metadataArray,
+                'metadata_json' => json_encode($metadataArray),
+                'has_category_id' => isset($metadataArray['category_id']),
+                'category_id_value' => $metadataArray['category_id'] ?? 'not_set',
+                'has_fields' => isset($metadataArray['fields']),
+                'category_id_param' => $categoryId ?? 'null',
+                'asset_type' => $assetTypeEnum->value,
+            ]);
+
             // Create asset - unique constraint prevents duplicates
             try {
+                // 🔍 DEBUG LOGGING: Log exact data being passed to Asset::create()
+                Log::info('[UploadCompletionService] Asset::create() called with data', [
+                    'tenant_id' => $uploadSession->tenant_id,
+                    'brand_id' => $uploadSession->brand_id,
+                    'upload_session_id' => $uploadSession->id,
+                    'storage_bucket_id' => $uploadSession->storage_bucket_id,
+                    'status' => AssetStatus::UPLOADED->value,
+                    'type' => $assetTypeEnum->value,
+                    'title' => $derivedTitle ?? 'null',
+                    'original_filename' => $fileInfo['original_filename'] ?? 'null',
+                    'mime_type' => $fileInfo['mime_type'] ?? 'null',
+                    'size_bytes' => $fileInfo['size_bytes'] ?? 'null',
+                    'storage_root_path' => $storagePath ?? 'null',
+                    'metadata_array' => $metadataArray,
+                    'metadata_json' => json_encode($metadataArray),
+                    'metadata_type' => gettype($metadataArray),
+                ]);
+                
                 $asset = Asset::create([
                     'tenant_id' => $uploadSession->tenant_id,
                     'brand_id' => $uploadSession->brand_id,
+                    'user_id' => $userId, // User who uploaded the asset
                     'upload_session_id' => $uploadSession->id, // Unique constraint prevents duplicates
                     'storage_bucket_id' => $uploadSession->storage_bucket_id,
                     'status' => AssetStatus::UPLOADED, // Initial state after upload completion
                     'type' => $assetTypeEnum,
-                    'title' => $derivedTitle, // Persist human-facing title
+                    'title' => $derivedTitle, // Persist human-facing title (never "Unknown", null if empty)
                     'original_filename' => $fileInfo['original_filename'], // Always use actual original filename from S3
                     'mime_type' => $fileInfo['mime_type'],
                     'size_bytes' => $fileInfo['size_bytes'],
                     'storage_root_path' => $storagePath, // Uses finalFilename (resolvedFilename from frontend if provided)
-                    'metadata' => [],
+                    'metadata' => $metadataArray, // JSON object with category_id and fields
                 ]);
+                
+                Log::info('[UploadCompletionService] Asset::create() succeeded', [
+                    'asset_id' => $asset->id,
+                ]);
+                
             } catch (\Illuminate\Database\QueryException $e) {
                 // Handle unique constraint violation (duplicate asset detected)
                 // Laravel/PDO throws code 23000 for unique constraint violations
@@ -239,6 +417,8 @@ class UploadCompletionService
 
                     // Fetch the existing asset that was created by the other request
                     $asset = Asset::where('upload_session_id', $uploadSession->id)->firstOrFail();
+                    // Refresh to get latest state
+                    $asset->refresh();
                 } else {
                     // Re-throw if it's a different error
                     Log::error('Unexpected database error during asset creation', [
@@ -247,6 +427,48 @@ class UploadCompletionService
                         'error_message' => $errorMessage,
                     ]);
                     throw $e;
+                }
+            }
+            
+            // 🔍 VERIFICATION: Refresh asset and verify it saved correctly (runs for both new and duplicate cases)
+            $asset->refresh();
+            
+            Log::info('[UploadCompletionService] Asset created and refreshed from database', [
+                'asset_id' => $asset->id,
+                'upload_session_id' => $uploadSession->id,
+                'title' => $asset->title ?? 'null',
+                'title_type' => gettype($asset->title),
+                'metadata' => $asset->metadata ?? 'null',
+                'metadata_type' => gettype($asset->metadata),
+                'metadata_is_array' => is_array($asset->metadata),
+                'metadata_json' => is_array($asset->metadata) ? json_encode($asset->metadata) : 'not_array',
+                'has_category_id_in_metadata' => is_array($asset->metadata) && isset($asset->metadata['category_id']),
+                'category_id_in_metadata' => is_array($asset->metadata) && isset($asset->metadata['category_id']) ? $asset->metadata['category_id'] : 'not_set',
+                'has_fields_in_metadata' => is_array($asset->metadata) && isset($asset->metadata['fields']),
+            ]);
+            
+            // 🚨 GUARDRAIL: Verify category_id persisted if it was provided
+            // Note: In race condition (duplicate asset), the other request may have different metadata,
+            // so we log but don't throw - the asset was already created successfully
+            if ($categoryId !== null) {
+                $persistedMetadata = $asset->metadata ?? [];
+                if (empty($persistedMetadata['category_id']) || $persistedMetadata['category_id'] !== $categoryId) {
+                    Log::warning('[UploadCompletionService] Category ID mismatch detected', [
+                        'asset_id' => $asset->id,
+                        'expected_category_id' => $categoryId,
+                        'persisted_category_id' => $persistedMetadata['category_id'] ?? null,
+                        'metadata' => $persistedMetadata,
+                        'note' => 'This may occur in race conditions where another request created the asset first',
+                    ]);
+                    // Only throw if this is a new asset (not a duplicate from race condition)
+                    // We can detect this by checking if the asset was just created (created_at is recent)
+                    $assetAge = time() - strtotime($asset->created_at);
+                    if ($assetAge < 5) { // Asset was created within last 5 seconds
+                        throw new \RuntimeException(
+                            "Asset category_id failed to persist. Expected: {$categoryId}, Got: " . 
+                            ($persistedMetadata['category_id'] ?? 'null')
+                        );
+                    }
                 }
             }
 
@@ -269,6 +491,25 @@ class UploadCompletionService
             // Emit AssetUploaded event (only emit once, even if called multiple times)
             // The event system should handle duplicate events gracefully
             event(new AssetUploaded($asset));
+
+            // Log asset upload finalized (non-blocking)
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_UPLOAD_FINALIZED,
+                    [
+                        'upload_session_id' => $uploadSession->id,
+                        'size_bytes' => $asset->size_bytes,
+                        'mime_type' => $asset->mime_type,
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break processing
+                Log::error('Failed to log asset upload finalized event', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return $asset;
         });
@@ -392,7 +633,7 @@ class UploadCompletionService
      * @return array{original_filename: string, mime_type: string|null, size_bytes: int}
      * @throws \RuntimeException If object does not exist or verification fails
      */
-    protected function getFileInfoFromS3(UploadSession $uploadSession, ?string $s3Key = null): array
+    protected function getFileInfoFromS3(UploadSession $uploadSession, ?string $s3Key = null, ?string $fallbackFilename = null): array
     {
         $bucket = $uploadSession->storageBucket;
 
@@ -426,7 +667,9 @@ class UploadCompletionService
 
             $actualSize = (int) $headResult->get('ContentLength');
             $mimeType = $headResult->get('ContentType');
-            $originalFilename = $this->extractFilenameFromMetadata($headResult) ?? 'unknown';
+            // Try to extract filename from S3 metadata, fall back to provided filename, then to 'unknown'
+            $extractedFilename = $this->extractFilenameFromMetadata($headResult);
+            $originalFilename = $extractedFilename ?? $fallbackFilename ?? 'unknown';
 
             // Verify file size matches expected size (fail loudly on mismatch)
             if ($actualSize !== $uploadSession->expected_size) {

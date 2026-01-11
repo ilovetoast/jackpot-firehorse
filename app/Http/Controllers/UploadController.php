@@ -122,25 +122,88 @@ class UploadController extends Controller
             ], 403);
         }
 
-        // Validate request
-        $validated = $request->validate([
-            'upload_session_id' => 'required|uuid|exists:upload_sessions,id',
-            'asset_type' => 'nullable|string|in:asset,marketing,ai_generated',
-            'title' => 'nullable|string|max:255',
-            'filename' => 'nullable|string|max:255',
+        // 🔍 DEBUG LOGGING: Log raw request before validation
+        Log::info('[Upload Complete] Raw request received', [
+            'upload_session_id' => $request->input('upload_session_id'),
+            'asset_type' => $request->input('asset_type'),
+            'title' => $request->input('title'),
+            'filename' => $request->input('filename'),
+            'category_id' => $request->input('category_id'),
+            'metadata' => $request->input('metadata'),
+            'all_input' => $request->all(),
         ]);
+
+        // Validate request - enforce required fields and types
+        // Note: asset_type is nullable for backward compatibility, defaults to 'asset' if not provided
+        try {
+            $validated = $request->validate([
+                'upload_session_id' => 'required|uuid|exists:upload_sessions,id',
+                'asset_type' => 'nullable|string|in:asset,marketing,ai_generated',
+                'filename' => 'nullable|string|max:255',
+                'title' => 'nullable|string|max:255',
+                'category_id' => 'nullable|integer',
+                'metadata' => 'nullable|array',
+            ]);
+            
+            // Default asset_type to 'asset' if not provided (backward compatibility)
+            if (empty($validated['asset_type'])) {
+                $validated['asset_type'] = 'asset';
+            }
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Log validation errors for debugging
+            Log::error('[Upload Complete] Validation failed', [
+                'errors' => $e->errors(),
+                'request_data' => $request->all(),
+            ]);
+            
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
         // Get upload session
         $uploadSession = UploadSession::where('id', $validated['upload_session_id'])
             ->where('tenant_id', $tenant->id)
             ->firstOrFail();
 
+        // 🔍 DEBUG LOGGING: Log validated payload before processing
+        $categoryId = isset($validated['category_id']) ? (int) $validated['category_id'] : null;
+        Log::info('[Upload Complete] Validated payload before calling service', [
+            'upload_session_id' => $validated['upload_session_id'],
+            'asset_type' => $validated['asset_type'] ?? 'asset (default)',
+            'title' => $validated['title'] ?? 'null',
+            'filename' => $validated['filename'] ?? 'null',
+            'category_id' => $categoryId ?? 'null',
+            'metadata' => $validated['metadata'] ?? 'null',
+            'metadata_type' => gettype($validated['metadata'] ?? null),
+            'metadata_keys' => is_array($validated['metadata'] ?? null) ? array_keys($validated['metadata']) : 'not_array',
+        ]);
+
         try {
+            // Pass all values explicitly (no silent nulls)
+            Log::info('[Upload Complete] Calling completion service with parameters', [
+                'upload_session_id' => $uploadSession->id,
+                'asset_type' => $validated['asset_type'] ?? null,
+                'filename' => $validated['filename'] ?? null,
+                'title' => $validated['title'] ?? null,
+                'category_id' => $categoryId,
+                'metadata' => $validated['metadata'] ?? null,
+            ]);
+            
+            // Get authenticated user
+            $user = Auth::user();
+            $userId = $user ? $user->id : null;
+
             $asset = $this->completionService->complete(
                 $uploadSession,
                 $validated['asset_type'] ?? null,
                 $validated['filename'] ?? null,
-                $validated['title'] ?? null
+                $validated['title'] ?? null,
+                null, // $s3Key - optional, will be determined
+                $categoryId,
+                $validated['metadata'] ?? null,
+                $userId // User who uploaded the asset
             );
 
             // Refresh upload session to get updated status

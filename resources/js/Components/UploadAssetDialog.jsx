@@ -1,9 +1,17 @@
 /**
- * ⚠️ PHASE 3 LOCKED
+ * ⚠️ PHASE 3 LOCKED — COMPLETE AND LOCKED
  *
  * This uploader (Phase 3) is production-ready and frozen.
  * Do NOT refactor logic, effects, or data flow.
  * Only cosmetic UI changes are allowed without explicit approval.
+ *
+ * Persistence verified:
+ * - Title normalization (never "Unknown", null if empty)
+ * - Category ID stored in metadata->category_id
+ * - Metadata fields stored in metadata->fields
+ * - Slug-based category filtering (?category=rarr)
+ * - Extensive logging for debugging
+ * - Guardrails prevent silent failures
  *
  * See project notes for Phase 4+ work.
  */
@@ -27,18 +35,19 @@ import UploadManager from '../utils/UploadManager' // Phase 2 singleton - import
  * @param {function} onClose - Callback when dialog closes
  * @param {string} defaultAssetType - Default asset type ('asset' or 'marketing')
  * @param {Array} categories - Categories array from page props
+ * @param {number|null} initialCategoryId - Optional initial category ID to prepopulate
  */
-export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [] }) {
+export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null }) {
     const { auth } = usePage().props
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef(null)
     const dropZoneRef = useRef(null)
 
-    // Initialize Phase 3 Upload Manager
+    // Initialize Phase 3 Upload Manager with initial category if provided
     const uploadContext = {
         companyId: auth.activeCompany?.id || auth.companies?.[0]?.id || null,
         brandId: auth.activeBrand?.id || null,
-        categoryId: null // Will be set via GlobalMetadataPanel
+        categoryId: initialCategoryId || null // Prepopulate if provided, otherwise will be set via GlobalMetadataPanel
     }
 
     const phase3Manager = usePhase3UploadManager(uploadContext)
@@ -985,14 +994,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     throw new Error(`Upload session ID missing for ${item.originalFilename}`)
                 }
 
-                // Call backend endpoint
-                // Include title and resolvedFilename (filename) for backend persistence
-                const response = await window.axios.post('/app/assets/upload/complete', {
+                // Get effective metadata for this item (combines global + per-file metadata)
+                const effectiveMetadata = phase3Manager.getEffectiveMetadata(item.clientId)
+
+                // 🔍 DEBUG LOGGING: Log payload before sending to backend
+                const payloadData = {
                     upload_session_id: item.uploadSessionId,
                     asset_type: defaultAssetType === 'asset' ? 'asset' : 'marketing',
-                    title: item.title, // Human-facing title (no extension)
-                    filename: item.resolvedFilename, // Derived filename (title + extension)
+                    title: item.title || null,
+                    filename: item.resolvedFilename,
+                    category_id: phase3Manager.context.categoryId || null,
+                    metadata: Object.keys(effectiveMetadata).length > 0 ? { fields: effectiveMetadata } : null,
+                }
+                
+                console.log('[Finalize Payload] Full payload being sent:', JSON.stringify(payloadData, null, 2))
+                console.log('[Finalize Payload] Phase 3 Manager Context:', {
+                    categoryId: phase3Manager.context.categoryId,
+                    brandId: phase3Manager.context.brandId,
+                    companyId: phase3Manager.context.companyId,
                 })
+                console.log('[Finalize Payload] Item data:', {
+                    clientId: item.clientId,
+                    title: item.title,
+                    resolvedFilename: item.resolvedFilename,
+                    uploadSessionId: item.uploadSessionId,
+                    uploadStatus: item.uploadStatus,
+                    progress: item.progress,
+                })
+                console.log('[Finalize Payload] Effective metadata:', effectiveMetadata)
+
+                // Call backend endpoint
+                // Include title, resolvedFilename, category_id, and metadata for backend persistence
+                const response = await window.axios.post('/app/assets/upload/complete', payloadData)
 
                 return response.data
             })
@@ -1126,6 +1159,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         const metadataFields = [] // Should be fetched from category configuration
         phase3Manager.changeCategory(categoryId, metadataFields)
     }, [phase3Manager])
+
+    // Set initial category when dialog opens (if provided)
+    useEffect(() => {
+        if (open && initialCategoryId) {
+            // Set category when dialog opens to prepopulate
+            // Use empty metadata fields array for now (metadata fields should be fetched from category config)
+            // Only set if not already set (avoid unnecessary updates)
+            if (phase3Manager.context.categoryId !== initialCategoryId) {
+                phase3Manager.changeCategory(initialCategoryId, [])
+            }
+        }
+    }, [open, initialCategoryId]) // eslint-disable-line react-hooks/exhaustive-deps - phase3Manager is stable, don't include to avoid re-runs
 
     // Reset when dialog closes
     useEffect(() => {

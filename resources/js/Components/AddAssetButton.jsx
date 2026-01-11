@@ -9,17 +9,18 @@ import UploadAssetDialog from './UploadAssetDialog'
 /**
  * AddAssetButton - Button to open upload dialog (gated by permissions)
  * 
- * ⚠️ Phase 2 verification UI — NOT final UX.
- * Safe to refactor or remove in Phase 3.
- * 
  * @param {string} defaultAssetType - Default asset type ('asset' or 'marketing')
  * @param {Array} categories - Categories array from page props
  * @param {string} buttonText - Optional button text override
+ * @param {number|null} initialCategoryId - Optional category ID to prepopulate in dialog
+ * @param {string} className - Optional additional CSS classes
  */
 export default function AddAssetButton({ 
     defaultAssetType = 'asset', 
     categories = [],
-    buttonText = null 
+    buttonText = null,
+    initialCategoryId = null,
+    className = ''
 }) {
     const { auth } = usePage().props
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -28,14 +29,12 @@ export default function AddAssetButton({
         ? 'Add Asset' 
         : 'Add Marketing Asset'
 
-    // TODO: Add assets.upload permission to PermissionSeeder and use PermissionGate
-    // For now, showing button to all authenticated users (per requirements: no new permissions)
     return (
         <>
             <button
                 type="button"
                 onClick={() => setDialogOpen(true)}
-                className="inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-colors"
+                className={`inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-colors ${className}`}
                 style={{
                     backgroundColor: auth.activeBrand?.primary_color || '#6366f1'
                 }}
@@ -68,6 +67,7 @@ export default function AddAssetButton({
                 onClose={() => setDialogOpen(false)}
                 defaultAssetType={defaultAssetType}
                 categories={categories}
+                initialCategoryId={initialCategoryId}
             />
         </>
     )

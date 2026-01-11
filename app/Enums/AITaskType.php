@@ -29,6 +29,7 @@ class AITaskType
     // Audit and reporting tasks
     public const AUDIT_REPORT_GENERATION = 'audit_report_generation';
     public const PERFORMANCE_ANALYSIS = 'performance_analysis';
+    public const SYSTEM_RELIABILITY_ANALYSIS = 'system_reliability_analysis';
     
     // Asset management tasks (future)
     public const ASSET_TAG_SUGGESTION = 'asset_tag_suggestion';
@@ -48,6 +49,7 @@ class AITaskType
             self::DUPLICATE_TICKET_DETECTION,
             self::AUDIT_REPORT_GENERATION,
             self::PERFORMANCE_ANALYSIS,
+            self::SYSTEM_RELIABILITY_ANALYSIS,
             self::ASSET_TAG_SUGGESTION,
         ];
     }
@@ -79,7 +81,7 @@ class AITaskType
                 self::DUPLICATE_TICKET_DETECTION,
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
-            'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS],
+            'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
             'asset' => [self::ASSET_TAG_SUGGESTION],
         ];
         

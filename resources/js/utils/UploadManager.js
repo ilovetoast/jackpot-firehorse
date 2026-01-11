@@ -803,7 +803,17 @@ class UploadManager {
     }
 
     /**
-     * Complete upload session with backend
+     * Complete upload session (Phase 2 local completion only)
+     * 
+     * NOTE: This method only marks the upload as complete in Phase 2 state.
+     * It does NOT call the backend /complete endpoint.
+     * 
+     * Backend finalization (with title, category_id, metadata) is handled by Phase 3
+     * when the user clicks "Finalize Assets" in the upload dialog.
+     * 
+     * This prevents assets from being created without metadata when Phase 2
+     * automatically completes uploads before the user finalizes.
+     * 
      * @param {string} clientReference
      */
     async completeUpload(clientReference) {
@@ -812,42 +822,22 @@ class UploadManager {
             throw new Error('Cannot complete upload: missing uploadSessionId')
         }
 
-        try {
-            const response = await window.axios.post('/app/assets/upload/complete', {
-                upload_session_id: upload.uploadSessionId,
-            })
+        // Phase 2 completion: Only mark as complete locally, do NOT call backend
+        // Backend finalization with metadata (title, category_id, metadata fields) is handled by Phase 3's handleFinalize()
+        // This prevents assets from being created without metadata when Phase 2 automatically completes uploads
+        upload.status = 'completed'
+        upload.progress = 100
+        upload.error = null
+        upload.lastUpdatedAt = Date.now()
+        this.activeUploads.delete(clientReference)
+        this.stopActivityUpdates(clientReference)
+        this.persistToStorage()
+        this.notifyListeners()
 
-            upload.status = 'completed'
-            upload.progress = 100
-            upload.error = null
-            upload.lastUpdatedAt = Date.now()
-            this.activeUploads.delete(clientReference)
-            this.stopActivityUpdates(clientReference)
-            this.persistToStorage()
-            this.notifyListeners()
-
-            // Remove from active uploads after a delay (allow UI to show completion)
-            setTimeout(() => {
-                this.removeUpload(clientReference)
-            }, 5000)
-        } catch (error) {
-            upload.status = 'failed'
-            // Phase 2.5: Classify and store structured error
-            const errorInfo = this.classifyError(error, error.response?.status, null)
-            upload.error = errorInfo.message || error.response?.data?.message || error.message || 'Failed to complete upload'
-            upload.errorInfo = errorInfo
-            upload.diagnostics = upload.diagnostics || {}
-            upload.diagnostics.last_error_type = errorInfo.type
-            upload.diagnostics.last_error_message = errorInfo.message
-            if (errorInfo.http_status) {
-                upload.diagnostics.last_http_status = errorInfo.http_status
-            }
-            upload.lastUpdatedAt = Date.now()
-            this.activeUploads.delete(clientReference)
-            this.stopActivityUpdates(clientReference)
-            this.persistToStorage()
-            this.notifyListeners()
-        }
+        // Remove from active uploads after a delay (allow UI to show completion)
+        setTimeout(() => {
+            this.removeUpload(clientReference)
+        }, 5000)
     }
 
     /**

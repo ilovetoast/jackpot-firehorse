@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { usePage } from '@inertiajs/react'
+import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
+import AssetGrid from '../../Components/AssetGrid'
+import AssetDetailDrawer from '../../Components/AssetDetailDrawer'
 import {
     TagIcon,
     SparklesIcon,
@@ -9,10 +11,28 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function MarketingAssetsIndex({ categories, selected_category, show_all_button = false }) {
+export default function MarketingAssetsIndex({ categories, selected_category, show_all_button = false, assets = [] }) {
     const { auth } = usePage().props
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+    const [activeAsset, setActiveAsset] = useState(null) // Asset selected for drawer
+
+    // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
+    const handleCategorySelect = (category) => {
+        const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
+        const categorySlug = category?.slug ?? null
+        
+        setSelectedCategoryId(categoryId)
+        
+        router.get('/app/marketing-assets', 
+            categorySlug ? { category: categorySlug } : {},
+            { 
+                preserveState: true, 
+                preserveScroll: true,
+                only: ['assets', 'selected_category', 'selected_category_slug'] // Only reload assets and category props
+            }
+        )
+    }
 
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
@@ -39,6 +59,18 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                     <div className="flex flex-col w-72 h-full" style={{ backgroundColor: sidebarColor }}>
                         <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
                             <nav className="mt-5 flex-1 px-2 space-y-1">
+                                {/* Add Marketing Asset Button - Persistent in sidebar (only show if user has upload permissions) */}
+                                {auth?.user && (
+                                    <div className="px-3 py-2 mb-4">
+                                        <AddAssetButton 
+                                            defaultAssetType="marketing" 
+                                            categories={categories || []}
+                                            initialCategoryId={selectedCategoryId}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                )}
+                                
                                 {/* Categories */}
                                 <div className="px-3 py-2">
                                     <h3 className="px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
@@ -48,7 +80,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                         {/* "All" button - only shown for non-free plans */}
                                         {show_all_button && (
                                             <button
-                                                onClick={() => setSelectedCategoryId(null)}
+                                                onClick={() => handleCategorySelect(null)}
                                                 className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                 style={{
                                                     backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent',
@@ -73,7 +105,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                             categories.map((category) => (
                                                 <button
                                                     key={category.id || `template-${category.slug}-${category.asset_type}`}
-                                                    onClick={() => setSelectedCategoryId(category.id)}
+                                                    onClick={() => handleCategorySelect(category)}
                                                     className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
                                                         backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent',
@@ -150,29 +182,41 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-y-auto bg-gray-50 h-full">
                     <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Marketing Assets Content - Empty State */}
-                        <div className="max-w-2xl mx-auto py-16 px-6 text-center">
-                            <div className="mb-8">
-                                <SparklesIcon className="mx-auto h-16 w-16 text-gray-300" />
+                        {/* Marketing Assets Grid or Empty State */}
+                        {assets && assets.length > 0 ? (
+                            <AssetGrid assets={assets} onAssetClick={setActiveAsset} />
+                        ) : (
+                            <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                <div className="mb-8">
+                                    <SparklesIcon className="mx-auto h-16 w-16 text-gray-300" />
+                                </div>
+                                <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
+                                    {selectedCategoryId ? 'No marketing assets in this category yet' : 'No marketing assets yet'}
+                                </h2>
+                                <p className="mt-4 text-base leading-7 text-gray-600">
+                                    {selectedCategoryId
+                                        ? 'Get started by uploading your first marketing asset to this category. Manage your brand assets with ease and keep everything organized.'
+                                        : 'Get started by selecting a category or uploading your first marketing asset. Manage your brand assets with ease and keep everything in sync.'}
+                                </p>
+                                <div className="mt-8">
+                                    <AddAssetButton 
+                                        defaultAssetType="marketing" 
+                                        categories={categories || []}
+                                    />
+                                </div>
                             </div>
-                            <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                {selectedCategoryId ? 'No marketing assets in this category yet' : 'No marketing assets yet'}
-                            </h2>
-                            <p className="mt-4 text-base leading-7 text-gray-600">
-                                {selectedCategoryId
-                                    ? 'Get started by uploading your first marketing asset to this category. Manage your brand assets with ease and keep everything organized.'
-                                    : 'Get started by selecting a category or uploading your first marketing asset. Manage your brand assets with ease and keep everything in sync.'}
-                            </p>
-                            <div className="mt-8">
-                                <AddAssetButton 
-                                    defaultAssetType="marketing" 
-                                    categories={categories || []}
-                                />
-                            </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {/* Asset Detail Drawer */}
+            {activeAsset && (
+                <AssetDetailDrawer
+                    asset={activeAsset}
+                    onClose={() => setActiveAsset(null)}
+                />
+            )}
         </div>
     )
 }

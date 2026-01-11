@@ -194,6 +194,16 @@ return [
                 'tickets.view_staff',
             ],
         ],
+        'system_reliability_agent' => [
+            'name' => 'System Reliability Agent',
+            'description' => 'Analyzes system health and generates reliability insights',
+            'scope' => 'system',
+            'default_model' => 'gpt-4-turbo',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // System-level agent - no specific permissions required
+            ],
+        ],
     ],
 
     /*

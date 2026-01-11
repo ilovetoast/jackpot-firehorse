@@ -42,4 +42,56 @@ return [
         'include_soft_deleted' => false,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Thumbnail Styles
+    |--------------------------------------------------------------------------
+    |
+    | Canonical thumbnail style definitions for asset preview generation.
+    | These styles are used consistently across the application for:
+    |   - Grid thumbnails (thumb)
+    |   - Drawer previews (medium)
+    |   - High-resolution previews (large)
+    |
+    | All thumbnails are generated atomically per asset via GenerateThumbnailsJob.
+    | Thumbnails are stored in S3 alongside the original asset.
+    |
+    */
+
+    'thumbnail_styles' => [
+        /*
+         * Small grid thumbnail.
+         * Used for asset grid views and list previews.
+         */
+        'thumb' => [
+            'width' => 320,
+            'height' => 320,
+            'quality' => 85,
+            'fit' => 'contain', // maintain aspect ratio, fit within dimensions
+        ],
+
+        /*
+         * Medium drawer preview.
+         * Used for asset detail drawers and modal previews.
+         */
+        'medium' => [
+            'width' => 1024,
+            'height' => 1024,
+            'quality' => 90,
+            'fit' => 'contain', // maintain aspect ratio, fit within dimensions
+        ],
+
+        /*
+         * Large high-resolution preview.
+         * Used for full-screen previews and high-quality displays.
+         * Maximum dimension capped at 4096px to prevent excessive processing.
+         */
+        'large' => [
+            'width' => 4096,
+            'height' => 4096,
+            'quality' => 95,
+            'fit' => 'contain', // maintain aspect ratio, fit within dimensions
+        ],
+    ],
+
 ];

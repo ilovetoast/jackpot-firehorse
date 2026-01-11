@@ -62,6 +62,14 @@ class EventType
     public const ASSET_VERSION_ADDED = 'asset.version_added';
     public const ASSET_PREVIEWED = 'asset.previewed';
     public const ASSET_METADATA_UPDATED = 'asset.metadata_updated';
+    
+    // Asset lifecycle events (processing pipeline)
+    public const ASSET_UPLOAD_FINALIZED = 'asset.upload.finalized';
+    public const ASSET_THUMBNAIL_STARTED = 'asset.thumbnail.started';
+    public const ASSET_THUMBNAIL_COMPLETED = 'asset.thumbnail.completed';
+    public const ASSET_THUMBNAIL_FAILED = 'asset.thumbnail.failed';
+    public const ASSET_PROMOTED = 'asset.promoted';
+    public const ASSET_READY = 'asset.ready';
 
     // Asset download events (explicit logging required)
     public const ASSET_DOWNLOAD_CREATED = 'asset.download.created';
@@ -130,6 +138,9 @@ class EventType
     public const AI_BUDGET_WARNING_TRIGGERED = 'ai.budget.warning_triggered';
     public const AI_BUDGET_EXCEEDED = 'ai.budget.exceeded';
     public const AI_BUDGET_BLOCKED = 'ai.budget.blocked';
+
+    // AI System Insight events
+    public const AI_SYSTEM_INSIGHT = 'ai.system_insight';
 
     /**
      * Get all event types as an array.
@@ -217,6 +228,7 @@ class EventType
             self::AI_BUDGET_WARNING_TRIGGERED,
             self::AI_BUDGET_EXCEEDED,
             self::AI_BUDGET_BLOCKED,
+            self::AI_SYSTEM_INSIGHT,
         ];
     }
 

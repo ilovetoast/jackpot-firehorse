@@ -8,6 +8,15 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// Scheduler heartbeat (records that scheduler is running)
+// This is used by System Status page to detect if scheduler is healthy
+Schedule::call(function () {
+    \Illuminate\Support\Facades\Cache::put('laravel_scheduler_last_heartbeat', now()->toIso8601String(), now()->addMinutes(10));
+})->everyMinute()
+    ->name('scheduler:heartbeat')
+    ->withoutOverlapping()
+    ->description('Record scheduler heartbeat for health monitoring');
+
 // TODO: Uncomment when PruneAILogs deletion logic is implemented
 // Schedule::command('ai:prune-logs --force')
 //     ->daily()

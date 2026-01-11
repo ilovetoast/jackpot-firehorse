@@ -80,6 +80,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/admin/permissions', [\App\Http\Controllers\SiteAdminController::class, 'permissions'])->name('admin.permissions');
     Route::get('/admin/stripe-status', [\App\Http\Controllers\SiteAdminController::class, 'stripeStatus'])->name('admin.stripe-status');
     Route::get('/admin/documentation', [\App\Http\Controllers\SiteAdminController::class, 'documentation'])->name('admin.documentation');
+    Route::get('/admin/system-status', [\App\Http\Controllers\Admin\SystemStatusController::class, 'index'])->name('admin.system-status');
     Route::get('/admin/notifications', [\App\Http\Controllers\Admin\NotificationController::class, 'index'])->name('admin.notifications');
     Route::post('/admin/notifications/seed', [\App\Http\Controllers\Admin\NotificationController::class, 'seed'])->name('admin.notifications.seed');
     Route::get('/admin/notifications/{template}', [\App\Http\Controllers\Admin\NotificationController::class, 'edit'])->name('admin.notifications.edit');
@@ -163,15 +164,12 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::middleware('tenant')->group(function () {
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
-            Route::get('/dashboard', function () {
-                return Inertia::render('Dashboard', [
-                    'tenant' => app('tenant'),
-                    'brand' => app('brand'),
-                ]);
-            })->name('dashboard');
+            Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'index'])->name('dashboard');
 
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
+            Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
+            Route::get('/assets/{asset}/thumbnail/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'show'])->name('assets.thumbnail');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/marketing-assets', [\App\Http\Controllers\MarketingAssetController::class, 'index'])->name('marketing-assets.index');
 

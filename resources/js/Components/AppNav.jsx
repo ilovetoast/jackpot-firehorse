@@ -255,30 +255,28 @@ export default function AppNav({ brand, tenant }) {
                             <div className="hidden sm:flex sm:space-x-8 absolute" style={{ left: '18rem' }}>
                                 <Link
                                     href="/app/assets"
-                                    className={`inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium ${
-                                        currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
-                                            ? 'border-primary'
-                                            : 'border-transparent'
-                                    }`}
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
                                             ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
                                     }}
                                 >
                                     Assets
                                 </Link>
                                 <Link
                                     href="/app/marketing-assets"
-                                    className={`inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium ${
-                                        currentUrl.startsWith('/app/marketing-assets')
-                                            ? 'border-primary'
-                                            : 'border-transparent'
-                                    }`}
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/marketing-assets')
                                             ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/marketing-assets')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
                                     }}
                                 >
                                     Marketing Assets
@@ -288,30 +286,28 @@ export default function AppNav({ brand, tenant }) {
                             <div className="hidden sm:flex sm:space-x-8 sm:ml-6">
                                 <Link
                                     href="/app/assets"
-                                    className={`inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium ${
-                                        currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
-                                            ? 'border-primary'
-                                            : 'border-transparent'
-                                    }`}
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
                                             ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
                                     }}
                                 >
                                     Assets
                                 </Link>
                                 <Link
                                     href="/app/marketing-assets"
-                                    className={`inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium ${
-                                        currentUrl.startsWith('/app/marketing-assets')
-                                            ? 'border-primary'
-                                            : 'border-transparent'
-                                    }`}
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
                                         color: currentUrl.startsWith('/app/marketing-assets')
                                             ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/marketing-assets')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
                                     }}
                                 >
                                     Marketing Assets

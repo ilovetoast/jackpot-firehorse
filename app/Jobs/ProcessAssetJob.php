@@ -102,12 +102,21 @@ class ProcessAssetJob implements ShouldQueue
         ]);
 
         // Dispatch processing chain using Bus::chain()
+        // Processing pipeline:
+        // 1. ExtractMetadataJob - Extract file metadata
+        // 2. GenerateThumbnailsJob - Generate thumbnail styles
+        // 3. GeneratePreviewJob - Generate preview images
+        // 4. AITaggingJob - AI-powered tagging
+        // 5. FinalizeAssetJob - Mark asset as completed
+        // 6. PromoteAssetJob - Move from temp/ to canonical assets/ location
+        //    (runs after thumbnail generation, requires COMPLETED status)
         Bus::chain([
             new ExtractMetadataJob($asset->id),
             new GenerateThumbnailsJob($asset->id),
             new GeneratePreviewJob($asset->id),
             new AITaggingJob($asset->id),
             new FinalizeAssetJob($asset->id),
+            new PromoteAssetJob($asset->id),
         ])->dispatch();
     }
 

@@ -62,7 +62,7 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
         { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },
         { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
         { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
-        { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '#' },
+        { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
         ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
         { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
         { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },

@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
+use App\Services\ThumbnailGenerationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -13,6 +15,21 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Generate Asset Thumbnails Job
+ *
+ * Background job that generates all configured thumbnail styles for an asset atomically.
+ * One job per asset (not per style) - generates all styles in a single execution.
+ *
+ * The job:
+ * - Downloads the asset from S3
+ * - Generates all thumbnail styles (thumb, medium, large)
+ * - Uploads thumbnails to S3
+ * - Updates asset metadata with thumbnail paths
+ * - Tracks thumbnail generation status independently
+ *
+ * Asset remains usable even if thumbnail generation fails.
+ */
 class GenerateThumbnailsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -41,15 +58,18 @@ class GenerateThumbnailsJob implements ShouldQueue
 
     /**
      * Execute the job.
+     *
+     * Generates all thumbnail styles for the asset atomically.
+     * Updates thumbnail_status and metadata on success or failure.
      */
-    public function handle(): void
+    public function handle(ThumbnailGenerationService $thumbnailService): void
     {
         $asset = Asset::findOrFail($this->assetId);
 
-        // Idempotency: Check if thumbnails already generated
-        $existingMetadata = $asset->metadata ?? [];
-        if (isset($existingMetadata['thumbnails_generated']) && $existingMetadata['thumbnails_generated'] === true) {
-            Log::info('Thumbnail generation skipped - already generated', [
+        // Idempotency: Check if thumbnails already completed
+        // NULL or PENDING means thumbnails haven't been attempted or are pending
+        if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
+            Log::info('Thumbnail generation skipped - already completed', [
                 'asset_id' => $asset->id,
             ]);
             // Job chaining is handled by Bus::chain() in ProcessAssetJob
@@ -57,72 +77,163 @@ class GenerateThumbnailsJob implements ShouldQueue
             return;
         }
 
-        // Generate thumbnails (stub implementation)
-        $thumbnails = $this->generateThumbnails($asset);
-
-        // Update asset metadata
-        $currentMetadata = $asset->metadata ?? [];
-        $currentMetadata['thumbnails_generated'] = true;
-        $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
-        $currentMetadata['thumbnails'] = $thumbnails;
-
-        // Update status to THUMBNAIL_GENERATED
+        // Update status to processing
         $asset->update([
-            'status' => AssetStatus::THUMBNAIL_GENERATED,
-            'metadata' => $currentMetadata,
+            'thumbnail_status' => ThumbnailStatus::PROCESSING,
+            'thumbnail_error' => null,
         ]);
 
-        // Emit thumbnails generated event
-        AssetEvent::create([
-            'tenant_id' => $asset->tenant_id,
-            'brand_id' => $asset->brand_id,
-            'asset_id' => $asset->id,
-            'user_id' => null,
-            'event_type' => 'asset.thumbnails.generated',
-            'metadata' => [
-                'job' => 'GenerateThumbnailsJob',
+        // Log thumbnail generation started (non-blocking)
+        try {
+            \App\Services\ActivityRecorder::logAsset(
+                $asset,
+                \App\Enums\EventType::ASSET_THUMBNAIL_STARTED,
+                [
+                    'styles' => array_keys(config('assets.thumbnail_styles', [])),
+                ]
+            );
+        } catch (\Exception $e) {
+            // Activity logging must never break processing
+            Log::error('Failed to log thumbnail started event', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            // Generate all thumbnail styles atomically
+            $thumbnails = $thumbnailService->generateThumbnails($asset);
+
+            // Update asset metadata with thumbnail information
+            $currentMetadata = $asset->metadata ?? [];
+            $currentMetadata['thumbnails_generated'] = true;
+            $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
+            $currentMetadata['thumbnails'] = $thumbnails;
+
+            // Update asset status
+            // Note: Asset status remains separate from thumbnail_status
+            // Thumbnail generation can complete independently of other processing steps
+            $asset->update([
+                'status' => AssetStatus::THUMBNAIL_GENERATED,
+                'thumbnail_status' => ThumbnailStatus::COMPLETED,
+                'thumbnail_error' => null,
+                'metadata' => $currentMetadata,
+            ]);
+
+            // Emit thumbnails generated event
+            AssetEvent::create([
+                'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
+                'asset_id' => $asset->id,
+                'user_id' => null,
+                'event_type' => 'asset.thumbnails.generated',
+                'metadata' => [
+                    'job' => 'GenerateThumbnailsJob',
+                    'thumbnail_count' => count($thumbnails),
+                    'styles' => array_keys($thumbnails),
+                ],
+                'created_at' => now(),
+            ]);
+
+            // Log thumbnail generation completed (non-blocking)
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_THUMBNAIL_COMPLETED,
+                    [
+                        'styles' => array_keys($thumbnails),
+                        'thumbnail_count' => count($thumbnails),
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break processing
+                Log::error('Failed to log thumbnail completed event', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            Log::info('Thumbnails generated successfully', [
+                'asset_id' => $asset->id,
                 'thumbnail_count' => count($thumbnails),
-            ],
-            'created_at' => now(),
-        ]);
+                'styles' => array_keys($thumbnails),
+            ]);
+        } catch (\Throwable $e) {
+            // Capture error but don't fail the entire asset processing pipeline
+            $errorMessage = $e->getMessage();
+            
+            $asset->update([
+                'thumbnail_status' => ThumbnailStatus::FAILED,
+                'thumbnail_error' => $errorMessage,
+            ]);
 
-        Log::info('Thumbnails generated', [
-            'asset_id' => $asset->id,
-            'thumbnail_count' => count($thumbnails),
-        ]);
+            // Log thumbnail generation failed (non-blocking)
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
+                    [
+                        'error' => $errorMessage,
+                    ]
+                );
+            } catch (\Exception $logException) {
+                // Activity logging must never break processing
+                Log::error('Failed to log thumbnail failed event', [
+                    'asset_id' => $asset->id,
+                    'error' => $logException->getMessage(),
+                ]);
+            }
+
+            // Update metadata to record failure
+            $currentMetadata = $asset->metadata ?? [];
+            $currentMetadata['thumbnail_generation_failed'] = true;
+            $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
+            $currentMetadata['thumbnail_generation_error'] = $errorMessage;
+            $asset->update(['metadata' => $currentMetadata]);
+
+            Log::error('Thumbnail generation failed', [
+                'asset_id' => $asset->id,
+                'error' => $errorMessage,
+                'attempt' => $this->attempts(),
+            ]);
+
+            // Re-throw to trigger job retry mechanism
+            throw $e;
+        }
 
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
     }
 
     /**
-     * Generate thumbnails for asset (stub implementation).
+     * Handle a job failure after all retries exhausted.
      *
-     * @param Asset $asset
-     * @return array
-     */
-    protected function generateThumbnails(Asset $asset): array
-    {
-        // Stub implementation - future phase will add actual thumbnail generation
-        // Returns empty array for now
-        return [];
-    }
-
-    /**
-     * Handle a job failure.
+     * Records the failure but asset remains usable.
      */
     public function failed(\Throwable $exception): void
     {
         $asset = Asset::find($this->assetId);
 
         if ($asset) {
-            // Use centralized failure recording service
+            // Update thumbnail status to failed
+            $asset->update([
+                'thumbnail_status' => ThumbnailStatus::FAILED,
+                'thumbnail_error' => $exception->getMessage(),
+            ]);
+
+            // Use centralized failure recording service for observability
             app(AssetProcessingFailureService::class)->recordFailure(
                 $asset,
                 self::class,
                 $exception,
                 $this->attempts()
             );
+
+            Log::error('Thumbnail generation job failed after all retries', [
+                'asset_id' => $asset->id,
+                'error' => $exception->getMessage(),
+                'attempts' => $this->attempts(),
+            ]);
         }
     }
 }

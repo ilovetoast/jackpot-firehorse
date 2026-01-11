@@ -261,4 +261,63 @@ class ActivityRecorder
     ): ActivityEvent {
         return self::record($tenant, $eventType, $subject, 'guest', null, $metadata);
     }
+
+    /**
+     * Log asset lifecycle event.
+     * 
+     * Convenience method for logging asset events with consistent structure.
+     * Ensures tenant is resolved from asset, subject is always the asset,
+     * and actor is set to 'system' (null actor_id) for background jobs.
+     * 
+     * This method wraps ActivityRecorder::system() with asset-specific defaults:
+     * - Tenant resolved from asset->tenant_id
+     * - Subject is always the asset
+     * - Actor is 'system' (for background jobs)
+     * 
+     * NOTE: Activity logging must never throw. Failures are logged but never
+     * propagated to the caller. This ensures logging never breaks processing.
+     * 
+     * @param \App\Models\Asset $asset The asset this event is about
+     * @param string $event Event type (e.g., 'asset.upload.finalized', 'asset.thumbnail.completed')
+     * @param array $metadata Additional metadata (e.g., ['styles' => ['thumb', 'medium']])
+     * @return ActivityEvent|null Returns null if logging fails (caller can ignore)
+     */
+    public static function logAsset(
+        \App\Models\Asset $asset,
+        string $event,
+        array $metadata = []
+    ): ?ActivityEvent {
+        // Activity logging must never throw - wrap in try/catch
+        try {
+            // Get tenant ID from asset
+            $tenantId = $asset->tenant_id;
+            
+            if (!$tenantId) {
+                \Log::warning('ActivityRecorder::logAsset called with asset missing tenant_id', [
+                    'asset_id' => $asset->id,
+                    'event' => $event,
+                ]);
+                // Don't throw - just skip logging and return null
+                return null;
+            }
+
+            // Use system() method which sets actor to 'system' (null actor_id)
+            // This is appropriate for background jobs that process assets
+            return self::system(
+                tenant: $tenantId,
+                eventType: $event,
+                subject: $asset,
+                metadata: $metadata
+            );
+        } catch (\Exception $e) {
+            // Swallow exceptions - activity logging must never break processing
+            \Log::error('Failed to log asset activity event', [
+                'asset_id' => $asset->id ?? null,
+                'event' => $event,
+                'error' => $e->getMessage(),
+            ]);
+            // Return null to indicate failure, but don't throw
+            return null;
+        }
+    }
 }

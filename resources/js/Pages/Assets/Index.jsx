@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { usePage } from '@inertiajs/react'
+import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
+import AssetGrid from '../../Components/AssetGrid'
+import AssetDetailDrawer from '../../Components/AssetDetailDrawer'
 import {
     FolderIcon,
     TagIcon,
@@ -9,10 +11,28 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, assets = [] }) {
     const { auth } = usePage().props
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+    const [activeAsset, setActiveAsset] = useState(null) // Asset selected for drawer
+
+    // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
+    const handleCategorySelect = (category) => {
+        const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
+        const categorySlug = category?.slug ?? null
+        
+        setSelectedCategoryId(categoryId)
+        
+        router.get('/app/assets', 
+            categorySlug ? { category: categorySlug } : {},
+            { 
+                preserveState: true, 
+                preserveScroll: true,
+                only: ['assets', 'selected_category', 'selected_category_slug'] // Only reload assets and category props
+            }
+        )
+    }
 
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
@@ -28,6 +48,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
     const hoverBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
     const activeBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'
+    
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
@@ -39,6 +60,18 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     <div className="flex flex-col w-72 h-full" style={{ backgroundColor: sidebarColor }}>
                         <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
                             <nav className="mt-5 flex-1 px-2 space-y-1">
+                                {/* Add Asset Button - Persistent in sidebar (only show if user has upload permissions) */}
+                                {auth?.user && (
+                                    <div className="px-3 py-2 mb-4">
+                                        <AddAssetButton 
+                                            defaultAssetType="asset" 
+                                            categories={categories || []}
+                                            initialCategoryId={selectedCategoryId}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                )}
+                                
                                 {/* Categories */}
                                 <div className="px-3 py-2">
                                     <h3 className="px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
@@ -48,7 +81,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         {/* "All" button - only shown for non-free plans */}
                                         {show_all_button && (
                                             <button
-                                                onClick={() => setSelectedCategoryId(null)}
+                                                onClick={() => handleCategorySelect(null)}
                                                 className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                 style={{
                                                     backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
@@ -78,7 +111,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     return (
                                                     <button
                                                         key={category.id}
-                                                        onClick={() => setSelectedCategoryId(category.id)}
+                                                        onClick={() => handleCategorySelect(category)}
                                                         className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                         style={{
                                                             backgroundColor: isSelected ? activeBgColor : 'transparent',
@@ -156,29 +189,41 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-y-auto bg-gray-50 h-full">
                     <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Assets Content - Empty State */}
-                        <div className="max-w-2xl mx-auto py-16 px-6 text-center">
-                            <div className="mb-8">
-                                <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
+                        {/* Assets Grid or Empty State */}
+                        {assets && assets.length > 0 ? (
+                            <AssetGrid assets={assets} onAssetClick={setActiveAsset} />
+                        ) : (
+                            <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                <div className="mb-8">
+                                    <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
+                                </div>
+                                <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
+                                    {selectedCategoryId ? 'No assets in this category yet' : 'No assets yet'}
+                                </h2>
+                                <p className="mt-4 text-base leading-7 text-gray-600">
+                                    {selectedCategoryId
+                                        ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
+                                        : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
+                                </p>
+                                <div className="mt-8">
+                                    <AddAssetButton 
+                                        defaultAssetType="asset" 
+                                        categories={categories || []}
+                                    />
+                                </div>
                             </div>
-                            <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                {selectedCategoryId ? 'No assets in this category yet' : 'No assets yet'}
-                            </h2>
-                            <p className="mt-4 text-base leading-7 text-gray-600">
-                                {selectedCategoryId
-                                    ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
-                                    : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
-                            </p>
-                            <div className="mt-8">
-                                <AddAssetButton 
-                                    defaultAssetType="asset" 
-                                    categories={categories || []}
-                                />
-                            </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {/* Asset Detail Drawer */}
+            {activeAsset && (
+                <AssetDetailDrawer
+                    asset={activeAsset}
+                    onClose={() => setActiveAsset(null)}
+                />
+            )}
         </div>
     )
 }
