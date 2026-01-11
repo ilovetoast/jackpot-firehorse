@@ -372,6 +372,110 @@ class AdminTicketController extends Controller
     }
 
     /**
+     * Resolve a ticket.
+     * Sets status to resolved and records resolution time for SLA tracking.
+     */
+    public function resolve(Request $request, Ticket $ticket)
+    {
+        $user = Auth::user();
+        $this->authorize('assign', $ticket);
+
+        if ($ticket->status === TicketStatus::RESOLVED) {
+            return redirect()->back()->with('info', 'Ticket is already resolved.');
+        }
+
+        if ($ticket->status === TicketStatus::CLOSED) {
+            return redirect()->back()->withErrors(['status' => 'Cannot resolve a closed ticket. Please reopen it first.']);
+        }
+
+        $oldStatus = $ticket->status->value;
+        $ticket->update(['status' => TicketStatus::RESOLVED]);
+        // Note: Ticket model observer will automatically call updateResolutionTime() for SLA tracking
+
+        // Log status change
+        ActivityRecorder::record(
+            tenant: $ticket->tenant_id ?? 1,
+            eventType: EventType::TICKET_STATUS_CHANGED,
+            subject: $ticket,
+            actor: $user,
+            brand: null,
+            metadata: [
+                'old_status' => $oldStatus,
+                'new_status' => 'resolved',
+                'action' => 'resolve',
+            ]
+        );
+
+        return redirect()->back()->with('success', 'Ticket resolved. Resolution time has been recorded for SLA tracking.');
+    }
+
+    /**
+     * Close a ticket.
+     * Sets status to closed (final state).
+     */
+    public function close(Request $request, Ticket $ticket)
+    {
+        $user = Auth::user();
+        $this->authorize('assign', $ticket);
+
+        if ($ticket->status === TicketStatus::CLOSED) {
+            return redirect()->back()->with('info', 'Ticket is already closed.');
+        }
+
+        $oldStatus = $ticket->status->value;
+        $ticket->update(['status' => TicketStatus::CLOSED]);
+
+        // Log status change
+        ActivityRecorder::record(
+            tenant: $ticket->tenant_id ?? 1,
+            eventType: EventType::TICKET_STATUS_CHANGED,
+            subject: $ticket,
+            actor: $user,
+            brand: null,
+            metadata: [
+                'old_status' => $oldStatus,
+                'new_status' => 'closed',
+                'action' => 'close',
+            ]
+        );
+
+        return redirect()->back()->with('success', 'Ticket closed.');
+    }
+
+    /**
+     * Reopen a ticket.
+     * Changes status from resolved/closed back to open.
+     */
+    public function reopen(Request $request, Ticket $ticket)
+    {
+        $user = Auth::user();
+        $this->authorize('assign', $ticket);
+
+        if ($ticket->status !== TicketStatus::RESOLVED && $ticket->status !== TicketStatus::CLOSED) {
+            return redirect()->back()->with('info', 'Ticket is not in a final state and cannot be reopened.');
+        }
+
+        $oldStatus = $ticket->status->value;
+        $ticket->update(['status' => TicketStatus::OPEN]);
+
+        // Log status change
+        ActivityRecorder::record(
+            tenant: $ticket->tenant_id ?? 1,
+            eventType: EventType::TICKET_STATUS_CHANGED,
+            subject: $ticket,
+            actor: $user,
+            brand: null,
+            metadata: [
+                'old_status' => $oldStatus,
+                'new_status' => 'open',
+                'action' => 'reopen',
+            ]
+        );
+
+        return redirect()->back()->with('success', 'Ticket reopened.');
+    }
+
+    /**
      * Update ticket status.
      */
     public function updateStatus(Request $request, Ticket $ticket)
@@ -400,6 +504,55 @@ class AdminTicketController extends Controller
         );
 
         return redirect()->back()->with('success', 'Ticket status updated.');
+    }
+
+    /**
+     * Add public reply to ticket.
+     */
+    public function publicReply(Request $request, Ticket $ticket)
+    {
+        $user = Auth::user();
+        $this->authorize('assign', $ticket); // Use assign permission for public replies
+
+        $validated = $request->validate([
+            'body' => 'required|string|max:10000',
+            'attachments' => 'nullable|array|max:3',
+            'attachments.*' => 'file|max:5120', // 5MB max
+        ]);
+
+        $message = TicketMessage::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $user->id,
+            'body' => $validated['body'],
+            'is_internal' => false, // Public message
+        ]);
+
+        // Handle attachments if provided
+        if ($request->hasFile('attachments')) {
+            foreach ($request->file('attachments') as $file) {
+                $this->attachmentService->uploadAttachment($ticket, $file, $message, false); // false = public attachment
+            }
+        }
+
+        // Update ticket status to waiting_on_user when staff replies
+        if ($ticket->status === TicketStatus::WAITING_ON_SUPPORT) {
+            $ticket->update(['status' => TicketStatus::WAITING_ON_USER]);
+        }
+
+        // Log public message creation
+        ActivityRecorder::record(
+            tenant: $ticket->tenant_id ?? 1,
+            eventType: EventType::TICKET_MESSAGE_CREATED,
+            subject: $ticket,
+            actor: $user,
+            brand: null,
+            metadata: [
+                'message_id' => $message->id,
+                'is_internal' => false,
+            ]
+        );
+
+        return redirect()->back()->with('success', 'Public reply added.');
     }
 
     /**

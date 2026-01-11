@@ -20,7 +20,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
-import { XMarkIcon, CloudArrowUpIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
@@ -112,16 +112,22 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             
             // Include uploads that belong to Phase 3 items OR are currently being added
             // CRITICAL: Also include uploads that are actively uploading/initiating
+            // CRITICAL: Also include ALL completed uploads (needed for finalization stability check)
+            // Completed uploads are needed even if phase3ClientIds is temporarily empty (ref timing issue)
+            // The stability check will verify they match Phase 3 items using phase3Manager.items (hook state)
             // This prevents the filter from removing uploads that just started
             // (the upload might have started before Phase 3 items state updated)
             const filteredUploads = allUploads.filter(upload => {
                 const belongsToPhase3 = phase3ClientIds.has(upload.clientReference)
                 const isCurrentlyAdding = currentlyAddingIds.has(upload.clientReference)
                 const isActivelyUploading = upload.status === 'uploading' || upload.status === 'initiating'
+                const isCompleted = upload.status === 'completed'
                 
-                // Include if it belongs to Phase 3, is being added, OR is actively uploading
+                // Include if it belongs to Phase 3, is being added, is actively uploading, OR is completed
+                // Completed uploads are preserved for stability check (even if phase3ClientIds is empty due to ref timing)
                 // This ensures active uploads are never filtered out
-                const include = belongsToPhase3 || isCurrentlyAdding || isActivelyUploading
+                // AND completed uploads needed for finalization stability check are preserved
+                const include = belongsToPhase3 || isCurrentlyAdding || isActivelyUploading || isCompleted
                 
                 if (!include && (upload.status === 'uploading' || upload.status === 'initiating')) {
                     console.warn('[Subscription] Filter removing ACTIVE upload!', {
@@ -134,6 +140,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         phase3ItemsCount: currentPhase3Items.length
                     })
                 }
+                
                 
                 return include
             })
@@ -168,6 +175,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // Clean up old uploads when dialog opens
     // Remove any uploads without files (rehydrated old uploads) to prevent conflicts
+    // CRITICAL: Do NOT remove completed Phase 2 uploads - they're needed for finalization stability check
     useEffect(() => {
         if (open) {
             const phase2Manager = phase2ManagerRef.current
@@ -176,21 +184,25 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             const phase3ClientIds = new Set(currentPhase3Items.map(item => item.clientId))
             
             // Remove uploads that:
-            // 1. Don't have a file attached (old rehydrated uploads) OR
-            // 2. Have uploadSessionId but don't belong to Phase 3 (old uploads trying to resume) OR
-            // 3. Are not currently being added
+            // 1. Don't have a file attached (old rehydrated uploads) AND
+            // 2. Don't belong to Phase 3 AND
+            // 3. Are not currently being added AND
+            // 4. Are NOT completed (completed uploads are needed for finalization)
             // This prevents old uploads from interfering with new uploads
+            // BUT preserves completed uploads needed for stability check
             const uploadsToRemove = allUploads.filter(([key, upload]) => {
                 const belongsToPhase3 = phase3ClientIds.has(upload.clientReference)
                 const isCurrentlyAdding = currentlyAddingRef.current.has(upload.clientReference)
                 const hasNoFile = !upload.file
-                const hasUploadSessionId = !!upload.uploadSessionId
+                const isCompleted = upload.status === 'completed'
                 
                 // Remove if:
-                // - Doesn't belong to Phase 3 AND (has no file OR has uploadSessionId)
-                // Old uploads with uploadSessionId are likely expired and will fail on resume
-                // Old uploads without file are rehydrated and cannot be resumed
-                return !belongsToPhase3 && !isCurrentlyAdding && (hasNoFile || hasUploadSessionId)
+                // - Doesn't belong to Phase 3 AND
+                // - Is not currently being added AND
+                // - Has no file (rehydrated old uploads) AND
+                // - Is NOT completed (completed uploads are needed even if they don't belong to Phase 3 yet)
+                // This prevents old rehydrated uploads from interfering, but preserves completed uploads
+                return !belongsToPhase3 && !isCurrentlyAdding && hasNoFile && !isCompleted
             })
             
             if (uploadsToRemove.length > 0) {
@@ -412,6 +424,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Only sync uploads that belong to Phase 3 items (by clientId match).
      */
     const lastSyncedRef = useRef(new Map()) // Track last synced state per clientId
+    // Track session ID change timestamps to enforce backend stability settle window
+    // Maps clientId -> { timestamp: number, sessionId: string } of last session ID change
+    // This allows us to check if the sessionId has actually changed, not just if it's different from lastSynced
+    const sessionIdChangeTimestampsRef = useRef(new Map())
 
     // Store stable references to Phase 3 manager methods
     const { 
@@ -452,6 +468,24 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // OPTIMIZATION 6: Reduce logging - only log on state transitions and errors
             // Don't log every progress tick for large files
             const hasSessionIdChanged = phase2Upload.uploadSessionId !== lastSynced.uploadSessionId
+            
+            // Track session ID changes for backend stability check
+            // CRITICAL: Reset settle window timestamp whenever sessionId changes
+            // hasSessionIdChanged means sessionId is different from lastSynced (which updates after sync)
+            // So if hasSessionIdChanged is true, the sessionId just changed and we need to reset the settle window
+            if (hasSessionIdChanged && phase2Upload.uploadSessionId) {
+                const lastRecorded = sessionIdChangeTimestampsRef.current.get(clientId)
+                const lastRecordedSessionId = lastRecorded?.sessionId
+                
+                // Reset timestamp if sessionId is different from what we last recorded
+                // This ensures the settle window restarts whenever the sessionId actually changes
+                if (lastRecordedSessionId !== phase2Upload.uploadSessionId) {
+                    sessionIdChangeTimestampsRef.current.set(clientId, {
+                        timestamp: Date.now(),
+                        sessionId: phase2Upload.uploadSessionId
+                    })
+                }
+            }
             const hasStatusChanged = phase2Upload.status !== lastSynced.status
             const isStateTransition = hasStatusChanged || hasSessionIdChanged || 
                                      (phase2Upload.status === 'failed' || phase2Upload.status === 'completed')
@@ -997,14 +1031,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 // Get effective metadata for this item (combines global + per-file metadata)
                 const effectiveMetadata = phase3Manager.getEffectiveMetadata(item.clientId)
 
-                // 🔍 DEBUG LOGGING: Log payload before sending to backend
+                // Build payload - only include metadata if non-empty, otherwise send empty object
                 const payloadData = {
                     upload_session_id: item.uploadSessionId,
                     asset_type: defaultAssetType === 'asset' ? 'asset' : 'marketing',
                     title: item.title || null,
                     filename: item.resolvedFilename,
                     category_id: phase3Manager.context.categoryId || null,
-                    metadata: Object.keys(effectiveMetadata).length > 0 ? { fields: effectiveMetadata } : null,
+                    metadata: Object.keys(effectiveMetadata).length > 0 ? { fields: effectiveMetadata } : {},
                 }
                 
                 console.log('[Finalize Payload] Full payload being sent:', JSON.stringify(payloadData, null, 2))
@@ -1054,18 +1088,158 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 'Failed to finalize assets'
             
             setFinalizeError(errorMessage)
+        } finally {
+            // CRITICAL: Always reset finalizing state, regardless of success or failure
             setIsFinalizing(false)
-            
-            // Log error for debugging
-            // console.error('Finalize error:', error)
+            console.log('[Finalize] isFinalizing reset')
         }
     }, [phase3Manager, defaultAssetType, isFinalizing, onClose])
 
     // Check if finalize button should be enabled
+    // CRITICAL: Check if S3 uploads are actually complete (uploaded_size >= expected_size)
+    // Phase 2 completion only means frontend thinks S3 finished - verify with backend
+    // Track backend session status (uploaded_size, expected_size) for each upload session
+    // Maps uploadSessionId -> { uploaded_size: number, expected_size: number }
+    const [backendUploadSizes, setBackendUploadSizes] = useState(new Map())
+    
+    // Force re-render to trigger status checks
+    const [sizeCheckTick, setSizeCheckTick] = useState(0)
+    
+    // Track which sessions are currently being checked (prevent duplicate requests)
+    const checkingSessionsRef = useRef(new Set())
+    
+    // Check backend upload sizes for completed items
+    useEffect(() => {
+        const completedItems = phase3Manager.items.filter(item => item.uploadStatus === 'complete' && item.uploadSessionId)
+        
+        if (completedItems.length === 0) {
+            return
+        }
+        
+        let hasIncomplete = false
+        
+        // Check sizes for all completed items
+        completedItems.forEach((item) => {
+            const sessionId = item.uploadSessionId
+            const currentSizes = backendUploadSizes.get(sessionId)
+            const isComplete = currentSizes && currentSizes.uploaded_size >= currentSizes.expected_size && currentSizes.expected_size > 0
+            
+            // Skip if already known to be complete
+            if (isComplete) {
+                return
+            }
+            
+            // Skip if already checking (prevent duplicate requests)
+            if (checkingSessionsRef.current.has(sessionId)) {
+                hasIncomplete = true
+                return
+            }
+            
+            // Mark as checking
+            checkingSessionsRef.current.add(sessionId)
+            hasIncomplete = true
+            
+            // Check backend upload sizes
+            window.axios.get(`/app/uploads/${sessionId}/resume`)
+                .then(response => {
+                    const uploadedSize = response.data.uploaded_size ?? 0
+                    const expectedSize = response.data.expected_size ?? 0
+                    const s3ObjectExists = response.data.s3_object_exists ?? false
+                    
+                    // Update sizes
+                    setBackendUploadSizes(prev => {
+                        const next = new Map(prev)
+                        next.set(sessionId, { 
+                            uploaded_size: uploadedSize, 
+                            expected_size: expectedSize,
+                            s3_object_exists: s3ObjectExists
+                        })
+                        return next
+                    })
+                    
+                    // Upload is complete if: s3_object_exists AND uploaded_size >= expected_size AND expected_size > 0
+                    const isComplete = s3ObjectExists && uploadedSize >= expectedSize && expectedSize > 0
+                    
+                    // If not complete, continue polling
+                    if (!isComplete) {
+                        setTimeout(() => {
+                            setSizeCheckTick(prev => prev + 1)
+                        }, 500)
+                    }
+                })
+                .catch(error => {
+                    console.error('[Backend Size Check] Failed to check upload sizes', {
+                        sessionId,
+                        error: error.message
+                    })
+                    
+                    // Retry on error
+                    setTimeout(() => {
+                        setSizeCheckTick(prev => prev + 1)
+                    }, 1000)
+                })
+                .finally(() => {
+                    // Remove from checking set
+                    checkingSessionsRef.current.delete(sessionId)
+                })
+        })
+        
+        // If there are incomplete uploads, schedule another check
+        if (hasIncomplete) {
+            const timeout = setTimeout(() => {
+                setSizeCheckTick(prev => prev + 1)
+            }, 500) // Check every 500ms
+            
+            return () => clearTimeout(timeout)
+        }
+    }, [phase3Manager.items, sizeCheckTick, backendUploadSizes])
+    
+    const allUploadsBackendStable = useMemo(() => {
+        if (phase3Manager.items.length === 0) return false
+        
+        // Only check completed items
+        const completedItems = phase3Manager.items.filter(item => item.uploadStatus === 'complete')
+        
+        if (completedItems.length === 0) {
+            return false
+        }
+        
+        // All completed items must have uploadSessionId AND S3 object exists AND uploaded_size >= expected_size
+        const result = completedItems.every(item => {
+            if (!item.uploadSessionId) {
+                return false
+            }
+            
+            const sizes = backendUploadSizes.get(item.uploadSessionId)
+            if (!sizes) {
+                return false // Not checked yet
+            }
+            
+            // Upload is complete if: s3_object_exists AND uploaded_size >= expected_size AND expected_size > 0
+            return sizes.s3_object_exists && 
+                   sizes.uploaded_size >= sizes.expected_size && 
+                   sizes.expected_size > 0
+        })
+        
+        return result
+    }, [phase3Manager.items, backendUploadSizes])
+    
+    // Check if all uploads are complete (in terminal state)
+    const allUploadsComplete = useMemo(() => {
+        if (phase3Manager.items.length === 0) return false
+        return phase3Manager.items.every(item => 
+            item.uploadStatus === 'complete' || item.uploadStatus === 'failed'
+        )
+    }, [phase3Manager.items])
+    
+    // Check if button should be enabled (all complete AND backend-stable)
     const canFinalize = phase3Manager.canFinalize && 
                        !isFinalizing && 
-                       phase3Manager.completedItems.length > 0 &&
-                       phase3Manager.uploadingItems.length === 0
+                       allUploadsComplete &&
+                       allUploadsBackendStable
+    
+    // Check if waiting for backend stability (all complete but not yet stable)
+    const isWaitingForStability = allUploadsComplete && !allUploadsBackendStable
 
     // Collect blocking validation errors for form-level alert
     // These explain why the Finalize button is disabled
@@ -1101,20 +1275,27 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             }
         }
         
-        // No completed uploads
-        if (phase3Manager.completedItems.length === 0 && phase3Manager.items.length > 0) {
-            const hasUploading = phase3Manager.uploadingItems.length > 0
-            const hasQueued = phase3Manager.queuedItems.length > 0
-            if (hasUploading || hasQueued) {
-                errors.push('Uploads are still in progress.')
-        } else {
-                errors.push('At least one upload must complete before finalizing.')
+        // Uploads still in progress or not backend-stable
+        // Check that ALL uploads are backend-stable (backend session status must be 'completed')
+        if (!allUploadsBackendStable && phase3Manager.items.length > 0) {
+            const hasNonTerminalUploads = phase3Manager.items.some(item => 
+                item.uploadStatus !== 'complete' && item.uploadStatus !== 'failed'
+            )
+            
+            if (hasNonTerminalUploads) {
+                errors.push('Waiting for all uploads to finish...')
+            } else {
+                // All uploads are complete but backend sessions may still be processing
+                errors.push('Finalizing will unlock once uploads finish processing')
             }
         }
         
-        // Uploads still in progress (additional check beyond canFinalize)
-        if (phase3Manager.uploadingItems.length > 0) {
-            errors.push('Uploads are still in progress.')
+        // No completed uploads (only show if all uploads failed)
+        if (phase3Manager.completedItems.length === 0 && phase3Manager.items.length > 0) {
+            const allFailed = phase3Manager.items.every(item => item.uploadStatus === 'failed')
+            if (allFailed) {
+                errors.push('At least one upload must complete before finalizing.')
+            }
         }
         
         // Finalize error (from previous finalize attempt)
@@ -1136,10 +1317,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         phase3Manager.context.categoryId,
         phase3Manager.warnings,
         phase3Manager.availableMetadataFields,
+        phase3Manager.items,
         phase3Manager.completedItems.length,
-        phase3Manager.uploadingItems.length,
-        phase3Manager.queuedItems.length,
-        phase3Manager.items.length,
+        allUploadsBackendStable,
         finalizeError
     ])
 
@@ -1303,35 +1483,43 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     </div>
                                 )}
 
-                        {/* Form-level validation alert */}
-                        {hasFiles && blockingErrors.length > 0 && (
-                            <div 
-                                role="alert"
-                                className="mt-6 rounded-md border border-yellow-300 bg-yellow-50 p-4"
-                            >
-                                    <div className="flex">
-                                    <div className="flex-shrink-0">
-                                        <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600" aria-hidden="true" />
-                                    </div>
-                                    <div className="ml-3 flex-1">
-                                        <h3 className="text-sm font-medium text-yellow-900">
-                                            Please resolve the following before finalizing:
-                                            </h3>
-                                        <div className="mt-2 text-sm text-yellow-900">
-                                                <ul className="list-disc list-inside space-y-1">
-                                                {blockingErrors.map((error, index) => (
-                                                    <li key={index}>{error}</li>
-                                                ))}
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                         {/* Footer Actions */}
                         <div className="mt-6">
-                            <div className="flex justify-end gap-3">
+                            <div className="flex items-center justify-end gap-3">
+                                {/* Status indicator */}
+                                {hasFiles && (
+                                    <div className="flex-1 text-sm text-gray-600">
+                                        {(() => {
+                                            const completedCount = phase3Manager.completedItems.length
+                                            const totalCount = phase3Manager.items.length
+                                            const allComplete = completedCount === totalCount && totalCount > 0
+                                            
+                                            if (allComplete && !allUploadsBackendStable) {
+                                                return (
+                                                    <span className="text-gray-500">
+                                                        Finalizing uploads... ({completedCount} / {totalCount})
+                                                    </span>
+                                                )
+                                            }
+                                            
+                                            if (allComplete && allUploadsBackendStable) {
+                                                return (
+                                                    <span className="text-green-600 font-medium">
+                                                        Ready to finalize ({completedCount} / {totalCount})
+                                                    </span>
+                                                )
+                                            }
+                                            
+                                            return (
+                                                <span>
+                                                    {completedCount} / {totalCount} complete
+                                                </span>
+                                            )
+                                        })()}
+                                    </div>
+                                )}
+                                
                                 {!hasUploadingItems && (
                                     <button
                                         type="button"
@@ -1348,13 +1536,16 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         type="button"
                                         onClick={handleFinalize}
                                         disabled={!canFinalize || isFinalizing}
-                                        className={`rounded-md px-4 py-2 text-sm font-medium ${
+                                        className={`rounded-md px-4 py-2 text-sm font-medium flex items-center gap-2 ${
                                             canFinalize && !isFinalizing
                                                 ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
                                     >
-                                        {isFinalizing ? 'Finalizing...' : 'Finalize Assets'}
+                                        {isWaitingForStability && (
+                                            <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                                        )}
+                                        {isFinalizing ? 'Finalizing...' : isWaitingForStability ? 'Finalizing uploads...' : 'Finalize Assets'}
                                 </button>
                                 )}
                             </div>

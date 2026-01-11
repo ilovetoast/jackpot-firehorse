@@ -81,7 +81,10 @@ class ResumeMetadataService
      *   expires_at: string|null,
      *   is_expired: bool,
      *   can_resume: bool,
-     *   error: string|null
+     *   error: string|null,
+     *   uploaded_size: int,
+     *   expected_size: int,
+     *   s3_object_exists: bool
      * }
      */
     public function getResumeMetadata(UploadSession $uploadSession): array
@@ -107,6 +110,9 @@ class ResumeMetadataService
             'is_expired' => $this->isExpired($uploadSession),
             'can_resume' => false,
             'error' => null,
+            'uploaded_size' => $uploadSession->uploaded_size ?? 0,
+            'expected_size' => $uploadSession->expected_size ?? 0,
+            's3_object_exists' => false,
         ];
 
         // Check if session can be resumed
@@ -129,6 +135,34 @@ class ResumeMetadataService
                     $uploadedParts = $this->getUploadedParts($uploadSession);
                     $result['already_uploaded_parts'] = $uploadedParts;
                     $result['chunk_size'] = self::DEFAULT_CHUNK_SIZE;
+                    
+                    // Calculate actual uploaded size from S3 parts (more accurate than DB field)
+                    $calculatedUploadedSize = array_sum(array_column($uploadedParts, 'Size'));
+                    if ($calculatedUploadedSize > 0) {
+                        $result['uploaded_size'] = $calculatedUploadedSize;
+                    }
+                    
+                    // Check if S3 object exists (indicates multipart upload has been finalized)
+                    try {
+                        $bucket = $uploadSession->storageBucket;
+                        if ($bucket) {
+                            $path = $this->generateTempUploadPath($uploadSession);
+                            $objectExists = $this->s3Client->doesObjectExist($bucket->name, $path);
+                            $result['s3_object_exists'] = $objectExists;
+                            
+                            // If object exists, multipart upload is finalized and complete
+                            if ($objectExists && $calculatedUploadedSize >= $uploadSession->expected_size) {
+                                $result['uploaded_size'] = $uploadSession->expected_size ?? $calculatedUploadedSize;
+                            }
+                        }
+                    } catch (\Exception $s3CheckError) {
+                        // If S3 check fails, assume object doesn't exist yet
+                        $result['s3_object_exists'] = false;
+                        Log::debug('Failed to check S3 object existence for multipart upload', [
+                            'upload_session_id' => $uploadSession->id,
+                            'error' => $s3CheckError->getMessage(),
+                        ]);
+                    }
 
                     // EDGE CASE: Multipart Part Size Drift
                     // If chunk_size ever changes between resumes (e.g., configuration change),
@@ -141,6 +175,8 @@ class ResumeMetadataService
                         'multipart_upload_id' => $uploadSession->multipart_upload_id,
                         'parts_count' => count($uploadedParts),
                         'chunk_size' => self::DEFAULT_CHUNK_SIZE,
+                        'calculated_uploaded_size' => $calculatedUploadedSize,
+                        's3_object_exists' => $result['s3_object_exists'] ?? false,
                     ]);
                 } catch (\Exception $e) {
                 Log::error('Failed to retrieve uploaded parts for resume', [
@@ -155,6 +191,28 @@ class ResumeMetadataService
         } else {
             // Direct uploads don't have parts to query
             $result['chunk_size'] = null;
+            
+            // For direct uploads, check if S3 object exists to determine if upload is complete
+            try {
+                $bucket = $uploadSession->storageBucket;
+                if ($bucket) {
+                    $path = $this->generateTempUploadPath($uploadSession);
+                    $objectExists = $this->s3Client->doesObjectExist($bucket->name, $path);
+                    $result['s3_object_exists'] = $objectExists;
+                    
+                    if ($objectExists) {
+                        // If object exists, uploaded_size equals expected_size
+                        $result['uploaded_size'] = $uploadSession->expected_size ?? 0;
+                    }
+                }
+            } catch (\Exception $e) {
+                // If S3 check fails, assume object doesn't exist yet
+                $result['s3_object_exists'] = false;
+                Log::debug('Failed to check S3 object existence for direct upload', [
+                    'upload_session_id' => $uploadSession->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return $result;

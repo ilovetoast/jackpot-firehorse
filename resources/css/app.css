@@ -37,4 +37,14 @@
             background-position: -200% 0;
         }
     }
+    
+    /* Asset grid container with dynamic card size */
+    .asset-grid-container {
+        grid-template-columns: repeat(auto-fill, minmax(var(--asset-card-size), 1fr));
+    }
+}
+
+
+.gap-7{
+    gap: 1.7rem;
 }

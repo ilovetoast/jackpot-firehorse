@@ -7,7 +7,12 @@ import Avatar from '../../../../Components/Avatar'
 import BrandAvatar from '../../../../Components/BrandAvatar'
 import SLAPanel from '../../../../Components/Tickets/SLAPanel'
 import AssignmentControls from '../../../../Components/Tickets/AssignmentControls'
+import TicketActionsToolbar from '../../../../Components/Tickets/TicketActionsToolbar'
+import CustomerInfoPanel from '../../../../Components/Tickets/CustomerInfoPanel'
+import RelatedTicketsPanel from '../../../../Components/Tickets/RelatedTicketsPanel'
+import ConvertTicketModal from '../../../../Components/Tickets/ConvertTicketModal'
 import InternalNoteForm from '../../../../Components/Tickets/InternalNoteForm'
+import PublicReplyForm from '../../../../Components/Tickets/PublicReplyForm'
 import TicketLinkForm from '../../../../Components/Tickets/TicketLinkForm'
 import AuditLogTimeline from '../../../../Components/Tickets/AuditLogTimeline'
 import SuggestionPanel from '../../../../Components/Automation/SuggestionPanel'
@@ -240,30 +245,21 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                                 )}
                             </>
                         )}
-                        {ticket.converted_from && (
-                            <div>
-                                <label className="text-xs font-medium text-gray-500 uppercase">Converted From</label>
-                                <p className="mt-1 text-sm text-gray-900">
-                                    <Link href={`/app/admin/support/tickets/${ticket.converted_from.id}`} className="text-indigo-600 hover:text-indigo-900">
-                                        {ticket.converted_from.ticket_number}
-                                    </Link>
-                                </p>
-                            </div>
-                        )}
-                        {ticket.converted_to && ticket.converted_to.length > 0 && (
-                            <div>
-                                <label className="text-xs font-medium text-gray-500 uppercase">Converted To</label>
-                                <div className="mt-1 flex flex-col gap-1">
-                                    {ticket.converted_to.map((converted) => (
-                                        <Link key={converted.id} href={`/app/admin/support/tickets/${converted.id}`} className="text-sm text-indigo-600 hover:text-indigo-900">
-                                            {converted.ticket_number}
-                                        </Link>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
+
+                {/* Related Tickets Panel */}
+                <RelatedTicketsPanel ticket={ticket} />
+
+                {/* Customer Information Panel (for tenant tickets) */}
+                <CustomerInfoPanel ticket={ticket} />
+
+                {/* Ticket Actions Toolbar */}
+                <TicketActionsToolbar 
+                    ticket={ticket} 
+                    permissions={permissions} 
+                    onConvert={handleConvert}
+                />
 
                 {/* Assignment Controls */}
                 {permissions?.canAssign && (
@@ -283,18 +279,6 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                 {suggestions && suggestions.length > 0 && (
                     <div className="mb-6">
                         <SuggestionPanel suggestions={suggestions} />
-                    </div>
-                )}
-
-                {/* Convert Button */}
-                {permissions?.canConvert && ticket.type === 'tenant' && (
-                    <div className="mb-6">
-                        <button
-                            onClick={handleConvert}
-                            className="inline-flex items-center rounded-md bg-purple-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-500"
-                        >
-                            Convert to Internal Ticket
-                        </button>
                     </div>
                 )}
 
@@ -327,41 +311,46 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                     <div className="p-6">
                         {/* Public Messages Tab */}
                         {activeTab === 'messages' && (
-                            <div className="space-y-4">
-                                {publicMessages.length === 0 ? (
-                                    <p className="text-sm text-gray-500">No public messages yet.</p>
-                                ) : (
-                                    publicMessages.map((message) => (
-                                        <div key={message.id} className="flex items-start gap-3 pb-4 border-b border-gray-200 last:border-0">
-                                            {message.user ? (
-                                                <Avatar
-                                                    avatarUrl={message.user.avatar_url}
-                                                    firstName={message.user.first_name}
-                                                    lastName={message.user.last_name}
-                                                    email={message.user.email}
-                                                    size="sm"
-                                                />
-                                            ) : (
-                                                <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-                                                    <span className="text-xs text-gray-500">S</span>
-                                                </div>
-                                            )}
-                                            <div className="flex-1">
-                                                <div className="flex items-start justify-between mb-2">
-                                                    <div>
-                                                        <p className="text-sm font-medium text-gray-900">
-                                                            {message.user?.name || 'System'}
-                                                        </p>
-                                                        <p className="text-xs text-gray-500">{new Date(message.created_at).toLocaleString()}</p>
+                            <div className="space-y-6">
+                                {permissions?.canAssign && (
+                                    <PublicReplyForm ticketId={ticket.id} />
+                                )}
+                                <div className="space-y-4">
+                                    {publicMessages.length === 0 ? (
+                                        <p className="text-sm text-gray-500">No public messages yet.</p>
+                                    ) : (
+                                        publicMessages.map((message) => (
+                                            <div key={message.id} className="flex items-start gap-3 pb-4 border-b border-gray-200 last:border-0">
+                                                {message.user ? (
+                                                    <Avatar
+                                                        avatarUrl={message.user.avatar_url}
+                                                        firstName={message.user.first_name}
+                                                        lastName={message.user.last_name}
+                                                        email={message.user.email}
+                                                        size="sm"
+                                                    />
+                                                ) : (
+                                                    <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                                        <span className="text-xs text-gray-500">S</span>
+                                                    </div>
+                                                )}
+                                                <div className="flex-1">
+                                                    <div className="flex items-start justify-between mb-2">
+                                                        <div>
+                                                            <p className="text-sm font-medium text-gray-900">
+                                                                {message.user?.name || 'System'}
+                                                            </p>
+                                                            <p className="text-xs text-gray-500">{new Date(message.created_at).toLocaleString()}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">
+                                                        {message.body}
                                                     </div>
                                                 </div>
-                                                <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">
-                                                    {message.body}
-                                                </div>
                                             </div>
-                                        </div>
-                                    ))
-                                )}
+                                        ))
+                                    )}
+                                </div>
                             </div>
                         )}
 
@@ -514,6 +503,15 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                 </div>
             </main>
             <AppFooter />
+
+            {/* Convert Ticket Modal */}
+            <ConvertTicketModal
+                open={showConvertModal}
+                onClose={() => setShowConvertModal(false)}
+                form={convertForm}
+                ticketId={ticket.id}
+                filterOptions={filterOptions}
+            />
         </div>
     )
 }

@@ -244,7 +244,8 @@ class CompanyController extends Controller
         }
 
         $query = \App\Models\ActivityEvent::query()
-            ->where('tenant_id', $tenant->id); // Only show events for this company
+            ->where('tenant_id', $tenant->id) // Only show events for this company
+            ->where('event_type', '!=', \App\Enums\EventType::AI_SYSTEM_INSIGHT); // Exclude system-level AI insights
 
         // Filter by event type
         if ($request->filled('event_type')) {

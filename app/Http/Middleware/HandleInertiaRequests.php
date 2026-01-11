@@ -310,7 +310,8 @@ class HandleInertiaRequests extends Middleware
         }
         
         // Get processing assets for the tray (only for authenticated users on app pages)
-        // Assets where thumbnail_status !== 'completed'
+        // Only show assets that are actively processing (pending, processing)
+        // Exclude failed assets - they're not processing anymore
         // Note: thumbnail_status can be null for legacy assets or enum value for new assets
         $processingAssets = [];
         if ($user && $activeBrand && $tenant) {
@@ -318,9 +319,11 @@ class HandleInertiaRequests extends Middleware
                 $processingAssets = \App\Models\Asset::where('tenant_id', $tenant->id)
                     ->where('brand_id', $activeBrand->id)
                     ->where(function ($query) {
-                        // Include assets where thumbnail_status is not 'completed' or is null
+                        // Include assets where thumbnail_status is pending, processing, or null (legacy)
+                        // Exclude failed and completed assets
                         $query->where(function ($q) {
-                            $q->where('thumbnail_status', '!=', \App\Enums\ThumbnailStatus::COMPLETED->value)
+                            $q->where('thumbnail_status', \App\Enums\ThumbnailStatus::PENDING->value)
+                              ->orWhere('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING->value)
                               ->orWhereNull('thumbnail_status');
                         });
                     })

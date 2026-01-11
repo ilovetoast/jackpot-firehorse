@@ -113,6 +113,10 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/admin/support/tickets/{ticket}', [\App\Http\Controllers\AdminTicketController::class, 'show'])->name('admin.support.tickets.show');
     Route::put('/admin/support/tickets/{ticket}/assignment', [\App\Http\Controllers\AdminTicketController::class, 'updateAssignment'])->name('admin.support.tickets.assignment');
     Route::put('/admin/support/tickets/{ticket}/status', [\App\Http\Controllers\AdminTicketController::class, 'updateStatus'])->name('admin.support.tickets.status');
+    Route::put('/admin/support/tickets/{ticket}/resolve', [\App\Http\Controllers\AdminTicketController::class, 'resolve'])->name('admin.support.tickets.resolve');
+    Route::put('/admin/support/tickets/{ticket}/close', [\App\Http\Controllers\AdminTicketController::class, 'close'])->name('admin.support.tickets.close');
+    Route::put('/admin/support/tickets/{ticket}/reopen', [\App\Http\Controllers\AdminTicketController::class, 'reopen'])->name('admin.support.tickets.reopen');
+    Route::post('/admin/support/tickets/{ticket}/reply', [\App\Http\Controllers\AdminTicketController::class, 'publicReply'])->name('admin.support.tickets.reply');
     Route::post('/admin/support/tickets/{ticket}/internal-note', [\App\Http\Controllers\AdminTicketController::class, 'addInternalNote'])->name('admin.support.tickets.internal-note');
     Route::post('/admin/support/tickets/{ticket}/internal-attachment', [\App\Http\Controllers\AdminTicketController::class, 'uploadInternalAttachment'])->name('admin.support.tickets.internal-attachment');
     Route::post('/admin/support/tickets/{ticket}/convert', [\App\Http\Controllers\AdminTicketController::class, 'convert'])->name('admin.support.tickets.convert');
@@ -169,6 +173,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
+            Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
             Route::get('/assets/{asset}/thumbnail/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'show'])->name('assets.thumbnail');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/marketing-assets', [\App\Http\Controllers\MarketingAssetController::class, 'index'])->name('marketing-assets.index');

@@ -1,12 +1,20 @@
 import { useForm } from '@inertiajs/react'
 
+/**
+ * AssignmentControls Component
+ * 
+ * Controls for managing ticket assignment (team and user) and status.
+ * 
+ * @param {Object} props
+ * @param {Object} props.ticket - Ticket object
+ * @param {Array} props.staffUsers - Array of staff users available for assignment
+ */
 export default function AssignmentControls({ ticket, staffUsers = [] }) {
     const { data, setData, put, processing } = useForm({
         assigned_to_user_id: ticket.assigned_to?.id || '',
         assigned_team: ticket.assigned_team || '',
         status: ticket.status,
     })
-
 
     const handleAssignmentSubmit = (e) => {
         e.preventDefault()

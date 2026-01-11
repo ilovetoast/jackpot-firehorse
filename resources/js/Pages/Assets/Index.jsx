@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import AssetGrid from '../../Components/AssetGrid'
-import AssetDetailDrawer from '../../Components/AssetDetailDrawer'
+import AssetGridToolbar from '../../Components/AssetGridToolbar'
+import AssetDrawer from '../../Components/AssetDrawer'
 import {
     FolderIcon,
     TagIcon,
@@ -15,7 +16,84 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const { auth } = usePage().props
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
-    const [activeAsset, setActiveAsset] = useState(null) // Asset selected for drawer
+    // Store only asset ID to prevent stale object references after Inertia reloads
+    // The active asset is derived from the current assets array, ensuring it always reflects fresh data
+    const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    
+    // Derive active asset from current assets array to prevent stale references
+    // If asset no longer exists after reload, activeAsset will be null and drawer will close
+    const activeAsset = activeAssetId ? assets.find(asset => asset.id === activeAssetId) : null
+    
+    // Close drawer if active asset no longer exists in current assets array
+    useEffect(() => {
+        if (activeAssetId && !activeAsset) {
+            setActiveAssetId(null)
+        }
+    }, [activeAssetId, activeAsset, assets])
+    
+    // Track drawer animation state to freeze grid layout during animation
+    // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
+    // By delaying padding change until after animation (300ms), grid recalculates once cleanly
+    const [isDrawerAnimating, setIsDrawerAnimating] = useState(false)
+    
+    // Separate layout concerns (drawer visibility) from content concerns (active asset)
+    // Grid layout changes should only trigger on drawer open/close, not on asset changes
+    // This prevents grid rescaling when switching assets while drawer is already open
+    const isDrawerOpen = !!activeAsset
+    const prevDrawerOpenRef = useRef(isDrawerOpen)
+    
+    useEffect(() => {
+        const prevDrawerOpen = prevDrawerOpenRef.current
+        const drawerVisibilityChanged = prevDrawerOpen !== isDrawerOpen
+        
+        // Only trigger animation logic when drawer visibility changes (open/close)
+        // Asset changes while drawer is open are content swaps, not layout events
+        if (drawerVisibilityChanged) {
+            if (isDrawerOpen) {
+                // Drawer opening - delay padding change to prevent mid-animation grid reflow
+                setIsDrawerAnimating(true)
+                const timer = setTimeout(() => {
+                    setIsDrawerAnimating(false)
+                }, 300) // Match transition duration
+                prevDrawerOpenRef.current = isDrawerOpen
+                return () => clearTimeout(timer)
+            } else {
+                // Drawer closing - apply padding change immediately for clean close
+                setIsDrawerAnimating(false)
+                prevDrawerOpenRef.current = isDrawerOpen
+            }
+        }
+    }, [isDrawerOpen])
+    
+    // Load toolbar settings from localStorage
+    const getStoredCardSize = () => {
+        if (typeof window === 'undefined') return 220
+        const stored = localStorage.getItem('assetGridCardSize')
+        return stored ? parseInt(stored, 10) : 220
+    }
+    
+    const getStoredShowInfo = () => {
+        if (typeof window === 'undefined') return true
+        const stored = localStorage.getItem('assetGridShowInfo')
+        return stored ? stored === 'true' : true
+    }
+    
+    // Card size with scaling enabled - loads from localStorage
+    const [cardSize, setCardSize] = useState(getStoredCardSize)
+    const [showInfo, setShowInfo] = useState(getStoredShowInfo)
+    
+    // Save card size to localStorage when it changes
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridCardSize', cardSize.toString())
+        }
+    }, [cardSize])
+    
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridShowInfo', showInfo.toString())
+        }
+    }, [showInfo])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
     const handleCategorySelect = (category) => {
@@ -187,12 +265,42 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 </div>
 
                 {/* Main Content - Full Height with Scroll */}
-                <div className="flex-1 overflow-y-auto bg-gray-50 h-full">
-                    <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Assets Grid or Empty State */}
-                        {assets && assets.length > 0 ? (
-                            <AssetGrid assets={assets} onAssetClick={setActiveAsset} />
-                        ) : (
+                <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
+                    <div 
+                        className="h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out"
+                        style={{ 
+                            // Freeze grid layout during drawer animation to prevent mid-animation reflow
+                            // CSS Grid recalculates columns immediately on width change
+                            // By delaying padding change until after animation, we get one controlled snap instead of dropping items mid-animation
+                            // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
+                            paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
+                        }}
+                    >
+                        <div className="py-6 px-4 sm:px-6 lg:px-8">
+                        {/* Asset Grid Toolbar */}
+                        {assets && assets.length > 0 && (
+                            <div className="mb-6">
+                                <AssetGridToolbar
+                                    showInfo={showInfo}
+                                    onToggleInfo={() => setShowInfo(v => !v)}
+                                    cardSize={cardSize}
+                                    onCardSizeChange={setCardSize}
+                                    primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                />
+                            </div>
+                        )}
+                            
+                            {/* Assets Grid or Empty State */}
+                            {assets && assets.length > 0 ? (
+                                <AssetGrid 
+                                    assets={assets} 
+                                    onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
+                                    cardSize={cardSize}
+                                    showInfo={showInfo}
+                                    selectedAssetId={activeAssetId}
+                                    primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                />
+                            ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
                                 <div className="mb-8">
                                     <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
@@ -213,17 +321,31 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 </div>
                             </div>
                         )}
+                        </div>
                     </div>
-                </div>
-            </div>
 
-            {/* Asset Detail Drawer */}
-            {activeAsset && (
-                <AssetDetailDrawer
-                    asset={activeAsset}
-                    onClose={() => setActiveAsset(null)}
-                />
-            )}
+                    {/* Asset Drawer - Desktop (pushes grid) */}
+                    {activeAsset && (
+                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
+                            <AssetDrawer
+                                asset={activeAsset}
+                                onClose={() => setActiveAssetId(null)}
+                            />
+                        </div>
+                    )}
+                </div>
+
+                {/* Asset Drawer - Mobile (full-width overlay) */}
+                {activeAsset && (
+                    <div className="md:hidden fixed inset-0 z-50">
+                        <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
+                        <AssetDrawer
+                            asset={activeAsset}
+                            onClose={() => setActiveAssetId(null)}
+                        />
+                    </div>
+                )}
+            </div>
         </div>
     )
 }

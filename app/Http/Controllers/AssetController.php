@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
+use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\AssetDeletionService;
@@ -316,6 +317,48 @@ class AssetController extends Controller
             'show_all_button' => $showAllButton,
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
         ]);
+    }
+
+    /**
+     * Get activity events for an asset.
+     *
+     * GET /assets/{asset}/activity
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function activity(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Get activity events for this asset
+        $events = ActivityEvent::where('tenant_id', $tenant->id)
+            ->where('subject_type', Asset::class)
+            ->where('subject_id', $asset->id)
+            ->orderBy('created_at', 'desc')
+            ->limit(20) // Limit to most recent 20 events
+            ->get()
+            ->map(function ($event) {
+                return [
+                    'id' => $event->id,
+                    'event_type' => $event->event_type,
+                    'metadata' => $event->metadata,
+                    'created_at' => $event->created_at?->toIso8601String(),
+                    'actor_type' => $event->actor_type,
+                    'actor_id' => $event->actor_id,
+                ];
+            });
+
+        return response()->json([
+            'events' => $events,
+        ], 200);
     }
 
     /**

@@ -100,7 +100,7 @@ start_scheduler() {
     fi
 
     echo -e "${CYAN}Starting Laravel Scheduler...${NC}"
-    (cd "$PROJECT_ROOT" && $ARTISAN_CMD schedule:work > "$SCHEDULER_LOG" 2>&1) &
+    $ARTISAN_CMD schedule:work > "$SCHEDULER_LOG" 2>&1 &
     local pid=$!
     echo $pid > "$SCHEDULER_PID"
     echo -e "${GREEN}Scheduler started (PID: $pid)${NC}"
@@ -118,7 +118,7 @@ start_worker() {
     fi
 
     echo -e "${CYAN}Starting Queue Worker...${NC}"
-    (cd "$PROJECT_ROOT" && $ARTISAN_CMD queue:work --tries=3 --timeout=90 > "$WORKER_LOG" 2>&1) &
+    $ARTISAN_CMD queue:work --tries=3 --timeout=90 > "$WORKER_LOG" 2>&1 &
     local pid=$!
     echo $pid > "$WORKER_PID"
     echo -e "${GREEN}Queue worker started (PID: $pid)${NC}"
@@ -136,7 +136,7 @@ start_npm() {
     fi
 
     echo -e "${CYAN}Starting npm dev server...${NC}"
-    (cd "$PROJECT_ROOT" && $NPM_CMD run dev > "$NPM_LOG" 2>&1) &
+    $NPM_CMD run dev > "$NPM_LOG" 2>&1 &
     local pid=$!
     echo $pid > "$NPM_PID"
     echo -e "${GREEN}npm dev server started (PID: $pid)${NC}"

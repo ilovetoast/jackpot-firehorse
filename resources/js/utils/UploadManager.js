@@ -834,10 +834,14 @@ class UploadManager {
         this.persistToStorage()
         this.notifyListeners()
 
-        // Remove from active uploads after a delay (allow UI to show completion)
-        setTimeout(() => {
-            this.removeUpload(clientReference)
-        }, 5000)
+        // CRITICAL: Do NOT automatically remove completed uploads
+        // Completed uploads must remain in UploadManager until finalization completes
+        // The upload dialog cleanup logic (on dialog close) will handle removal
+        // Removing them here causes stability check to fail because Phase 2 uploads disappear
+        // before finalization can verify backend readiness
+        // setTimeout(() => {
+        //     this.removeUpload(clientReference)
+        // }, 5000)
     }
 
     /**

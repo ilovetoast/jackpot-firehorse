@@ -307,14 +307,9 @@ class UploadCompletionService
             'fields_count' => isset($metadataArray['fields']) && is_array($metadataArray['fields']) ? count($metadataArray['fields']) : 0,
         ]);
 
-        // Generate final storage path for asset
-        // Use finalFilename (which may be the resolvedFilename from frontend)
-        $storagePath = $this->generateStoragePath(
-            $uploadSession->tenant_id,
-            $uploadSession->brand_id,
-            $finalFilename,
-            $uploadSession->id
-        );
+        // Generate initial storage path for asset (temp path, will be promoted later)
+        // Assets are initially stored in temp/ during upload, then promoted to canonical location
+        $storagePath = $this->generateTempUploadPath($uploadSession);
 
         // Determine asset type (default to ASSET if not provided)
         $assetTypeEnum = $assetType ? AssetType::from($assetType) : AssetType::ASSET;

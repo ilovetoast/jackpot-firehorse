@@ -24,14 +24,15 @@ import {
     FilmIcon,
     ArrowPathIcon,
 } from '@heroicons/react/24/outline'
+import AssetImage from './AssetImage'
+import AssetTimeline from './AssetTimeline'
 
 export default function AssetDetailDrawer({ asset, onClose }) {
     const drawerRef = useRef(null)
-    const [previewUrl, setPreviewUrl] = useState(null)
-    const [previewLoading, setPreviewLoading] = useState(true)
-    const [previewError, setPreviewError] = useState(false)
     const [showZoomModal, setShowZoomModal] = useState(false)
     const [isOpen, setIsOpen] = useState(false) // For animation control
+    const [activityEvents, setActivityEvents] = useState([])
+    const [activityLoading, setActivityLoading] = useState(false)
 
     // Handle ESC key to close drawer
     useEffect(() => {
@@ -65,47 +66,31 @@ export default function AssetDetailDrawer({ asset, onClose }) {
         }
     }, [])
 
-    // Fetch signed preview URL when asset is set
+    // Fetch activity events when asset is set
     useEffect(() => {
         if (!asset || !asset.id) {
-            setPreviewUrl(null)
-            setPreviewLoading(false)
-            setPreviewError(false)
+            setActivityEvents([])
+            setActivityLoading(false)
             return
         }
 
-        // Only fetch signed URL if asset is completed and is an image
-        const isImage = asset.mime_type?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tif', 'tiff'].includes((asset.file_extension || '').toLowerCase())
-        const isCompleted = asset.status === 'completed'
-
-        if (!isCompleted || !isImage) {
-            setPreviewLoading(false)
-            setPreviewError(!asset.thumbnail_url && !asset.preview_url)
-            return
-        }
-
-        // Fetch signed URL from backend endpoint
-        setPreviewLoading(true)
-        setPreviewError(false)
-
-        // Use assets preview-url endpoint (works for both asset and marketing asset types)
-        window.axios.get(`/app/assets/${asset.id}/preview-url`)
+        setActivityLoading(true)
+        window.axios.get(`/app/assets/${asset.id}/activity`)
             .then(response => {
-                if (response.data && response.data.url) {
-                    setPreviewUrl(response.data.url)
+                if (response.data && response.data.events) {
+                    setActivityEvents(response.data.events)
                 } else {
-                    // Fallback to thumbnail_url if signed URL not available yet
-                    setPreviewUrl(asset.thumbnail_url || asset.preview_url || null)
+                    setActivityEvents([])
                 }
-                setPreviewLoading(false)
+                setActivityLoading(false)
             })
             .catch(error => {
-                // On error, fallback to thumbnail_url if available
-                setPreviewUrl(asset.thumbnail_url || asset.preview_url || null)
-                setPreviewError(!asset.thumbnail_url && !asset.preview_url)
-                setPreviewLoading(false)
+                console.error('Error fetching activity events:', error)
+                setActivityEvents([])
+                setActivityLoading(false)
             })
     }, [asset])
+
 
     if (!asset) {
         return null
@@ -121,6 +106,12 @@ export default function AssetDetailDrawer({ asset, onClose }) {
     // Check if asset is processing (not completed)
     const isProcessing = asset.status && asset.status !== 'completed'
     const isCompleted = asset.status === 'completed'
+    
+    // Check thumbnail status - hide loading spinner when thumbnails are complete
+    // Handle both string and object (enum) values from backend
+    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status
+    const thumbnailsComplete = thumbnailStatus === 'completed' || !thumbnailStatus // null means legacy asset (considered complete for display)
+    const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
 
     // Format file size
     const formatFileSize = (bytes) => {
@@ -220,8 +211,8 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                     <div className="space-y-3">
                         <h3 className="text-sm font-medium text-gray-900">Preview</h3>
                         
-                        {isProcessing ? (
-                            // Processing state
+                        {thumbnailsProcessing ? (
+                            // Thumbnail processing state
                             <div className="aspect-video bg-gray-100 rounded-lg flex items-center justify-center border border-gray-200">
                                 <div className="text-center">
                                     <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto animate-spin" />
@@ -229,35 +220,24 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                                     <p className="mt-1 text-xs text-gray-400">This may take a moment</p>
                                 </div>
                             </div>
-                        ) : isImage && (previewUrl || asset.thumbnail_url || asset.preview_url) ? (
-                            // Image preview
+                        ) : isImage && asset.id && thumbnailsComplete ? (
+                            // Image preview using AssetImage component
                             <div className="relative">
                                 <div
                                     className="aspect-video bg-gray-100 rounded-lg overflow-hidden border border-gray-200 cursor-pointer group"
                                     onClick={() => setShowZoomModal(true)}
                                 >
-                                    <img
-                                        src={previewUrl || asset.thumbnail_url || asset.preview_url}
+                                    <AssetImage
+                                        assetId={asset.id}
                                         alt={asset.title || asset.original_filename || 'Asset preview'}
                                         className="w-full h-full object-contain"
-                                        onLoad={() => setPreviewLoading(false)}
-                                        onError={() => {
-                                            setPreviewLoading(false)
-                                            setPreviewError(true)
-                                        }}
+                                        containerWidth={448} // Drawer max-width 480px - padding (32px) = 448px
+                                        lazy={false} // Load immediately in detail view
                                     />
-                                    {previewLoading && (
-                                        <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
-                                            <ArrowPathIcon className="h-8 w-8 text-gray-400 animate-spin" />
-                                        </div>
-                                    )}
                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                                         <span className="text-white text-sm font-medium">Click to zoom</span>
                                     </div>
                                 </div>
-                                {previewError && (
-                                    <p className="mt-2 text-xs text-amber-600">Preview unavailable</p>
-                                )}
                             </div>
                         ) : (
                             // Non-image file type
@@ -369,6 +349,9 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                         </div>
                     )}
 
+                    {/* Asset Timeline */}
+                    <AssetTimeline events={activityEvents} loading={activityLoading} />
+
                     {/* Actions (placeholder - read-only for now) */}
                     <div className="border-t border-gray-200 pt-6">
                         <button
@@ -384,7 +367,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
             </div>
 
             {/* Zoom Modal for Images (optional enhancement) */}
-            {showZoomModal && isImage && (previewUrl || asset.thumbnail_url || asset.preview_url) && (
+            {showZoomModal && isImage && asset.id && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                     onClick={() => setShowZoomModal(false)}
@@ -397,7 +380,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                         <XMarkIcon className="h-8 w-8" />
                     </button>
                     <img
-                        src={previewUrl || asset.thumbnail_url || asset.preview_url}
+                        src={`/app/assets/${asset.id}/thumbnail/large`}
                         alt={asset.title || asset.original_filename || 'Asset preview'}
                         className="max-w-full max-h-full object-contain"
                         onClick={(e) => e.stopPropagation()}

@@ -7,8 +7,13 @@
  * @param {Object} props
  * @param {Object} props.asset - Asset object with title, thumbnail_url, file_extension, etc.
  * @param {Function} props.onClick - Optional click handler to open asset detail drawer
+ * @param {boolean} props.showInfo - Whether to show asset info (title, file type)
+ * @param {boolean} props.isSelected - Whether this asset is currently selected
+ * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
-export default function AssetCard({ asset, onClick = null }) {
+import AssetImage from './AssetImage'
+
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1' }) {
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
         // First try explicit file_extension field
@@ -105,19 +110,44 @@ export default function AssetCard({ asset, onClick = null }) {
         }
     }
 
+    // Convert hex color to RGB for shadow opacity
+    const hexToRgb = (hex) => {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : { r: 99, g: 102, b: 241 } // Default indigo-500
+    }
+    
+    const rgb = hexToRgb(primaryColor)
+    const shadowStyle = isSelected ? {
+        borderColor: primaryColor,
+        boxShadow: `0 10px 15px -3px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3), 0 4px 6px -2px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2), 0 0 0 1px ${primaryColor}`,
+    } : {}
+    
     return (
         <div
             onClick={handleClick}
-            className="group relative bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 cursor-pointer"
+            className={`group relative bg-white rounded-lg border overflow-hidden transition-all duration-200 cursor-pointer ${
+                isSelected 
+                    ? 'border-2' 
+                    : 'border-gray-200 hover:border-gray-300 shadow-md hover:shadow-lg'
+            }`}
+            style={{
+                ...shadowStyle,
+                '--primary-color': primaryColor,
+            }}
         >
             {/* Thumbnail container - fixed aspect ratio (4:3) */}
             <div className="aspect-[4/3] bg-gray-100 relative overflow-hidden">
-                {isImage && thumbnailUrl ? (
-                    <img
-                        src={thumbnailUrl}
+                {isImage && asset.id ? (
+                    <AssetImage
+                        assetId={asset.id}
                         alt={asset.title || asset.original_filename || 'Asset'}
                         className="w-full h-full object-cover"
-                        loading="lazy"
+                        containerWidth={400} // Grid cards are ~400px wide on large screens
+                        lazy={true}
                     />
                 ) : (
                     // Fallback icon for non-image files
@@ -133,20 +163,26 @@ export default function AssetCard({ asset, onClick = null }) {
                     </div>
                 )}
                 
-                {/* File type badge overlay - top right */}
-                <div className="absolute top-2 right-2">
-                    <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
-                        {fileExtension}
-                    </span>
-                </div>
+                {/* File type badge overlay - top right - Conditionally hidden based on showInfo prop */}
+                {showInfo && (
+                    <div className="absolute top-2 right-2">
+                        <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
+                            {fileExtension}
+                        </span>
+                    </div>
+                )}
             </div>
             
-            {/* Title section */}
-            <div className="p-3 border-t border-gray-100">
-                <h3 className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600 transition-colors">
-                    {asset.title || asset.original_filename || 'Untitled Asset'}
-                </h3>
-            </div>
+            {/* Title section - Conditionally hidden based on showInfo prop */}
+            {showInfo && (
+                <div className="p-3 border-t border-gray-100">
+                    <h3 
+                        className="text-sm font-medium text-gray-900 truncate transition-colors duration-200 group-hover:text-[var(--primary-color)]"
+                    >
+                        {asset.title || asset.original_filename || 'Untitled Asset'}
+                    </h3>
+                </div>
+            )}
         </div>
     )
 }
