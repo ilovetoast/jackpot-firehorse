@@ -26,7 +26,8 @@ export default function GlobalMetadataPanel({
     uploadManager, 
     categories = [],
     onCategoryChange = null,
-    className = '' 
+    className = '',
+    disabled = false
 }) {
     const { 
         hasItems, 
@@ -116,7 +117,10 @@ export default function GlobalMetadataPanel({
                         id="category-select"
                         value={context.categoryId || ''}
                         onChange={(e) => handleCategoryChange(e.target.value)}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                        disabled={disabled}
+                        className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
+                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
+                        }`}
                     >
                         <option value="">Select a category</option>
                         {filteredCategories.map((category) => (
@@ -173,6 +177,7 @@ export default function GlobalMetadataPanel({
                                                 value={currentValue}
                                                 onChange={(value) => handleFieldChange(field.key, value)}
                                                 hasError={hasError}
+                                                disabled={disabled}
                                             />
                                         </div>
                                     );

@@ -136,14 +136,17 @@ export default function AssetDrawer({ asset, onClose }) {
     const isImage = asset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
 
     // Check thumbnail status
-    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status
-    const thumbnailsComplete = thumbnailStatus === 'completed' || !thumbnailStatus
+    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
+    const thumbnailsComplete = thumbnailStatus === 'completed'
     const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
     const thumbnailsFailed = thumbnailStatus === 'failed'
 
-    // Check processing state
-    const isProcessing = asset.status && asset.status !== 'completed'
-    const isCompleted = asset.status === 'completed'
+    // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
+    // If status is VISIBLE, asset was uploaded correctly (not processing)
+    // Asset.status represents visibility only, not processing state
+    const assetStatus = asset.status?.value || asset.status || 'visible'
+    const isVisible = assetStatus === 'visible'
+    const isProcessing = !isVisible
 
     // Format file size
     const formatFileSize = (bytes) => {
@@ -205,7 +208,7 @@ export default function AssetDrawer({ asset, onClose }) {
                 <div className="space-y-3">
                     <h3 className="text-sm font-medium text-gray-900">Preview</h3>
                     
-                    <div className="bg-gray-100 rounded-lg overflow-hidden border border-gray-200 flex items-center justify-center" style={{ aspectRatio: '16/9', minHeight: '240px' }}>
+                    <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative" style={{ aspectRatio: '16/9', minHeight: '240px' }}>
                         {thumbnailsProcessing ? (
                             <div className="text-center">
                                 <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto animate-spin" />
@@ -219,12 +222,12 @@ export default function AssetDrawer({ asset, onClose }) {
                                     <p className="text-xs text-gray-500">{asset.thumbnail_error}</p>
                                 )}
                             </div>
-                        ) : isImage && asset.id && thumbnailsComplete ? (
+                        ) : isImage && asset.id ? (
                             <div 
-                                className={`relative transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
+                                className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                             >
                                 <div
-                                    className="aspect-video bg-gray-100 rounded-lg overflow-hidden border border-gray-200 cursor-pointer group w-full h-full"
+                                    className="w-full h-full cursor-pointer group"
                                     onClick={() => setShowZoomModal(true)}
                                 >
                                     <AssetImage
@@ -233,8 +236,9 @@ export default function AssetDrawer({ asset, onClose }) {
                                         className="w-full h-full object-contain"
                                         containerWidth={448}
                                         lazy={false}
+                                        thumbnailUrl={asset.thumbnail_url}
                                     />
-                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
                                         <span className="text-white text-sm font-medium">Click to zoom</span>
                                     </div>
                                 </div>
@@ -268,11 +272,11 @@ export default function AssetDrawer({ asset, onClose }) {
                             <dt className="text-sm text-gray-500">Status</dt>
                             <dd className="text-sm font-medium">
                                 <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                    isCompleted
+                                    isVisible
                                         ? 'bg-green-100 text-green-800'
                                         : 'bg-yellow-100 text-yellow-800'
                                 }`}>
-                                    {isCompleted ? 'Completed' : 'Processing'}
+                                    {isVisible ? 'Completed' : 'Processing'}
                                 </span>
                             </dd>
                         </div>

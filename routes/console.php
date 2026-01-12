@@ -52,3 +52,17 @@ Schedule::command('uploads:cleanup-expired')
     ->everyThreeHours()
     ->withoutOverlapping()
     ->description('Cleanup expired upload sessions and orphaned multipart uploads');
+
+// Billing expiration checks (runs daily at 2:00 AM)
+// Checks for expiring trial/comped accounts and processes expiration
+Schedule::command('billing:check-expiring --days=7')
+    ->dailyAt('09:00')
+    ->withoutOverlapping()
+    ->description('Check for accounts expiring soon and send warnings');
+
+// Process expired billing statuses (runs daily at 2:00 AM)
+// Processes accounts with expired billing_status (trial/comped) and downgrades to free
+Schedule::command('billing:process-expired')
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->description('Process expired trial and comped accounts, downgrading to free plan');

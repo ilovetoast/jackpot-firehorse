@@ -63,7 +63,16 @@ class EventType
     public const ASSET_PREVIEWED = 'asset.previewed';
     public const ASSET_METADATA_UPDATED = 'asset.metadata_updated';
     
-    // Asset lifecycle events (processing pipeline)
+    /**
+     * Asset lifecycle events (processing pipeline)
+     * 
+     * Event/State Contract:
+     * - Asset.status = VISIBILITY ONLY (VISIBLE/HIDDEN/FAILED), not processing state
+     * - Processing state is DERIVED from thumbnail_status, metadata.pipeline_completed_at, and metadata flags
+     * - ASSET_UPLOAD_FINALIZED is the canonical event that triggers processing pipeline
+     * - asset.created does NOT exist - upload completion uses ASSET_UPLOAD_FINALIZED instead
+     * - Processing pipeline: AssetUploaded event → ProcessAssetOnUpload listener → ProcessAssetJob
+     */
     public const ASSET_UPLOAD_FINALIZED = 'asset.upload.finalized';
     public const ASSET_THUMBNAIL_STARTED = 'asset.thumbnail.started';
     public const ASSET_THUMBNAIL_COMPLETED = 'asset.thumbnail.completed';

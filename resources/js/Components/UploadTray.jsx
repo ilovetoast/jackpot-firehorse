@@ -23,7 +23,7 @@ import UploadItemRow from './UploadItemRow';
  * @param {Function} [props.onRemoveItem] - Callback when an item should be removed
  * @param {string} [props.className] - Additional CSS classes
  */
-export default function UploadTray({ uploadManager, onRemoveItem, className = '' }) {
+export default function UploadTray({ uploadManager, onRemoveItem, className = '', disabled = false }) {
     const { hasItems, items } = uploadManager;
 
     // Don't render if no items
@@ -46,6 +46,7 @@ export default function UploadTray({ uploadManager, onRemoveItem, className = ''
                         item={item}
                         uploadManager={uploadManager}
                         onRemove={onRemoveItem}
+                        disabled={disabled}
                     />
                 ))}
             </div>

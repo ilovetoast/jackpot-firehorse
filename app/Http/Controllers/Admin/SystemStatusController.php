@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schedule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Aws\S3\S3Client;
@@ -48,6 +49,8 @@ class SystemStatusController extends Controller
         $systemHealth = $this->getSystemHealth();
         $recentFailedJobs = $this->getRecentFailedJobs(10);
         $assetsWithIssues = $this->getAssetsWithIssues();
+        $scheduledTasks = $this->getScheduledTasks();
+        $queueNextRun = $this->getQueueNextRunTime();
         
         // Get latest AI insight
         $latestInsight = $this->getLatestAIInsight();
@@ -57,6 +60,8 @@ class SystemStatusController extends Controller
             'recentFailedJobs' => $recentFailedJobs,
             'assetsWithIssues' => $assetsWithIssues,
             'latestAIInsight' => $latestInsight,
+            'scheduledTasks' => $scheduledTasks,
+            'queueNextRun' => $queueNextRun,
         ]);
     }
 
@@ -435,6 +440,130 @@ class SystemStatusController extends Controller
                 'error' => $e->getMessage(),
             ]);
             return null;
+        }
+    }
+
+    /**
+     * Get scheduled tasks with their next run times.
+     *
+     * @return array
+     */
+    protected function getScheduledTasks(): array
+    {
+        try {
+            $events = Schedule::events();
+            $tasks = [];
+
+            foreach ($events as $event) {
+                try {
+                    $nextRunDate = $event->nextRunDate();
+                    $description = $event->description ?? 'No description';
+                    
+                    // Get the cron expression
+                    $expression = $event->expression ?? 'N/A';
+                    
+                    // Try to extract command name if it's a command
+                    $command = null;
+                    // Check for mutex name which often contains the command
+                    if (method_exists($event, 'mutexName')) {
+                        $mutexName = $event->mutexName();
+                        // Extract command from mutex name if it follows a pattern
+                        if (strpos($mutexName, 'schedule-') === 0) {
+                            $command = str_replace('schedule-', '', $mutexName);
+                        }
+                    }
+                    
+                    // Try to get command from the event directly
+                    if (!$command && method_exists($event, 'buildCommand')) {
+                        $fullCommand = $event->buildCommand();
+                        // Extract just the command name (before first space or --)
+                        if (preg_match('/^([^\s]+)/', $fullCommand, $matches)) {
+                            $command = $matches[1];
+                        }
+                    }
+
+                    $tasks[] = [
+                        'description' => $description,
+                        'command' => $command,
+                        'expression' => $expression,
+                        'next_run_at' => $nextRunDate ? $nextRunDate->toIso8601String() : null,
+                        'next_run_in' => $nextRunDate ? $this->formatTimeUntil($nextRunDate) : null,
+                    ];
+                } catch (\Exception $e) {
+                    // Skip events that can't be processed
+                    Log::warning('Failed to process scheduled event', ['error' => $e->getMessage()]);
+                    continue;
+                }
+            }
+
+            // Sort by next run time
+            usort($tasks, function ($a, $b) {
+                if (!$a['next_run_at'] && !$b['next_run_at']) return 0;
+                if (!$a['next_run_at']) return 1;
+                if (!$b['next_run_at']) return -1;
+                return strcmp($a['next_run_at'], $b['next_run_at']);
+            });
+
+            return $tasks;
+        } catch (\Exception $e) {
+            Log::error('Failed to get scheduled tasks', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Get the next run time for the queue (next job available_at).
+     *
+     * @return array|null
+     */
+    protected function getQueueNextRunTime(): ?array
+    {
+        try {
+            $nextJob = DB::table('jobs')
+                ->where('available_at', '>', now()->timestamp)
+                ->orderBy('available_at', 'asc')
+                ->first();
+
+            if (!$nextJob) {
+                return null;
+            }
+
+            $nextRunDate = \Carbon\Carbon::createFromTimestamp($nextJob->available_at);
+
+            // Extract job name from payload
+            $payload = json_decode($nextJob->payload, true);
+            $jobName = $payload['displayName'] ?? class_basename($payload['job'] ?? 'Unknown');
+
+            return [
+                'job_name' => $jobName,
+                'next_run_at' => $nextRunDate->toIso8601String(),
+                'next_run_in' => $this->formatTimeUntil($nextRunDate),
+                'queue' => $nextJob->queue ?? 'default',
+            ];
+        } catch (\Exception $e) {
+            Log::error('Failed to get queue next run time', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Format time until a date in human-readable format.
+     *
+     * @param \Carbon\Carbon $date
+     * @return string
+     */
+    protected function formatTimeUntil(\Carbon\Carbon $date): string
+    {
+        $diff = now()->diff($date);
+        
+        if ($diff->days > 0) {
+            return $diff->days . ' day' . ($diff->days > 1 ? 's' : '') . ' ' . $diff->h . ' hour' . ($diff->h !== 1 ? 's' : '');
+        } elseif ($diff->h > 0) {
+            return $diff->h . ' hour' . ($diff->h > 1 ? 's' : '') . ' ' . $diff->i . ' minute' . ($diff->i !== 1 ? 's' : '');
+        } elseif ($diff->i > 0) {
+            return $diff->i . ' minute' . ($diff->i !== 1 ? 's' : '');
+        } else {
+            return $diff->s . ' second' . ($diff->s !== 1 ? 's' : '');
         }
     }
 }

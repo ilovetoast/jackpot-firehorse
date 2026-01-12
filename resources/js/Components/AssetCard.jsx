@@ -77,6 +77,14 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     const extLower = fileExtension.toLowerCase()
     const isImage = asset.mime_type?.startsWith('image/') || imageExtensions.includes(extLower)
     
+    // Check if asset processing is complete
+    // If thumbnail_url exists, consider it complete (thumbnails are generated)
+    // Otherwise, check thumbnail_status === 'completed'
+    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
+    const hasThumbnail = !!(asset.thumbnail_url || asset.preview_url)
+    const isComplete = hasThumbnail || thumbnailStatus === 'completed'
+    const isProcessing = !isComplete
+    
     // Get thumbnail URL or preview URL
     const thumbnailUrl = asset.thumbnail_url || asset.preview_url || asset.url || asset.storage_url
     
@@ -140,7 +148,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             }}
         >
             {/* Thumbnail container - fixed aspect ratio (4:3) */}
-            <div className="aspect-[4/3] bg-gray-100 relative overflow-hidden">
+            <div className="aspect-[4/3] bg-gray-50 relative overflow-hidden">
                 {isImage && asset.id ? (
                     <AssetImage
                         assetId={asset.id}
@@ -148,6 +156,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                         className="w-full h-full object-cover"
                         containerWidth={400} // Grid cards are ~400px wide on large screens
                         lazy={true}
+                        thumbnailUrl={asset.thumbnail_url}
                     />
                 ) : (
                     // Fallback icon for non-image files
@@ -160,6 +169,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                                 {fileExtension}
                             </span>
                         </div>
+                    </div>
+                )}
+                
+                {/* Processing badge - bottom left - Shows while thumbnail is processing */}
+                {isProcessing && (
+                    <div className="absolute bottom-2 left-2 pointer-events-none">
+                        <span className="inline-flex items-center rounded-md bg-gray-900/70 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white">
+                            Processing…
+                        </span>
                     </div>
                 )}
                 

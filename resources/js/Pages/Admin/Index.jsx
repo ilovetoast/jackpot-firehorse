@@ -27,6 +27,7 @@ import AppFooter from '../../Components/AppFooter'
 import UserSelector from '../../Components/UserSelector'
 import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
+import ConfirmDialog from '../../Components/ConfirmDialog'
 
 export default function AdminIndex({ companies, users, stats, all_users }) {
     const { auth } = usePage().props
@@ -49,10 +50,61 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
     const [savingUserId, setSavingUserId] = useState(null)
     // Track dropdown state for user actions
     const [openUserDropdown, setOpenUserDropdown] = useState(null)
+    // Track plan change confirmation
+    const [planChangeConfirm, setPlanChangeConfirm] = useState({ 
+        open: false, 
+        companyId: null, 
+        companyName: '', 
+        oldPlan: '', 
+        newPlan: '', 
+        managementSource: null,
+        pendingValue: null, // Store the new plan value to apply after confirmation
+        billingStatus: 'comped', // Default to comped for manual plan assignments
+        expirationMonths: 6, // Default 6 months
+        equivalentPlanValue: null
+    })
     const dropdownRefs = useRef({})
 
     // Close dropdown when clicking outside - using backdrop overlay instead of document listener
     // This is more reliable and doesn't interfere with button clicks
+
+    // Handle plan change confirmation
+    const handlePlanChangeConfirm = () => {
+        if (planChangeConfirm.companyId && planChangeConfirm.pendingValue) {
+            const payload = {
+                plan: planChangeConfirm.pendingValue,
+                management_source: planChangeConfirm.managementSource,
+            }
+            
+            // For non-free plans, include expiration fields
+            if (planChangeConfirm.pendingValue !== 'free' && planChangeConfirm.billingStatus && planChangeConfirm.expirationMonths) {
+                payload.billing_status = planChangeConfirm.billingStatus
+                payload.expiration_months = planChangeConfirm.expirationMonths
+                if (planChangeConfirm.billingStatus === 'comped' && planChangeConfirm.equivalentPlanValue) {
+                    payload.equivalent_plan_value = planChangeConfirm.equivalentPlanValue
+                }
+            }
+            
+            router.put(`/app/admin/companies/${planChangeConfirm.companyId}/plan`, payload, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setPlanChangeConfirm({ open: false, companyId: null, companyName: '', oldPlan: '', newPlan: '', managementSource: null, pendingValue: null, billingStatus: 'comped', expirationMonths: 6, equivalentPlanValue: null })
+                    router.reload()
+                },
+                onError: (errors) => {
+                    setPlanChangeConfirm({ open: false, companyId: null, companyName: '', oldPlan: '', newPlan: '', managementSource: null, pendingValue: null, billingStatus: 'comped', expirationMonths: 6, equivalentPlanValue: null })
+                    if (errors.plan) {
+                        alert(errors.plan)
+                    }
+                },
+            })
+        }
+    }
+
+    const handlePlanChangeCancel = () => {
+        setPlanChangeConfirm({ open: false, companyId: null, companyName: '', oldPlan: '', newPlan: '', managementSource: null, pendingValue: null, billingStatus: 'comped', expirationMonths: 6, equivalentPlanValue: null })
+        // No need to reload - the dropdown is controlled by value prop, so it will show the current plan from props
+    }
 
     // Check if user has AI dashboard view permission
     const canViewAIDashboard = auth.permissions?.includes('ai.dashboard.view') || false
@@ -64,6 +116,7 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
         { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
         { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
         ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
+        { name: 'Billing Overview', icon: ChartBarIcon, description: 'View income, expenses, and financial reports', href: '/app/admin/billing' },
         { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
         { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },
         { name: 'Permissions', icon: LockClosedIcon, description: 'Manage role permissions', href: '/app/admin/permissions' },
@@ -302,21 +355,38 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                             <select
                                                                                 value={company.plan_name}
                                                                                 onChange={(e) => {
-                                                                                    if (confirm(`Are you sure you want to change ${company.name}'s plan from ${company.plan} to ${e.target.value}? This action cannot be undone easily.`)) {
-                                                                                        router.put(`/app/admin/companies/${company.id}/plan`, {
-                                                                                            plan: e.target.value,
-                                                                                            management_source: company.plan_management.source,
-                                                                                        }, {
-                                                                                            preserveScroll: true,
-                                                                                            onSuccess: () => {
-                                                                                                router.reload()
-                                                                                            },
-                                                                                            onError: (errors) => {
-                                                                                                if (errors.plan) {
-                                                                                                    alert(errors.plan)
-                                                                                                }
-                                                                                            },
-                                                                                        })
+                                                                                    const newPlan = e.target.value
+                                                                                    if (newPlan !== company.plan_name) {
+                                                                                        // If changing to free, use legacy path (no expiration needed)
+                                                                                        // Otherwise, show form modal for expiration details
+                                                                                        if (newPlan === 'free') {
+                                                                                            setPlanChangeConfirm({
+                                                                                                open: true,
+                                                                                                companyId: company.id,
+                                                                                                companyName: company.name,
+                                                                                                oldPlan: company.plan,
+                                                                                                newPlan: newPlan,
+                                                                                                managementSource: company.plan_management.source,
+                                                                                                pendingValue: newPlan,
+                                                                                                billingStatus: null, // Free plan doesn't need billing_status
+                                                                                                expirationMonths: null,
+                                                                                                equivalentPlanValue: null
+                                                                                            })
+                                                                                        } else {
+                                                                                            // For paid plans, require expiration details
+                                                                                            setPlanChangeConfirm({
+                                                                                                open: true,
+                                                                                                companyId: company.id,
+                                                                                                companyName: company.name,
+                                                                                                oldPlan: company.plan,
+                                                                                                newPlan: newPlan,
+                                                                                                managementSource: company.plan_management.source,
+                                                                                                pendingValue: newPlan,
+                                                                                                billingStatus: 'comped', // Default to comped
+                                                                                                expirationMonths: 6, // Default 6 months
+                                                                                                equivalentPlanValue: null
+                                                                                            })
+                                                                                        }
                                                                                     }
                                                                                 }}
                                                                                 className="rounded-md border-gray-300 text-xs font-medium shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
@@ -397,6 +467,12 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                             </div>
                                                         </div>
                                                         <div className="ml-4 flex gap-2">
+                                                            <Link
+                                                                href={`/app/admin/companies/${company.id}`}
+                                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                            >
+                                                                View
+                                                            </Link>
                                                             {company.stripe_connected && (
                                                                 <Link
                                                                     href={`/app/admin/stripe-status?tenant_id=${company.id}`}
@@ -429,7 +505,7 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                                                 }}
                                                                 className="rounded-md bg-gray-200 px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-300"
                                                             >
-                                                                {isDetailsExpanded ? 'Hide Details' : 'View Details'}
+                                                                {isDetailsExpanded ? 'Hide Details' : 'Show Details'}
                                                             </button>
                                                         </div>
                                                     </div>
@@ -1180,6 +1256,122 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                     )}
                 </div>
             </main>
+            <AppFooter />
+            {/* Plan Change Confirmation Dialog with Form */}
+            {planChangeConfirm.open && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        {/* Backdrop */}
+                        <div
+                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            onClick={handlePlanChangeCancel}
+                        />
+
+                        {/* Modal */}
+                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                            <div className="sm:flex sm:items-start">
+                                <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 sm:mx-0 sm:h-10 sm:w-10">
+                                    <ExclamationTriangleIcon className="h-6 w-6 text-amber-600" aria-hidden="true" />
+                                </div>
+                                <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900">
+                                        Change Company Plan
+                                    </h3>
+                                    <div className="mt-2">
+                                        <p className="text-sm text-gray-500">
+                                            Change {planChangeConfirm.companyName}'s plan from <strong>{planChangeConfirm.oldPlan}</strong> to <strong>{planChangeConfirm.newPlan}</strong>
+                                        </p>
+                                        {planChangeConfirm.pendingValue !== 'free' && (
+                                            <div className="mt-4 space-y-4">
+                                                {/* Billing Status */}
+                                                <div>
+                                                    <label htmlFor="billing_status" className="block text-sm font-medium text-gray-700">
+                                                        Billing Status
+                                                    </label>
+                                                    <select
+                                                        id="billing_status"
+                                                        value={planChangeConfirm.billingStatus || 'comped'}
+                                                        onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, billingStatus: e.target.value, equivalentPlanValue: e.target.value !== 'comped' ? null : planChangeConfirm.equivalentPlanValue })}
+                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                    >
+                                                        <option value="comped">Comped (Free/Complimentary)</option>
+                                                        <option value="trial">Trial</option>
+                                                    </select>
+                                                    <p className="mt-1 text-xs text-gray-500">Internal accounting status - not visible to customers</p>
+                                                </div>
+
+                                                {/* Expiration Months */}
+                                                <div>
+                                                    <label htmlFor="expiration_months" className="block text-sm font-medium text-gray-700">
+                                                        Expiration (Months) <span className="text-red-500">*</span>
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        id="expiration_months"
+                                                        min="1"
+                                                        max="36"
+                                                        value={planChangeConfirm.expirationMonths || ''}
+                                                        onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, expirationMonths: parseInt(e.target.value) || '' })}
+                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                        required
+                                                    />
+                                                    <p className="mt-1 text-xs text-gray-500">Plan will auto-downgrade to Free after expiration if not upgraded (1-36 months)</p>
+                                                </div>
+
+                                                {/* Equivalent Plan Value (only for comped) */}
+                                                {planChangeConfirm.billingStatus === 'comped' && (
+                                                    <div>
+                                                        <label htmlFor="equivalent_plan_value" className="block text-sm font-medium text-gray-700">
+                                                            Equivalent Plan Value (Optional)
+                                                        </label>
+                                                        <div className="mt-1">
+                                                            <div className="relative rounded-md shadow-sm">
+                                                                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                                                    <span className="text-gray-500 sm:text-sm">$</span>
+                                                                </div>
+                                                                <input
+                                                                    type="number"
+                                                                    id="equivalent_plan_value"
+                                                                    min="0"
+                                                                    step="0.01"
+                                                                    value={planChangeConfirm.equivalentPlanValue || ''}
+                                                                    onChange={(e) => setPlanChangeConfirm({ ...planChangeConfirm, equivalentPlanValue: e.target.value ? parseFloat(e.target.value) : null })}
+                                                                    className="block w-full rounded-md border-gray-300 pl-7 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                                    placeholder="0.00"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <p className="mt-1 text-xs text-gray-500">Sales insight only - NOT counted as revenue (for internal tracking)</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
+                                <button
+                                    type="button"
+                                    onClick={handlePlanChangeConfirm}
+                                    disabled={planChangeConfirm.pendingValue !== 'free' && (!planChangeConfirm.expirationMonths || planChangeConfirm.expirationMonths < 1 || planChangeConfirm.expirationMonths > 36)}
+                                    className="inline-flex w-full justify-center rounded-md bg-amber-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 sm:ml-3 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    Change Plan
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handlePlanChangeCancel}
+                                    className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

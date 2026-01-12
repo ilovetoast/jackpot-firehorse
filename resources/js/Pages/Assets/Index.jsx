@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
+import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
+import { useThumbnailPolling } from '../../hooks/useThumbnailPolling'
 import {
     FolderIcon,
     TagIcon,
@@ -12,24 +14,70 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, assets = [] }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [] }) {
     const { auth } = usePage().props
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+    
+    // Local asset state
+    const [localAssets, setLocalAssets] = useState(assets)
+    
+    // Update local assets when props change (e.g., after Inertia reload)
+    // Guard: Protect completed thumbnails from being overwritten on refresh
+    useEffect(() => {
+        setLocalAssets(prevAssets => {
+            // If no previous assets, use new assets as-is
+            if (!prevAssets || prevAssets.length === 0) {
+                return assets
+            }
+            
+            // Merge new assets with field-level protection
+            return assets.map(newAsset => {
+                const prevAsset = prevAssets.find(a => a.id === newAsset.id)
+                if (!prevAsset) {
+                    return newAsset
+                }
+                
+                // Dev warning if attempting to overwrite completed thumbnail
+                warnIfOverwritingCompletedThumbnail(prevAsset, newAsset, 'refresh-sync')
+                
+                // Field-level merge: protects thumbnail fields but allows title, filename, metadata updates
+                return mergeAsset(prevAsset, newAsset)
+            })
+        })
+    }, [assets])
+    
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
     
-    // Derive active asset from current assets array to prevent stale references
+    // Derive active asset from local assets array to prevent stale references
     // If asset no longer exists after reload, activeAsset will be null and drawer will close
-    const activeAsset = activeAssetId ? assets.find(asset => asset.id === activeAssetId) : null
+    const activeAsset = activeAssetId ? localAssets.find(asset => asset.id === activeAssetId) : null
     
     // Close drawer if active asset no longer exists in current assets array
     useEffect(() => {
         if (activeAssetId && !activeAsset) {
             setActiveAssetId(null)
         }
-    }, [activeAssetId, activeAsset, assets])
+    }, [activeAssetId, activeAsset, localAssets])
+    
+    // Safe thumbnail polling - only for assets waiting for thumbnails
+    // Polls only qualifying assets (not completed, not error, no thumbnail_url)
+    // Stops immediately when asset completes or errors
+    // Never touches completed or errored assets
+    useThumbnailPolling(localAssets, (updatedAsset) => {
+        // Update local asset state when thumbnail becomes available
+        setLocalAssets(prevAssets =>
+            prevAssets.map(a => {
+                if (a.id === updatedAsset.id) {
+                    // Use mergeAsset to safely merge (protects completed thumbnails)
+                    return mergeAsset(a, updatedAsset)
+                }
+                return a
+            })
+        )
+    })
     
     // Track drawer animation state to freeze grid layout during animation
     // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
@@ -112,6 +160,20 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         )
     }
 
+    // Handle finalize complete - refresh asset grid after successful upload finalize
+    const handleFinalizeComplete = useCallback(() => {
+        console.log('[ASSETS_INDEX] Finalize complete - refreshing asset grid')
+        // Reload assets to show newly uploaded assets
+        // Don't preserve state to ensure we get fresh data from backend
+        router.reload({ 
+            only: ['assets'], 
+            preserveScroll: true,
+            onSuccess: () => {
+                console.log('[ASSETS_INDEX] Asset grid refreshed successfully')
+            }
+        })
+    }, [])
+
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
     const isLightColor = (color) => {
@@ -146,6 +208,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                             categories={categories || []}
                                             initialCategoryId={selectedCategoryId}
                                             className="w-full"
+                                            onFinalizeComplete={handleFinalizeComplete}
                                         />
                                     </div>
                                 )}
@@ -177,7 +240,12 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 }}
                                             >
                                                 <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} />
-                                                All
+                                                <span className="flex-1">All</span>
+                                                {total_asset_count > 0 && (
+                                                    <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                        {total_asset_count}
+                                                    </span>
+                                                )}
                                             </button>
                                         )}
                                         {/* Show all categories (both basic and marketing) in a single list */}
@@ -212,6 +280,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                             style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
                                                         />
                                                         <span className="flex-1">{category.name}</span>
+                                                        {category.asset_count !== undefined && category.asset_count > 0 && (
+                                                            <span className="text-xs font-normal opacity-50 ml-2" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                                {category.asset_count}
+                                                            </span>
+                                                        )}
                                                         {category.is_private && (
                                                             <div className="relative ml-2 group">
                                                                 <LockClosedIcon 
@@ -278,7 +351,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     >
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Asset Grid Toolbar */}
-                        {assets && assets.length > 0 && (
+                        {localAssets && localAssets.length > 0 && (
                             <div className="mb-6">
                                 <AssetGridToolbar
                                     showInfo={showInfo}
@@ -291,9 +364,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         )}
                             
                             {/* Assets Grid or Empty State */}
-                            {assets && assets.length > 0 ? (
+                            {localAssets && localAssets.length > 0 ? (
                                 <AssetGrid 
-                                    assets={assets} 
+                                    assets={localAssets} 
                                     onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
                                     cardSize={cardSize}
                                     showInfo={showInfo}
@@ -317,6 +390,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     <AddAssetButton 
                                         defaultAssetType="asset" 
                                         categories={categories || []}
+                                        onFinalizeComplete={handleFinalizeComplete}
                                     />
                                 </div>
                             </div>

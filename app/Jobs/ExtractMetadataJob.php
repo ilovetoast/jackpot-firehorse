@@ -57,9 +57,11 @@ class ExtractMetadataJob implements ShouldQueue
             return;
         }
 
-        // Ensure asset is in PROCESSING status (set by ProcessAssetJob)
-        if ($asset->status !== AssetStatus::PROCESSING) {
-            Log::warning('Metadata extraction skipped - asset is not in processing state', [
+        // Ensure asset is VISIBLE (not hidden or failed)
+        // Asset.status represents VISIBILITY, not processing progress
+        // Processing jobs must NOT mutate Asset.status (assets must remain visible in grid)
+        if ($asset->status !== AssetStatus::VISIBLE) {
+            Log::warning('Metadata extraction skipped - asset is not visible', [
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);

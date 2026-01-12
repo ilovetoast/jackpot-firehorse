@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetStatus;
 use App\Enums\EventType;
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Services\AssetCompletionService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -45,16 +48,13 @@ class DashboardController extends Controller
         $startOfLastMonth = $now->copy()->subMonth()->startOfMonth();
         $endOfLastMonth = $now->copy()->subMonth()->endOfMonth();
         
-        // Total Assets: Count completed assets for this brand
-        $totalAssets = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('status', AssetStatus::COMPLETED)
+        // Total Assets: Count assets with completed processing pipeline
+        // Query by processing state (thumbnail_status + metadata flags), not status
+        $totalAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->count();
             
         // Total Assets last month
-        $totalAssetsLastMonth = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('status', AssetStatus::COMPLETED)
+        $totalAssetsLastMonth = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->where('created_at', '<=', $endOfLastMonth)
             ->count();
             
@@ -64,19 +64,38 @@ class DashboardController extends Controller
             : ($totalAssets > 0 ? 100 : 0);
         
         // Storage Size: Sum of size_bytes for completed assets (in MB)
-        $storageBytes = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('status', AssetStatus::COMPLETED)
+        $storageBytes = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->sum('size_bytes');
         $storageMB = round($storageBytes / 1024 / 1024, 2);
         
         // Storage Size last month
-        $storageBytesLastMonth = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('status', AssetStatus::COMPLETED)
+        $storageBytesLastMonth = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
             ->where('created_at', '<=', $endOfLastMonth)
             ->sum('size_bytes');
         $storageMBLastMonth = round($storageBytesLastMonth / 1024 / 1024, 2);
+        
+        // AUDIT: Log query results and sample asset brand_ids for comparison
+        $sampleAssets = $this->getCompletedAssetsQuery($tenant->id, $brand->id)
+            ->limit(5)
+            ->get(['id', 'brand_id']);
+        if ($sampleAssets->count() > 0) {
+            $sampleAssetBrandIds = $sampleAssets->pluck('brand_id')->unique()->values()->toArray();
+            Log::info('[ASSET_QUERY_AUDIT] DashboardController::index() query results', [
+                'query_tenant_id' => $tenant->id,
+                'query_brand_id' => $brand->id,
+                'total_assets_count' => $totalAssets,
+                'sample_asset_brand_ids' => $sampleAssetBrandIds,
+                'brand_id_mismatch_count' => $sampleAssets->filter(fn($a) => $a->brand_id != $brand->id)->count(),
+                'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
+            ]);
+        } else {
+            Log::info('[ASSET_QUERY_AUDIT] DashboardController::index() query results (empty)', [
+                'query_tenant_id' => $tenant->id,
+                'query_brand_id' => $brand->id,
+                'total_assets_count' => 0,
+                'note' => 'No assets found - cannot compare brand_ids',
+            ]);
+        }
         
         // Calculate percentage change for storage
         $storageChange = $storageMBLastMonth > 0
@@ -137,5 +156,33 @@ class DashboardController extends Controller
                 ],
             ],
         ]);
+    }
+
+    /**
+     * Get query for assets with completed processing pipeline.
+     * 
+     * Completion criteria (matches AssetCompletionService):
+     * - thumbnail_status === COMPLETED
+     * - metadata['ai_tagging_completed'] === true
+     * - metadata['metadata_extracted'] === true
+     * - metadata['preview_generated'] === true (optional - if key exists, must be true)
+     * 
+     * Asset.status represents VISIBILITY only, so we query VISIBLE assets
+     * and filter by processing state.
+     */
+    protected function getCompletedAssetsQuery(int $tenantId, int $brandId)
+    {
+        return Asset::where('tenant_id', $tenantId)
+            ->where('brand_id', $brandId)
+            ->where('status', AssetStatus::VISIBLE) // Only visible assets
+            ->where('thumbnail_status', ThumbnailStatus::COMPLETED)
+            ->where('metadata->ai_tagging_completed', true)
+            ->where('metadata->metadata_extracted', true)
+            ->where(function ($query) {
+                // Preview generated is optional - if key exists, must be true; if doesn't exist, allow
+                $query->where('metadata->preview_generated', true)
+                      ->orWhereNull('metadata->preview_generated');
+            })
+            ->whereNull('deleted_at');
     }
 }

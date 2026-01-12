@@ -254,6 +254,20 @@ export default function AppNav({ brand, tenant }) {
                         {isAppPage ? (
                             <div className="hidden sm:flex sm:space-x-8 absolute" style={{ left: '18rem' }}>
                                 <Link
+                                    href="/app/dashboard"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl === '/app/dashboard'
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl === '/app/dashboard'
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Dashboard
+                                </Link>
+                                <Link
                                     href="/app/assets"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
@@ -284,6 +298,20 @@ export default function AppNav({ brand, tenant }) {
                             </div>
                         ) : (
                             <div className="hidden sm:flex sm:space-x-8 sm:ml-6">
+                                <Link
+                                    href="/app/dashboard"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl === '/app/dashboard'
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl === '/app/dashboard'
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Dashboard
+                                </Link>
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"

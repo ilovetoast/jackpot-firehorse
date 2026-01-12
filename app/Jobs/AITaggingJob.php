@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
@@ -57,12 +58,12 @@ class AITaggingJob implements ShouldQueue
             return;
         }
 
-        // Ensure asset is in THUMBNAIL_GENERATED status (from GeneratePreviewJob which should maintain status)
-        // Actually, preview generation doesn't change status, so we check for THUMBNAIL_GENERATED
-        if ($asset->status !== AssetStatus::THUMBNAIL_GENERATED) {
-            Log::warning('AI tagging skipped - asset has not completed thumbnail generation', [
+        // Ensure thumbnails have been generated (check thumbnail_status, not asset status)
+        // Asset.status remains UPLOADED throughout processing for visibility
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            Log::warning('AI tagging skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,
-                'status' => $asset->status->value,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
             return;
         }
@@ -71,6 +72,13 @@ class AITaggingJob implements ShouldQueue
         $tags = $this->generateAITags($asset);
 
         // Update asset metadata
+        // IMPORTANT: Asset.status must NOT be mutated here.
+        // Asset.status represents VISIBILITY (UPLOADED = visible in grid, COMPLETED = visible in dashboard),
+        // not processing progress. Mutating status would cause assets to disappear from the asset grid
+        // (AssetController queries status = UPLOADED). Processing progress is tracked via:
+        // - metadata flags (ai_tagging_completed, ai_tagging_completed_at)
+        // - activity events (asset.ai_tagging.completed)
+        // Only FinalizeAssetJob is authorized to change status from UPLOADED to COMPLETED.
         $currentMetadata = $asset->metadata ?? [];
         $currentMetadata['ai_tagging_completed'] = true;
         $currentMetadata['ai_tagging_completed_at'] = now()->toIso8601String();
@@ -78,9 +86,7 @@ class AITaggingJob implements ShouldQueue
             $currentMetadata['ai_tags'] = $tags;
         }
 
-        // Update status to AI_TAGGED
         $asset->update([
-            'status' => AssetStatus::AI_TAGGED,
             'metadata' => $currentMetadata,
         ]);
 

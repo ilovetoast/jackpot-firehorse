@@ -29,6 +29,13 @@ use Illuminate\Support\Facades\Log;
  * - Tracks thumbnail generation status independently
  *
  * Asset remains usable even if thumbnail generation fails.
+ *
+ * ⚠️ STATUS MUTATION CONTRACT:
+ * - Asset.status represents VISIBILITY, not processing progress
+ * - This job MUST NOT mutate Asset.status
+ * - Asset.status must remain UPLOADED throughout processing (for grid visibility)
+ * - Processing progress is tracked via thumbnail_status, metadata flags, and activity events
+ * - Only FinalizeAssetJob should change Asset.status to COMPLETED (for dashboard stats)
  */
 class GenerateThumbnailsJob implements ShouldQueue
 {
@@ -110,11 +117,11 @@ class GenerateThumbnailsJob implements ShouldQueue
             $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
             $currentMetadata['thumbnails'] = $thumbnails;
 
-            // Update asset status
-            // Note: Asset status remains separate from thumbnail_status
-            // Thumbnail generation can complete independently of other processing steps
+            // CRITICAL: Asset.status represents visibility and must remain UPLOADED
+            // Processing jobs (thumbnails, metadata, previews) must NOT mutate Asset.status
+            // Processing progress is tracked via thumbnail_status, metadata flags, and activity events
+            // AssetController queries only status = UPLOADED, so changing status hides assets from the grid
             $asset->update([
-                'status' => AssetStatus::THUMBNAIL_GENERATED,
                 'thumbnail_status' => ThumbnailStatus::COMPLETED,
                 'thumbnail_error' => null,
                 'metadata' => $currentMetadata,

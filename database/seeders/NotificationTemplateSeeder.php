@@ -443,6 +443,190 @@ class NotificationTemplateSeeder extends Seeder
                 'variables' => ['user_name', 'user_email', 'reset_url', 'app_name', 'app_url'],
                 'is_active' => true,
             ],
+            [
+                'key' => 'billing_trial_expiring_warning',
+                'name' => 'Billing Trial Expiring Warning',
+                'subject' => 'Your trial expires in {{days_until_expiration}} days - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #d97706;">Trial Expiring Soon</h2>
+            
+            <p>Hi {{owner_name}},</p>
+            
+            <p>
+                Your trial period for <strong>{{tenant_name}}</strong> will expire in <strong>{{days_until_expiration}} day(s)</strong> on {{expiration_date}}.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;">
+                <strong>What happens next:</strong><br>
+                When your trial expires, your plan will automatically downgrade to the Free plan. 
+                To continue with full access, please upgrade to a paid plan before {{expiration_date}}.
+            </p>
+            
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                If you have any questions about your trial or need assistance, please don\'t hesitate to contact our support team.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Trial Expiring Soon\n\nHi {{owner_name}},\n\nYour trial period for {{tenant_name}} will expire in {{days_until_expiration}} day(s) on {{expiration_date}}.\n\nWhat happens next:\nWhen your trial expires, your plan will automatically downgrade to the Free plan. To continue with full access, please upgrade to a paid plan before {{expiration_date}}.\n\nUpgrade your plan: {{billing_url}}\n\nIf you have any questions about your trial or need assistance, please don't hesitate to contact our support team.",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'expiration_date', 'days_until_expiration', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'billing_trial_expired',
+                'name' => 'Billing Trial Expired',
+                'subject' => 'Your trial has expired - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #ea580c;">Trial Expired</h2>
+            
+            <p>Hi {{owner_name}},</p>
+            
+            <p>
+                Your trial period for <strong>{{tenant_name}}</strong> has expired.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #fff7ed; border-left: 4px solid #f97316; border-radius: 4px;">
+                <strong>What happened:</strong><br>
+                Your plan has been automatically downgraded to the Free plan. You still have access to basic features, 
+                but some advanced features may be limited.
+            </p>
+            
+            <p>
+                To restore full access, please upgrade to a paid plan:
+            </p>
+            
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                If you have any questions or need assistance, please don\'t hesitate to contact our support team.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Trial Expired\n\nHi {{owner_name}},\n\nYour trial period for {{tenant_name}} has expired.\n\nWhat happened:\nYour plan has been automatically downgraded to the Free plan. You still have access to basic features, but some advanced features may be limited.\n\nTo restore full access, please upgrade to a paid plan: {{billing_url}}\n\nIf you have any questions or need assistance, please don't hesitate to contact our support team.",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'expiration_date', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'billing_comped_expiring_warning',
+                'name' => 'Billing Comped Expiring Warning',
+                'subject' => 'Your complimentary plan expires in {{days_until_expiration}} days - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #7c3aed;">Complimentary Plan Expiring</h2>
+            
+            <p>Hi {{owner_name}},</p>
+            
+            <p>
+                Your complimentary plan for <strong>{{tenant_name}}</strong> will expire in <strong>{{days_until_expiration}} day(s)</strong> on {{expiration_date}}.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #faf5ff; border-left: 4px solid #8b5cf6; border-radius: 4px;">
+                <strong>What happens next:</strong><br>
+                When your complimentary plan expires, your account will automatically downgrade to the Free plan. 
+                To continue with your current features, please upgrade to a paid plan before {{expiration_date}}.
+            </p>
+            
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                If you have any questions or need assistance, please don\'t hesitate to contact our support team.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Complimentary Plan Expiring\n\nHi {{owner_name}},\n\nYour complimentary plan for {{tenant_name}} will expire in {{days_until_expiration}} day(s) on {{expiration_date}}.\n\nWhat happens next:\nWhen your complimentary plan expires, your account will automatically downgrade to the Free plan. To continue with your current features, please upgrade to a paid plan before {{expiration_date}}.\n\nUpgrade your plan: {{billing_url}}\n\nIf you have any questions or need assistance, please don't hesitate to contact our support team.",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'expiration_date', 'days_until_expiration', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'billing_comped_expired',
+                'name' => 'Billing Comped Expired',
+                'subject' => 'Your complimentary plan has expired - {{tenant_name}}',
+                'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: #ffffff; padding: 24px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+            <h2 style="margin-top: 0; color: #7c3aed;">Complimentary Plan Expired</h2>
+            
+            <p>Hi {{owner_name}},</p>
+            
+            <p>
+                Your complimentary plan for <strong>{{tenant_name}}</strong> has expired.
+            </p>
+            
+            <p style="margin-top: 24px; padding: 16px; background-color: #faf5ff; border-left: 4px solid #8b5cf6; border-radius: 4px;">
+                <strong>What happened:</strong><br>
+                Your account has been automatically downgraded to the Free plan. You still have access to basic features, 
+                but some advanced features may be limited.
+            </p>
+            
+            <p>
+                To restore full access, please upgrade to a paid plan:
+            </p>
+            
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+            </div>
+            
+            <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
+                If you have any questions or need assistance, please don\'t hesitate to contact our support team.
+            </p>
+        </div>
+        <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+            <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+            </p>
+        </div>
+    </div>
+</div>',
+                'body_text' => "Complimentary Plan Expired\n\nHi {{owner_name}},\n\nYour complimentary plan for {{tenant_name}} has expired.\n\nWhat happened:\nYour account has been automatically downgraded to the Free plan. You still have access to basic features, but some advanced features may be limited.\n\nTo restore full access, please upgrade to a paid plan: {{billing_url}}\n\nIf you have any questions or need assistance, please don't hesitate to contact our support team.",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'expiration_date', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
         ];
 
         foreach ($templates as $template) {

@@ -24,7 +24,23 @@ class Tenant extends Model
         'timezone',
         'plan_management_source',
         'manual_plan_override',
+        'billing_status', // For accounting: null/'paid' (Stripe), 'trial', 'comped' (free account)
+        'billing_status_expires_at', // Optional expiration for trial/comped accounts
+        'equivalent_plan_value', // Sales insight only - NOT real revenue
     ];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'billing_status_expires_at' => 'date',
+            'equivalent_plan_value' => 'decimal:2',
+        ];
+    }
 
     /**
      * Boot the model.

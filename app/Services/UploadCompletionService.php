@@ -6,8 +6,12 @@ use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Events\AssetProcessingCompleteEvent;
 use App\Events\AssetUploaded;
+use App\Jobs\ExtractMetadataJob;
+use App\Jobs\GenerateThumbnailsJob;
 use App\Models\Asset;
+use App\Models\Category;
 use App\Models\UploadSession;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -311,13 +315,66 @@ class UploadCompletionService
         // Assets are initially stored in temp/ during upload, then promoted to canonical location
         $storagePath = $this->generateTempUploadPath($uploadSession);
 
-        // Determine asset type (default to ASSET if not provided)
-        $assetTypeEnum = $assetType ? AssetType::from($assetType) : AssetType::ASSET;
+        // Derive asset type from category if categoryId is provided, otherwise use provided assetType or default to ASSET
+        // This ensures type always matches the category's asset_type
+        if ($categoryId !== null) {
+            // Look up category to get its asset_type
+            $category = Category::find($categoryId);
+            if ($category) {
+                $assetTypeEnum = $category->asset_type; // Use category's asset_type enum directly
+                Log::info('[UploadCompletionService] Derived asset type from category', [
+                    'category_id' => $categoryId,
+                    'asset_type' => $assetTypeEnum->value,
+                ]);
+            } else {
+                // Category not found - fall back to provided assetType or default
+                Log::warning('[UploadCompletionService] Category not found, using provided assetType or default', [
+                    'category_id' => $categoryId,
+                    'provided_asset_type' => $assetType ?? 'null',
+                ]);
+                $assetTypeEnum = $assetType ? AssetType::from($assetType) : AssetType::ASSET;
+            }
+        } else {
+            // No categoryId provided - use provided assetType or default to ASSET
+            $assetTypeEnum = $assetType ? AssetType::from($assetType) : AssetType::ASSET;
+        }
 
+        // Get active brand ID from context (set by ResolveTenant middleware)
+        // CRITICAL: Brand context MUST be available - fail loudly if missing
+        // The finalize route is inside the 'tenant' middleware group which binds the brand
+        // Silent fallback to uploadSession->brand_id is incorrect and causes brand mismatch bugs
+        if (!app()->bound('brand')) {
+            Log::error('[UploadCompletionService] Brand context not bound - ResolveTenant middleware may not have run', [
+                'upload_session_id' => $uploadSession->id,
+                'tenant_id' => $uploadSession->tenant_id,
+                'session_brand_id' => $uploadSession->brand_id,
+                'note' => 'Brand context must be bound by ResolveTenant middleware. Ensure finalize route is in tenant middleware group.',
+            ]);
+            throw new \RuntimeException(
+                'Brand context is not available. The finalize endpoint must be accessed through the tenant middleware which binds the active brand. ' .
+                'This prevents assets from being created with incorrect brand_id values.'
+            );
+        }
+        
+        $activeBrand = app('brand');
+        $targetBrandId = $activeBrand->id;
+        
+        // GUARD: Log warning if session brand_id differs from active brand_id
+        // This helps identify when upload_session was created with a different brand than the current UI brand
+        if ($uploadSession->brand_id !== $targetBrandId) {
+            Log::warning('[UploadCompletionService] Brand mismatch detected - using active brand instead of session brand', [
+                'upload_session_id' => $uploadSession->id,
+                'session_brand_id' => $uploadSession->brand_id,
+                'active_brand_id' => $targetBrandId,
+                'tenant_id' => $uploadSession->tenant_id,
+                'note' => 'Asset will be created under active brand context, not the brand used during upload initiation',
+            ]);
+        }
+        
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change
         // The unique constraint on upload_session_id prevents duplicate assets at DB level
-        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $metadataArray, $categoryId, $userId) {
+        return DB::transaction(function () use ($uploadSession, $fileInfo, $assetTypeEnum, $storagePath, $derivedTitle, $finalFilename, $filename, $metadataArray, $categoryId, $userId, $targetBrandId) {
             // Double-check for existing asset inside transaction (final race condition check)
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->lockForUpdate()->first();
             if ($existingAsset) {
@@ -338,7 +395,8 @@ class UploadCompletionService
             Log::info('[UploadCompletionService] About to create Asset record', [
                 'upload_session_id' => $uploadSession->id,
                 'tenant_id' => $uploadSession->tenant_id,
-                'brand_id' => $uploadSession->brand_id,
+                'session_brand_id' => $uploadSession->brand_id,
+                'target_brand_id' => $targetBrandId,
                 'title' => $derivedTitle ?? 'null',
                 'title_type' => gettype($derivedTitle),
                 'original_filename' => $fileInfo['original_filename'] ?? 'null',
@@ -356,10 +414,11 @@ class UploadCompletionService
                 // 🔍 DEBUG LOGGING: Log exact data being passed to Asset::create()
                 Log::info('[UploadCompletionService] Asset::create() called with data', [
                     'tenant_id' => $uploadSession->tenant_id,
-                    'brand_id' => $uploadSession->brand_id,
+                    'target_brand_id' => $targetBrandId,
+                    'session_brand_id' => $uploadSession->brand_id,
                     'upload_session_id' => $uploadSession->id,
                     'storage_bucket_id' => $uploadSession->storage_bucket_id,
-                    'status' => AssetStatus::UPLOADED->value,
+                    'status' => AssetStatus::VISIBLE->value,
                     'type' => $assetTypeEnum->value,
                     'title' => $derivedTitle ?? 'null',
                     'original_filename' => $fileInfo['original_filename'] ?? 'null',
@@ -371,16 +430,35 @@ class UploadCompletionService
                     'metadata_type' => gettype($metadataArray),
                 ]);
                 
+                // AUDIT: Log brand_id being stored on asset for comparison with query brand_ids
+                Log::info('[ASSET_QUERY_AUDIT] UploadCompletionService::complete() storing asset', [
+                    'stored_tenant_id' => $uploadSession->tenant_id,
+                    'stored_brand_id' => $targetBrandId,
+                    'session_brand_id' => $uploadSession->brand_id,
+                    'stored_brand_id_type' => gettype($targetBrandId),
+                    'upload_session_id' => $uploadSession->id,
+                    'note' => 'Compare stored_brand_id (from active brand context) against query_brand_id in AssetController and DashboardController',
+                ]);
+
+                // Use resolvedFilename from frontend if provided, otherwise fall back to S3 extracted filename
+                // This prevents "unknown" from appearing when S3 metadata doesn't contain filename
+                $finalOriginalFilename = $finalFilename ?? $fileInfo['original_filename'];
+                
+                // Ensure we never save "unknown" as original_filename
+                if ($finalOriginalFilename === 'unknown' && $filename) {
+                    $finalOriginalFilename = $filename;
+                }
+                
                 $asset = Asset::create([
                     'tenant_id' => $uploadSession->tenant_id,
-                    'brand_id' => $uploadSession->brand_id,
+                    'brand_id' => $targetBrandId,
                     'user_id' => $userId, // User who uploaded the asset
                     'upload_session_id' => $uploadSession->id, // Unique constraint prevents duplicates
                     'storage_bucket_id' => $uploadSession->storage_bucket_id,
-                    'status' => AssetStatus::UPLOADED, // Initial state after upload completion
+                    'status' => AssetStatus::VISIBLE, // Initial visibility state after upload completion
                     'type' => $assetTypeEnum,
                     'title' => $derivedTitle, // Persist human-facing title (never "Unknown", null if empty)
-                    'original_filename' => $fileInfo['original_filename'], // Always use actual original filename from S3
+                    'original_filename' => $finalOriginalFilename, // Use resolvedFilename from frontend, fallback to S3 filename
                     'mime_type' => $fileInfo['mime_type'],
                     'size_bytes' => $fileInfo['size_bytes'],
                     'storage_root_path' => $storagePath, // Uses finalFilename (resolvedFilename from frontend if provided)
@@ -427,6 +505,19 @@ class UploadCompletionService
             
             // 🔍 VERIFICATION: Refresh asset and verify it saved correctly (runs for both new and duplicate cases)
             $asset->refresh();
+            
+            // AUDIT: Log actual brand_id stored in database after asset creation
+            Log::info('[ASSET_QUERY_AUDIT] UploadCompletionService::complete() asset created and verified', [
+                'asset_id' => $asset->id,
+                'stored_tenant_id' => $asset->tenant_id,
+                'stored_brand_id' => $asset->brand_id,
+                'stored_brand_id_type' => gettype($asset->brand_id),
+                'target_brand_id' => $targetBrandId,
+                'session_brand_id' => $uploadSession->brand_id,
+                'brand_id_matches_target' => $asset->brand_id == $targetBrandId,
+                'upload_session_id' => $uploadSession->id,
+                'note' => 'Verify stored_brand_id matches target_brand_id (from active brand context)',
+            ]);
             
             Log::info('[UploadCompletionService] Asset created and refreshed from database', [
                 'asset_id' => $asset->id,
@@ -486,6 +577,18 @@ class UploadCompletionService
             // Emit AssetUploaded event (only emit once, even if called multiple times)
             // The event system should handle duplicate events gracefully
             event(new AssetUploaded($asset));
+
+            // Dispatch post-finalize processing jobs (async, non-blocking)
+            // Jobs are dispatched immediately after asset creation to ensure processing happens eventually
+            // Order: ThumbnailGenerationJob -> MetadataExtractionJob (if applicable) -> AssetProcessingCompleteEvent
+            GenerateThumbnailsJob::dispatch($asset->id);
+
+            // Dispatch metadata extraction job if applicable (images and other extractable file types)
+            // For now, dispatch for all assets - future refinement can add file type checks
+            ExtractMetadataJob::dispatch($asset->id);
+
+            // Emit AssetProcessingCompleteEvent
+            event(new AssetProcessingCompleteEvent($asset));
 
             // Log asset upload finalized (non-blocking)
             try {

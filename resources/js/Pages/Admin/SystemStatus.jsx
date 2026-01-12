@@ -15,7 +15,7 @@ import {
     SparklesIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight }) {
+export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun }) {
     const { auth } = usePage().props
 
     // Get status badge config
@@ -140,6 +140,11 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                                 Last processed: {formatDate(systemHealth.queue.last_processed_at)}
                                             </div>
                                         )}
+                                        {queueNextRun && (
+                                            <div className="text-xs text-gray-500 mt-2">
+                                                Next job: {queueNextRun.job_name} in {queueNextRun.next_run_in}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -158,18 +163,18 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                         </span>
                                     </div>
                                     <div className="space-y-2">
-                                        {systemHealth?.scheduler?.last_heartbeat_at ? (
+                                        {systemHealth?.scheduler?.last_heartbeat ? (
                                             <div className="text-sm">
                                                 <span className="text-gray-500">Last heartbeat: </span>
                                                 <span className="font-medium text-gray-900">
-                                                    {formatDate(systemHealth.scheduler.last_heartbeat_at)}
+                                                    {formatDate(systemHealth.scheduler.last_heartbeat)}
                                                 </span>
                                             </div>
                                         ) : (
                                             <div className="text-sm text-gray-500">No heartbeat recorded</div>
                                         )}
-                                        {systemHealth?.scheduler?.error && (
-                                            <div className="text-xs text-red-600 mt-2">{systemHealth.scheduler.error}</div>
+                                        {systemHealth?.scheduler?.message && (
+                                            <div className="text-xs text-gray-600 mt-1">{systemHealth.scheduler.message}</div>
                                         )}
                                     </div>
                                 </div>
@@ -339,6 +344,66 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                             )}
                         </div>
                         {/* TODO: Add retry button for failed jobs in future phase */}
+                    </div>
+
+                    {/* Scheduled Tasks */}
+                    <div className="mb-8">
+                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Scheduled Tasks</h2>
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            {scheduledTasks && scheduledTasks.length > 0 ? (
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Task
+                                                </th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Schedule
+                                                </th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Next Run
+                                                </th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    In
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-gray-200">
+                                            {scheduledTasks.map((task, index) => (
+                                                <tr key={index} className="hover:bg-gray-50">
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-sm font-medium text-gray-900">
+                                                            {task.description || task.command || 'Unknown task'}
+                                                        </div>
+                                                        {task.command && task.command !== task.description && (
+                                                            <div className="text-xs text-gray-500 font-mono mt-1">
+                                                                {task.command}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-sm text-gray-500 font-mono">
+                                                            {task.expression || 'N/A'}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        {task.next_run_at ? formatDate(task.next_run_at) : 'N/A'}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        {task.next_run_in || 'N/A'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="px-6 py-8 text-center text-sm text-gray-500">
+                                    No scheduled tasks found
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     {/* Assets with Issues */}

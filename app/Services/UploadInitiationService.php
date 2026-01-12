@@ -128,21 +128,9 @@ class UploadInitiationService
             $multipartUploadId = null;
             $chunkSize = null;
         } else {
-            // Multipart upload initiation
-            $multipartUpload = $this->initiateMultipartUpload($bucket, $path, $mimeType);
-            $uploadUrl = null; // No single URL for multipart
-            $multipartUploadId = $multipartUpload['UploadId'];
-            $chunkSize = self::DEFAULT_CHUNK_SIZE;
-
-            // Store multipart upload ID in database for resume support
-            // This allows us to resume multipart uploads after page refresh or network interruption
-            $uploadSession->update([
-                'multipart_upload_id' => $multipartUploadId,
-                'last_activity_at' => now(), // Track activity for abandoned session detection
-            ]);
-            
-            // Refresh to get the updated multipart_upload_id
-            $uploadSession->refresh();
+            // TEMPORARY: Multipart upload not built yet
+            // Return error for files over 100MB that would require multipart upload
+            throw new \RuntimeException('Multipart upload not built yet. Files over 100MB are not supported.');
         }
 
         Log::info('Upload session initiated', [
@@ -259,15 +247,9 @@ class UploadInitiationService
                     $multipartUploadId = null;
                     $chunkSize = null;
                 } else {
-                    // Multipart upload initiation
-                    $multipartUpload = $this->initiateMultipartUpload($bucket, $path, $file['mime_type'] ?? null);
-                    $uploadUrl = null;
-                    $multipartUploadId = $multipartUpload['UploadId'];
-                    $chunkSize = self::DEFAULT_CHUNK_SIZE;
-
-                    // Store multipart upload ID in database for resume support (after transaction commit)
-                    // We'll update it after the transaction to ensure consistency
-                    $uploadSession->multipart_upload_id = $multipartUploadId;
+                    // TEMPORARY: Multipart upload not built yet
+                    // Return error for files over 100MB that would require multipart upload
+                    throw new \RuntimeException('Multipart upload not built yet. Files over 100MB are not supported.');
                 }
 
                 // Commit transaction - all DB operations succeeded

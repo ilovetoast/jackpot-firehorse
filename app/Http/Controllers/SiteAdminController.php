@@ -111,9 +111,10 @@ class SiteAdminController extends Controller
         ]);
 
         $planService = app(\App\Services\PlanService::class);
+        $costService = app(\App\Services\CompanyCostService::class);
         
         return Inertia::render('Admin/Index', [
-            'companies' => $companies->map(function ($company) use ($planService) {
+            'companies' => $companies->map(function ($company) use ($planService, $costService) {
                 // Database role is the SINGLE source of truth - use owner() method which ensures consistency
                 // This method will automatically fix any discrepancies by setting the role in the database
                 $owner = $company->owner();
@@ -232,6 +233,10 @@ class SiteAdminController extends Controller
                             'brand_assignments' => $brandAssignments,
                         ];
                     })->values(),
+                    // Calculate costs and income for this company
+                    'costs' => $costService->calculateMonthlyCosts($company),
+                    'income' => $costService->calculateIncome($company),
+                    'profitability' => $costService->calculateProfitabilityRating($company),
                 ];
             }),
             'users' => $allUsers,
@@ -1155,10 +1160,16 @@ class SiteAdminController extends Controller
         $validated = $request->validate([
             'plan' => ['required', 'string', 'in:free,starter,pro,enterprise'],
             'management_source' => ['nullable', 'string', 'in:stripe,shopify,manual'],
+            'billing_status' => ['nullable', 'string', 'in:trial,comped'],
+            'expiration_months' => ['nullable', 'integer', 'min:1', 'max:36'], // Max 3 years
+            'equivalent_plan_value' => ['nullable', 'numeric', 'min:0'], // For comped accounts only
         ]);
 
         $planName = $validated['plan'];
         $managementSource = $validated['management_source'] ?? null;
+        $billingStatus = $validated['billing_status'] ?? null;
+        $expirationMonths = $validated['expiration_months'] ?? null;
+        $equivalentPlanValue = $validated['equivalent_plan_value'] ?? null;
         
         // Validate plan exists
         if (!config("plans.{$planName}")) {
@@ -1166,7 +1177,37 @@ class SiteAdminController extends Controller
                 'plan' => 'Invalid plan selected.',
             ]);
         }
-
+        
+        // If setting trial/comped with expiration, use the service
+        // This ensures proper audit logging and protections
+        if ($billingStatus && in_array($billingStatus, ['trial', 'comped']) && $expirationMonths) {
+            try {
+                $expirationService = app(\App\Services\BillingExpirationService::class);
+                $expirationService->setBillingStatusWithExpiration(
+                    tenant: $tenant,
+                    billingStatus: $billingStatus,
+                    planName: $planName,
+                    months: $expirationMonths,
+                    equivalentPlanValue: $equivalentPlanValue,
+                    reason: 'admin_manual_assignment'
+                );
+                
+                // Set management source if provided
+                if ($managementSource) {
+                    $tenant->plan_management_source = $managementSource;
+                    $tenant->save();
+                }
+                
+                // Activity logging is handled by the service
+                return back()->with('success', "Plan set to {$planName} with {$billingStatus} status (expires in {$expirationMonths} months)");
+            } catch (\Exception $e) {
+                return back()->withErrors([
+                    'plan' => 'Failed to set billing status: ' . $e->getMessage(),
+                ]);
+            }
+        }
+        
+        // Legacy path: Simple plan assignment without expiration
         // Get old plan for logging
         $oldPlan = $planService->getCurrentPlan($tenant);
         
@@ -1175,6 +1216,22 @@ class SiteAdminController extends Controller
         if ($managementSource) {
             $tenant->plan_management_source = $managementSource;
         }
+        
+        // Set billing_status for accounting purposes (legacy - no expiration)
+        // When manually assigning a plan without Stripe, account is comped (no revenue)
+        // This is NOT frontend-facing - internal accounting only
+        // TODO: Encourage use of billing_status with expiration for better tracking
+        if (!$tenant->stripe_id) {
+            // If billing_status provided, use it; otherwise default to 'comped'
+            $tenant->billing_status = $billingStatus ?? 'comped';
+            
+            // Set equivalent_plan_value for comped accounts if provided
+            if ($tenant->billing_status === 'comped' && $equivalentPlanValue !== null) {
+                $tenant->equivalent_plan_value = $equivalentPlanValue;
+            }
+        }
+        // If they have Stripe, billing_status should remain null (paid/subscribed)
+        
         $tenant->save();
 
         // Log activity
@@ -2214,13 +2271,28 @@ class SiteAdminController extends Controller
     }
 
     /**
-     * Get the plan prefix label (Override, Forced, etc.)
+     * Get the plan prefix label (Comped, Trial, Forced, etc.)
+     * 
+     * Uses billing_status for comped/trial accounts instead of generic "Override"
+     * This is internal-only labeling for admin purposes.
      */
     private function getPlanPrefix(Tenant $tenant, string $planName, $latestSubscription, $planService): ?string
     {
-        // Check if manually overridden
-        if ($tenant->manual_plan_override) {
-            return 'Override';
+        // Check billing_status first - use specific labels for comped/trial
+        // billing_status is NOT frontend-facing - internal admin labeling only
+        if ($tenant->billing_status === 'comped') {
+            return 'Comped'; // No revenue, expenses still apply
+        }
+        
+        if ($tenant->billing_status === 'trial') {
+            return 'Trial'; // No revenue during trial, expenses still apply
+        }
+        
+        // Check if manually overridden (legacy - before billing_status was added)
+        // For accounts with manual_plan_override but no billing_status set, treat as comped
+        if ($tenant->manual_plan_override && !$tenant->stripe_id) {
+            // TODO: Set billing_status to 'comped' when updating plan manually
+            return 'Comped';
         }
         
         // Check if externally managed (e.g., Shopify)

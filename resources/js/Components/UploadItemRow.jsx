@@ -157,16 +157,48 @@ function formatFileSize(bytes) {
  * @param {Object} props.uploadManager - Phase 3 upload manager instance
  * @param {Function} [props.onRemove] - Callback when item should be removed
  */
-export default function UploadItemRow({ item, uploadManager, onRemove }) {
+export default function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
+    // CLEAN UPLOADER V2: DEV warning for failed files
+    if (process.env.NODE_ENV === 'development' && item.uploadStatus === 'failed') {
+        console.warn('[UPLOAD_V2_UI] rendering failed file', { 
+            clientId: item.clientId, 
+            error: item.error 
+        });
+    }
+
+    // Helper to get filename without extension (must be defined before use)
+    const getFilenameWithoutExtension = (filename) => {
+        if (!filename) return '';
+        const lastDot = filename.lastIndexOf('.');
+        if (lastDot === -1) {
+            return filename;
+        }
+        return filename.substring(0, lastDot);
+    };
+    
+    // Helper to get extension from original filename
+    const getFileExtension = (filename) => {
+        if (!filename) return '';
+        const lastDot = filename.lastIndexOf('.');
+        if (lastDot === -1 || lastDot === filename.length - 1) {
+            return '';
+        }
+        return filename.substring(lastDot + 1).toLowerCase();
+    };
+    
+    // Safe filename accessors with defaults
+    const originalFilename = item.originalFilename || 'unknown';
+    const resolvedFilename = item.resolvedFilename || originalFilename;
+    
     const [isExpanded, setIsExpanded] = useState(false);
     const [titleEditing, setTitleEditing] = useState(false);
-    const [editedTitle, setEditedTitle] = useState(item.title || getFilenameWithoutExtension(item.originalFilename));
+    const [editedTitle, setEditedTitle] = useState(item.title || getFilenameWithoutExtension(originalFilename));
     const [showEditIcon, setShowEditIcon] = useState(false);
     const titleInputRef = useRef(null);
     
     // Resolved filename editing state (power-user control)
     const [filenameEditing, setFilenameEditing] = useState(false);
-    const [editedFilename, setEditedFilename] = useState(item.resolvedFilename || item.originalFilename);
+    const [editedFilename, setEditedFilename] = useState(resolvedFilename);
     const filenameInputRef = useRef(null);
     
     // Heartbeat fallback for large multipart uploads (shows "Uploading..." when queued >7.5s with no progress)
@@ -179,39 +211,21 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
     const statusConfig = getStatusConfig(displayStatus);
     const StatusIcon = statusConfig.icon;
     
-    // Helper to get extension from original filename
-    const getFileExtension = (filename) => {
-        const lastDot = filename.lastIndexOf('.');
-        if (lastDot === -1 || lastDot === filename.length - 1) {
-            return '';
-        }
-        return filename.substring(lastDot + 1).toLowerCase();
-    };
-    
-    // Helper to get filename without extension
-    const getFilenameWithoutExtension = (filename) => {
-        const lastDot = filename.lastIndexOf('.');
-        if (lastDot === -1) {
-            return filename;
-        }
-        return filename.substring(0, lastDot);
-    };
-    
-    const extension = getFileExtension(item.originalFilename);
+    const extension = getFileExtension(originalFilename);
     
     // Sync editedTitle when item.title changes (but not when editing)
     useEffect(() => {
         if (!titleEditing) {
-            setEditedTitle(item.title || getFilenameWithoutExtension(item.originalFilename));
+            setEditedTitle(item.title || getFilenameWithoutExtension(originalFilename));
         }
-    }, [item.title, item.originalFilename, titleEditing]);
+    }, [item.title, originalFilename, titleEditing]);
     
     // Sync editedFilename when item.resolvedFilename changes (but not when editing)
     useEffect(() => {
         if (!filenameEditing) {
-            setEditedFilename(item.resolvedFilename || item.originalFilename);
+            setEditedFilename(resolvedFilename);
         }
-    }, [item.resolvedFilename, item.originalFilename, filenameEditing]);
+    }, [resolvedFilename, filenameEditing]);
     
     // Focus input when entering edit mode
     useEffect(() => {
@@ -229,10 +243,10 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
         }
     }, [filenameEditing]);
     
-    // Image preview for image files
-    const isImage = item.file.type.startsWith('image/');
+    // Image preview for image files (safe access)
+    const isImage = item.file?.type?.startsWith('image/') || false;
     const previewUrl = useMemo(() => {
-        if (isImage) {
+        if (isImage && item.file) {
             return URL.createObjectURL(item.file);
         }
         return null;
@@ -247,29 +261,26 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
         };
     }, [previewUrl]);
     
-    // Get effective metadata (read-only)
-    const effectiveMetadata = uploadManager.getEffectiveMetadata(item.clientId);
+    // Get effective metadata (read-only) - safe access
+    const effectiveMetadata = uploadManager?.getEffectiveMetadata?.(item.clientId) || {};
     
-    // Get global metadata for comparison
-    const globalMetadata = uploadManager.globalMetadataDraft;
-    const availableFields = uploadManager.availableMetadataFields;
+    // Get global metadata for comparison - safe access
+    const globalMetadata = uploadManager?.globalMetadataDraft || {};
+    const availableFields = uploadManager?.availableMetadataFields || [];
     
-    // Check if field is overridden
+    // Check if field is overridden - safe access
+    // Field is overridden if it exists in metadataDraft (even if value is empty/undefined)
     const isFieldOverridden = (fieldKey) => {
-        if (!item.isMetadataOverridden) return false;
-        if (typeof item.isMetadataOverridden === 'boolean') {
-            return item.isMetadataOverridden && item.metadataDraft[fieldKey] !== undefined;
-        }
-        return item.isMetadataOverridden[fieldKey] === true;
+        return item.metadataDraft && fieldKey in item.metadataDraft;
     };
     
     // Original title for fallback display (title is primary, not an override)
-    const originalTitle = getFilenameWithoutExtension(item.originalFilename);
+    const originalTitle = getFilenameWithoutExtension(originalFilename);
     
     // Handle title save
     const handleTitleSave = () => {
         const newTitle = editedTitle.trim() || originalTitle;
-        if (newTitle !== item.title) {
+        if (newTitle !== item.title && uploadManager?.setTitle) {
             uploadManager.setTitle(item.clientId, newTitle);
             // resolvedFilename will be automatically derived by setTitle
         }
@@ -301,16 +312,16 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
     
     // Handle filename save
     const handleFilenameSave = () => {
-        const newFilename = editedFilename.trim() || item.resolvedFilename || item.originalFilename;
+        const newFilename = editedFilename.trim() || resolvedFilename;
         if (newFilename !== item.resolvedFilename) {
-            uploadManager.setResolvedFilename(item.clientId, newFilename);
+            uploadManager?.setResolvedFilename?.(item.clientId, newFilename);
         }
         setFilenameEditing(false);
     };
     
     // Handle filename cancel
     const handleFilenameCancel = () => {
-        setEditedFilename(item.resolvedFilename || item.originalFilename);
+        setEditedFilename(resolvedFilename);
         setFilenameEditing(false);
     };
     
@@ -332,7 +343,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
     };
 
     // Handle remove (only for queued/failed items)
-    const canRemove = (item.uploadStatus === 'queued' || item.uploadStatus === 'failed');
+    const canRemove = !disabled && (item.uploadStatus === 'queued' || item.uploadStatus === 'failed');
     const handleRemove = (e) => {
         e.stopPropagation(); // Prevent row expansion
         if (onRemove && canRemove) {
@@ -388,7 +399,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                             {isImage && previewUrl ? (
                                 <img
                                     src={previewUrl}
-                                    alt={item.resolvedFilename || item.originalFilename}
+                                    alt={resolvedFilename}
                                     className="h-10 w-10 object-cover rounded border border-gray-200"
                                 />
                             ) : (
@@ -442,7 +453,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                 )}
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5">
-                                {formatFileSize(item.file.size)}
+                                {item.file?.size ? formatFileSize(item.file.size) : 'Unknown size'}
                             </p>
                             
                             {/* Inline progress bar - always visible */}
@@ -478,7 +489,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                             >
                                 {statusConfig.label}
                             </span>
-                            {/* Show "Expired" badge for rehydrated/expired uploads */}
+                            {/* Show "Expired" badge for rehydrated/expired uploads - safe access */}
                             {(item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired') && (
                                 <span
                                     className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700"
@@ -520,18 +531,22 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                     </div>
                 </div>
 
-                {/* Error message (if failed) */}
+                {/* Error message (if failed) - safe access */}
                 {item.uploadStatus === 'failed' && item.error && (
                     <div className="mt-2 ml-8">
                         <div className="flex items-start">
-                            <ExclamationCircleIcon className="h-4 w-4 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+                            <ExclamationCircleIcon className={`h-4 w-4 mr-2 flex-shrink-0 mt-0.5 ${
+                                item.error?.stage === 'finalize' ? 'text-amber-500' : 'text-red-500'
+                            }`} />
                             <div className="flex-1">
-                                <p className="text-sm text-red-600">
-                                    {item.error.message || 'Upload failed'}
+                                <p className={`text-sm ${
+                                    item.error?.stage === 'finalize' ? 'text-amber-700' : 'text-red-600'
+                                }`}>
+                                    {item.error?.message || 'Upload failed'}
                                 </p>
-                                {/* Show indicator if this was a rehydrated/expired upload */}
-                                {(item.error.type === 'rehydrated_expired' || item.error.type === 'old_upload_expired' || 
-                                  (item.error.message && (item.error.message.includes('expired') || item.error.message.includes('Previous upload session') || item.error.message.includes('does not exist in S3')))) && (
+                                {/* Show indicator if this was a rehydrated/expired upload - safe access */}
+                                {(item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired' || 
+                                  (item.error?.message && (item.error.message.includes('expired') || item.error.message.includes('Previous upload session') || item.error.message.includes('does not exist in S3')))) && (
                                     <p className="text-xs text-gray-500 mt-1">
                                         This upload was from a previous session and cannot be resumed. Remove it and upload the file again.
                                     </p>
@@ -555,7 +570,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                             <dl className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
                                     <dt className="text-gray-500 mb-1">Original filename</dt>
-                                    <dd className="text-gray-900 font-mono text-xs break-all">{item.originalFilename}</dd>
+                                    <dd className="text-gray-900 font-mono text-xs break-all">{originalFilename}</dd>
                                 </div>
                                 <div>
                                     <dt className="text-gray-500 mb-1">Resolved filename</dt>
@@ -570,7 +585,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                                 onKeyDown={handleFilenameKeyDown}
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                                                placeholder={item.originalFilename}
+                                                placeholder={originalFilename}
                                             />
                                         ) : (
                                             <button
@@ -580,7 +595,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                                 className="text-left w-full px-2 py-1 text-xs font-mono break-all hover:bg-gray-50 rounded border border-transparent hover:border-gray-300 transition-colors group"
                                                 title="Click to edit (used for storage and URLs)"
                                             >
-                                                {item.resolvedFilename || item.originalFilename}
+                                                {resolvedFilename}
                                             </button>
                                         )}
                                         <p className="mt-1 text-xs text-gray-400">Used for storage and URLs</p>
@@ -588,11 +603,11 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                 </div>
                                 <div>
                                     <dt className="text-gray-500">File size</dt>
-                                    <dd className="text-gray-900">{formatFileSize(item.file.size)}</dd>
+                                    <dd className="text-gray-900">{item.file?.size ? formatFileSize(item.file.size) : 'Unknown'}</dd>
                                 </div>
                                 <div>
                                     <dt className="text-gray-500">MIME type</dt>
-                                    <dd className="text-gray-900">{item.file.type || 'Unknown'}</dd>
+                                    <dd className="text-gray-900">{item.file?.type || 'Unknown'}</dd>
                                 </div>
                                 <div>
                                     <dt className="text-gray-500">Progress</dt>
@@ -609,13 +624,13 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                             </dl>
                         </div>
 
-                        {/* Effective metadata (read-only display) */}
-                        {Object.keys(effectiveMetadata).length > 0 && (
+                        {/* Effective metadata (read-only display) - safe access */}
+                        {effectiveMetadata && Object.keys(effectiveMetadata).length > 0 && (
                             <div>
                                 <h4 className="text-xs font-medium text-gray-700 mb-2">Effective Metadata</h4>
                                 <dl className="space-y-2">
                                     {Object.entries(effectiveMetadata).map(([key, value]) => {
-                                        const field = availableFields.find(f => f.key === key);
+                                        const field = availableFields?.find?.(f => f.key === key);
                                         const isOverridden = isFieldOverridden(key);
                                         
                                         return (
@@ -655,15 +670,15 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                             </div>
                         )}
 
-                        {/* Per-file overrides section */}
-                        {availableFields.length > 0 && (
+                        {/* Per-file overrides section - safe access */}
+                        {Array.isArray(availableFields) && availableFields.length > 0 && (
                             <div className="border-t border-gray-200 pt-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <h4 className="text-xs font-medium text-gray-700">
                                         Overrides (this file only)
                                     </h4>
-                                    {/* Count of overridden fields */}
-                                    {Object.keys(item.metadataDraft).filter(key => isFieldOverridden(key)).length > 0 && (
+                                    {/* Count of overridden fields - safe access */}
+                                    {item.metadataDraft && Object.keys(item.metadataDraft).filter(key => isFieldOverridden(key)).length > 0 && (
                                         <span className="text-xs text-gray-500">
                                             {Object.keys(item.metadataDraft).filter(key => isFieldOverridden(key)).length} field(s) overridden
                                         </span>
@@ -673,10 +688,16 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                 <div className="space-y-4">
                                     {availableFields.map((field) => {
                                         const isOverridden = isFieldOverridden(field.key);
-                                        // Get override value or effective value
-                                        const overrideValue = item.metadataDraft[field.key];
-                                        const currentValue = isOverridden ? overrideValue : (effectiveMetadata[field.key] ?? field.defaultValue ?? '');
-                                        const globalValue = globalMetadata[field.key];
+                                        // Get override value or effective value - safe access
+                                        const overrideValue = item.metadataDraft?.[field.key];
+                                        const currentValue = isOverridden ? overrideValue : (effectiveMetadata?.[field.key] ?? field?.defaultValue ?? '');
+                                        const globalValue = globalMetadata?.[field.key];
+                                        
+                                        // Check for field-level error (finalize validation errors)
+                                        const fieldError = item.error?.stage === 'finalize' && item.error?.fields && typeof item.error.fields === 'object' 
+                                            ? item.error.fields[field.key] 
+                                            : null;
+                                        const hasFieldError = !!fieldError;
                                         
                                         return (
                                             <div key={field.key} className="relative">
@@ -686,12 +707,19 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                                             field={field}
                                                             value={currentValue}
                                                             onChange={(value) => {
-                                                                uploadManager.overrideItemMetadata(item.clientId, field.key, value);
+                                                                uploadManager?.overrideItemMetadata?.(item.clientId, field.key, value);
                                                             }}
-                                                            hasError={false} // Validation handled at global level
+                                                            hasError={hasFieldError}
+                                                            disabled={disabled}
                                                         />
-                                                        {/* Show global value hint if not overridden */}
-                                                        {!isOverridden && globalValue !== undefined && globalValue !== '' && (
+                                                        {/* Show field-level error message if present */}
+                                                        {hasFieldError && (
+                                                            <p className="mt-1 text-xs text-amber-600">
+                                                                {typeof fieldError === 'string' ? fieldError : 'Invalid value'}
+                                                            </p>
+                                                        )}
+                                                        {/* Show global value hint if not overridden - safe access */}
+                                                        {!isOverridden && !hasFieldError && globalValue !== undefined && globalValue !== '' && (
                                                             <p className="mt-1 text-xs text-gray-500">
                                                                 Global: {Array.isArray(globalValue) ? globalValue.join(', ') : String(globalValue)}
                                                             </p>
@@ -701,7 +729,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove }) {
                                                     {isOverridden && (
                                                         <button
                                                             type="button"
-                                                            onClick={() => uploadManager.clearItemOverride(item.clientId, field.key)}
+                                                            onClick={() => uploadManager?.clearItemOverride?.(item.clientId, field.key)}
                                                             className="flex-shrink-0 mt-6 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
                                                             title="Reset to global value"
                                                         >

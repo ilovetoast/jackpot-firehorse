@@ -27,6 +27,22 @@ import UploadTray from './UploadTray'
 import UploadManager from '../utils/UploadManager' // Phase 2 singleton - import directly
 
 /**
+ * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
+ * 
+ * Feature flag to disable legacy Phase 2/Phase 3 upload execution logic.
+ * This flag freezes all legacy uploader behavior to prepare for rewrite.
+ * 
+ * When set to false:
+ * - Phase 2 UploadManager integration is disabled
+ * - Upload execution, sync, auto-start, and backend checks are frozen
+ * - UI still renders (dialog, file selection, metadata panels)
+ * - Uploading may temporarily do nothing (acceptable for this step)
+ * 
+ * This logic will be removed after Step 7.
+ */
+const USE_LEGACY_UPLOADER = false
+
+/**
  * UploadAssetDialog - Phase 3 Upload Dialog
  * 
  * Uses Phase 3 Upload Manager for state management and Phase 2 UploadManager for actual uploads.
@@ -36,40 +52,144 @@ import UploadManager from '../utils/UploadManager' // Phase 2 singleton - import
  * @param {string} defaultAssetType - Default asset type ('asset' or 'marketing')
  * @param {Array} categories - Categories array from page props
  * @param {number|null} initialCategoryId - Optional initial category ID to prepopulate
+ * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully (batchStatus === 'complete')
  */
-export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null }) {
+export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null }) {
     const { auth } = usePage().props
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef(null)
     const dropZoneRef = useRef(null)
 
-    // Initialize Phase 3 Upload Manager with initial category if provided
-    const uploadContext = {
-        companyId: auth.activeCompany?.id || auth.companies?.[0]?.id || null,
-        brandId: auth.activeBrand?.id || null,
-        categoryId: initialCategoryId || null // Prepopulate if provided, otherwise will be set via GlobalMetadataPanel
-    }
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * NEW CANONICAL UPLOADER STATE MODEL — STEP 1 & STEP 2
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * STEP 1: State model introduced
+     * STEP 2: Upload phase (bytes only) - uploads files to S3
+     * 
+     * Files array: Each file entry represents an upload file with its state.
+     * Batch status: Tracks the overall batch upload state.
+     */
 
-    const phase3Manager = usePhase3UploadManager(uploadContext)
+    /**
+     * New canonical files state array.
+     * Each file entry follows this shape:
+     * {
+     *   clientId: string,           // Unique identifier for this file
+     *   file: File,                 // The actual File object
+     *   uploadKey?: string,         // Backend upload key (set during upload)
+     *   uploadStatus:               // Current upload status
+     *     | 'selected'              // File selected but not yet uploading
+     *     | 'uploading'             // File is currently uploading
+     *     | 'uploaded'              // File upload complete, ready for finalize
+     *     | 'finalizing'            // Finalization in progress
+     *     | 'finalized'             // Finalization complete
+     *     | 'failed',               // Upload or finalization failed
+     *   uploadProgress: number,     // Upload progress 0-100
+     *   metadata: Record<string, any>, // File metadata
+     *   error: null | {             // Error information if failed
+     *     stage: 'upload' | 'validation' | 'finalize',
+     *     code: string,
+     *     message: string,
+     *     fields?: Record<string, string>
+     *   }
+     * }
+     */
+    const [files, setFiles] = useState([])
+
+    /**
+     * New canonical batch status state.
+     * Tracks the overall batch upload state:
+     * - 'idle': No files selected
+     * - 'uploading': One or more files are uploading
+     * - 'ready': All files uploaded, ready to finalize
+     * - 'finalizing': Finalization in progress
+     * - 'partial_success': Some files failed, some succeeded
+     * - 'complete': All files finalized successfully
+     */
+    // batchStatus is now computed deterministically from v2Files - no useState needed
+
+    /**
+     * CLEAN UPLOADER V2 — Selected Category ID
+     * 
+     * Category selection for finalization prerequisite.
+     * Must be selected before finalizing uploads.
+     * Does NOT affect upload behavior.
+     */
+    const [selectedCategoryId, setSelectedCategoryId] = useState(initialCategoryId || null)
+
+    /**
+     * CLEAN UPLOADER V2 — Global Metadata Draft
+     * 
+     * Global metadata that applies to all files in the batch.
+     * Stored independently from files.
+     * Empty override on a file = inherits global value.
+     */
+    const [globalMetadataDraft, setGlobalMetadataDraft] = useState({})
+
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — NEW CLEAN STATE
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Clean uploader v2 state - completely independent of legacy logic.
+     * Each file object:
+     * - clientId: string (crypto.randomUUID())
+     * - file: File object
+     * - status: 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
+     * - progress: number (0-100)
+     * - uploadKey?: string (set when upload completes, needed for finalize)
+     * - metadataDraft: Record<string, any> (per-file metadata overrides, empty = inherit global)
+     * - error: null | Error object
+     */
+    const [v2Files, setV2Files] = useState([])
+
+    // ═══════════════════════════════════════════════════════════════
+    // CLEAN UPLOADER V2 — TEMPORARILY DISABLED LEGACY
+    // ═══════════════════════════════════════════════════════════════
     
-    // Phase 2 UploadManager - use singleton directly to avoid rehydration
-    // We don't use useUploadManager hook because it auto-rehydrates, which causes
-    // 400 errors for uploads that don't exist or have invalid UUIDs in the modal context
-    const phase2ManagerRef = useRef(UploadManager)
+    // TEMPORARILY DISABLED: Legacy Phase 3 Upload Manager
+    // const uploadContext = {
+    //     companyId: auth.activeCompany?.id || auth.companies?.[0]?.id || null,
+    //     brandId: auth.activeBrand?.id || null,
+    //     categoryId: initialCategoryId || null
+    // }
+    // const phase3Manager = usePhase3UploadManager(uploadContext)
     
-    // Track currently adding clientIds to prevent subscription filter from removing them
-    const currentlyAddingRef = useRef(new Set())
+    // TEMPORARY MOCK: Minimal phase3Manager mock for UI rendering (upload logic disabled)
+    const phase3Manager = {
+        items: [],
+        completedItems: [],
+        uploadingItems: [],
+        hasItems: false,
+        canFinalize: false,
+        context: { categoryId: initialCategoryId || null },
+        warnings: [],
+        availableMetadataFields: [],
+        setUploadSessionId: () => {},
+        updateUploadProgress: () => {},
+        markUploadComplete: () => {},
+        markUploadFailed: () => {},
+        markUploadStarted: () => {},
+        getEffectiveMetadata: () => ({}),
+        addFiles: () => [], // NO-OP: Returns empty array
+    }
     
-    // Track latest phase3Manager in a ref so subscription callback can access it
-    // This avoids closure issues and infinite loops from dependency arrays
-    const phase3ManagerRef = useRef(phase3Manager)
-    useEffect(() => {
-        // Only update ref if phase3Manager actually changed (by comparing items length or identity)
-        // This prevents unnecessary updates that could trigger re-renders
-        if (phase3ManagerRef.current !== phase3Manager) {
-            phase3ManagerRef.current = phase3Manager
-        }
-    }, [phase3Manager])
+    // TEMPORARILY DISABLED: Legacy Phase 2 UploadManager
+    // const phase2ManagerRef = useRef(UploadManager)
+    // const currentlyAddingRef = useRef(new Set())
+    // const phase3ManagerRef = useRef(phase3Manager)
+    // useEffect(() => {
+    //     if (phase3ManagerRef.current !== phase3Manager) {
+    //         phase3ManagerRef.current = phase3Manager
+    //     }
+    // }, [phase3Manager])
+    
+    // TEMPORARY MOCK REFS: Minimal refs for UI compatibility (upload logic disabled)
+    const phase2ManagerRef = { current: null } // TEMPORARY NO-OP
+    const currentlyAddingRef = { current: new Set() } // TEMPORARY NO-OP - mock Set for .clear() calls
+    const phase3ManagerRef = { current: phase3Manager } // TEMPORARY NO-OP
     
     // Track Phase 2 uploads via subscription instead of hook state
     const [phase2Uploads, setPhase2Uploads] = useState(() => {
@@ -78,10 +198,24 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return []
     })
     
-    // Subscribe to Phase 2 updates (without triggering rehydration)
+    // TEMPORARILY DISABLED: Legacy Phase 2 subscription
+    // ⚠️ CLEAN UPLOADER V2: Legacy upload logic disabled
+    useEffect(() => {
+        // NO-OP: Legacy logic disabled for clean uploader v2
+        return
+    }, [])
+    
+    // DISABLED LEGACY CODE (commented out for clean uploader v2):
+    /*
+    // LEGACY — DO NOT USE: Subscribe to Phase 2 updates (without triggering rehydration)
     // CRITICAL: This subscription updates phase2Uploads state, which triggers the sync effect below
     // Run only once on mount - use refs to access latest values in subscription callback
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
     useEffect(() => {
+        // Freeze legacy Phase 2 subscription logic
+        if (!USE_LEGACY_UPLOADER) {
+            return // Early return - legacy logic frozen
+        }
         // Initial state - filter to only current Phase 3 items (use ref to avoid dependency)
         const initialAllUploads = Array.from(UploadManager.getUploads())
         const initialPhase3Manager = phase3ManagerRef.current
@@ -172,11 +306,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         
         return unsubscribe
     }, []) // Empty deps - run only once on mount, use refs to access latest values
+    */
     
-    // Clean up old uploads when dialog opens
+    // TEMPORARILY DISABLED: Legacy cleanup effect
+    // ⚠️ CLEAN UPLOADER V2: Legacy upload logic disabled
+    useEffect(() => {
+        // NO-OP: Legacy logic disabled for clean uploader v2
+        return
+    }, [open])
+    
+    // DISABLED LEGACY CODE (commented out for clean uploader v2):
+    /*
+    // LEGACY — DO NOT USE: Clean up old uploads when dialog opens
     // Remove any uploads without files (rehydrated old uploads) to prevent conflicts
     // CRITICAL: Do NOT remove completed Phase 2 uploads - they're needed for finalization stability check
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
     useEffect(() => {
+        // Freeze legacy Phase 2 cleanup logic
+        if (!USE_LEGACY_UPLOADER) {
+            // Clear refs on close (safe to do even when frozen)
+            if (!open) {
+                currentlyAddingRef.current.clear()
+            }
+            return // Early return - legacy logic frozen
+        }
+        
         if (open) {
             const phase2Manager = phase2ManagerRef.current
             const allUploads = Array.from(phase2Manager.uploads.entries())
@@ -226,6 +380,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             currentlyAddingRef.current.clear()
         }
     }, [open])
+    */
 
     // Filter categories by asset type
     const filteredCategories = (categories || []).filter(cat => {
@@ -237,21 +392,190 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     })
 
     /**
-     * Handle file selection/drop
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Upload Single File Function
+     * ═══════════════════════════════════════════════════════════════
      * 
-     * Phase 3 owns the UUID. Phase 2 must use Phase 3's clientId as client_reference.
-     * We work around Phase 2's UUID generation by directly adding to Phase 2's uploads map.
+     * Clean upload function that proves uploads execute and hit the network.
+     * Does NOT reference any legacy upload logic.
+     * 
+     * @param {Object} fileEntry - File entry from v2Files state
+     * @param {string} fileEntry.clientId - Unique client ID
+     * @param {File} fileEntry.file - The File object
      */
-    const handleFileSelect = useCallback((files) => {
-        if (!files || files.length === 0) return
+    const uploadSingleFile = useCallback(async (fileEntry) => {
+        const { clientId, file } = fileEntry
+        
+        // a. Log start
+        console.log('[UPLOAD_V2] start', clientId)
+        
+        try {
+            // b. POST to /app/uploads/initiate-batch
+            const payload = {
+                files: [{
+                    file_name: file.name,
+                    file_size: file.size,
+                    mime_type: file.type || 'application/octet-stream',
+                    client_reference: clientId,
+                }],
+                brand_id: auth.activeBrand?.id,
+            }
+            
+            const response = await fetch('/app/uploads/initiate-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload),
+            })
+            
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => 'Unknown error')
+                throw new Error(`Upload initiation failed: ${response.status} ${response.statusText} - ${errorText}`)
+            }
+            
+            const responseData = await response.json()
+            
+            // c. Log session response
+            console.log('[UPLOAD_V2] session response', responseData)
+            
+            const result = responseData.uploads[0]
+            if (result.error) {
+                throw new Error(result.error)
+            }
+            
+            const uploadUrl = result.upload_url
+            if (!uploadUrl) {
+                throw new Error('No presigned URL returned from backend')
+            }
+            
+            // d. PUT the file to the returned presigned URL
+            const putResponse = await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': file.type || 'application/octet-stream',
+                },
+                body: file,
+            })
+            
+            if (!putResponse.ok) {
+                throw new Error(`S3 upload failed: ${putResponse.status} ${putResponse.statusText}`)
+            }
+            
+            // e. Log complete
+            console.log('[UPLOAD_V2] complete', { clientId, status: putResponse.status })
+            
+            // Store uploadKey from response for finalize
+            const uploadKey = result.upload_key || `temp/uploads/${result.upload_session_id}/original`
+            
+            // Update v2Files state: set status to 'uploaded', progress to 100, and store uploadKey
+            setV2Files((prevFiles) => {
+                return prevFiles.map((f) => {
+                    if (f.clientId === clientId) {
+                        console.log('[UPLOAD_V2] Updating file state to uploaded', { clientId, uploadKey })
+                        return {
+                            ...f,
+                            status: 'uploaded',
+                            progress: 100,
+                            uploadKey: uploadKey,
+                            error: null
+                        }
+                    }
+                    return f
+                })
+            })
+            
+            return {
+                success: true,
+                uploadKey: uploadKey,
+            }
+        } catch (error) {
+            console.error('[UPLOAD_V2] error', { clientId, error: error.message })
+            
+            // Update v2Files state: set status to 'failed' and store error
+            setV2Files((prevFiles) => {
+                return prevFiles.map((f) => {
+                    if (f.clientId === clientId) {
+                        return {
+                            ...f,
+                            status: 'failed',
+                            error: {
+                                message: error.message,
+                                stage: 'upload'
+                            }
+                        }
+                    }
+                    return f
+                })
+            })
+            
+            throw error
+        }
+    }, [auth.activeBrand?.id])
 
-        const fileArray = Array.from(files)
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — File Selection Handler
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Clean file selection handler that populates v2Files state and triggers upload.
+     * Does NOT reference any legacy upload logic, hooks, managers, or effects.
+     */
+    const handleFileSelect = useCallback((selectedFiles) => {
+        console.log('[FILE_SELECT] handler called', { fileCount: selectedFiles?.length || 0 })
         
-        // Add files to Phase 3 manager first (Phase 3 owns UUID generation)
-        const clientIds = phase3Manager.addFiles(fileArray)
+        if (!selectedFiles || selectedFiles.length === 0) {
+            console.log('[FILE_SELECT] No files selected, returning early')
+            return
+        }
+
+        const fileArray = Array.from(selectedFiles)
+        console.log('[FILE_SELECT] Processing files', { count: fileArray.length, fileNames: fileArray.map(f => f.name) })
         
-        // Track these clientIds as currently adding (prevents subscription filter from removing them)
-        clientIds.forEach(clientId => currentlyAddingRef.current.add(clientId))
+        // Create clean file entries for v2Files state
+        const newV2FileEntries = fileArray.map((file) => ({
+            clientId: (window.crypto?.randomUUID || (() => {
+                // Fallback UUID generation if crypto.randomUUID is not available
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+                    const r = Math.random() * 16 | 0
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+                    return v.toString(16)
+                })
+            }))(),
+            file,
+            status: 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
+            progress: 0, // 0-100
+            uploadKey: null, // Set when upload completes
+            metadataDraft: {}, // Per-file metadata overrides (empty = inherit global)
+            error: null
+        }))
+
+        console.log('[FILE_SELECT] Created file entries', { count: newV2FileEntries.length, clientIds: newV2FileEntries.map(e => e.clientId) })
+
+        // Add new file entries to v2Files state ONLY
+        // Upload coordinator useEffect will handle starting uploads automatically
+        setV2Files((prevFiles) => {
+            const updated = [...prevFiles, ...newV2FileEntries]
+            console.log('[FILE_SELECT] Updated v2Files state', { totalCount: updated.length })
+            return updated
+        })
+    }, [selectedCategoryId])
+    
+    // DISABLED LEGACY CODE (commented out for clean uploader v2):
+    /*
+        // LEGACY — DO NOT USE: Track these clientIds as currently adding (prevents subscription filter from removing them)
+        // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
+        if (USE_LEGACY_UPLOADER) {
+            clientIds.forEach(clientId => currentlyAddingRef.current.add(clientId))
+        }
+
+        // LEGACY — DO NOT USE: Phase 2 UploadManager integration
+        // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
+        if (!USE_LEGACY_UPLOADER) {
+            return // Early return - legacy Phase 2 integration frozen
+        }
 
         const phase2Manager = phase2ManagerRef.current
         const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024 // 5 MB
@@ -382,6 +706,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // This ensures slot-based queue advancement works correctly
         // The effect will detect the new queued item and start it when a slot is available
     }, [phase3Manager, auth.activeBrand?.id])
+    */
 
     /**
      * Handle drag events
@@ -417,11 +742,554 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [handleFileSelect])
 
     /**
-     * Sync Phase 2 upload progress to Phase 3 state
+     * ═══════════════════════════════════════════════════════════════
+     * STEP 2 — Upload phase (bytes only)
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Implements file upload to S3 using presigned URLs.
+     * - Uploads files with uploadStatus === 'selected'
+     * - Tracks progress and updates file state
+     * - Transitions files to 'uploaded' on success
+     * - Handles failures and allows retry
+     * - Updates batchStatus based on file states
+     * 
+     * NO finalize calls - only byte upload to S3.
+     */
+
+    // Track active uploads (clientId -> AbortController)
+    const activeUploadsRef = useRef(new Map())
+    const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024 // 5 MB
+
+    /**
+     * STEP 2.4/2.5 — Initiate upload session with backend
+     * 
+     * STEP 2.5: Bypass axios to verify network path.
+     * Uses fetch() directly to debug network request issues.
+     * Returns upload session data (upload_url, upload_session_id, etc.)
+     */
+    const initiateUpload = useCallback(async (fileEntry) => {
+        // STEP 2.6 — Hard assertion to verify execution path
+        throw new Error('[ASSERT] initiateUpload ENTERED');
+        
+        // DEV-only logging
+        console.log('[INITIATE] called', { clientId: fileEntry.clientId, fileName: fileEntry.file.name })
+
+        const payload = {
+            files: [{
+                file_name: fileEntry.file.name,
+                file_size: fileEntry.file.size,
+                mime_type: fileEntry.file.type || 'application/octet-stream',
+                client_reference: fileEntry.clientId,
+            }],
+            brand_id: auth.activeBrand?.id,
+            ...(selectedCategoryId !== null && selectedCategoryId !== undefined && { category_id: selectedCategoryId }),
+        }
+        
+        // DEV-only logging
+        console.log('[INITIATE] sending request', { endpoint: '/app/uploads/initiate-batch', payload })
+        
+        // STEP 2.5: Use fetch() directly to bypass axios and verify network path
+        const response = await fetch('/app/uploads/initiate-batch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+        })
+        
+        // DEV-only logging
+        console.log('[INITIATE] fetch response status', { status: response.status, statusText: response.statusText })
+        
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'Unknown error')
+            throw new Error(`Upload initiation failed: ${response.status} ${response.statusText} - ${errorText}`)
+        }
+        
+        // Parse JSON response
+        const responseData = await response.json()
+        
+        // DEV-only logging
+        console.log('[INITIATE] fetch response json', responseData)
+
+        const result = responseData.uploads[0]
+        if (result.error) {
+            throw new Error(result.error)
+        }
+
+        const sessionData = {
+            uploadSessionId: result.upload_session_id,
+            uploadType: result.upload_type, // 'direct' or 'multipart'
+            uploadUrl: result.upload_url || null,
+            multipartUploadId: result.multipart_upload_id || null,
+            chunkSize: result.chunk_size || DEFAULT_CHUNK_SIZE,
+        }
+        
+        // DEV-only logging
+        console.log('[INITIATE] returning session data', sessionData)
+        
+        return sessionData
+    }, [auth.activeBrand?.id, selectedCategoryId])
+
+    /**
+     * STEP 2.1 — Perform direct upload (PUT to presigned URL)
+     * 
+     * Handles XHR upload with progress tracking.
+     * Progress handler calls onProgress callback with 0-100 integer.
+     */
+    const performDirectUpload = useCallback(async (fileEntry, uploadUrl, onProgress) => {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest()
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable && onProgress) {
+                    // STEP 2.1: Calculate progress as integer 0-100, capped at 100
+                    const progress = Math.min(100, Math.max(0, Math.round((e.loaded / e.total) * 100)))
+                    // Call progress callback (wired to setFiles in startFileUpload)
+                    onProgress(progress)
+                }
+            })
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve({
+                        uploadKey: `temp/uploads/${fileEntry.uploadSessionId}/original`, // S3 key pattern
+                    })
+                } else {
+                    reject(new Error(`Upload failed: ${xhr.statusText}`))
+                }
+            })
+
+            xhr.addEventListener('error', () => {
+                reject(new Error('Network error during upload'))
+            })
+
+            xhr.addEventListener('abort', () => {
+                reject(new Error('Upload cancelled'))
+            })
+
+            xhr.open('PUT', uploadUrl)
+            xhr.setRequestHeader('Content-Type', fileEntry.file.type || 'application/octet-stream')
+            xhr.send(fileEntry.file)
+        })
+    }, [])
+
+    /**
+     * STEP 2.3 — Start upload for a single file
+     * 
+     * This is NEW canonical uploader logic that ALWAYS runs.
+     * Legacy upload logic is frozen separately and does NOT affect this function.
+     * 
+     * Flow:
+     * 1. Validate fileEntry exists
+     * 2. Set uploadStatus → 'uploading'
+     * 3. Call initiateUpload (POST /app/uploads/initiate-batch)
+     * 4. Perform direct upload (PUT to S3)
+     * 5. Update progress and status
+     */
+    const startFileUpload = useCallback(async (clientId) => {
+        // Get current file entry from state using a functional update
+        let fileEntry = null
+        setFiles((prevFiles) => {
+            fileEntry = prevFiles.find((f) => f.clientId === clientId)
+            if (!fileEntry || fileEntry.uploadStatus === 'uploading' || fileEntry.uploadStatus === 'uploaded') {
+                return prevFiles // No change needed
+            }
+
+            // Create abort controller for this upload
+            const abortController = new AbortController()
+            activeUploadsRef.current.set(clientId, abortController)
+
+            // Update status to uploading
+            return prevFiles.map((f) =>
+                f.clientId === clientId
+                    ? { ...f, uploadStatus: 'uploading', uploadProgress: 0, error: null }
+                    : f
+            )
+        })
+
+        if (!fileEntry || fileEntry.uploadStatus === 'uploading' || fileEntry.uploadStatus === 'uploaded') {
+            return // Already uploading or uploaded
+        }
+
+        try {
+            // Initiate upload session
+            // Note: batchStatus is now computed from v2Files, no manual update needed
+            const sessionData = await initiateUpload(fileEntry)
+
+            // Store uploadSessionId
+            setFiles((prev) =>
+                prev.map((f) =>
+                    f.clientId === clientId
+                        ? { ...f, uploadSessionId: sessionData.uploadSessionId }
+                        : f
+                )
+            )
+
+            // Get updated file entry for upload
+            let currentFileEntry = { ...fileEntry, uploadSessionId: sessionData.uploadSessionId }
+
+            // Perform upload based on type
+            if (sessionData.uploadType === 'direct') {
+                // STEP 2.1 — Upload progress fix
+                // Direct upload with progress tracking
+                await performDirectUpload(
+                    currentFileEntry,
+                    sessionData.uploadUrl,
+                    (progress) => {
+                        // STEP 2.1: Ensure progress updates use functional setState
+                        // Match file strictly by clientId and update uploadProgress only
+                        setFiles((prev) =>
+                            prev.map((f) => {
+                                if (f.clientId === clientId) {
+                                    // DEV-only console log for progress tracking
+                                    console.log('[Upload Progress]', { clientId, progress })
+                                    return { ...f, uploadProgress: progress }
+                                }
+                                return f
+                            })
+                        )
+                    }
+                )
+
+                // Upload successful - mark as uploaded
+                setFiles((prev) =>
+                    prev.map((f) =>
+                        f.clientId === clientId
+                            ? {
+                                  ...f,
+                                  uploadStatus: 'uploaded',
+                                  uploadProgress: 100,
+                                  uploadKey: `temp/uploads/${sessionData.uploadSessionId}/original`,
+                                  error: null,
+                              }
+                            : f
+                    )
+                )
+            } else {
+                // Multipart upload - for Step 2, we'll handle basic multipart
+                // For now, mark as failed if multipart (can be enhanced later)
+                throw new Error('Multipart upload not yet implemented in Step 2')
+            }
+        } catch (error) {
+            // Upload failed
+            setFiles((prev) =>
+                prev.map((f) =>
+                    f.clientId === clientId
+                        ? {
+                              ...f,
+                              uploadStatus: 'failed',
+                              error: {
+                                  stage: 'upload',
+                                  code: 'upload_failed',
+                                  message: error.message || 'Upload failed. Please retry.',
+                              },
+                          }
+                        : f
+                )
+            )
+        } finally {
+            // Clean up abort controller
+            activeUploadsRef.current.delete(clientId)
+            // STEP 2.2: Clean up started tracking (allows retry if needed)
+            startedUploadsRef.current.delete(clientId)
+        }
+    }, [initiateUpload, performDirectUpload])
+
+    /**
+     * STEP 2 — Retry upload for a failed file (re-upload bytes)
+     * 
+     * Resets file to 'selected' status, which triggers re-upload.
+     */
+    const retryFileUpload = useCallback((clientId) => {
+        setFiles((prevFiles) =>
+            prevFiles.map((f) =>
+                f.clientId === clientId
+                    ? {
+                          ...f,
+                          uploadStatus: 'selected',
+                          uploadProgress: 0,
+                          error: null,
+                      }
+                    : f
+            )
+        )
+    }, [])
+
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * STEP 5 — Partial success UX
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Implements retry and remove behavior for failed files.
+     * Allows users to resolve failures without losing successes.
+     */
+
+    /**
+     * STEP 5 — Retry failed finalize for a file
+     * 
+     * Allowed ONLY when:
+     * - file.uploadStatus === 'failed'
+     * - error.stage !== 'upload'
+     * 
+     * Does NOT re-upload bytes - resets to 'uploaded' status for re-finalization.
+     */
+    const retryFailedFinalize = useCallback((clientId) => {
+        setFiles((prevFiles) =>
+            prevFiles.map((f) => {
+                if (f.clientId !== clientId) {
+                    return f
+                }
+
+                // Guard: Only allow retry for failed files with non-upload errors
+                if (f.uploadStatus !== 'failed' || f.error?.stage === 'upload') {
+                    return f
+                }
+
+                // Reset to 'uploaded' status (not 'selected' - don't re-upload)
+                return {
+                    ...f,
+                    uploadStatus: 'uploaded',
+                    error: null,
+                }
+            })
+        )
+
+        // Update batchStatus if needed (will be updated by batchStatus effect)
+    }, [])
+
+    /**
+     * STEP 5 — Remove a file from the upload list
+     * 
+     * Allowed for:
+     * - Failed files
+     * - Uploaded files (not finalized)
+     * 
+     * Does NOT affect finalized assets (they're already created).
+     */
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Metadata Management
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Global and per-file metadata editing (draft state only).
+     * Effective metadata = globalMetadataDraft merged with file.metadataDraft.
+     */
+    
+    /**
+     * CLEAN UPLOADER V2 — Set Global Metadata Field
+     */
+    const setGlobalMetadataV2 = useCallback((fieldKey, value) => {
+        setGlobalMetadataDraft((prev) => ({
+            ...prev,
+            [fieldKey]: value,
+        }))
+    }, [])
+
+    /**
+     * CLEAN UPLOADER V2 — Get Effective Metadata for a File
+     * 
+     * Merges globalMetadataDraft with file.metadataDraft.
+     * Per-file overrides take precedence.
+     */
+    const getEffectiveMetadataV2 = useCallback((clientId) => {
+        const file = v2Files.find((f) => f.clientId === clientId)
+        if (!file) return {}
+        
+        return {
+            ...globalMetadataDraft,
+            ...(file.metadataDraft || {}),
+        }
+    }, [v2Files, globalMetadataDraft])
+
+    /**
+     * CLEAN UPLOADER V2 — Override Item Metadata Field
+     * 
+     * Sets a per-file metadata override.
+     */
+    const overrideItemMetadataV2 = useCallback((clientId, fieldKey, value) => {
+        setV2Files((prevFiles) =>
+            prevFiles.map((f) =>
+                f.clientId === clientId
+                    ? {
+                          ...f,
+                          metadataDraft: {
+                              ...(f.metadataDraft || {}),
+                              [fieldKey]: value,
+                          },
+                      }
+                    : f
+            )
+        )
+    }, [])
+
+    /**
+     * CLEAN UPLOADER V2 — Clear Item Metadata Override
+     * 
+     * Removes a per-file override, making it inherit from global.
+     */
+    const clearItemOverrideV2 = useCallback((clientId, fieldKey) => {
+        setV2Files((prevFiles) =>
+            prevFiles.map((f) => {
+                if (f.clientId !== clientId) return f
+                
+                const newMetadataDraft = { ...(f.metadataDraft || {}) }
+                delete newMetadataDraft[fieldKey]
+                
+                return {
+                    ...f,
+                    metadataDraft: newMetadataDraft,
+                }
+            })
+        )
+    }, [])
+
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Retry Functions
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Retry upload: Resets failed upload to 'selected' status for re-upload.
+     * Retry finalize: Resets failed finalize to 'uploaded' status for re-finalize.
+     */
+    
+    /**
+     * CLEAN UPLOADER V2 — Retry Upload (for stage === 'upload' failures)
+     * 
+     * Resets file to 'selected' status so coordinator can pick it up.
+     * Upload will restart automatically.
+     */
+    const retryUpload = useCallback((clientId) => {
+        console.log('[RETRY_UPLOAD] Retrying upload', { clientId })
+        setV2Files((prevFiles) =>
+            prevFiles.map((f) =>
+                f.clientId === clientId
+                    ? {
+                          ...f,
+                          status: 'selected',
+                          progress: 0,
+                          error: null,
+                      }
+                    : f
+            )
+        )
+    }, [])
+
+    /**
+     * CLEAN UPLOADER V2 — Retry Finalize (for stage === 'finalize' failures)
+     * 
+     * Resets file to 'uploaded' status (preserves uploadKey).
+     * File becomes eligible for next finalize operation.
+     */
+    const retryFinalize = useCallback((clientId) => {
+        console.log('[RETRY_FINALIZE] Retrying finalize', { clientId })
+        setV2Files((prevFiles) =>
+            prevFiles.map((f) =>
+                f.clientId === clientId
+                    ? {
+                          ...f,
+                          status: 'uploaded',
+                          error: null,
+                      }
+                    : f
+            )
+        )
+    }, [])
+
+    /**
+     * CLEAN UPLOADER V2 — Remove File
+     * 
+     * Removes a file from v2Files state.
+     */
+    const removeFile = useCallback((clientId) => {
+        console.log('[REMOVE_FILE] Removing file', { clientId })
+        setV2Files((prevFiles) => prevFiles.filter((f) => f.clientId !== clientId))
+        
+        // Clean up active uploads ref
+        activeUploadsRef.current.delete(clientId)
+        // STEP 2.2: Clean up started tracking
+        startedUploadsRef.current.delete(clientId)
+    }, [])
+
+    // STEP 2.2 — Track which uploads have been started (to prevent duplicate starts)
+    const startedUploadsRef = useRef(new Set())
+
+    /**
+     * STEP 2.2 — Explicit upload auto-start
+     * 
+     * This effect triggers uploads for files with uploadStatus === 'selected'.
+     * 
+     * Why not use legacy auto-start logic:
+     * - Legacy logic is frozen and must remain disabled
+     * - Legacy logic depends on Phase 2/Phase 3 manager integration
+     * - This is a clean, explicit implementation for the canonical uploader
+     * 
+     * Behavior:
+     * - Watches files array for changes
+     * - Finds files with uploadStatus === 'selected'
+     * - Calls startFileUpload(clientId) for each
+     * - Uses ref to prevent duplicate starts
+     */
+    useEffect(() => {
+        const selectedFiles = files.filter((f) => f.uploadStatus === 'selected')
+        
+        selectedFiles.forEach((fileEntry) => {
+            const clientId = fileEntry.clientId
+            
+            // Only start if not already started
+            if (!startedUploadsRef.current.has(clientId)) {
+                startedUploadsRef.current.add(clientId)
+                
+                // DEV-only logging
+                console.log('[AUTO-START] Starting upload', { clientId, fileName: fileEntry.file.name })
+                
+                // Start upload (errors are handled in startFileUpload)
+                startFileUpload(clientId).catch(() => {
+                    // Error handling is done in startFileUpload
+                })
+            }
+        })
+
+        // Clean up tracking for files that are no longer in the files array
+        const currentClientIds = new Set(files.map((f) => f.clientId))
+        startedUploadsRef.current.forEach((clientId) => {
+            if (!currentClientIds.has(clientId)) {
+                startedUploadsRef.current.delete(clientId)
+            }
+        })
+    }, [files, startFileUpload])
+
+    /**
+     * LEGACY — DISABLED: Update batchStatus based on file states (UI-only)
+     * 
+     * DISABLED: batchStatus is now computed deterministically from v2Files.
+     * This legacy effect is no longer needed and has been disabled to prevent
+     * reference errors (batchStatus is computed later in the file).
+     * 
+     * Original behavior (preserved for reference):
+     * - When uploads begin → 'uploading'
+     * - When no files are uploading AND at least one file is 'uploaded' → 'ready'
+     * - 'finalizing' and 'complete' states are set by handleFinalize handler, not by this effect
+     * - After partial_success, if conditions are met, transitions back to 'ready'
+     */
+    // DISABLED: batchStatus is now computed from v2Files, not manually set
+    // useEffect(() => {
+    //     if (files.length === 0) {
+    //         setBatchStatus('idle')
+    //         return
+    //     }
+    //     // ... legacy code disabled
+    // }, [files, batchStatus])
+
+    /**
+     * LEGACY — DO NOT USE: Sync Phase 2 upload progress to Phase 3 state
      * 
      * CRITICAL: Use useRef to track last synced values to prevent infinite loops.
      * Only sync when values actually change, not on every render.
      * Only sync uploads that belong to Phase 3 items (by clientId match).
+     * 
+     * ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
      */
     const lastSyncedRef = useRef(new Map()) // Track last synced state per clientId
     // Track session ID change timestamps to enforce backend stability settle window
@@ -444,7 +1312,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return new Set(phase3Items.map(item => item.clientId))
     }, [phase3Items])
     
+    // LEGACY — DO NOT USE: Sync effect
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
     useEffect(() => {
+        // Freeze legacy Phase 2 sync logic
+        if (!USE_LEGACY_UPLOADER) {
+            return // Early return - legacy sync logic frozen
+        }
         // OPTIMIZATION 6: Remove verbose logging from tight loops
         // Only log when there's a significant state change or error
         
@@ -696,7 +1570,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [open])
 
     /**
-     * Slot-based queue advancement
+     * LEGACY — DO NOT USE: Slot-based queue advancement
      * 
      * CANONICAL RULE: If activeUploads < MAX_CONCURRENT_UPLOADS AND queuedUploads > 0
      * → start next queued upload.
@@ -710,6 +1584,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * - Failed uploads don't block queue (they free up slots)
      * 
      * Sequential uploads by default (1 at a time).
+     * 
+     * ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
      */
     const startingUploadsRef = useRef(new Set()) // Track uploads currently being started
     const MAX_CONCURRENT_UPLOADS = 1 // Sequential by default (can be increased later)
@@ -730,7 +1606,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const activeCount = activeUploads.length
     const availableSlots = MAX_CONCURRENT_UPLOADS - activeCount
 
+    // LEGACY — DO NOT USE: Auto-start effect
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
     useEffect(() => {
+        // Freeze legacy auto-start queue advancement logic
+        if (!USE_LEGACY_UPLOADER) {
+            return // Early return - legacy auto-start logic frozen
+        }
         const phase2Manager = phase2ManagerRef.current
         
         // OPTIMIZATION 6: Remove verbose logging from auto-start effect
@@ -993,15 +1875,364 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [open])
 
     /**
-     * Finalize Assets
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Finalize button rules
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Implements Finalize button enable/disable logic and labels using v2Files.
+     * NO backend calls - UI state only.
+     */
+
+    /**
+     * CLEAN UPLOADER V2 — Check if Finalize button should be enabled
+     * 
+     * Enabled if and only if:
+     * - At least one v2File has status === 'uploaded'
+     * - No v2File has status === 'uploading' or 'finalizing'
+     * - selectedCategoryId !== null (category must be selected)
+     */
+    /**
+     * CLEAN UPLOADER V2 — Compute batchStatus deterministically from v2Files
+     * 
+     * Rules (evaluated in order):
+     * 1. If any file.status === 'finalizing' → batchStatus = 'finalizing'
+     * 2. Else if all files.status === 'finalized' → batchStatus = 'complete'
+     * 3. Else if some finalized and some failed → 'partial_success'
+     * 4. Else if any uploading → 'uploading'
+     * 5. Else if any uploaded → 'ready'
+     * 6. Else → 'idle'
+     */
+    const batchStatus = useMemo(() => {
+        if (v2Files.length === 0) {
+            return 'idle'
+        }
+
+        const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
+        if (hasFinalizing) {
+            return 'finalizing'
+        }
+
+        const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
+        const failedCount = v2Files.filter((f) => f.status === 'failed').length
+        const totalCount = v2Files.length
+
+        // Check if all files are finalized
+        if (finalizedCount === totalCount && totalCount > 0) {
+            return 'complete'
+        }
+
+        // Check if some finalized and some failed
+        if (finalizedCount > 0 && failedCount > 0) {
+            return 'partial_success'
+        }
+
+        const hasUploading = v2Files.some((f) => f.status === 'uploading')
+        if (hasUploading) {
+            return 'uploading'
+        }
+
+        const hasUploaded = v2Files.some((f) => f.status === 'uploaded')
+        if (hasUploaded) {
+            return 'ready'
+        }
+
+        return 'idle'
+    }, [v2Files])
+
+    const canFinalizeV2 = useMemo(() => {
+        const hasUploaded = v2Files.some((f) => f.status === 'uploaded')
+        const hasUploading = v2Files.some((f) => f.status === 'uploading')
+        const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
+        const hasCategory = selectedCategoryId !== null
+
+        return hasUploaded && !hasUploading && !hasFinalizing && hasCategory
+    }, [v2Files, selectedCategoryId])
+
+    /**
+     * CLEAN UPLOADER V2 — Get warnings for missing required fields
+     */
+    const v2Warnings = useMemo(() => {
+        const warnings = []
+        const hasUploaded = v2Files.some((f) => f.status === 'uploaded')
+
+        // Only show warnings if there are uploaded files ready to finalize
+        if (!hasUploaded) {
+            return warnings
+        }
+
+        // Category is required
+        if (selectedCategoryId === null) {
+            warnings.push('Category is required before finalizing assets.')
+        }
+
+        return warnings
+    }, [v2Files, selectedCategoryId])
+
+    /**
+     * CLEAN UPLOADER V2 — Get Finalize button label based on batchStatus
+     */
+    const finalizeButtonLabelV2 = useMemo(() => {
+        if (batchStatus === 'uploading') {
+            return 'Uploading…'
+        } else if (batchStatus === 'ready' || batchStatus === 'partial_success') {
+            return 'Finalize uploads'
+        } else if (batchStatus === 'finalizing') {
+            return 'Finalizing uploads…'
+        } else {
+            return 'Finalize uploads' // Default label (button will be disabled)
+        }
+    }, [batchStatus])
+
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Finalize execution (manifest-driven)
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Implements finalize execution using a manifest-driven backend call.
+     * Handles responses per file and updates state accordingly.
+     * Uses v2Files state - NO legacy upload logic.
+     */
+
+    /**
+     * CLEAN UPLOADER V2 — Handle Finalize button click
+     * 
+     * Builds manifest from uploaded v2Files and calls backend finalize endpoint.
+     * Handles responses per file and updates batchStatus accordingly.
+     */
+    const handleFinalizeV2 = useCallback(async () => {
+        // Only allow finalize if button is enabled
+        if (!canFinalizeV2) {
+            console.log('[FINALIZE_V2] Button disabled, returning early')
+            return
+        }
+
+        // Build manifest from v2Files with status === 'uploaded'
+        const uploadedFiles = v2Files.filter((f) => f.status === 'uploaded')
+        
+        if (uploadedFiles.length === 0) {
+            console.log('[FINALIZE_V2] No uploaded files found, returning early')
+            return // Should not happen if canFinalizeV2 is true, but guard anyway
+        }
+
+        console.log('[FINALIZE_V2] Starting finalize', { uploadedCount: uploadedFiles.length })
+
+        // Helper functions to derive title and resolvedFilename (matching usePhase3UploadManager logic)
+        const normalizeTitle = (title) => {
+            if (!title || typeof title !== 'string') return '';
+            let normalized = title.trim();
+            normalized = normalized.replace(/[-_]/g, ' ');
+            normalized = normalized.replace(/\s+/g, ' ');
+            normalized = normalized.replace(/[^a-zA-Z0-9\s]/g, '');
+            normalized = normalized.replace(/\s+/g, ' ').trim();
+            normalized = normalized
+                .split(' ')
+                .map(word => word ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : '')
+                .filter(word => word.length > 0)
+                .join(' ');
+            return normalized || '';
+        };
+        
+        const slugify = (str) => {
+            if (!str || typeof str !== 'string') return 'untitled';
+            return str.toLowerCase().trim()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/[\s_-]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+        };
+        
+        const deriveResolvedFilename = (title, extension) => {
+            const slugified = slugify(title || 'untitled');
+            return extension ? `${slugified}.${extension}` : slugified;
+        };
+
+        // Build manifest items
+        // Derive title and resolvedFilename from file.name
+        const manifest = uploadedFiles.map((fileEntry) => {
+            // Get filename without extension for title
+            const fileName = fileEntry.file.name || 'unknown'
+            const lastDotIndex = fileName.lastIndexOf('.')
+            const extension = lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1) : ''
+            const baseName = lastDotIndex > 0 ? fileName.substring(0, lastDotIndex) : fileName
+            
+            // Normalize title (Title Case, clean)
+            const normalizedTitle = normalizeTitle(baseName) || normalizeTitle(fileName) || null
+            
+            // Derive resolvedFilename from normalized title + extension (slugified)
+            const resolvedFilename = deriveResolvedFilename(normalizedTitle || baseName, extension)
+            
+            return {
+                upload_key: fileEntry.uploadKey,
+                expected_size: fileEntry.file.size,
+                category_id: selectedCategoryId,
+                metadata: getEffectiveMetadataV2(fileEntry.clientId),
+                title: normalizedTitle,
+                resolved_filename: resolvedFilename,
+            }
+        })
+
+        console.log('[FINALIZE_V2] Built manifest', { manifestCount: manifest.length })
+
+        // Set status to 'finalizing' for manifest files
+        // Note: batchStatus is now computed from v2Files, no manual update needed
+        const uploadedClientIds = new Set(uploadedFiles.map((f) => f.clientId))
+        setV2Files((prevFiles) =>
+            prevFiles.map((f) =>
+                uploadedClientIds.has(f.clientId)
+                    ? { ...f, status: 'finalizing', error: null }
+                    : f
+            )
+        )
+
+        try {
+            // Call backend finalize endpoint using fetch
+            const response = await fetch('/app/assets/upload/finalize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ manifest }),
+            })
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => 'Unknown error')
+                throw new Error(`Finalize failed: ${response.status} ${response.statusText} - ${errorText}`)
+            }
+
+            const responseData = await response.json()
+            console.log('[FINALIZE_V2] Response received', responseData)
+
+            // Handle backend response per file
+            const results = responseData.results || []
+            const resultsByUploadKey = new Map()
+            results.forEach((result) => {
+                if (result.upload_key) {
+                    resultsByUploadKey.set(result.upload_key, result)
+                }
+            })
+
+            // Update v2Files states based on results
+            let finalizedCount = 0
+            let failedCount = 0
+
+            setV2Files((prevFiles) => {
+                return prevFiles.map((f) => {
+                    if (!uploadedClientIds.has(f.clientId)) {
+                        return f // Not in manifest, leave unchanged
+                    }
+
+                    // Match result to file using exact upload_key comparison
+                    const result = resultsByUploadKey.get(f.uploadKey)
+
+                    if (!result) {
+                        // No result for this file - treat as failure
+                        failedCount++
+                        console.log('[FINALIZE_V2] No result for file', { clientId: f.clientId, uploadKey: f.uploadKey })
+                        return {
+                            ...f,
+                            status: 'failed',
+                            error: {
+                                stage: 'finalize',
+                                code: 'no_result',
+                                message: 'Finalize did not return a result for this file.',
+                            },
+                        }
+                    }
+
+                    // Log matched clientId for each result
+                    console.log('[FINALIZE_V2] Matched result to file', { 
+                        clientId: f.clientId, 
+                        uploadKey: f.uploadKey, 
+                        resultStatus: result.status 
+                    })
+
+                    // Check result.status explicitly (not result.success)
+                    if (result.status === 'success') {
+                        // Success: set file.status = 'finalized', clear file.error
+                        finalizedCount++
+                        console.log('[FINALIZE_V2] File marked as finalized', { clientId: f.clientId, uploadKey: f.uploadKey })
+                        return {
+                            ...f,
+                            status: 'finalized',
+                            error: null,
+                        }
+                    } else if (result.status === 'failed') {
+                        // Failure: set file.status = 'failed', set file.error with stage: 'finalize'
+                        failedCount++
+                        console.log('[FINALIZE_V2] File marked as failed', { clientId: f.clientId, uploadKey: f.uploadKey, error: result.error })
+                        return {
+                            ...f,
+                            status: 'failed',
+                            error: {
+                                stage: 'finalize',
+                                code: result.error?.code,
+                                message: result.error?.message || 'Finalize failed.',
+                                fields: result.error?.fields,
+                            },
+                        }
+                    } else {
+                        // Unknown status - treat as failure
+                        failedCount++
+                        console.warn('[FINALIZE_V2] Unknown result status', { clientId: f.clientId, uploadKey: f.uploadKey, status: result.status })
+                        return {
+                            ...f,
+                            status: 'failed',
+                            error: {
+                                stage: 'finalize',
+                                code: 'unknown_status',
+                                message: `Finalize returned unknown status: ${result.status}`,
+                            },
+                        }
+                    }
+                })
+            })
+
+            // batchStatus is now computed from v2Files, no manual update needed
+            console.log('[FINALIZE_V2] Results processed', { successCount: finalizedCount, failureCount: failedCount })
+        } catch (error) {
+            console.error('[FINALIZE_V2] Error during finalize', error)
+            // Network / unexpected errors - mark ALL manifest files as failed
+            const errorMessage = error.response?.data?.message || error.message || 'Finalize failed'
+            
+            setV2Files((prevFiles) =>
+                prevFiles.map((f) =>
+                    uploadedClientIds.has(f.clientId)
+                        ? {
+                              ...f,
+                              status: 'failed',
+                              error: {
+                                  stage: 'finalize',
+                                  code: error.response?.status === 400 ? 'validation_error' : 'network_error',
+                                  message: errorMessage,
+                                  fields: undefined, // Network errors don't have field-level errors
+                              },
+                          }
+                        : f
+                )
+            )
+            // Note: batchStatus is now computed from v2Files, no manual update needed
+        }
+    }, [canFinalizeV2, v2Files, selectedCategoryId, getEffectiveMetadataV2])
+
+    /**
+     * LEGACY — DO NOT USE: Finalize Assets
      * 
      * Finalizes all completed uploads by calling the backend endpoint.
      * Sends upload_session_id and asset_type for each completed upload.
+     * 
+     * ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
      */
     const [isFinalizing, setIsFinalizing] = useState(false)
     const [finalizeError, setFinalizeError] = useState(null)
 
-    const handleFinalize = useCallback(async () => {
+    const handleFinalizeLegacy = useCallback(async () => {
+        // Freeze legacy finalize logic
+        if (!USE_LEGACY_UPLOADER) {
+            setFinalizeError('Finalize is temporarily disabled during rewrite')
+            return // Early return - legacy finalize logic frozen
+        }
+        
         if (isFinalizing) return
 
         // Get completed items
@@ -1095,11 +2326,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
     }, [phase3Manager, defaultAssetType, isFinalizing, onClose])
 
-    // Check if finalize button should be enabled
+    // LEGACY — DO NOT USE: Check if finalize button should be enabled
     // CRITICAL: Check if S3 uploads are actually complete (uploaded_size >= expected_size)
     // Phase 2 completion only means frontend thinks S3 finished - verify with backend
     // Track backend session status (uploaded_size, expected_size) for each upload session
     // Maps uploadSessionId -> { uploaded_size: number, expected_size: number }
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
     const [backendUploadSizes, setBackendUploadSizes] = useState(new Map())
     
     // Force re-render to trigger status checks
@@ -1108,8 +2340,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Track which sessions are currently being checked (prevent duplicate requests)
     const checkingSessionsRef = useRef(new Set())
     
-    // Check backend upload sizes for completed items
+    // LEGACY — DO NOT USE: Check backend upload sizes for completed items (backend session polling)
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
     useEffect(() => {
+        // Freeze legacy backend session checking/polling logic
+        if (!USE_LEGACY_UPLOADER) {
+            return // Early return - legacy backend checks frozen
+        }
         const completedItems = phase3Manager.items.filter(item => item.uploadStatus === 'complete' && item.uploadSessionId)
         
         if (completedItems.length === 0) {
@@ -1232,8 +2469,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         )
     }, [phase3Manager.items])
     
-    // Check if button should be enabled (all complete AND backend-stable)
-    const canFinalize = phase3Manager.canFinalize && 
+    // LEGACY — DO NOT USE: Check if button should be enabled (all complete AND backend-stable)
+    // ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
+    // STEP 3: New canFinalize logic is defined above based on new files state
+    const canFinalizeLegacy = phase3Manager.canFinalize && 
                        !isFinalizing && 
                        allUploadsComplete &&
                        allUploadsBackendStable
@@ -1324,7 +2563,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     ])
 
     /**
-     * Handle category change callback
+     * CLEAN UPLOADER V2 — Handle category change callback
+     * 
+     * Updates selectedCategoryId state for finalization prerequisite.
+     * Does NOT affect upload behavior.
+     */
+    const handleCategoryChangeV2 = useCallback((categoryId) => {
+        console.log('[CATEGORY_V2] Category changed', { categoryId })
+        setSelectedCategoryId(categoryId)
+    }, [])
+
+    /**
+     * Handle category change callback (LEGACY - for Phase 3 manager)
      * Fetches metadata fields for the category (placeholder - should be implemented by parent)
      */
     const handleCategoryChange = useCallback((categoryId) => {
@@ -1361,10 +2611,211 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
     }, [open])
 
-    if (!open) return null
+    // DISABLED: batchStatus is now computed deterministically from v2Files using useMemo
+    // This legacy effect is no longer needed since batchStatus is computed, not manually set
+    // useEffect(() => {
+    //     // ... legacy code disabled - batchStatus is computed from v2Files
+    // }, [v2Files, batchStatus])
 
-    const hasFiles = phase3Manager.hasItems
-    const hasUploadingItems = phase3Manager.uploadingItems.length > 0
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Sequential Upload Coordinator
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Coordinates sequential file uploads:
+     * - Only one file uploads at a time
+     * - When a file finishes (uploaded or failed), the next queued file starts automatically
+     * - Finds files with status === 'selected' and starts them in order
+     */
+    useEffect(() => {
+        // Check if any file is currently uploading
+        const isUploading = v2Files.some((f) => f.status === 'uploading')
+        
+        if (isUploading) {
+            // Already uploading - wait for current upload to finish
+            return
+        }
+        
+        // Find the next file with status === 'selected' to upload
+        const nextFile = v2Files.find((f) => f.status === 'selected')
+        
+        if (!nextFile) {
+            // No files waiting to upload
+            return
+        }
+        
+        // Guard: Ensure file still exists in v2Files before starting (handle removed files)
+        const fileStillExists = v2Files.some((f) => f.clientId === nextFile.clientId && f.status === 'selected')
+        if (!fileStillExists) {
+            // File was removed - coordinator will pick up next file on next render
+            return
+        }
+        
+        console.log('[UPLOAD_COORDINATOR] Starting next upload', { 
+            clientId: nextFile.clientId, 
+            fileName: nextFile.file?.name || 'unknown',
+            queuePosition: v2Files.filter((f) => f.status === 'selected').length
+        })
+        
+        // Update status to 'uploading' before starting upload
+        setV2Files((prevFiles) => {
+            return prevFiles.map((f) => {
+                if (f.clientId === nextFile.clientId) {
+                    return {
+                        ...f,
+                        status: 'uploading',
+                        progress: 0
+                    }
+                }
+                return f
+            })
+        })
+        
+        // Start the upload
+        uploadSingleFile(nextFile).catch((error) => {
+            console.error('[UPLOAD_COORDINATOR] Upload failed', { 
+                clientId: nextFile.clientId, 
+                error: error.message 
+            })
+            // Error handling is done in uploadSingleFile (sets status to 'failed')
+            // This effect will re-run and pick up the next file
+        })
+    }, [v2Files, uploadSingleFile])
+
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — State Reset Function
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Resets v2Files and batchStatus to initial state.
+     * Used when closing dialog to clean up state.
+     */
+    const resetV2State = useCallback(() => {
+        setV2Files([])
+        setSelectedCategoryId(initialCategoryId || null) // Reset to initial category
+        setGlobalMetadataDraft({}) // Reset global metadata
+        // Note: batchStatus is now computed from v2Files, will be 'idle' when v2Files is empty
+        console.log('[RESET_V2] State reset complete')
+    }, [initialCategoryId])
+
+    /**
+     * ═══════════════════════════════════════════════════════════════
+     * CLEAN UPLOADER V2 — Auto-Close on Complete
+     * ═══════════════════════════════════════════════════════════════
+     * 
+     * Auto-closes dialog ONLY when:
+     * - batchStatus === 'complete'
+     * - At least one file finalized
+     * - No failed files
+     * 
+     * Delay: 400-700ms for perceived completion.
+     * Does NOT auto-close on partial_success.
+     */
+    useEffect(() => {
+        // Only auto-close when batchStatus is 'complete'
+        if (batchStatus !== 'complete') {
+            return
+        }
+
+        // Verify conditions: at least one finalized, no failed files
+        const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
+        const failedCount = v2Files.filter((f) => f.status === 'failed').length
+
+        if (finalizedCount === 0 || failedCount > 0) {
+            // Conditions not met - don't auto-close
+            console.log('[AUTO_CLOSE_V2] Conditions not met', { finalizedCount, failedCount })
+            return
+        }
+
+        console.log('[AUTO_CLOSE_V2] Starting auto-close timer', { finalizedCount })
+        
+        // Delay 400-700ms for perceived completion
+        const delay = 400 + Math.random() * 300 // 400-700ms
+        const timeoutId = setTimeout(() => {
+            console.log('[AUTO_CLOSE_V2] Auto-closing dialog')
+            
+            // Trigger refresh callback if provided (e.g., to refresh asset grid)
+            if (onFinalizeComplete) {
+                console.log('[AUTO_CLOSE_V2] Triggering onFinalizeComplete callback')
+                onFinalizeComplete()
+            }
+            
+            resetV2State()
+            onClose()
+        }, delay)
+
+        return () => {
+            clearTimeout(timeoutId)
+        }
+    }, [batchStatus, v2Files, onClose, resetV2State, onFinalizeComplete])
+
+    // CLEAN UPLOADER V2: Helper function to update title in v2Files
+    const setTitleV2 = useCallback((clientId, newTitle) => {
+        setV2Files((prevFiles) => 
+            prevFiles.map((f) => 
+                f.clientId === clientId 
+                    ? { ...f, title: newTitle }
+                    : f
+            )
+        )
+    }, [])
+
+    // CLEAN UPLOADER V2: Map v2Files to UploadTray items format
+    // MUST be before conditional return to follow Rules of Hooks
+    const v2UploadManager = useMemo(() => {
+        const items = v2Files.map((v2File) => ({
+            clientId: v2File.clientId,
+            uploadStatus: v2File.status === 'selected' ? 'queued' : 
+                         v2File.status === 'uploading' ? 'uploading' :
+                         v2File.status === 'uploaded' ? 'complete' :
+                         v2File.status === 'finalizing' ? 'complete' : // Show as complete while finalizing
+                         v2File.status === 'finalized' ? 'complete' :
+                         v2File.status === 'failed' ? 'failed' : 'queued',
+            progress: v2File.progress,
+            originalFilename: v2File.file.name,
+            file: v2File.file,
+            title: v2File.title || null, // Use title from v2File if available
+            resolvedFilename: null, // Optional
+            metadataDraft: v2File.metadataDraft || {}, // Per-file metadata overrides
+            error: v2File.error || null, // Include error object for failed uploads
+        }))
+        
+        return {
+            hasItems: items.length > 0,
+            items: items,
+            // NO-OP methods for compatibility
+            setUploadSessionId: () => {},
+            updateUploadProgress: () => {},
+            markUploadComplete: () => {},
+            markUploadFailed: () => {},
+            markUploadStarted: () => {},
+            // Title method
+            setTitle: setTitleV2,
+            // Metadata methods
+            getEffectiveMetadata: (clientId) => getEffectiveMetadataV2(clientId),
+            setGlobalMetadata: (fieldKey, value) => setGlobalMetadataV2(fieldKey, value),
+            overrideItemMetadata: (clientId, fieldKey, value) => overrideItemMetadataV2(clientId, fieldKey, value),
+            clearItemOverride: (clientId, fieldKey) => clearItemOverrideV2(clientId, fieldKey),
+            // Category state for GlobalMetadataPanel compatibility
+            context: {
+                categoryId: selectedCategoryId,
+            },
+            changeCategory: (categoryId, metadataFields) => {
+                // Update selectedCategoryId when category changes via GlobalMetadataPanel
+                setSelectedCategoryId(categoryId)
+            },
+            // Metadata state
+            globalMetadataDraft: globalMetadataDraft,
+            availableMetadataFields: [], // TODO: Fetch from category config (for now empty)
+            warnings: [], // No warnings for v2 (validation not implemented)
+            validateMetadata: () => {}, // NO-OP - validation not implemented
+        }
+    }, [v2Files, selectedCategoryId, globalMetadataDraft, getEffectiveMetadataV2, setGlobalMetadataV2, overrideItemMetadataV2, clearItemOverrideV2, setTitleV2])
+
+    const hasFiles = v2UploadManager.hasItems
+    const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
+
+    if (!open) return null
 
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
@@ -1372,7 +2823,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 {/* Background overlay */}
                 <div
                     className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
-                    onClick={!hasUploadingItems ? onClose : undefined}
+                    onClick={!hasUploadingItems && batchStatus !== 'finalizing' ? onClose : undefined}
                 />
 
                 {/* Modal panel - wider for Phase 3 layout */}
@@ -1383,11 +2834,22 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
                                 Add {defaultAssetType === 'asset' ? 'Asset' : 'Marketing Asset'}
                             </h3>
-                            {!hasUploadingItems && (
+                            {!hasUploadingItems && batchStatus !== 'finalizing' && (
                                 <button
                                     type="button"
                                     className="text-gray-400 hover:text-gray-500"
                                     onClick={onClose}
+                                    title="Close dialog"
+                                >
+                                    <XMarkIcon className="h-6 w-6" />
+                                </button>
+                            )}
+                            {batchStatus === 'finalizing' && (
+                                <button
+                                    type="button"
+                                    className="text-gray-300 cursor-not-allowed"
+                                    disabled
+                                    title="Finalizing uploads…"
                                 >
                                     <XMarkIcon className="h-6 w-6" />
                                 </button>
@@ -1438,6 +2900,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     uploadManager={phase3Manager}
                                     categories={filteredCategories}
                                     onCategoryChange={handleCategoryChange}
+                                    disabled={batchStatus === 'finalizing'}
                                 />
 
                                 {/* Compact Drop Zone - above uploads list, always visible */}
@@ -1468,17 +2931,22 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 </div>
                                             </div>
 
+                                {/* CLEAN UPLOADER V2 — Category Selector (Finalize Prerequisite) */}
+                                <GlobalMetadataPanel
+                                    uploadManager={v2UploadManager}
+                                    categories={filteredCategories}
+                                    onCategoryChange={handleCategoryChangeV2}
+                                />
+
                                 {/* Upload Tray */}
+                                {/* CLEAN UPLOADER V2: UploadTray now uses v2Files state */}
                                 <UploadTray 
-                                    uploadManager={phase3Manager}
+                                    uploadManager={v2UploadManager}
                                     onRemoveItem={(clientId) => {
-                                        // Remove from Phase 3 state
-                                        phase3Manager.removeItem(clientId);
-                                        
-                                        // Remove from Phase 2 state
-                                        const phase2Manager = phase2ManagerRef.current;
-                                        phase2Manager.removeUpload(clientId);
+                                        // Remove file from v2Files state
+                                        removeFile(clientId)
                                     }}
+                                    disabled={batchStatus === 'finalizing'}
                                 />
                                     </div>
                                 )}
@@ -1486,9 +2954,59 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                         {/* Footer Actions */}
                         <div className="mt-6">
+                            {/* CLEAN UPLOADER V2 — Warnings for missing required fields */}
+                            {v2Files.length > 0 && v2Warnings.length > 0 && (
+                                <div className="mb-4 rounded-md bg-yellow-50 border border-yellow-200 p-3">
+                                    <div className="flex">
+                                        <div className="flex-shrink-0">
+                                            <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                            </svg>
+                                        </div>
+                                        <div className="ml-3">
+                                            <div className="text-sm text-yellow-800">
+                                                {v2Warnings.map((warning, index) => (
+                                                    <p key={index}>{warning}</p>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* CLEAN UPLOADER V2 — Partial success banner */}
+                            {batchStatus === 'partial_success' && (
+                                <div className="mb-4 rounded-md bg-yellow-50 border border-yellow-200 p-3">
+                                    <div className="flex">
+                                        <div className="flex-shrink-0">
+                                            <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                            </svg>
+                                        </div>
+                                        <div className="ml-3">
+                                            <p className="text-sm text-yellow-800">
+                                                {(() => {
+                                                    const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
+                                                    const failedCount = v2Files.filter((f) => f.status === 'failed').length
+                                                    return (
+                                                        <>
+                                                            {finalizedCount} asset{finalizedCount !== 1 ? 's' : ''} created successfully. {failedCount} failed — review and retry.
+                                                        </>
+                                                    )
+                                                })()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="flex items-center justify-end gap-3">
-                                {/* Status indicator */}
-                                {hasFiles && (
+                                {/* Status indicator - Show v2 counter when v2Files exist, otherwise legacy */}
+                                {v2Files.length > 0 ? (
+                                    <div className="flex-1 text-sm text-gray-600">
+                                        {v2Files.length} / {v2Files.length} upload{v2Files.length !== 1 ? 's' : ''}
+                                    </div>
+                                ) : files.length > 0 ? (
                                     <div className="flex-1 text-sm text-gray-600">
                                         {(() => {
                                             const completedCount = phase3Manager.completedItems.length
@@ -1518,34 +3036,49 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                             )
                                         })()}
                                     </div>
-                                )}
+                                ) : null}
                                 
-                                {!hasUploadingItems && (
-                                    <button
-                                        type="button"
-                                        onClick={onClose}
-                                        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                                    >
-                                        {hasFiles ? 'Close' : 'Cancel'}
-                                    </button>
-                                )}
+                                {(() => {
+                                    const disableClose = batchStatus === 'finalizing'
+                                    
+                                    return (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                console.log('[CLOSE_BUTTON_V2] Close button clicked, resetting v2 state')
+                                                resetV2State()
+                                                onClose()
+                                            }}
+                                            disabled={disableClose}
+                                            className={`rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium ${
+                                                disableClose
+                                                    ? 'text-gray-400 cursor-not-allowed opacity-50'
+                                                    : 'text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                            title={disableClose ? 'Finalizing uploads…' : undefined}
+                                        >
+                                            {hasFiles ? 'Close' : 'Cancel'}
+                                        </button>
+                                    )
+                                })()}
                                 
-                                {/* Finalize Assets Button */}
-                                {hasFiles && (
+                                {/* CLEAN UPLOADER V2 — Finalize Assets Button */}
+                                {v2Files.length > 0 && (
                                 <button
                                         type="button"
-                                        onClick={handleFinalize}
-                                        disabled={!canFinalize || isFinalizing}
+                                        onClick={handleFinalizeV2}
+                                        disabled={!canFinalizeV2 || batchStatus === 'finalizing'}
                                         className={`rounded-md px-4 py-2 text-sm font-medium flex items-center gap-2 ${
-                                            canFinalize && !isFinalizing
+                                            canFinalizeV2 && batchStatus !== 'finalizing'
                                                 ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
+                                        title={!selectedCategoryId ? 'Select a category to finalize uploads' : undefined}
                                     >
-                                        {isWaitingForStability && (
+                                        {batchStatus === 'finalizing' && (
                                             <ArrowPathIcon className="h-4 w-4 animate-spin" />
                                         )}
-                                        {isFinalizing ? 'Finalizing...' : isWaitingForStability ? 'Finalizing uploads...' : 'Finalize Assets'}
+                                        {finalizeButtonLabelV2}
                                 </button>
                                 )}
                             </div>

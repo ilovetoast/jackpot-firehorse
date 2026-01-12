@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
@@ -57,11 +58,12 @@ class GeneratePreviewJob implements ShouldQueue
             return;
         }
 
-        // Ensure asset is in THUMBNAIL_GENERATED status (from GenerateThumbnailsJob)
-        if ($asset->status !== AssetStatus::THUMBNAIL_GENERATED) {
-            Log::warning('Preview generation skipped - asset has not completed thumbnail generation', [
+        // Ensure thumbnails have been generated (check thumbnail_status, not asset status)
+        // Asset.status remains UPLOADED throughout processing for visibility
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            Log::warning('Preview generation skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,
-                'status' => $asset->status->value,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
             return;
         }

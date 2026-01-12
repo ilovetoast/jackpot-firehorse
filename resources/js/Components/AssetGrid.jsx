@@ -12,6 +12,7 @@
  * @param {number|null} props.selectedAssetId - ID of currently selected asset
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
+import { useEffect } from 'react'
 import AssetCard from './AssetCard'
 import AssetGridContainer from './AssetGridContainer'
 
@@ -23,6 +24,15 @@ export default function AssetGrid({
     selectedAssetId = null,
     primaryColor = '#6366f1',
 }) {
+    // Console log assets when they change
+    useEffect(() => {
+        console.log('[AssetGrid] Assets found:', assets)
+        console.log('[AssetGrid] Asset count:', assets?.length || 0)
+        if (assets && assets.length > 0) {
+            console.log('[AssetGrid] Sample asset (first):', assets[0])
+        }
+    }, [assets])
+
     if (!assets || assets.length === 0) {
         return null
     }

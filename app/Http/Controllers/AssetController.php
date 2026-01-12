@@ -13,8 +13,10 @@ use App\Services\SystemCategoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
+use Illuminate\Support\Facades\DB;
 
 class AssetController extends Controller
 {
@@ -136,6 +138,47 @@ class AssetController extends Controller
             ['name', 'asc'],
         ])->values();
 
+        // Get asset counts per category (efficient single query)
+        $categoryIds = $allCategories->pluck('id')->filter()->toArray();
+        $assetCounts = [];
+        if (!empty($categoryIds)) {
+            // Count assets per category using JSON path (single query with GROUP BY)
+            // Use whereRaw for JSON extraction in WHERE clause
+            $counts = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::ASSET)
+                ->where('status', AssetStatus::VISIBLE)
+                ->whereNull('deleted_at')
+                ->whereNotNull('metadata')
+                ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) IN (' . implode(',', array_map('intval', $categoryIds)) . ')')
+                ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
+                ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
+                ->get()
+                ->pluck('count', 'category_id')
+                ->toArray();
+            
+            // Map counts by category ID
+            foreach ($counts as $catId => $count) {
+                $assetCounts[$catId] = $count;
+            }
+        }
+        
+        // Get total asset count for "All" button
+        $totalAssetCount = Asset::where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->where('status', AssetStatus::VISIBLE)
+            ->whereNull('deleted_at')
+            ->count();
+        
+        // Add counts to categories
+        $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
+            $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']]) 
+                ? $assetCounts[$category['id']] 
+                : 0;
+            return $category;
+        });
+
         // Check if plan is not free (to show "All" button)
         $currentPlan = $this->planService->getCurrentPlan($tenant);
         $showAllButton = $currentPlan !== 'free';
@@ -156,24 +199,54 @@ class AssetController extends Controller
             }
         }
 
-        // Query completed assets for this brand and asset type
-        // Note: assets must be top-level prop for Inertia to pass to frontend component
-        $assetsQuery = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET)
-            ->where('status', AssetStatus::COMPLETED)
-            ->whereNull('deleted_at'); // Exclude soft-deleted assets
+        // Query visible assets for this brand and asset type
+        // AssetStatus represents VISIBILITY only, not processing progress.
+        // Processing state is tracked via thumbnail_status, metadata flags, and activity events.
+
+        $assetsQuery = Asset::query()
+        ->where('tenant_id', $tenant->id)
+        ->where('brand_id', $brand->id)
+        ->where('type', AssetType::ASSET)
+
+        // Visibility-only filter - assets with VISIBLE status are shown in grid
+        ->where('status', AssetStatus::VISIBLE)
+
+        // Exclude soft-deleted assets only
+        ->whereNull('deleted_at');
+
 
         // Filter by category if provided (check metadata for category_id)
         if ($categoryId) {
-            // Filter assets where metadata contains category_id
-            // Note: Handles null metadata gracefully - assets without category in metadata will be excluded
+            // Filter assets where metadata->category_id matches the category ID
+            // Use direct JSON path comparison for exact integer match
+            // Cast categoryId to integer to ensure type matching with JSON integer values
             $assetsQuery->whereNotNull('metadata')
-                ->whereJsonContains('metadata->category_id', $categoryId);
+                ->where('metadata->category_id', (int) $categoryId);
         }
 
-        $assets = $assetsQuery->get()
-            ->map(function ($asset) use ($tenant, $brand) {
+        $assets = $assetsQuery->get();
+        
+        // AUDIT: Log query results and sample asset brand_ids for comparison
+        if ($assets->count() > 0) {
+            $sampleAssetBrandIds = $assets->take(5)->pluck('brand_id')->unique()->values()->toArray();
+            Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results', [
+                'query_tenant_id' => $tenant->id,
+                'query_brand_id' => $brand->id,
+                'assets_count' => $assets->count(),
+                'sample_asset_brand_ids' => $sampleAssetBrandIds,
+                'brand_id_mismatch_count' => $assets->filter(fn($a) => $a->brand_id != $brand->id)->count(),
+                'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
+            ]);
+        } else {
+            Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results (empty)', [
+                'query_tenant_id' => $tenant->id,
+                'query_brand_id' => $brand->id,
+                'assets_count' => 0,
+                'note' => 'No assets found - cannot compare brand_ids',
+            ]);
+        }
+        
+        $assets = $assets->map(function ($asset) use ($tenant, $brand) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -315,8 +388,74 @@ class AssetController extends Controller
             'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
+            'total_asset_count' => $totalAssetCount, // Total count for "All" button
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
         ]);
+    }
+
+    /**
+     * Get processing status for an asset (thumbnail generation status).
+     *
+     * GET /assets/{asset}/processing-status
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function processingStatus(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+        
+        if ($asset->brand_id !== $brand->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Refresh asset to ensure we have the latest thumbnail_status from database
+        $asset->refresh();
+
+        // Get thumbnail status from Asset model
+        // thumbnail_status is the source of truth for thumbnail generation state
+        // Values: 'pending', 'processing', 'completed', 'failed' (ThumbnailStatus enum)
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+            ? $asset->thumbnail_status->value 
+            : ($asset->thumbnail_status ?? 'pending');
+
+        // Generate thumbnail URL using existing grid thumbnail logic
+        $thumbnailUrl = route('assets.thumbnail', [
+            'asset' => $asset->id,
+            'style' => 'thumb',
+        ]);
+
+        // Get thumbnails_generated_at from metadata
+        $metadata = $asset->metadata ?? [];
+        $thumbnailsGeneratedAt = $metadata['thumbnails_generated_at'] ?? null;
+
+        // Append cache-busting query param using thumbnails_generated_at timestamp
+        if ($thumbnailsGeneratedAt) {
+            // Convert ISO8601 timestamp to unix timestamp for cache busting
+            try {
+                $timestamp = \Carbon\Carbon::parse($thumbnailsGeneratedAt)->timestamp;
+                $thumbnailUrl .= '?t=' . $timestamp;
+            } catch (\Exception $e) {
+                // If parsing fails, use current timestamp as fallback
+                $thumbnailUrl .= '?t=' . time();
+            }
+        }
+
+        return response()->json([
+            'thumbnail_status' => $thumbnailStatus,
+            'thumbnail_url' => $thumbnailUrl,
+            'thumbnails_generated_at' => $thumbnailsGeneratedAt,
+        ], 200);
     }
 
     /**
@@ -380,8 +519,9 @@ class AssetController extends Controller
             ], 404);
         }
 
-        // Verify asset is completed
-        if ($asset->status !== AssetStatus::COMPLETED) {
+        // Verify asset processing is completed (check processing state, not status)
+        $completionService = app(\App\Services\AssetCompletionService::class);
+        if (!$completionService->isComplete($asset)) {
             return response()->json([
                 'message' => 'Asset preview not available - asset is still processing',
             ], 422);

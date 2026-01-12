@@ -14,13 +14,15 @@ import UploadAssetDialog from './UploadAssetDialog'
  * @param {string} buttonText - Optional button text override
  * @param {number|null} initialCategoryId - Optional category ID to prepopulate in dialog
  * @param {string} className - Optional additional CSS classes
+ * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully
  */
 export default function AddAssetButton({ 
     defaultAssetType = 'asset', 
     categories = [],
     buttonText = null,
     initialCategoryId = null,
-    className = ''
+    className = '',
+    onFinalizeComplete = null
 }) {
     const { auth } = usePage().props
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -68,6 +70,7 @@ export default function AddAssetButton({
                 defaultAssetType={defaultAssetType}
                 categories={categories}
                 initialCategoryId={initialCategoryId}
+                onFinalizeComplete={onFinalizeComplete}
             />
         </>
     )

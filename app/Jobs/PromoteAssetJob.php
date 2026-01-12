@@ -99,10 +99,11 @@ class PromoteAssetJob implements ShouldQueue
     {
         $asset = Asset::findOrFail($this->assetId);
 
-        // Only promote completed assets
-        // Note: This job may be queued before asset is completed, so we check status here
-        if ($asset->status !== AssetStatus::COMPLETED) {
-            Log::debug('Asset promotion skipped - asset not completed yet', [
+        // Only promote assets with completed processing pipeline
+        // Check processing completion state, not status (status is visibility only)
+        $completionService = app(\App\Services\AssetCompletionService::class);
+        if (!$completionService->isComplete($asset)) {
+            Log::debug('Asset promotion skipped - asset processing not completed yet', [
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);

@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\Category;
 use App\Models\UploadSession;
 use App\Services\AbandonedSessionService;
+use App\Services\ActivityRecorder;
 use App\Services\MultipartUploadUrlService;
 use App\Services\ResumeMetadataService;
 use App\Services\UploadCompletionService;
 use App\Services\UploadInitiationService;
+use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -281,6 +285,7 @@ class UploadController extends Controller
             'files.*.client_reference' => 'nullable|uuid', // Optional client reference for frontend mapping
             'brand_id' => 'nullable|exists:brands,id', // Shared brand for all files in batch
             'batch_reference' => 'nullable|uuid', // Optional batch-level correlation ID for grouping/debugging/analytics
+            'category_id' => 'nullable|integer|exists:categories,id', // Category is optional for upload initiation (required for finalization)
         ]);
 
         // Verify brand belongs to tenant if provided
@@ -292,6 +297,35 @@ class UploadController extends Controller
         } else {
             // Use default brand if no brand specified
             $brand = $tenant->defaultBrand;
+        }
+
+        if (!$brand) {
+            return response()->json([
+                'message' => 'Brand not found',
+            ], 404);
+        }
+
+        // Verify category belongs to tenant and brand (only if provided)
+        $category = null;
+        if (isset($validated['category_id'])) {
+            $categoryId = $validated['category_id'];
+            $category = Category::where('id', $categoryId)
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+
+            if (!$category) {
+                Log::warning('Upload initiation: Invalid category provided', [
+                    'category_id' => $categoryId,
+                    'tenant_id' => $tenant->id,
+                    'brand_id' => $brand->id,
+                ]);
+
+                return response()->json([
+                    'error' => 'invalid_category',
+                    'message' => 'Invalid category. Category must belong to this brand.',
+                ], 422);
+            }
         }
 
         try {
@@ -766,5 +800,400 @@ class UploadController extends Controller
                 'upload_session_id' => $uploadSession->id,
             ], 500);
         }
+    }
+
+    /**
+     * Finalize multiple uploads from a manifest (manifest-driven batch finalize).
+     *
+     * POST /app/assets/upload/finalize
+     *
+     * Processes each manifest item independently. Never fails the entire request
+     * due to one bad item. Each item is validated and processed separately.
+     *
+     * ORPHAN HANDLING:
+     * Failed finalize items leave S3 objects in temp/uploads/ - they are NOT deleted synchronously.
+     * Synchronous deletion is forbidden to:
+     *   - Prevent blocking finalize response (deletion can be slow)
+     *   - Allow retries without re-upload (S3 object must exist)
+     *   - Avoid race conditions with concurrent finalize attempts
+     *   - Enable manual recovery of failed items
+     * Cleanup is handled by S3 lifecycle rules (expected window: 7 days).
+     * Orphan candidates are logged for monitoring purposes.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function finalize(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // CRITICAL: Brand context must be available (bound by ResolveTenant middleware)
+        // This ensures assets are created with the same brand_id used by UI queries
+        if (!$brand) {
+            Log::error('[UploadController::finalize] Brand context not bound', [
+                'tenant_id' => $tenant->id ?? null,
+                'note' => 'Brand context must be bound by ResolveTenant middleware. Ensure finalize route is in tenant middleware group.',
+            ]);
+            return response()->json([
+                'message' => 'Brand context is not available. The finalize endpoint must be accessed through the tenant middleware which binds the active brand.',
+            ], 500);
+        }
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Validate request structure
+        $validated = $request->validate([
+            'manifest' => 'required|array|min:1',
+            'manifest.*.upload_key' => 'required|string',
+            'manifest.*.expected_size' => 'required|integer|min:1',
+            'manifest.*.category_id' => 'required|integer|exists:categories,id',
+            'manifest.*.metadata' => 'nullable|array',
+            'manifest.*.title' => 'nullable|string|max:255',
+            'manifest.*.resolved_filename' => 'nullable|string|max:255',
+        ]);
+
+        $manifest = $validated['manifest'];
+        $results = [];
+
+        // Process each manifest item independently
+        foreach ($manifest as $item) {
+            $uploadKey = $item['upload_key'];
+            $expectedSize = $item['expected_size'];
+            $categoryId = $item['category_id'];
+            $metadata = $item['metadata'] ?? [];
+            $title = $item['title'] ?? null;
+            $resolvedFilename = $item['resolved_filename'] ?? null;
+
+            $uploadSession = null; // Initialize for use in catch blocks
+            
+            try {
+                // Extract upload_session_id from upload_key
+                // Format: temp/uploads/{upload_session_id}/original
+                if (!preg_match('#^temp/uploads/([^/]+)/original$#', $uploadKey, $matches)) {
+                    throw new \RuntimeException("Invalid upload_key format: {$uploadKey}");
+                }
+
+                $uploadSessionId = $matches[1];
+
+                // Find upload session (tenant-scoped)
+                $uploadSession = UploadSession::where('id', $uploadSessionId)
+                    ->where('tenant_id', $tenant->id)
+                    ->first();
+
+                if (!$uploadSession) {
+                    throw new \RuntimeException("Upload session not found: {$uploadSessionId}");
+                }
+
+                // CRITICAL: Verify category belongs to tenant and ACTIVE BRAND (not upload_session->brand_id)
+                // The user is selecting a category in the UI, which is scoped to the active brand
+                // Assets are created with the active brand_id to match UI queries
+                $category = Category::where('id', $categoryId)
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->first();
+
+                if (!$category) {
+                    throw new \RuntimeException("Category not found or does not belong to tenant/brand");
+                }
+
+                // IDEMPOTENCY CHECK: Check if asset already exists for this upload_session_id
+                // Uses upload_session_id only (unique constraint) - brand_id is determined by active brand context
+                // This makes finalize safe under retries, refreshes, and race conditions
+                $existingAsset = Asset::where('upload_session_id', $uploadSessionId)
+                    ->where('tenant_id', $tenant->id)
+                    ->first();
+
+                if ($existingAsset) {
+                    // Asset already exists - return existing asset (idempotent)
+                    $results[] = [
+                        'upload_key' => $uploadKey,
+                        'status' => 'success',
+                        'asset_id' => $existingAsset->id,
+                    ];
+                    continue; // Skip to next manifest item
+                }
+
+                // Verify S3 object exists and size matches
+                $this->verifyS3Upload($uploadSession, $uploadKey, $expectedSize);
+
+                // Create asset using UploadCompletionService
+                // Determine asset type from category
+                $assetType = $category->asset_type->value;
+
+                $asset = $this->completionService->complete(
+                    $uploadSession,
+                    $assetType,
+                    $resolvedFilename, // filename - use resolvedFilename from frontend, fallback to S3 if null
+                    $title, // title - use title from frontend, fallback to filename if null
+                    $uploadKey, // s3Key
+                    $categoryId,
+                    $metadata,
+                    $user->id
+                );
+
+                // Success result
+                $results[] = [
+                    'upload_key' => $uploadKey,
+                    'status' => 'success',
+                    'asset_id' => $asset->id,
+                ];
+
+                // Note: Activity logging is handled by UploadCompletionService::complete()
+                // which logs ASSET_UPLOAD_FINALIZED (the canonical event for processing start)
+            } catch (\RuntimeException $e) {
+                // Validation/business logic errors - return as failed item
+                $errorCode = 'validation_error';
+                $errorMessage = $e->getMessage();
+                
+                // Determine if this is a file missing error (S3 verification failed)
+                $isFileMissing = str_contains($errorMessage, 'does not exist in S3') || 
+                                 str_contains($errorMessage, 'not found in S3') ||
+                                 str_contains($errorMessage, 'Upload does not exist');
+                
+                $results[] = [
+                    'upload_key' => $uploadKey,
+                    'status' => 'failed',
+                    'error' => [
+                        'code' => $errorCode,
+                        'message' => $errorMessage,
+                    ],
+                ];
+
+                // ORPHAN HANDLING: Log orphan candidate for monitoring
+                // S3 object remains in temp/uploads/ - NOT deleted synchronously
+                // Cleanup handled by S3 lifecycle rules (7 day window)
+                if (!$isFileMissing && $uploadSession) {
+                    Log::warning('Orphan candidate: Failed finalize item', [
+                        'upload_key' => $uploadKey,
+                        'upload_session_id' => $uploadSession->id ?? null,
+                        'tenant_id' => $tenant->id,
+                        'brand_id' => $uploadSession->brand_id ?? null,
+                        'error_code' => $errorCode,
+                        'error_message' => $errorMessage,
+                        'note' => 'S3 object left in temp/uploads/ for lifecycle cleanup (7 days)',
+                    ]);
+                }
+
+                // Record activity event based on error type
+                if ($isFileMissing) {
+                    // asset.file_missing
+                    ActivityRecorder::record(
+                        tenant: $tenant,
+                        eventType: 'asset.file_missing',
+                        subject: null,
+                        actor: $user,
+                        brand: $uploadSession->brand_id ?? null,
+                        metadata: [
+                            'upload_key' => $uploadKey,
+                        ]
+                    );
+                } else {
+                    // asset.create_failed (for other RuntimeExceptions)
+                    ActivityRecorder::record(
+                        tenant: $tenant,
+                        eventType: 'asset.create_failed',
+                        subject: null,
+                        actor: $user,
+                        brand: $uploadSession->brand_id ?? null,
+                        metadata: [
+                            'upload_key' => $uploadKey,
+                            'reason' => $errorCode,
+                            'error' => $errorMessage,
+                        ]
+                    );
+                }
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                // Validation errors with fields
+                $results[] = [
+                    'upload_key' => $uploadKey,
+                    'status' => 'failed',
+                    'error' => [
+                        'code' => 'validation_error',
+                        'message' => 'Validation failed',
+                        'fields' => $e->errors(),
+                    ],
+                ];
+
+                // ORPHAN HANDLING: Log orphan candidate for monitoring
+                // S3 object remains in temp/uploads/ - NOT deleted synchronously
+                // Cleanup handled by S3 lifecycle rules (7 day window)
+                if ($uploadSession) {
+                    Log::warning('Orphan candidate: Failed finalize item (validation)', [
+                        'upload_key' => $uploadKey,
+                        'upload_session_id' => $uploadSession->id ?? null,
+                        'tenant_id' => $tenant->id,
+                        'brand_id' => $uploadSession->brand_id ?? null,
+                        'error_fields' => array_keys($e->errors()),
+                        'note' => 'S3 object left in temp/uploads/ for lifecycle cleanup (7 days)',
+                    ]);
+                }
+
+                // Record activity event: asset.validation_failed
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: 'asset.validation_failed',
+                    subject: null,
+                    actor: $user,
+                    brand: $uploadSession->brand_id ?? null,
+                    metadata: [
+                        'upload_key' => $uploadKey,
+                        'fields' => $e->errors(),
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Unexpected errors - log and return as failed item
+                Log::error('Unexpected error finalizing upload', [
+                    'upload_key' => $uploadKey,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+
+                $errorCode = 'server_error';
+                $errorMessage = 'An unexpected error occurred';
+
+                $results[] = [
+                    'upload_key' => $uploadKey,
+                    'status' => 'failed',
+                    'error' => [
+                        'code' => $errorCode,
+                        'message' => $errorMessage,
+                    ],
+                ];
+
+                // ORPHAN HANDLING: Log orphan candidate for monitoring
+                // S3 object remains in temp/uploads/ - NOT deleted synchronously
+                // Cleanup handled by S3 lifecycle rules (7 day window)
+                if ($uploadSession) {
+                    Log::warning('Orphan candidate: Failed finalize item (server error)', [
+                        'upload_key' => $uploadKey,
+                        'upload_session_id' => $uploadSession->id ?? null,
+                        'tenant_id' => $tenant->id,
+                        'brand_id' => $uploadSession->brand_id ?? null,
+                        'error_code' => $errorCode,
+                        'error_message' => $errorMessage,
+                        'note' => 'S3 object left in temp/uploads/ for lifecycle cleanup (7 days)',
+                    ]);
+                }
+
+                // Record activity event: asset.create_failed
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: 'asset.create_failed',
+                    subject: null,
+                    actor: $user,
+                    brand: $uploadSession->brand_id ?? null,
+                    metadata: [
+                        'upload_key' => $uploadKey,
+                        'reason' => $errorCode,
+                        'error' => $errorMessage,
+                    ]
+                );
+            }
+        }
+
+        // Always return 200 OK with results array
+        // Individual items may have status 'success' or 'failed'
+        return response()->json([
+            'results' => $results,
+        ], 200);
+    }
+
+    /**
+     * Verify S3 upload exists and matches expected size.
+     *
+     * @param UploadSession $uploadSession
+     * @param string $uploadKey
+     * @param int $expectedSize
+     * @return void
+     * @throws \RuntimeException If verification fails
+     */
+    protected function verifyS3Upload(UploadSession $uploadSession, string $uploadKey, int $expectedSize): void
+    {
+        $bucket = $uploadSession->storageBucket;
+        if (!$bucket) {
+            throw new \RuntimeException('Storage bucket not found for upload session');
+        }
+
+        // Create S3 client using reflection to access protected method
+        // Or create our own instance using the same configuration
+        $s3Client = $this->createS3ClientForFinalize();
+
+        try {
+            // Verify object exists in S3
+            $exists = $s3Client->doesObjectExist($bucket->name, $uploadKey);
+
+            if (!$exists) {
+                throw new \RuntimeException("Upload does not exist in S3: {$uploadKey}");
+            }
+
+            // Get object metadata to verify size
+            $headResult = $s3Client->headObject([
+                'Bucket' => $bucket->name,
+                'Key' => $uploadKey,
+            ]);
+
+            $actualSize = (int) $headResult->get('ContentLength');
+
+            // Verify file size matches expected size
+            if ($actualSize !== $expectedSize) {
+                throw new \RuntimeException(
+                    "File size mismatch. Expected: {$expectedSize} bytes, Actual: {$actualSize} bytes"
+                );
+            }
+        } catch (S3Exception $e) {
+            Log::error('S3 verification failed', [
+                'upload_key' => $uploadKey,
+                'error' => $e->getMessage(),
+                'code' => $e->getAwsErrorCode(),
+            ]);
+
+            throw new \RuntimeException(
+                "Failed to verify upload in S3: {$e->getMessage()}"
+            );
+        }
+    }
+
+    /**
+     * Create S3 client instance for finalize verification.
+     *
+     * @return S3Client
+     * @throws \RuntimeException
+     */
+    protected function createS3ClientForFinalize(): S3Client
+    {
+        if (!class_exists(S3Client::class)) {
+            throw new \RuntimeException(
+                'AWS SDK for PHP is required for upload finalization. ' .
+                'Install it via: composer require aws/aws-sdk-php'
+            );
+        }
+
+        $config = [
+            'version' => 'latest',
+            'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
+        ];
+
+        // Add credentials if provided
+        if (config('filesystems.disks.s3.key') && config('filesystems.disks.s3.secret')) {
+            $config['credentials'] = [
+                'key' => config('filesystems.disks.s3.key'),
+                'secret' => config('filesystems.disks.s3.secret'),
+            ];
+        }
+
+        // Add endpoint for MinIO/local S3
+        if (config('filesystems.disks.s3.endpoint')) {
+            $config['endpoint'] = config('filesystems.disks.s3.endpoint');
+            $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
+        }
+
+        return new S3Client($config);
     }
 }

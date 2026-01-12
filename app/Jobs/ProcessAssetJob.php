@@ -47,20 +47,6 @@ class ProcessAssetJob implements ShouldQueue
     {
         $asset = Asset::findOrFail($this->assetId);
 
-        // Idempotency: Skip if already processing or completed
-        if (in_array($asset->status, [
-            AssetStatus::PROCESSING,
-            AssetStatus::THUMBNAIL_GENERATED,
-            AssetStatus::AI_TAGGED,
-            AssetStatus::COMPLETED,
-        ])) {
-            Log::info('Asset processing skipped - already processing or completed', [
-                'asset_id' => $asset->id,
-                'status' => $asset->status->value,
-            ]);
-            return;
-        }
-
         // Skip if failed (don't reprocess failed assets automatically)
         if ($asset->status === AssetStatus::FAILED) {
             Log::warning('Asset processing skipped - asset is in failed state', [
@@ -69,19 +55,40 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
 
-        // Only process assets that are in UPLOADED state
-        if ($asset->status !== AssetStatus::UPLOADED) {
-            Log::warning('Asset processing skipped - asset is not in uploaded state', [
+        // Only process assets that are VISIBLE (not hidden or failed)
+        // Asset.status represents VISIBILITY, not processing progress
+        // Processing jobs must NOT mutate Asset.status (assets must remain visible in grid)
+        // Processing progress is tracked via thumbnail_status, metadata flags, and activity events
+        if ($asset->status !== AssetStatus::VISIBLE) {
+            Log::info('Asset processing skipped - asset is not visible', [
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);
             return;
         }
 
-        // Update status to PROCESSING
-        $asset->update([
-            'status' => AssetStatus::PROCESSING,
-        ]);
+        // Idempotency: Check if processing has already started (via metadata)
+        // Individual jobs in the chain have their own idempotency checks
+        $metadata = $asset->metadata ?? [];
+        if (isset($metadata['processing_started'])) {
+            Log::info('Asset processing skipped - processing already started', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Mark processing as started in metadata (for idempotency)
+        // IMPORTANT: Asset.status must NOT be mutated here.
+        // Asset.status represents VISIBILITY (UPLOADED = visible in grid, COMPLETED = visible in dashboard),
+        // not processing progress. Mutating status would cause assets to disappear from the asset grid
+        // (AssetController queries status = UPLOADED). Processing progress is tracked via:
+        // - thumbnail_status (for thumbnail generation)
+        // - metadata flags (processing_started, metadata_extracted, thumbnails_generated, etc.)
+        // - activity events (asset.processing.started, etc.)
+        // Only FinalizeAssetJob is authorized to change status from UPLOADED to COMPLETED.
+        $metadata['processing_started'] = true;
+        $metadata['processing_started_at'] = now()->toIso8601String();
+        $asset->update(['metadata' => $metadata]);
 
         // Emit processing started event
         AssetEvent::create([

@@ -18,7 +18,7 @@ import { useState, useEffect } from 'react';
  * @param {Function} props.onChange - Callback when value changes
  * @param {boolean} [props.hasError] - Whether field has validation error
  */
-export default function MetadataFieldRenderer({ field, value, onChange, hasError = false }) {
+export default function MetadataFieldRenderer({ field, value, onChange, hasError = false, disabled = false }) {
     const [multiselectValues, setMultiselectValues] = useState(() => {
         // Initialize multiselect from value or empty array
         if (field.type === 'multiselect') {
@@ -61,9 +61,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                         id={field.key}
                         value={value || ''}
                         onChange={(e) => handleChange(e.target.value)}
+                        disabled={disabled}
                         className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
                             hasError ? 'border-red-300' : ''
-                        }`}
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                         placeholder={field.defaultValue ? String(field.defaultValue) : ''}
                     />
                     {hasError && (
@@ -84,9 +85,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                         rows={4}
                         value={value || ''}
                         onChange={(e) => handleChange(e.target.value)}
+                        disabled={disabled}
                         className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
                             hasError ? 'border-red-300' : ''
-                        }`}
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                         placeholder={field.defaultValue ? String(field.defaultValue) : ''}
                     />
                     {hasError && (
@@ -106,9 +108,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                         id={field.key}
                         value={value || ''}
                         onChange={(e) => handleChange(e.target.value)}
+                        disabled={disabled}
                         className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
                             hasError ? 'border-red-300' : ''
-                        }`}
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     >
                         <option value="">Select {field.label.toLowerCase()}</option>
                         {field.options?.map((option) => (
@@ -147,7 +150,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                                                 : multiselectValues.filter(v => v !== option.value);
                                             handleChange(newValues);
                                         }}
-                                        className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                                        disabled={disabled}
+                                        className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${
+                                            disabled ? 'cursor-not-allowed opacity-60' : ''
+                                        }`}
                                     />
                                     <span className="ml-2 text-sm text-gray-700">
                                         {option.label}
@@ -174,9 +180,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                         id={field.key}
                         value={value || ''}
                         onChange={(e) => handleChange(e.target.value === '' ? null : Number(e.target.value))}
+                        disabled={disabled}
                         className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
                             hasError ? 'border-red-300' : ''
-                        }`}
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                         placeholder={field.defaultValue ? String(field.defaultValue) : ''}
                     />
                     {hasError && (
@@ -197,9 +204,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                         id={field.key}
                         value={value || ''}
                         onChange={(e) => handleChange(e.target.value)}
+                        disabled={disabled}
                         className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
                             hasError ? 'border-red-300' : ''
-                        }`}
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     />
                     {hasError && (
                         <p className="mt-1 text-xs text-red-600">This field is required</p>
@@ -215,7 +223,10 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                             type="checkbox"
                             checked={value === true || value === 'true'}
                             onChange={(e) => handleChange(e.target.checked)}
-                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                            disabled={disabled}
+                            className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${
+                                disabled ? 'cursor-not-allowed opacity-60' : ''
+                            }`}
                         />
                         <span className="ml-2 text-sm font-medium text-gray-700">
                             {field.label}

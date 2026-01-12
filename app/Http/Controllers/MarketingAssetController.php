@@ -148,12 +148,21 @@ class MarketingAssetController extends Controller
             }
         }
 
-        // Query completed marketing assets for this brand and asset type
+        // Query marketing assets with completed processing pipeline
+        // Query by processing state (thumbnail_status + metadata flags), not status
         // Note: assets must be top-level prop for Inertia to pass to frontend component
         $assetsQuery = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', AssetType::MARKETING)
-            ->where('status', AssetStatus::COMPLETED)
+            ->where('status', AssetStatus::VISIBLE) // Only visible assets
+            ->where('thumbnail_status', \App\Enums\ThumbnailStatus::COMPLETED)
+            ->where('metadata->ai_tagging_completed', true)
+            ->where('metadata->metadata_extracted', true)
+            ->where(function ($query) {
+                // Preview generated is optional
+                $query->where('metadata->preview_generated', true)
+                      ->orWhereNull('metadata->preview_generated');
+            })
             ->whereNull('deleted_at'); // Exclude soft-deleted assets
 
         // Filter by category if provided (check metadata for category_id)

@@ -3,63 +3,40 @@
 namespace App\Enums;
 
 /**
- * Asset lifecycle status enum.
+ * Asset visibility status enum.
  *
- * Tracks the full lifecycle of an asset from upload through processing to availability.
- * Assets progress through these states asynchronously via queue jobs.
+ * Tracks asset visibility in the system. This enum represents VISIBILITY only,
+ * not processing state. Processing state is tracked separately via:
+ * - thumbnail_status (ThumbnailStatus enum)
+ * - metadata flags (processing_started, metadata_extracted, ai_tagging_completed, etc.)
+ * - activity events
+ * - pipeline_completed_at timestamp (optional)
  *
- * Status flow:
- * INITIATED → UPLOADING → UPLOADED → PROCESSING → THUMBNAIL_GENERATED → AI_TAGGED → COMPLETED
- * Any stage can transition to FAILED on error.
+ * Status values:
+ * - VISIBLE: Asset is visible in grid/dashboard (default for uploaded assets)
+ * - HIDDEN: Asset is hidden from normal views (archived, manually hidden, etc.)
+ * - FAILED: Asset processing failed (visibility remains controlled separately)
  */
 enum AssetStatus: string
 {
     /**
-     * Upload session has been initiated but file upload has not started.
-     * Initial state when UploadSession is created.
+     * Asset is visible in the asset grid and dashboard.
+     * Default state for uploaded assets.
+     * Processing state (thumbnails, AI tagging, etc.) is tracked separately.
      */
-    case INITIATED = 'initiated';
+    case VISIBLE = 'visible';
 
     /**
-     * File is currently being uploaded to S3.
-     * Asset record may not exist yet (upload happens before asset creation).
+     * Asset is hidden from normal views.
+     * May be archived, manually hidden, or temporarily unavailable.
+     * Can be made visible again later.
      */
-    case UPLOADING = 'uploading';
+    case HIDDEN = 'hidden';
 
     /**
-     * File has been successfully uploaded to S3 and asset record created.
-     * Upload verification completed. Ready for processing pipeline.
-     */
-    case UPLOADED = 'uploaded';
-
-    /**
-     * Asset is currently being processed (metadata extraction, etc.).
-     * Initial processing stage after upload completion.
-     */
-    case PROCESSING = 'processing';
-
-    /**
-     * Thumbnails have been generated successfully.
-     * Asset has completed thumbnail generation step.
-     */
-    case THUMBNAIL_GENERATED = 'thumbnail_generated';
-
-    /**
-     * AI tagging has been completed successfully.
-     * Asset has been analyzed and tagged by AI system.
-     */
-    case AI_TAGGED = 'ai_tagged';
-
-    /**
-     * Asset has been fully processed and is ready for use.
-     * All processing jobs have completed successfully.
-     * Assets in this state are available to users via signed URLs.
-     */
-    case COMPLETED = 'completed';
-
-    /**
-     * Processing failed and the asset cannot be made available.
-     * Asset remains in storage but is not accessible.
+     * Asset processing failed.
+     * Asset remains in storage but processing encountered errors.
+     * Visibility is controlled separately (can be VISIBLE or HIDDEN).
      * May be retried or require manual intervention.
      */
     case FAILED = 'failed';
