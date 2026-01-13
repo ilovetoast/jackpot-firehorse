@@ -31,6 +31,9 @@ class UploadSession extends Model
         'failure_reason',
         'client_reference',
         'multipart_upload_id', // S3 multipart upload ID for resume support
+        'multipart_state', // JSON state tracking for multipart uploads
+        'part_size', // Part size for multipart uploads (10MB default)
+        'total_parts', // Total number of parts for multipart uploads
         'last_activity_at', // Last activity timestamp for abandoned session detection
         'last_cleanup_attempt_at', // Optional: Track when cleanup was last attempted (for observability)
     ];
@@ -48,6 +51,9 @@ class UploadSession extends Model
             'expected_size' => 'integer',
             'uploaded_size' => 'integer',
             'expires_at' => 'datetime',
+            'multipart_state' => 'array', // JSON state tracking for multipart uploads
+            'part_size' => 'integer',
+            'total_parts' => 'integer',
             'last_activity_at' => 'datetime',
             'last_cleanup_attempt_at' => 'datetime',
         ];

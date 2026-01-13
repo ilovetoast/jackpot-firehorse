@@ -144,6 +144,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * - error: null | Error object
      */
     const [v2Files, setV2Files] = useState([])
+    
+    // FINAL FIX: Track mapping between v2File.clientId and UploadManager.clientReference for multipart uploads
+    // This allows us to read status/progress from UploadManager instead of v2Files for chunked uploads
+    const v2ToUploadManagerMapRef = useRef(new Map()) // Map<v2File.clientId, UploadManager.clientReference>
+    
+    // FINAL FIX: Prevent AUTO_CLOSE_V2 from executing multiple times per dialog open cycle
+    const autoClosedRef = useRef(false)
 
     // ═══════════════════════════════════════════════════════════════
     // CLEAN UPLOADER V2 — TEMPORARILY DISABLED LEGACY
@@ -315,6 +322,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return
     }, [open])
     
+    // FINAL FIX: Reset auto-closed flag when dialog opens
+    useEffect(() => {
+        if (open) {
+            autoClosedRef.current = false
+        }
+    }, [open])
+    
     // DISABLED LEGACY CODE (commented out for clean uploader v2):
     /*
     // LEGACY — DO NOT USE: Clean up old uploads when dialog opens
@@ -446,28 +460,105 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 throw new Error(result.error)
             }
             
+            // HOTFIX: upload_url is only required for direct uploads
+            // Multipart (chunked) uploads use the multipart init flow instead
+            const uploadType = result.upload_type || 'direct'
             const uploadUrl = result.upload_url
-            if (!uploadUrl) {
-                throw new Error('No presigned URL returned from backend')
+            
+            if (uploadType === 'direct') {
+                // Direct uploads require upload_url
+                if (!uploadUrl) {
+                    throw new Error('No presigned URL returned for direct upload')
+                }
+                
+                // d. PUT the file to the returned presigned URL
+                const putResponse = await fetch(uploadUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': file.type || 'application/octet-stream',
+                    },
+                    body: file,
+                })
+                
+                if (!putResponse.ok) {
+                    throw new Error(`S3 upload failed: ${putResponse.status} ${putResponse.statusText}`)
+                }
+                
+                // e. Log complete
+                console.log('[UPLOAD_V2] complete', { clientId, status: putResponse.status })
+            } else if (uploadType === 'chunked') {
+                // HOTFIX: Explicitly start multipart upload via UploadManager
+                // Multipart uploads are owned by UploadManager and must be started explicitly
+                console.log('[UPLOAD_V2] multipart upload delegated to UploadManager', {
+                    clientId,
+                    upload_session_id: result.upload_session_id
+                })
+                
+                // Add file to UploadManager and get the clientReference
+                const clientReferences = UploadManager.addFiles([file], {
+                    brandId: auth.activeBrand?.id,
+                })
+                
+                if (clientReferences.length === 0) {
+                    console.error('[UPLOAD_V2] Failed to add file to UploadManager', { clientId })
+                    throw new Error('Failed to add file to UploadManager')
+                }
+                
+                const uploadManagerClientRef = clientReferences[0]
+                
+                // FINAL FIX: Store mapping between v2File.clientId and UploadManager.clientReference
+                // This allows UI to read status/progress from UploadManager for multipart uploads
+                v2ToUploadManagerMapRef.current.set(clientId, uploadManagerClientRef)
+                
+                // Find the upload entry (getUploads() returns array, need to find by clientReference)
+                const allUploads = UploadManager.getUploads()
+                const upload = allUploads.find(u => u.clientReference === uploadManagerClientRef)
+                
+                if (!upload) {
+                    console.error('[UPLOAD_V2] Upload entry not found in UploadManager after addFiles', {
+                        clientId,
+                        uploadManagerClientRef
+                    })
+                    throw new Error('Upload entry not found in UploadManager')
+                }
+                
+                // Update upload entry with session info from initiate-batch response
+                upload.uploadSessionId = result.upload_session_id
+                upload.uploadType = 'chunked'
+                upload.chunkSize = result.chunk_size || upload.chunkSize
+                upload.brandId = auth.activeBrand?.id
+                
+                // Ensure file object is attached
+                UploadManager.reattachFile(uploadManagerClientRef, file)
+                
+                // Start the multipart upload
+                // startUpload() will see uploadSessionId exists and call resumeUpload(),
+                // which will then call performMultipartUpload()
+                UploadManager.startUpload(uploadManagerClientRef).catch((error) => {
+                    console.error('[UPLOAD_V2] Failed to start multipart upload in UploadManager', {
+                        clientId,
+                        uploadManagerClientRef,
+                        error: error.message
+                    })
+                })
+                
+                // IMPORTANT:
+                // Multipart uploads are handled exclusively by UploadManager.
+                // This legacy path must exit early and not:
+                // - Update upload progress
+                // - Mark upload as completed
+                // - Call finalize logic
+                // UploadManager is responsible for:
+                // - Calling /multipart/init
+                // - Uploading parts
+                // - Tracking progress
+                // - Marking complete after multipart completion
+                return
+            } else {
+                throw new Error(`Unknown upload type: ${uploadType}`)
             }
             
-            // d. PUT the file to the returned presigned URL
-            const putResponse = await fetch(uploadUrl, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': file.type || 'application/octet-stream',
-                },
-                body: file,
-            })
-            
-            if (!putResponse.ok) {
-                throw new Error(`S3 upload failed: ${putResponse.status} ${putResponse.statusText}`)
-            }
-            
-            // e. Log complete
-            console.log('[UPLOAD_V2] complete', { clientId, status: putResponse.status })
-            
-            // Store uploadKey from response for finalize
+            // Store uploadKey from response for finalize (only reached for direct uploads)
             const uploadKey = result.upload_key || `temp/uploads/${result.upload_session_id}/original`
             
             // Update v2Files state: set status to 'uploaded', progress to 100, and store uploadKey
@@ -1202,8 +1293,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * 
      * Removes a file from v2Files state.
      */
+    // Phase 2.8: Remove file and cancel any active uploads
     const removeFile = useCallback((clientId) => {
         console.log('[REMOVE_FILE] Removing file', { clientId })
+        
+        // Phase 2.8: Cancel UploadManager upload if active
+        const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(clientId)
+        if (uploadManagerClientRef) {
+            const uploadManagerUpload = UploadManager.getUploads().find(u => u.clientReference === uploadManagerClientRef)
+            if (uploadManagerUpload && 
+                (uploadManagerUpload.status === 'initiating' || 
+                 uploadManagerUpload.status === 'uploading' || 
+                 uploadManagerUpload.status === 'completing')) {
+                // Cancel active multipart upload
+                console.log('[REMOVE_FILE] Cancelling active multipart upload', { 
+                    clientId, 
+                    uploadManagerClientRef,
+                    status: uploadManagerUpload.status 
+                })
+                UploadManager.cancelUpload(uploadManagerClientRef).catch((error) => {
+                    console.error('[REMOVE_FILE] Failed to cancel UploadManager upload', {
+                        clientId,
+                        uploadManagerClientRef,
+                        error: error.message
+                    })
+                })
+            }
+        }
+        
+        // Clean up mapping
+        v2ToUploadManagerMapRef.current.delete(clientId)
+        
+        // Remove from v2Files
         setV2Files((prevFiles) => prevFiles.filter((f) => f.clientId !== clientId))
         
         // Clean up active uploads ref
@@ -1891,15 +2012,27 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * - No v2File has status === 'uploading' or 'finalizing'
      * - selectedCategoryId !== null (category must be selected)
      */
+    // Phase 2.8: Track UploadManager state changes to trigger UI updates for multipart uploads
+    // MUST be defined before useMemo hooks that depend on it
+    const [uploadManagerStateVersion, setUploadManagerStateVersion] = useState(0)
+    
+    useEffect(() => {
+        // Subscribe to UploadManager changes to trigger UI updates for multipart uploads
+        const unsubscribe = UploadManager.subscribe(() => {
+            setUploadManagerStateVersion(prev => prev + 1)
+        })
+        return unsubscribe
+    }, [])
+    
     /**
-     * CLEAN UPLOADER V2 — Compute batchStatus deterministically from v2Files
+     * Phase 2.8: Batch status computation includes UploadManager state for multipart uploads
      * 
      * Rules (evaluated in order):
      * 1. If any file.status === 'finalizing' → batchStatus = 'finalizing'
-     * 2. Else if all files.status === 'finalized' → batchStatus = 'complete'
-     * 3. Else if some finalized and some failed → 'partial_success'
-     * 4. Else if any uploading → 'uploading'
-     * 5. Else if any uploaded → 'ready'
+     * 2. Else if all files finalized/completed → batchStatus = 'complete'
+     * 3. Else if some completed and some failed → 'partial_success'
+     * 4. Else if any uploading (direct or multipart) → 'uploading'
+     * 5. Else if any uploaded/completed → 'ready'
      * 6. Else → 'idle'
      */
     const batchStatus = useMemo(() => {
@@ -1907,46 +2040,218 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return 'idle'
         }
 
-        const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
+        // Get all UploadManager uploads for multipart check
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(
+            allUploadManagerUploads.map(u => [u.clientReference, u])
+        )
+
+        // Filter out cancelled uploads from consideration
+        const activeV2Files = v2Files.filter(f => {
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                // Exclude if cancelled in UploadManager
+                if (uploadManagerUpload?.status === 'cancelled') {
+                    return false
+                }
+            }
+            // Exclude if cancelled in v2Files (for direct uploads)
+            return f.status !== 'cancelled'
+        })
+
+        if (activeV2Files.length === 0) {
+            return 'idle' // All uploads cancelled
+        }
+
+        const hasFinalizing = activeV2Files.some((f) => f.status === 'finalizing')
         if (hasFinalizing) {
             return 'finalizing'
         }
 
-        const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
-        const failedCount = v2Files.filter((f) => f.status === 'failed').length
-        const totalCount = v2Files.length
+        // Count finalized files (direct uploads)
+        const finalizedCount = activeV2Files.filter((f) => f.status === 'finalized').length
+        
+        // Count completed multipart uploads (from UploadManager)
+        const completedMultipartCount = activeV2Files.filter((f) => {
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                return uploadManagerUpload?.status === 'completed'
+            }
+            return false
+        }).length
+        
+        // Count uploaded direct uploads (ready for finalize)
+        const uploadedDirectCount = activeV2Files.filter((f) => {
+            // Only count direct uploads (not multipart)
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (!uploadManagerClientRef) {
+                return f.status === 'uploaded'
+            }
+            return false
+        }).length
 
-        // Check if all files are finalized
-        if (finalizedCount === totalCount && totalCount > 0) {
+        const failedCount = activeV2Files.filter((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'failed') {
+                return true
+            }
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                return uploadManagerUpload?.status === 'failed'
+            }
+            return false
+        }).length
+        
+        const totalCount = activeV2Files.length
+
+        // Check if all files are finalized/completed
+        const totalCompleted = finalizedCount + completedMultipartCount + uploadedDirectCount
+        if (totalCompleted === totalCount && totalCount > 0) {
             return 'complete'
         }
 
-        // Check if some finalized and some failed
-        if (finalizedCount > 0 && failedCount > 0) {
+        // Check if some completed and some failed
+        if (totalCompleted > 0 && failedCount > 0) {
             return 'partial_success'
         }
 
-        const hasUploading = v2Files.some((f) => f.status === 'uploading')
+        // Check for active uploads (direct or multipart)
+        const hasUploading = activeV2Files.some((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'uploading') {
+                return true
+            }
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                if (uploadManagerUpload && 
+                    (uploadManagerUpload.status === 'initiating' || 
+                     uploadManagerUpload.status === 'uploading' || 
+                     uploadManagerUpload.status === 'completing')) {
+                    return true
+                }
+            }
+            return false
+        })
+        
         if (hasUploading) {
             return 'uploading'
         }
 
-        const hasUploaded = v2Files.some((f) => f.status === 'uploaded')
-        if (hasUploaded) {
+        // Check for uploaded/completed files ready for finalize
+        if (totalCompleted > 0) {
             return 'ready'
         }
 
         return 'idle'
-    }, [v2Files])
+    }, [v2Files, uploadManagerStateVersion])
 
+    // Phase 2.8: Finalize gating logic
+    // An upload is considered COMPLETE if:
+    // - v2File.status === 'uploaded' (direct uploads)
+    // - UploadManager upload.status === 'completed' (multipart uploads)
+    // Cancelled uploads are excluded from gating
     const canFinalizeV2 = useMemo(() => {
-        const hasUploaded = v2Files.some((f) => f.status === 'uploaded')
-        const hasUploading = v2Files.some((f) => f.status === 'uploading')
+        // Get all UploadManager uploads for multipart check
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(
+            allUploadManagerUploads.map(u => [u.clientReference, u])
+        )
+        
+        // Filter out cancelled uploads from consideration
+        const activeV2Files = v2Files.filter(f => {
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                // Exclude if cancelled in UploadManager
+                if (uploadManagerUpload?.status === 'cancelled') {
+                    return false
+                }
+            }
+            // Exclude if cancelled in v2Files (for direct uploads)
+            return f.status !== 'cancelled'
+        })
+        
+        if (activeV2Files.length === 0) {
+            return false // No active uploads
+        }
+        
+        // Check for completed uploads (direct or multipart)
+        const hasCompleted = activeV2Files.some((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'uploaded') {
+                return true
+            }
+            
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                if (uploadManagerUpload?.status === 'completed') {
+                    return true
+                }
+            }
+            
+            return false
+        })
+        
+        // Check for active uploads (direct or multipart)
+        const hasUploading = activeV2Files.some((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'uploading') {
+                return true
+            }
+            
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                if (uploadManagerUpload && 
+                    (uploadManagerUpload.status === 'initiating' || 
+                     uploadManagerUpload.status === 'uploading' || 
+                     uploadManagerUpload.status === 'completing')) {
+                    return true
+                }
+            }
+            
+            return false
+        })
+        
+        // Check for failed uploads (block finalize)
+        const hasFailed = activeV2Files.some((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'failed') {
+                return true
+            }
+            
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                if (uploadManagerUpload?.status === 'failed') {
+                    return true
+                }
+            }
+            
+            return false
+        })
+        
         const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
         const hasCategory = selectedCategoryId !== null
 
-        return hasUploaded && !hasUploading && !hasFinalizing && hasCategory
-    }, [v2Files, selectedCategoryId])
+        // Can finalize if:
+        // - Has at least one completed upload
+        // - No active uploads
+        // - No failed uploads (failed blocks finalize)
+        // - Not currently finalizing
+        // - Category is selected
+        return hasCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory
+    }, [v2Files, selectedCategoryId, uploadManagerStateVersion])
 
     /**
      * CLEAN UPLOADER V2 — Get warnings for missing required fields
@@ -2006,8 +2311,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return
         }
 
-        // Build manifest from v2Files with status === 'uploaded'
-        const uploadedFiles = v2Files.filter((f) => f.status === 'uploaded')
+        // Phase 2.8: Build manifest from v2Files with status === 'uploaded'
+        // Also include multipart uploads that are completed in UploadManager
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(
+            allUploadManagerUploads.map(u => [u.clientReference, u])
+        )
+        
+        const uploadedFiles = v2Files.filter((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'uploaded') {
+                return true
+            }
+            
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                // Include if completed in UploadManager (even if not yet synced to 'uploaded' in v2Files)
+                if (uploadManagerUpload?.status === 'completed') {
+                    return true
+                }
+            }
+            
+            return false
+        })
         
         if (uploadedFiles.length === 0) {
             console.log('[FINALIZE_V2] No uploaded files found, returning early')
@@ -2045,9 +2373,22 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return extension ? `${slugified}.${extension}` : slugified;
         };
 
-        // Build manifest items
+        // Phase 2.8: Build manifest items
         // Derive title and resolvedFilename from file.name
+        // For multipart uploads, ensure uploadKey is set from UploadManager if missing
         const manifest = uploadedFiles.map((fileEntry) => {
+            // Phase 2.8: For multipart uploads, get uploadKey from UploadManager if not set in v2File
+            let uploadKey = fileEntry.uploadKey
+            if (!uploadKey) {
+                const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(fileEntry.clientId)
+                if (uploadManagerClientRef) {
+                    const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                    if (uploadManagerUpload?.uploadSessionId) {
+                        uploadKey = `temp/uploads/${uploadManagerUpload.uploadSessionId}/original`
+                    }
+                }
+            }
+            
             // Get filename without extension for title
             const fileName = fileEntry.file.name || 'unknown'
             const lastDotIndex = fileName.lastIndexOf('.')
@@ -2061,7 +2402,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             const resolvedFilename = deriveResolvedFilename(normalizedTitle || baseName, extension)
             
             return {
-                upload_key: fileEntry.uploadKey,
+                upload_key: uploadKey,
                 expected_size: fileEntry.file.size,
                 category_id: selectedCategoryId,
                 metadata: getEffectiveMetadataV2(fileEntry.clientId),
@@ -2112,7 +2453,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 }
             })
 
-            // Update v2Files states based on results
+            // Phase 2.8: Update v2Files states based on results
+            // For multipart uploads, also match by uploadSessionId if uploadKey doesn't match
             let finalizedCount = 0
             let failedCount = 0
 
@@ -2122,13 +2464,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         return f // Not in manifest, leave unchanged
                     }
 
-                    // Match result to file using exact upload_key comparison
-                    const result = resultsByUploadKey.get(f.uploadKey)
+                    // Phase 2.8: Match result to file using upload_key
+                    // For multipart uploads, also try matching by uploadSessionId if uploadKey doesn't match
+                    let result = resultsByUploadKey.get(f.uploadKey)
+                    let uploadManagerUpload = null
+                    
+                    // If no match and this is a multipart upload, try matching by uploadSessionId
+                    if (!result) {
+                        const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+                        if (uploadManagerClientRef) {
+                            uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                            if (uploadManagerUpload?.uploadSessionId) {
+                                // Try matching by upload session ID path
+                                const sessionUploadKey = `temp/uploads/${uploadManagerUpload.uploadSessionId}/original`
+                                result = resultsByUploadKey.get(sessionUploadKey)
+                            }
+                        }
+                    } else {
+                        // Get uploadManagerUpload for reference even if result was found by uploadKey
+                        const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+                        if (uploadManagerClientRef) {
+                            uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                        }
+                    }
 
                     if (!result) {
                         // No result for this file - treat as failure
                         failedCount++
-                        console.log('[FINALIZE_V2] No result for file', { clientId: f.clientId, uploadKey: f.uploadKey })
+                        console.log('[FINALIZE_V2] No result for file', { 
+                            clientId: f.clientId, 
+                            uploadKey: f.uploadKey,
+                            isMultipart: !!v2ToUploadManagerMapRef.current.get(f.clientId)
+                        })
                         return {
                             ...f,
                             status: 'failed',
@@ -2144,18 +2511,28 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     console.log('[FINALIZE_V2] Matched result to file', { 
                         clientId: f.clientId, 
                         uploadKey: f.uploadKey, 
-                        resultStatus: result.status 
+                        resultStatus: result.status,
+                        isMultipart: !!v2ToUploadManagerMapRef.current.get(f.clientId)
                     })
 
-                    // Check result.status explicitly (not result.success)
+                    // Phase 2.8: Check result.status explicitly (not result.success)
+                    // For BOTH direct and multipart uploads, mark as finalized on success
                     if (result.status === 'success') {
                         // Success: set file.status = 'finalized', clear file.error
                         finalizedCount++
-                        console.log('[FINALIZE_V2] File marked as finalized', { clientId: f.clientId, uploadKey: f.uploadKey })
+                        console.log('[FINALIZE_V2] File marked as finalized', { 
+                            clientId: f.clientId, 
+                            uploadKey: f.uploadKey,
+                            isMultipart: !!v2ToUploadManagerMapRef.current.get(f.clientId)
+                        })
                         return {
                             ...f,
                             status: 'finalized',
                             error: null,
+                            // Phase 2.8: Preserve uploadKey for multipart uploads (ensure it's set)
+                            uploadKey: f.uploadKey || (uploadManagerUpload?.uploadSessionId ? 
+                                `temp/uploads/${uploadManagerUpload.uploadSessionId}/original` : 
+                                f.uploadKey)
                         }
                     } else if (result.status === 'failed') {
                         // Failure: set file.status = 'failed', set file.error with stage: 'finalize'
@@ -2618,18 +2995,42 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // }, [v2Files, batchStatus])
 
     /**
-     * ═══════════════════════════════════════════════════════════════
-     * CLEAN UPLOADER V2 — Sequential Upload Coordinator
-     * ═══════════════════════════════════════════════════════════════
+     * Phase 2.8: Sequential Upload Coordinator
      * 
      * Coordinates sequential file uploads:
-     * - Only one file uploads at a time
-     * - When a file finishes (uploaded or failed), the next queued file starts automatically
+     * - Only one file uploads at a time (direct or multipart)
+     * - When a file finishes (uploaded/completed or failed), the next queued file starts automatically
      * - Finds files with status === 'selected' and starts them in order
+     * - Checks both v2Files and UploadManager for active uploads
      */
     useEffect(() => {
-        // Check if any file is currently uploading
-        const isUploading = v2Files.some((f) => f.status === 'uploading')
+        // Get all UploadManager uploads to check for active multipart uploads
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(
+            allUploadManagerUploads.map(u => [u.clientReference, u])
+        )
+        
+        // Check if any file is currently uploading (direct or multipart)
+        const isUploading = v2Files.some((f) => {
+            // Direct uploads: check v2Files status
+            if (f.status === 'uploading') {
+                return true
+            }
+            
+            // Multipart uploads: check UploadManager status
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                if (uploadManagerUpload && 
+                    (uploadManagerUpload.status === 'initiating' || 
+                     uploadManagerUpload.status === 'uploading' || 
+                     uploadManagerUpload.status === 'completing')) {
+                    return true
+                }
+            }
+            
+            return false
+        })
         
         if (isUploading) {
             // Already uploading - wait for current upload to finish
@@ -2680,7 +3081,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // Error handling is done in uploadSingleFile (sets status to 'failed')
             // This effect will re-run and pick up the next file
         })
-    }, [v2Files, uploadSingleFile])
+    }, [v2Files, uploadSingleFile, uploadManagerStateVersion]) // Phase 2.8: Include uploadManagerStateVersion to react to multipart upload completion
 
     /**
      * ═══════════════════════════════════════════════════════════════
@@ -2694,6 +3095,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         setV2Files([])
         setSelectedCategoryId(initialCategoryId || null) // Reset to initial category
         setGlobalMetadataDraft({}) // Reset global metadata
+        // FINAL FIX: Clear mapping when resetting state
+        v2ToUploadManagerMapRef.current.clear()
         // Note: batchStatus is now computed from v2Files, will be 'idle' when v2Files is empty
         console.log('[RESET_V2] State reset complete')
     }, [initialCategoryId])
@@ -2703,8 +3106,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * CLEAN UPLOADER V2 — Auto-Close on Complete
      * ═══════════════════════════════════════════════════════════════
      * 
+     * FINAL FIX: Moved to useEffect to avoid stale state.
+     * Runs ONLY after React commits state updates.
+     * 
      * Auto-closes dialog ONLY when:
-     * - batchStatus === 'complete'
+     * - Dialog is open
      * - At least one file finalized
      * - No failed files
      * 
@@ -2712,12 +3118,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Does NOT auto-close on partial_success.
      */
     useEffect(() => {
-        // Only auto-close when batchStatus is 'complete'
-        if (batchStatus !== 'complete') {
+        // Only run when dialog is open
+        if (!open) {
             return
         }
 
-        // Verify conditions: at least one finalized, no failed files
+        // FINAL FIX: Prevent double execution - only run once per dialog open cycle
+        if (autoClosedRef.current) {
+            return
+        }
+
+        // FINAL FIX: Use derived state directly from v2Files (not batchStatus)
+        // This ensures we read committed state, not stale state
         const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
         const failedCount = v2Files.filter((f) => f.status === 'failed').length
 
@@ -2727,6 +3139,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return
         }
 
+        // FINAL FIX: Mark as auto-closed BEFORE setting timeout to prevent double execution
+        autoClosedRef.current = true
+
+        console.log('[AUTO_CLOSE_V2] Conditions met — closing dialog', { finalizedCount, failedCount })
         console.log('[AUTO_CLOSE_V2] Starting auto-close timer', { finalizedCount })
         
         // Delay 400-700ms for perceived completion
@@ -2747,7 +3163,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return () => {
             clearTimeout(timeoutId)
         }
-    }, [batchStatus, v2Files, onClose, resetV2State, onFinalizeComplete])
+    }, [v2Files, uploadManagerStateVersion, open, onClose, resetV2State, onFinalizeComplete])
 
     // CLEAN UPLOADER V2: Helper function to update title in v2Files
     const setTitleV2 = useCallback((clientId, newTitle) => {
@@ -2761,24 +3177,71 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [])
 
     // CLEAN UPLOADER V2: Map v2Files to UploadTray items format
+    // FINAL FIX: For multipart uploads, read status/progress from UploadManager instead of v2Files
     // MUST be before conditional return to follow Rules of Hooks
     const v2UploadManager = useMemo(() => {
-        const items = v2Files.map((v2File) => ({
-            clientId: v2File.clientId,
-            uploadStatus: v2File.status === 'selected' ? 'queued' : 
-                         v2File.status === 'uploading' ? 'uploading' :
-                         v2File.status === 'uploaded' ? 'complete' :
-                         v2File.status === 'finalizing' ? 'complete' : // Show as complete while finalizing
-                         v2File.status === 'finalized' ? 'complete' :
-                         v2File.status === 'failed' ? 'failed' : 'queued',
-            progress: v2File.progress,
-            originalFilename: v2File.file.name,
-            file: v2File.file,
-            title: v2File.title || null, // Use title from v2File if available
-            resolvedFilename: null, // Optional
-            metadataDraft: v2File.metadataDraft || {}, // Per-file metadata overrides
-            error: v2File.error || null, // Include error object for failed uploads
-        }))
+        // Get all UploadManager uploads for lookup
+        // Depend on uploadManagerStateVersion to recalculate when UploadManager state changes
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(
+            allUploadManagerUploads.map(u => [u.clientReference, u])
+        )
+        
+        const items = v2Files.map((v2File) => {
+            // FINAL FIX: Check if this v2File corresponds to a multipart upload in UploadManager
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(v2File.clientId)
+            const uploadManagerUpload = uploadManagerClientRef ? uploadManagerMap.get(uploadManagerClientRef) : null
+            
+            // For multipart uploads, use UploadManager as source of truth
+            if (uploadManagerUpload && uploadManagerUpload.uploadType === 'chunked') {
+                // Map UploadManager status to UploadTray status
+                let uploadStatus = 'queued'
+                if (uploadManagerUpload.status === 'initiating') {
+                    uploadStatus = 'uploading' // Show as uploading during init
+                } else if (uploadManagerUpload.status === 'uploading') {
+                    uploadStatus = 'uploading'
+                } else if (uploadManagerUpload.status === 'completing') {
+                    uploadStatus = 'uploading' // Show as uploading during completion
+                } else if (uploadManagerUpload.status === 'completed') {
+                    uploadStatus = 'complete'
+                } else if (uploadManagerUpload.status === 'failed') {
+                    uploadStatus = 'failed'
+                } else if (uploadManagerUpload.status === 'cancelled') {
+                    uploadStatus = 'failed' // Show cancelled as failed in UI
+                    // Phase 2.8: Cancelled uploads are excluded from finalize gating
+                }
+                
+                return {
+                    clientId: v2File.clientId,
+                    uploadStatus: uploadStatus,
+                    progress: uploadManagerUpload.progress || 0,
+                    originalFilename: v2File.file.name,
+                    file: v2File.file,
+                    title: v2File.title || null,
+                    resolvedFilename: null,
+                    metadataDraft: v2File.metadataDraft || {},
+                    error: uploadManagerUpload.error || uploadManagerUpload.errorInfo?.message || null,
+                }
+            }
+            
+            // For direct uploads, use v2Files state (legacy behavior)
+            return {
+                clientId: v2File.clientId,
+                uploadStatus: v2File.status === 'selected' ? 'queued' : 
+                             v2File.status === 'uploading' ? 'uploading' :
+                             v2File.status === 'uploaded' ? 'complete' :
+                             v2File.status === 'finalizing' ? 'complete' : // Show as complete while finalizing
+                             v2File.status === 'finalized' ? 'complete' :
+                             v2File.status === 'failed' ? 'failed' : 'queued',
+                progress: v2File.progress,
+                originalFilename: v2File.file.name,
+                file: v2File.file,
+                title: v2File.title || null, // Use title from v2File if available
+                resolvedFilename: null, // Optional
+                metadataDraft: v2File.metadataDraft || {}, // Per-file metadata overrides
+                error: v2File.error || null, // Include error object for failed uploads
+            }
+        })
         
         return {
             hasItems: items.length > 0,
@@ -2810,7 +3273,49 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             warnings: [], // No warnings for v2 (validation not implemented)
             validateMetadata: () => {}, // NO-OP - validation not implemented
         }
-    }, [v2Files, selectedCategoryId, globalMetadataDraft, getEffectiveMetadataV2, setGlobalMetadataV2, overrideItemMetadataV2, clearItemOverrideV2, setTitleV2])
+    }, [v2Files, uploadManagerStateVersion, selectedCategoryId, globalMetadataDraft]) // FINAL FIX: Include uploadManagerStateVersion to react to UploadManager changes
+
+    // Phase 2.8: Sync completed multipart uploads to v2Files status
+    // When a multipart upload completes in UploadManager, update v2File status to 'uploaded' for finalization
+    useEffect(() => {
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(
+            allUploadManagerUploads.map(u => [u.clientReference, u])
+        )
+        
+        // Check each v2File for completed multipart uploads
+        let hasChanges = false
+        const updatedV2Files = v2Files.map((v2File) => {
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(v2File.clientId)
+            if (!uploadManagerClientRef) {
+                return v2File // Not a multipart upload
+            }
+            
+            const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+            if (!uploadManagerUpload || uploadManagerUpload.uploadType !== 'chunked') {
+                return v2File // Not a multipart upload
+            }
+            
+            // If UploadManager says completed but v2File is not 'uploaded', update it
+            if (uploadManagerUpload.status === 'completed' && v2File.status !== 'uploaded') {
+                hasChanges = true
+                return {
+                    ...v2File,
+                    status: 'uploaded',
+                    progress: 100,
+                    uploadKey: uploadManagerUpload.uploadSessionId ? 
+                        `temp/uploads/${uploadManagerUpload.uploadSessionId}/original` : 
+                        v2File.uploadKey
+                }
+            }
+            
+            return v2File
+        })
+        
+        if (hasChanges) {
+            setV2Files(updatedV2Files)
+        }
+    }, [v2Files, uploadManagerStateVersion]) // Phase 2.8: React to UploadManager state changes
 
     const hasFiles = v2UploadManager.hasItems
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')

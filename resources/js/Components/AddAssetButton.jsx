@@ -2,7 +2,7 @@
 // Safe to refactor or remove in Phase 3
 // See docs/PHASE_2_UPLOAD_SYSTEM.md for Phase 2 status
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { usePage } from '@inertiajs/react'
 import UploadAssetDialog from './UploadAssetDialog'
 
@@ -26,6 +26,11 @@ export default function AddAssetButton({
 }) {
     const { auth } = usePage().props
     const [dialogOpen, setDialogOpen] = useState(false)
+    
+    // BUGFIX: Ensure onClose handler properly updates the open state
+    const handleClose = useCallback(() => {
+        setDialogOpen(false)
+    }, [])
     
     const defaultText = defaultAssetType === 'asset' 
         ? 'Add Asset' 
@@ -66,7 +71,7 @@ export default function AddAssetButton({
 
             <UploadAssetDialog
                 open={dialogOpen}
-                onClose={() => setDialogOpen(false)}
+                onClose={handleClose}
                 defaultAssetType={defaultAssetType}
                 categories={categories}
                 initialCategoryId={initialCategoryId}

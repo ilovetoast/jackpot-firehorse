@@ -106,6 +106,9 @@ class ResumeMetadataService
             'multipart_upload_id' => $uploadSession->multipart_upload_id,
             'already_uploaded_parts' => null,
             'chunk_size' => null,
+            'part_size' => $uploadSession->part_size, // Phase 2.6: Part size for multipart uploads
+            'total_parts' => $uploadSession->total_parts, // Phase 2.6: Total parts for multipart uploads
+            'multipart_state' => $uploadSession->multipart_state, // Phase 2.6: Multipart state (includes completed_parts)
             'expires_at' => $uploadSession->expires_at?->toIso8601String(),
             'is_expired' => $this->isExpired($uploadSession),
             'can_resume' => false,
@@ -129,12 +132,38 @@ class ResumeMetadataService
             return $result;
         }
 
-            // For multipart uploads, query S3 for already uploaded parts
+            // Phase 2.6: For multipart uploads, use multipart_state.completed_parts if available
+            // Fallback to S3 query for backward compatibility
             if ($uploadSession->type === UploadType::CHUNKED && $uploadSession->multipart_upload_id) {
                 try {
-                    $uploadedParts = $this->getUploadedParts($uploadSession);
+                    // Phase 2.6: Prefer multipart_state.completed_parts from database
+                    // This is more reliable than querying S3 and matches what frontend expects
+                    $multipartState = $uploadSession->multipart_state ?? [];
+                    $completedPartsFromState = $multipartState['completed_parts'] ?? [];
+                    
+                    // Convert multipart_state format to already_uploaded_parts format for backward compatibility
+                    $uploadedParts = [];
+                    if (!empty($completedPartsFromState)) {
+                        foreach ($completedPartsFromState as $partNumber => $etag) {
+                            // Calculate part size (use part_size from session or default)
+                            $partSize = $uploadSession->part_size ?? self::DEFAULT_CHUNK_SIZE;
+                            $start = ((int)$partNumber - 1) * $partSize;
+                            $end = min($start + $partSize, $uploadSession->expected_size);
+                            $size = $end - $start;
+                            
+                            $uploadedParts[] = [
+                                'PartNumber' => (int)$partNumber,
+                                'ETag' => $etag,
+                                'Size' => $size,
+                            ];
+                        }
+                    } else {
+                        // Fallback: Query S3 for uploaded parts (backward compatibility)
+                        $uploadedParts = $this->getUploadedParts($uploadSession);
+                    }
+                    
                     $result['already_uploaded_parts'] = $uploadedParts;
-                    $result['chunk_size'] = self::DEFAULT_CHUNK_SIZE;
+                    $result['chunk_size'] = $uploadSession->part_size ?? self::DEFAULT_CHUNK_SIZE;
                     
                     // Calculate actual uploaded size from S3 parts (more accurate than DB field)
                     $calculatedUploadedSize = array_sum(array_column($uploadedParts, 'Size'));

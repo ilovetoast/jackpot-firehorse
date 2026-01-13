@@ -356,6 +356,12 @@ class HandleInertiaRequests extends Middleware
                 'warning' => $request->session()->get('warning'),
                 'info' => $request->session()->get('info'),
             ],
+            // Phase 2.5: Environment detection for dev-only features
+            'env' => [
+                'is_production' => config('app.env') === 'production',
+                'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
+                'app_env' => config('app.env'),
+            ],
             'auth' => [
                 'user' => $user ? [
                     'id' => $user->id,

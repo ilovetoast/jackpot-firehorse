@@ -56,8 +56,12 @@ class UploadInitiationService
 
     /**
      * Default chunk size for multipart uploads (in bytes).
+     * 
+     * Phase 2.6: Updated to 10MB to match MultipartUploadService::DEFAULT_CHUNK_SIZE.
+     * This value is returned in the initiate response for informational purposes.
+     * Actual chunk size is determined by MultipartUploadService when /multipart/init is called.
      */
-    protected const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+    protected const DEFAULT_CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB (matches MultipartUploadService)
 
     /**
      * Create a new instance.
@@ -128,18 +132,23 @@ class UploadInitiationService
             $multipartUploadId = null;
             $chunkSize = null;
         } else {
-            // TEMPORARY: Multipart upload not built yet
-            // Return error for files over 100MB that would require multipart upload
-            throw new \RuntimeException('Multipart upload not built yet. Files over 100MB are not supported.');
+            // Phase 2.6: Multipart uploads enabled
+            // Frontend will call /multipart/init after session creation
+            // Return null values - frontend handles multipart initiation
+            $uploadUrl = null;
+            $multipartUploadId = null;
+            $chunkSize = self::DEFAULT_CHUNK_SIZE; // 10MB default (matches MultipartUploadService)
         }
 
-        Log::info('Upload session initiated', [
+        Log::info('[Upload Lifecycle] Upload session initiated', [
             'upload_session_id' => $uploadSession->id,
             'tenant_id' => $tenant->id,
             'brand_id' => $brand?->id,
             'expected_size' => $fileSize,
             'upload_type' => $uploadType->value,
             'expires_at' => $expiresAt->toIso8601String(),
+            'client_reference' => $clientReference,
+            'lifecycle_stage' => 'initiated',
         ]);
 
         return [
@@ -247,9 +256,12 @@ class UploadInitiationService
                     $multipartUploadId = null;
                     $chunkSize = null;
                 } else {
-                    // TEMPORARY: Multipart upload not built yet
-                    // Return error for files over 100MB that would require multipart upload
-                    throw new \RuntimeException('Multipart upload not built yet. Files over 100MB are not supported.');
+                    // Phase 2.6: Multipart uploads enabled
+                    // Frontend will call /multipart/init after session creation
+                    // Return null values - frontend handles multipart initiation
+                    $uploadUrl = null;
+                    $multipartUploadId = null;
+                    $chunkSize = self::DEFAULT_CHUNK_SIZE; // 10MB default (matches MultipartUploadService)
                 }
 
                 // Commit transaction - all DB operations succeeded
@@ -405,9 +417,10 @@ class UploadInitiationService
             'last_activity_at' => now(),
         ]);
 
-        Log::info('Upload session marked as UPLOADING', [
+        Log::info('[Upload Lifecycle] Upload session marked as UPLOADING', [
             'upload_session_id' => $uploadSession->id,
             'tenant_id' => $uploadSession->tenant_id,
+            'lifecycle_stage' => 'uploading',
         ]);
 
         return true;

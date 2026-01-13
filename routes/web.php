@@ -184,8 +184,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Upload routes (tenant-scoped)
             Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
             Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
+            Route::post('/uploads/diagnostics', [\App\Http\Controllers\UploadController::class, 'diagnostics'])->name('uploads.diagnostics');
             Route::get('/uploads/{uploadSession}/resume', [\App\Http\Controllers\UploadController::class, 'resume'])->name('uploads.resume');
             Route::post('/uploads/{uploadSession}/multipart-part-url', [\App\Http\Controllers\UploadController::class, 'getMultipartPartUrl'])->name('uploads.multipart-part-url');
+            // Multipart upload endpoints (Phase 2.4)
+            Route::post('/uploads/{uploadSession}/multipart/init', [\App\Http\Controllers\UploadController::class, 'initMultipart'])->name('uploads.multipart.init');
+            Route::post('/uploads/{uploadSession}/multipart/sign-part', [\App\Http\Controllers\UploadController::class, 'signMultipartPart'])->name('uploads.multipart.sign-part');
+            Route::post('/uploads/{uploadSession}/multipart/complete', [\App\Http\Controllers\UploadController::class, 'completeMultipart'])->name('uploads.multipart.complete');
+            Route::post('/uploads/{uploadSession}/multipart/abort', [\App\Http\Controllers\UploadController::class, 'abortMultipart'])->name('uploads.multipart.abort');
             Route::put('/uploads/{uploadSession}/activity', [\App\Http\Controllers\UploadController::class, 'updateActivity'])->name('uploads.update-activity');
             Route::put('/uploads/{uploadSession}/start', [\App\Http\Controllers\UploadController::class, 'markAsUploading'])->name('uploads.start');
             Route::post('/uploads/{uploadSession}/cancel', [\App\Http\Controllers\UploadController::class, 'cancel'])->name('uploads.cancel');

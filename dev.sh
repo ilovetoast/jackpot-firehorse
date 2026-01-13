@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Development Startup Script
-# Manages: Laravel Scheduler, Queue Worker, npm/Vite dev server
+# Manages: Laravel Scheduler, Queue Worker, Stripe webhook listener
 # Usage: ./dev.sh [start|stop|restart|status]
 
 set -e
@@ -34,7 +34,6 @@ NPM_LOG="$SCRIPT_DIR/storage/logs/npm.log"
 STRIPE_LOG="$SCRIPT_DIR/storage/logs/stripe.log"
 
 # Configuration
-ENABLE_STRIPE="${ENABLE_STRIPE:-false}"
 STRIPE_WEBHOOK_URL="${STRIPE_WEBHOOK_URL:-http://localhost/webhook/stripe}"
 
 # Function to determine command prefix
@@ -133,12 +132,8 @@ start_npm() {
     echo -e "${GREEN}npm dev server started (PID: $pid)${NC}"
 }
 
-# Function to start Stripe webhook listener (optional)
+# Function to start Stripe webhook listener
 start_stripe() {
-    if [ "$ENABLE_STRIPE" != "true" ]; then
-        return 0
-    fi
-
     if ! command -v stripe &> /dev/null; then
         echo -e "${YELLOW}Stripe CLI not found. Skipping Stripe webhook listener.${NC}"
         echo -e "${YELLOW}Install: https://stripe.com/docs/stripe-cli${NC}"
@@ -209,10 +204,7 @@ stop_process() {
 # Function to stop all processes
 stop_all() {
     echo -e "${CYAN}Stopping all services...${NC}"
-    stop_process "npm dev server" "$NPM_PID"
-    if [ "$ENABLE_STRIPE" = "true" ]; then
-        stop_process "Stripe webhook listener" "$STRIPE_PID"
-    fi
+    stop_process "Stripe webhook listener" "$STRIPE_PID"
     stop_process "Queue worker" "$WORKER_PID"
     stop_process "Laravel Scheduler" "$SCHEDULER_PID"
 }
@@ -227,7 +219,6 @@ start_all() {
     
     start_scheduler
     start_worker
-    start_npm
     start_stripe
     
     echo ""
@@ -238,10 +229,7 @@ start_all() {
     echo -e "Logs:"
     echo -e "  Scheduler: ${CYAN}tail -f $SCHEDULER_LOG${NC}"
     echo -e "  Worker:    ${CYAN}tail -f $WORKER_LOG${NC}"
-    echo -e "  npm:       ${CYAN}tail -f $NPM_LOG${NC}"
-    if [ "$ENABLE_STRIPE" = "true" ]; then
-        echo -e "  Stripe:    ${CYAN}tail -f $STRIPE_LOG${NC}"
-    fi
+    echo -e "  Stripe:    ${CYAN}tail -f $STRIPE_LOG${NC}"
     echo ""
 }
 
@@ -253,10 +241,7 @@ show_status() {
     
     print_status "Laravel Scheduler" "$SCHEDULER_PID" "$SCHEDULER_LOG"
     print_status "Queue Worker" "$WORKER_PID" "$WORKER_LOG"
-    print_status "npm dev server" "$NPM_PID" "$NPM_LOG"
-    if [ "$ENABLE_STRIPE" = "true" ]; then
-        print_status "Stripe webhook listener" "$STRIPE_PID" "$STRIPE_LOG"
-    fi
+    print_status "Stripe webhook listener" "$STRIPE_PID" "$STRIPE_LOG"
     
     echo ""
 }
@@ -296,12 +281,10 @@ case "${1:-}" in
         echo -e "  ${CYAN}status${NC}   - Show status of all services"
         echo ""
         echo -e "Environment Variables:"
-        echo -e "  ${CYAN}ENABLE_STRIPE${NC}=true        - Enable Stripe webhook listener (default: false)"
         echo -e "  ${CYAN}STRIPE_WEBHOOK_URL${NC}=url    - Stripe webhook forwarding URL (default: http://localhost/webhook/stripe)"
         echo ""
         echo -e "Examples:"
         echo -e "  ${GREEN}./dev.sh start${NC}                    # Start all services"
-        echo -e "  ${GREEN}ENABLE_STRIPE=true ./dev.sh start${NC} # Start with Stripe listener"
         echo -e "  ${GREEN}./dev.sh status${NC}                   # Check status"
         echo -e "  ${RED}./dev.sh stop${NC}                      # Stop all services"
         echo ""

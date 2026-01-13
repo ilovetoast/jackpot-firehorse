@@ -109,6 +109,14 @@ function getStatusConfig(status) {
                 icon: ArrowPathIcon,
                 iconColor: 'text-blue-500'
             };
+        case 'completing':
+            return {
+                label: 'Finalizing…',
+                bgColor: 'bg-blue-100',
+                textColor: 'text-blue-700',
+                icon: ArrowPathIcon,
+                iconColor: 'text-blue-500'
+            };
         case 'complete':
             return {
                 label: 'Complete',
@@ -358,6 +366,7 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
                 return 'bg-gray-300';
             case 'initiating':
             case 'uploading':
+            case 'completing':
                 return 'bg-blue-600';
             case 'complete':
                 return 'bg-green-600';
@@ -368,9 +377,9 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
         }
     };
     
-    // Check if we should show animated sheen (uploading or initiating status, including heartbeat)
+    // Check if we should show animated sheen (uploading, initiating, or completing status, including heartbeat)
     // Sheen indicates active work is happening even if progress hasn't updated yet
-    const shouldShowSheen = displayStatus === 'uploading' || displayStatus === 'initiating';
+    const shouldShowSheen = displayStatus === 'uploading' || displayStatus === 'initiating' || displayStatus === 'completing';
 
     // Get progress percentage (heartbeat shows indeterminate progress)
     const getProgressPercentage = () => {

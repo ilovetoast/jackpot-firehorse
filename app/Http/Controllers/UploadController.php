@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\UploadSession;
 use App\Services\AbandonedSessionService;
 use App\Services\ActivityRecorder;
+use App\Services\MultipartUploadService;
 use App\Services\MultipartUploadUrlService;
 use App\Services\ResumeMetadataService;
 use App\Services\UploadCompletionService;
@@ -28,7 +29,8 @@ class UploadController extends Controller
         protected UploadCompletionService $completionService,
         protected ResumeMetadataService $resumeService,
         protected AbandonedSessionService $abandonedService,
-        protected MultipartUploadUrlService $multipartUrlService
+        protected MultipartUploadUrlService $multipartUrlService,
+        protected MultipartUploadService $multipartService
     ) {
     }
 
@@ -803,6 +805,347 @@ class UploadController extends Controller
     }
 
     /**
+     * Initiate a multipart upload for an upload session.
+     *
+     * POST /uploads/{uploadSession}/multipart/init
+     *
+     * This endpoint is idempotent - if a multipart upload is already initiated,
+     * it returns the existing multipart_upload_id without creating a new one.
+     *
+     * @param Request $request
+     * @param UploadSession $uploadSession
+     * @return JsonResponse
+     */
+    public function initMultipart(Request $request, UploadSession $uploadSession): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Verify upload session belongs to tenant
+        if ($uploadSession->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Upload session not found',
+            ], 404);
+        }
+
+        try {
+            // Refresh to get latest state
+            $uploadSession->refresh();
+
+            Log::info('Multipart upload init requested', [
+                'upload_session_id' => $uploadSession->id,
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+                'current_status' => $uploadSession->status->value,
+            ]);
+
+            // Initiate multipart upload (idempotent)
+            $result = $this->multipartService->initiateMultipartUpload($uploadSession);
+
+            // Refresh to get updated state
+            $uploadSession->refresh();
+
+            return response()->json([
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $result['multipart_upload_id'],
+                'part_size' => $result['part_size'],
+                'total_parts' => $result['total_parts'],
+                'already_initiated' => $result['already_initiated'],
+            ], 200);
+        } catch (\RuntimeException $e) {
+            Log::error('Failed to initiate multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('Unexpected error initiating multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to initiate multipart upload: ' . $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 500);
+        }
+    }
+
+    /**
+     * Sign a presigned URL for uploading a specific part.
+     *
+     * POST /uploads/{uploadSession}/multipart/sign-part
+     *
+     * @param Request $request
+     * @param UploadSession $uploadSession
+     * @return JsonResponse
+     */
+    public function signMultipartPart(Request $request, UploadSession $uploadSession): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Verify upload session belongs to tenant
+        if ($uploadSession->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Upload session not found',
+            ], 404);
+        }
+
+        // Validate request input
+        $validated = $request->validate([
+            'part_number' => 'required|integer|min:1',
+        ]);
+
+        $partNumber = $validated['part_number'];
+
+        try {
+            // Refresh to get latest state
+            $uploadSession->refresh();
+
+            Log::info('Multipart part URL sign requested', [
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $partNumber,
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+            ]);
+
+            // Sign part upload URL
+            $result = $this->multipartService->signPartUploadUrl($uploadSession, $partNumber);
+
+            return response()->json([
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $result['part_number'],
+                'upload_url' => $result['upload_url'],
+                'expires_in' => $result['expires_in'],
+            ], 200);
+        } catch (\RuntimeException $e) {
+            Log::error('Failed to sign multipart part URL', [
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $partNumber,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('Unexpected error signing multipart part URL', [
+                'upload_session_id' => $uploadSession->id,
+                'part_number' => $partNumber,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to sign multipart part URL: ' . $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 500);
+        }
+    }
+
+    /**
+     * Complete a multipart upload.
+     *
+     * POST /uploads/{uploadSession}/multipart/complete
+     *
+     * This endpoint is idempotent - if the upload is already completed,
+     * it returns success without re-completing.
+     *
+     * @param Request $request
+     * @param UploadSession $uploadSession
+     * @return JsonResponse
+     */
+    public function completeMultipart(Request $request, UploadSession $uploadSession): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Verify upload session belongs to tenant
+        if ($uploadSession->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Upload session not found',
+            ], 404);
+        }
+
+        // Validate request input
+        $validated = $request->validate([
+            'parts' => 'required|array|min:1',
+            'parts.*' => 'required|string', // ETags as strings
+        ]);
+
+        // Convert parts array to [part_number => etag] format
+        // Expected format: ["1" => "etag1", "2" => "etag2", ...]
+        // Or: [{"part_number": 1, "etag": "etag1"}, ...]
+        $parts = [];
+        foreach ($validated['parts'] as $key => $value) {
+            if (is_array($value) && isset($value['part_number']) && isset($value['etag'])) {
+                // Format: [{"part_number": 1, "etag": "etag1"}, ...]
+                $parts[$value['part_number']] = $value['etag'];
+            } elseif (is_string($value)) {
+                // Format: ["1" => "etag1", "2" => "etag2", ...]
+                $parts[$key] = $value;
+            } else {
+                return response()->json([
+                    'message' => 'Invalid parts format. Expected array of [part_number => etag] or [{"part_number": int, "etag": string}, ...]',
+                ], 422);
+            }
+        }
+
+        try {
+            // Refresh to get latest state
+            $uploadSession->refresh();
+
+            Log::info('Multipart upload complete requested', [
+                'upload_session_id' => $uploadSession->id,
+                'parts_count' => count($parts),
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+            ]);
+
+            // Complete multipart upload (idempotent)
+            $result = $this->multipartService->completeMultipartUpload($uploadSession, $parts);
+
+            // Refresh to get updated state
+            $uploadSession->refresh();
+
+            return response()->json([
+                'upload_session_id' => $uploadSession->id,
+                'completed' => $result['completed'],
+                'already_completed' => $result['already_completed'],
+                'etag' => $result['etag'],
+            ], 200);
+        } catch (\RuntimeException $e) {
+            Log::error('Failed to complete multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'parts_count' => count($parts),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('Unexpected error completing multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'parts_count' => count($parts),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to complete multipart upload: ' . $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 500);
+        }
+    }
+
+    /**
+     * Abort a multipart upload.
+     *
+     * POST /uploads/{uploadSession}/multipart/abort
+     *
+     * This endpoint safely cleans up both S3 and database state.
+     * It is idempotent - safe to call multiple times.
+     *
+     * @param Request $request
+     * @param UploadSession $uploadSession
+     * @return JsonResponse
+     */
+    public function abortMultipart(Request $request, UploadSession $uploadSession): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Verify upload session belongs to tenant
+        if ($uploadSession->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Upload session not found',
+            ], 404);
+        }
+
+        try {
+            // Refresh to get latest state
+            $uploadSession->refresh();
+
+            Log::info('Multipart upload abort requested', [
+                'upload_session_id' => $uploadSession->id,
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+            ]);
+
+            // Abort multipart upload (idempotent)
+            $result = $this->multipartService->abortMultipartUpload($uploadSession);
+
+            // Refresh to get updated state
+            $uploadSession->refresh();
+
+            return response()->json([
+                'upload_session_id' => $uploadSession->id,
+                'aborted' => $result['aborted'],
+                'already_aborted' => $result['already_aborted'],
+            ], 200);
+        } catch (\RuntimeException $e) {
+            Log::error('Failed to abort multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('Unexpected error aborting multipart upload', [
+                'upload_session_id' => $uploadSession->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to abort multipart upload: ' . $e->getMessage(),
+                'upload_session_id' => $uploadSession->id,
+            ], 500);
+        }
+    }
+
+    /**
      * Finalize multiple uploads from a manifest (manifest-driven batch finalize).
      *
      * POST /app/assets/upload/finalize
@@ -1157,6 +1500,94 @@ class UploadController extends Controller
             throw new \RuntimeException(
                 "Failed to verify upload in S3: {$e->getMessage()}"
             );
+        }
+    }
+
+    /**
+     * Receive frontend upload diagnostics.
+     *
+     * POST /uploads/diagnostics
+     *
+     * This endpoint receives structured diagnostic information from the frontend
+     * about upload failures. It logs the information for debugging purposes.
+     * 
+     * Phase 2.5: Dev-only observability feature
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function diagnostics(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Validate request
+        $validated = $request->validate([
+            'type' => 'required|string|in:auth,cors,network,s3,validation,unknown',
+            'message' => 'required|string',
+            'http_status' => 'nullable|integer|min:100|max:599',
+            'request_phase' => 'nullable|string|max:255',
+            'upload_session_id' => 'nullable|uuid',
+            'file_name' => 'nullable|string|max:255',
+            'file_size' => 'nullable|integer|min:0',
+            'details' => 'nullable|array',
+            'timestamp' => 'nullable|string',
+            'user_agent' => 'nullable|string|max:500',
+            'is_online' => 'nullable|boolean',
+        ]);
+
+        try {
+            // Build structured log context
+            $logContext = [
+                'diagnostic_type' => 'upload_error',
+                'error_type' => $validated['type'],
+                'error_message' => $validated['message'],
+                'http_status' => $validated['http_status'] ?? null,
+                'request_phase' => $validated['request_phase'] ?? null,
+                'upload_session_id' => $validated['upload_session_id'] ?? null,
+                'file_name' => $validated['file_name'] ?? null,
+                'file_size' => $validated['file_size'] ?? null,
+                'details' => $validated['details'] ?? [],
+                'timestamp' => $validated['timestamp'] ?? now()->toIso8601String(),
+                'user_agent' => $validated['user_agent'] ?? null,
+                'is_online' => $validated['is_online'] ?? null,
+                'tenant_id' => $tenant->id ?? null,
+                'user_id' => $user->id ?? null,
+            ];
+
+            // Log structured diagnostic information
+            Log::info('[Upload Diagnostics] Frontend error reported', $logContext);
+
+            // Phase 2.65: Emit normalized upload signal for AI analysis
+            // Signal emission is best-effort and never throws
+            try {
+                $signalService = app(\App\Services\UploadSignalService::class);
+                $signalService->emitErrorSignal($validated, $tenant);
+            } catch (\Exception $signalError) {
+                // Silently fail - signal emission must not disrupt diagnostics flow
+                Log::debug('[Upload Diagnostics] Signal emission failed (non-critical)', [
+                    'error' => $signalError->getMessage(),
+                ]);
+            }
+
+            // Return success (never throw - diagnostics are best-effort)
+            return response()->json([
+                'message' => 'Diagnostics received',
+                'logged' => true,
+            ], 200);
+        } catch (\Exception $e) {
+            // Never throw from diagnostics endpoint - it's best-effort observability
+            Log::warning('[Upload Diagnostics] Failed to process diagnostics', [
+                'error' => $e->getMessage(),
+                'tenant_id' => $tenant->id ?? null,
+                'user_id' => $user->id ?? null,
+            ]);
+
+            // Still return success to prevent frontend errors
+            return response()->json([
+                'message' => 'Diagnostics received (processing failed)',
+                'logged' => false,
+            ], 200);
         }
     }
 
