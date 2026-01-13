@@ -207,6 +207,8 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
     // Resolved filename editing state (power-user control)
     const [filenameEditing, setFilenameEditing] = useState(false);
     const [editedFilename, setEditedFilename] = useState(resolvedFilename);
+    const [showFilenameEditIcon, setShowFilenameEditIcon] = useState(false);
+    const [filenameError, setFilenameError] = useState(null);
     const filenameInputRef = useRef(null);
     
     // Heartbeat fallback for large multipart uploads (shows "Uploading..." when queued >7.5s with no progress)
@@ -229,9 +231,12 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
     }, [item.title, originalFilename, titleEditing]);
     
     // Sync editedFilename when item.resolvedFilename changes (but not when editing)
+    // Extract just the name part (without extension) for editing
     useEffect(() => {
         if (!filenameEditing) {
-            setEditedFilename(resolvedFilename);
+            // Extract name without extension for editing
+            const nameWithoutExt = getFilenameWithoutExtension(resolvedFilename);
+            setEditedFilename(nameWithoutExt);
         }
     }, [resolvedFilename, filenameEditing]);
     
@@ -320,17 +325,33 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
     
     // Handle filename save
     const handleFilenameSave = () => {
-        const newFilename = editedFilename.trim() || resolvedFilename;
-        if (newFilename !== item.resolvedFilename) {
-            uploadManager?.setResolvedFilename?.(item.clientId, newFilename);
+        // Combine edited name with locked extension
+        const editedNameOnly = editedFilename.trim();
+        const fullFilename = editedNameOnly ? `${editedNameOnly}.${extension}` : resolvedFilename;
+        
+        // Clear any previous error
+        setFilenameError(null);
+        
+        // Validate that we have a name (extension is always locked, so no need to validate it)
+        if (!editedNameOnly) {
+            setFilenameError('Filename cannot be empty');
+            return;
+        }
+        
+        if (fullFilename !== item.resolvedFilename) {
+            uploadManager?.setResolvedFilename?.(item.clientId, fullFilename);
         }
         setFilenameEditing(false);
+        setFilenameError(null);
     };
     
     // Handle filename cancel
     const handleFilenameCancel = () => {
-        setEditedFilename(resolvedFilename);
+        // Reset to name without extension
+        const nameWithoutExt = getFilenameWithoutExtension(resolvedFilename);
+        setEditedFilename(nameWithoutExt);
         setFilenameEditing(false);
+        setFilenameError(null);
     };
     
     // Handle filename edit start
@@ -585,26 +606,48 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
                                     <dt className="text-gray-500 mb-1">Resolved filename</dt>
                                     <dd className="text-gray-900">
                                         {filenameEditing ? (
-                                            <input
-                                                ref={filenameInputRef}
-                                                type="text"
-                                                value={editedFilename}
-                                                onChange={(e) => setEditedFilename(e.target.value)}
-                                                onBlur={handleFilenameSave}
-                                                onKeyDown={handleFilenameKeyDown}
-                                                onClick={(e) => e.stopPropagation()}
-                                                className="w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                                                placeholder={originalFilename}
-                                            />
+                                            <div>
+                                                <div className="flex items-center gap-1">
+                                                    <input
+                                                        ref={filenameInputRef}
+                                                        type="text"
+                                                        value={editedFilename}
+                                                        onChange={(e) => {
+                                                            setEditedFilename(e.target.value);
+                                                            setFilenameError(null); // Clear error on change
+                                                        }}
+                                                        onBlur={handleFilenameSave}
+                                                        onKeyDown={handleFilenameKeyDown}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className={`flex-1 px-2 py-1 text-xs font-mono border rounded-l focus:ring-1 focus:outline-none ${
+                                                            filenameError 
+                                                                ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                                                                : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                                                        }`}
+                                                        placeholder={getFilenameWithoutExtension(originalFilename)}
+                                                    />
+                                                    <div className="px-2 py-1 text-xs font-mono border border-l-0 border-gray-300 rounded-r bg-gray-50 text-gray-600 flex items-center">
+                                                        .{extension}
+                                                    </div>
+                                                </div>
+                                                {filenameError && (
+                                                    <p className="mt-1 text-xs text-red-600">{filenameError}</p>
+                                                )}
+                                            </div>
                                         ) : (
                                             <button
                                                 type="button"
                                                 onClick={handleFilenameEdit}
+                                                onMouseEnter={() => !filenameEditing && setShowFilenameEditIcon(true)}
+                                                onMouseLeave={() => setShowFilenameEditIcon(false)}
                                                 onMouseDown={(e) => e.stopPropagation()}
-                                                className="text-left w-full px-2 py-1 text-xs font-mono break-all hover:bg-gray-50 rounded border border-transparent hover:border-gray-300 transition-colors group"
+                                                className="text-left w-full px-2 py-1 text-xs font-mono break-all hover:bg-gray-50 rounded border border-transparent hover:border-gray-300 transition-colors group flex items-center gap-1"
                                                 title="Click to edit (used for storage and URLs)"
                                             >
-                                                {resolvedFilename}
+                                                <span className="flex-1 break-all">{resolvedFilename}</span>
+                                                {showFilenameEditIcon && (
+                                                    <PencilIcon className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                                                )}
                                             </button>
                                         )}
                                         <p className="mt-1 text-xs text-gray-400">Used for storage and URLs</p>

@@ -200,6 +200,26 @@ class UploadCompletionService
         // Use provided filename (resolvedFilename from frontend) or fall back to original filename from S3
         // Frontend derives resolvedFilename from title + extension, so this respects user's title
         $finalFilename = $filename ?? $fileInfo['original_filename'];
+        
+        // Final validation: Ensure resolved filename extension matches original file extension
+        if ($filename !== null && $fileInfo['original_filename'] !== null) {
+            $originalExt = strtolower(pathinfo($fileInfo['original_filename'], PATHINFO_EXTENSION));
+            $resolvedExt = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            
+            if ($originalExt !== $resolvedExt) {
+                Log::error('Resolved filename extension mismatch detected in completion service', [
+                    'upload_session_id' => $uploadSession->id,
+                    'original_filename' => $fileInfo['original_filename'],
+                    'resolved_filename' => $filename,
+                    'original_ext' => $originalExt,
+                    'resolved_ext' => $resolvedExt,
+                ]);
+                
+                throw new \RuntimeException(
+                    "Resolved filename extension mismatch. Original file has extension '{$originalExt}', but resolved filename has '{$resolvedExt}'. File extensions cannot be changed."
+                );
+            }
+        }
 
         // 🔍 DEBUG LOGGING: Log title normalization process
         Log::info('[UploadCompletionService] Starting title normalization', [

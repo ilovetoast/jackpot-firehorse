@@ -1266,6 +1266,58 @@ class UploadController extends Controller
                 // Verify S3 object exists and size matches
                 $this->verifyS3Upload($uploadSession, $uploadKey, $expectedSize);
 
+                // Validate resolved_filename extension matches original file extension
+                if ($resolvedFilename !== null) {
+                    $bucket = $uploadSession->storageBucket;
+                    if (!$bucket) {
+                        throw new \RuntimeException('Storage bucket not found for upload session');
+                    }
+                    
+                    $s3Client = $this->createS3ClientForFinalize(); // Reuse same client from verifyS3Upload
+                    
+                    try {
+                        // Get object metadata to extract original filename
+                        $headResult = $s3Client->headObject([
+                            'Bucket' => $bucket->name,
+                            'Key' => $uploadKey,
+                        ]);
+                        
+                        // Extract filename from S3 metadata (same logic as UploadCompletionService)
+                        $metadata = $headResult->get('Metadata');
+                        $contentDisposition = $headResult->get('ContentDisposition');
+                        
+                        $originalFilename = null;
+                        if ($contentDisposition && preg_match('/filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)/', $contentDisposition, $matches)) {
+                            $originalFilename = trim($matches[1], '"\'');
+                        } elseif (isset($metadata['original-filename'])) {
+                            $originalFilename = $metadata['original-filename'];
+                        }
+                        
+                        // If we have an original filename, validate extension
+                        if ($originalFilename) {
+                            $originalExt = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
+                            $resolvedExt = strtolower(pathinfo($resolvedFilename, PATHINFO_EXTENSION));
+                            
+                            // Extensions must match (case-insensitive)
+                            if ($originalExt !== $resolvedExt) {
+                                throw new \RuntimeException(
+                                    "Resolved filename extension mismatch. Original file has extension '{$originalExt}', but resolved filename has '{$resolvedExt}'. File extensions cannot be changed."
+                                );
+                            }
+                        }
+                    } catch (\RuntimeException $e) {
+                        // Re-throw validation errors
+                        throw $e;
+                    } catch (\Exception $e) {
+                        // For other errors (S3 access issues), log warning but don't block
+                        // The completion service will also validate, so this is a best-effort check
+                        Log::warning('Could not validate resolved filename extension in finalize', [
+                            'upload_session_id' => $uploadSessionId,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+
                 // Create asset using UploadCompletionService
                 // Determine asset type from category
                 $assetType = $category->asset_type->value;

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
+import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
@@ -15,9 +16,20 @@ import {
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
 export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [] }) {
-    const { auth } = usePage().props
+    const pageProps = usePage().props
+    const { auth } = pageProps
+    
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+    
+    // FINAL FIX: Remount key to force page remount after finalize
+    const [remountKey, setRemountKey] = useState(0)
+    
+    // BUGFIX: Single source of truth for upload dialog state (page-level ownership)
+    const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
+    
+    // Prevent reopening dialog during auto-close timeout (400-700ms delay)
+    const [isAutoClosing, setIsAutoClosing] = useState(false)
     
     // Local asset state
     const [localAssets, setLocalAssets] = useState(assets)
@@ -148,6 +160,19 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
         
+        // ROOT CAUSE FIX: Explicitly reset dialog state before preserveState navigation
+        // This prevents Inertia from preserving isUploadDialogOpen=true across category changes
+        setIsUploadDialogOpen(prev => {
+            console.log('[DIALOG_STATE_CHANGE]', {
+                file: 'Assets/Index.jsx',
+                location: 'handleCategorySelect',
+                from: prev,
+                to: false,
+                stack: new Error().stack.split('\n').slice(1,6).join(' -> ')
+            })
+            return false
+        })
+        
         setSelectedCategoryId(categoryId)
         
         router.get('/app/assets', 
@@ -162,16 +187,41 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
 
     // Handle finalize complete - refresh asset grid after successful upload finalize
     const handleFinalizeComplete = useCallback(() => {
-        console.log('[ASSETS_INDEX] Finalize complete - refreshing asset grid')
+        // Set auto-closing flag to prevent reopening during timeout
+        setIsAutoClosing(true)
+        
+        // Ensure dialog stays closed during reload
+        setIsUploadDialogOpen(false)
+        
+        // Force page remount by incrementing remount key
+        setRemountKey(prev => prev + 1)
+        
         // Reload assets to show newly uploaded assets
-        // Don't preserve state to ensure we get fresh data from backend
         router.reload({ 
             only: ['assets'], 
             preserveScroll: true,
+            preserveState: false, // Prevent state preservation to avoid dialog reopening
             onSuccess: () => {
-                console.log('[ASSETS_INDEX] Asset grid refreshed successfully')
+                setIsUploadDialogOpen(false)
+                // Reset auto-closing flag after reload completes
+                setIsAutoClosing(false)
             }
         })
+    }, [])
+    
+    // BUGFIX: Single handler to open upload dialog
+    const handleOpenUploadDialog = useCallback(() => {
+        // Prevent opening if auto-close is in progress
+        if (isAutoClosing) {
+            return
+        }
+        setIsUploadDialogOpen(true)
+    }, [isAutoClosing])
+    
+    // BUGFIX: Single handler to close upload dialog
+    const handleCloseUploadDialog = useCallback(() => {
+        setIsUploadDialogOpen(false)
+        setIsAutoClosing(false) // Reset flag if manually closed
     }, [])
 
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
@@ -190,8 +240,13 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const activeBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'
     
 
+    // FINAL FIX: Force page remount via key to prevent multiple instances
+    // This ensures React unmounts the old page instance when props change
+    // Remount key forces remount after finalize (ensures clean state reset)
+    const pageKey = `assets-${selectedCategoryId || 'all'}-${assets?.length || 0}-${total_asset_count || 0}-${remountKey}`
+
     return (
-        <div className="h-screen flex flex-col overflow-hidden">
+        <div key={pageKey} className="h-screen flex flex-col overflow-hidden">
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
@@ -205,10 +260,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     <div className="px-3 py-2 mb-4">
                                         <AddAssetButton 
                                             defaultAssetType="asset" 
-                                            categories={categories || []}
-                                            initialCategoryId={selectedCategoryId}
                                             className="w-full"
-                                            onFinalizeComplete={handleFinalizeComplete}
+                                            onClick={handleOpenUploadDialog}
+                                            disabled={isAutoClosing}
                                         />
                                     </div>
                                 )}
@@ -389,8 +443,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 <div className="mt-8">
                                     <AddAssetButton 
                                         defaultAssetType="asset" 
-                                        categories={categories || []}
-                                        onFinalizeComplete={handleFinalizeComplete}
+                                        onClick={handleOpenUploadDialog}
+                                        disabled={isAutoClosing}
                                     />
                                 </div>
                             </div>
@@ -420,6 +474,18 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     </div>
                 )}
             </div>
+            
+            {/* FINAL FIX: Conditionally mount UploadAssetDialog to ensure it unmounts when closed */}
+            {isUploadDialogOpen && (
+                <UploadAssetDialog
+                    open={true}
+                    onClose={handleCloseUploadDialog}
+                    defaultAssetType="asset"
+                    categories={categories || []}
+                    initialCategoryId={selectedCategoryId}
+                    onFinalizeComplete={handleFinalizeComplete}
+                />
+            )}
         </div>
     )
 }

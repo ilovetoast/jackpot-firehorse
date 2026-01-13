@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
+import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
@@ -13,9 +14,15 @@ import {
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
 export default function MarketingAssetsIndex({ categories, selected_category, show_all_button = false, assets = [] }) {
-    const { auth } = usePage().props
+    const pageProps = usePage().props
+    const { auth } = pageProps
+    
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+    
+    // BUGFIX: Single source of truth for upload dialog state (page-level ownership)
+    const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
+    
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
@@ -100,6 +107,19 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
         
+        // ROOT CAUSE FIX: Explicitly reset dialog state before preserveState navigation
+        // This prevents Inertia from preserving isUploadDialogOpen=true across category changes
+        setIsUploadDialogOpen(prev => {
+            console.log('[DIALOG_STATE_CHANGE]', {
+                file: 'MarketingAssets/Index.jsx',
+                location: 'handleCategorySelect',
+                from: prev,
+                to: false,
+                stack: new Error().stack.split('\n').slice(1,6).join(' -> ')
+            })
+            return false
+        })
+        
         setSelectedCategoryId(categoryId)
         
         router.get('/app/marketing-assets', 
@@ -126,9 +146,23 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
     const hoverBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
     const activeBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'
+    
+    // FINAL FIX: Force page remount via key to prevent multiple instances
+    // This ensures React unmounts the old page instance when props change
+    const pageKey = `marketing-assets-${selectedCategoryId || 'all'}-${assets?.length || 0}`
+    
+    // BUGFIX: Single handler to open upload dialog
+    const handleOpenUploadDialog = useCallback(() => {
+        setIsUploadDialogOpen(true)
+    }, [])
+    
+    // BUGFIX: Single handler to close upload dialog
+    const handleCloseUploadDialog = useCallback(() => {
+        setIsUploadDialogOpen(false)
+    }, [])
 
     return (
-        <div className="h-screen flex flex-col overflow-hidden">
+        <div key={pageKey} className="h-screen flex flex-col overflow-hidden">
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
@@ -142,9 +176,8 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                     <div className="px-3 py-2 mb-4">
                                         <AddAssetButton 
                                             defaultAssetType="marketing" 
-                                            categories={categories || []}
-                                            initialCategoryId={selectedCategoryId}
                                             className="w-full"
+                                            onClick={handleOpenUploadDialog}
                                         />
                                     </div>
                                 )}
@@ -309,7 +342,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                 <div className="mt-8">
                                     <AddAssetButton 
                                         defaultAssetType="marketing" 
-                                        categories={categories || []}
+                                        onClick={handleOpenUploadDialog}
                                     />
                                 </div>
                             </div>
@@ -339,6 +372,17 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                     </div>
                 )}
             </div>
+            
+            {/* FINAL FIX: Conditionally mount UploadAssetDialog to ensure it unmounts when closed */}
+            {isUploadDialogOpen && (
+                <UploadAssetDialog
+                    open={true}
+                    onClose={handleCloseUploadDialog}
+                    defaultAssetType="marketing"
+                    categories={categories || []}
+                    initialCategoryId={selectedCategoryId}
+                />
+            )}
         </div>
     )
 }

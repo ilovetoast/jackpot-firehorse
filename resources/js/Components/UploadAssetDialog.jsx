@@ -20,7 +20,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
-import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
@@ -55,6 +55,11 @@ const USE_LEGACY_UPLOADER = false
  * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully (batchStatus === 'complete')
  */
 export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null }) {
+    // CRITICAL DEBUG STEP — HARD CONTROL of open prop
+    // This temporarily violates hook rules to prove control flow
+    if (open !== true) {
+        return null
+    }
     const { auth } = usePage().props
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef(null)
@@ -151,6 +156,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // FINAL FIX: Prevent AUTO_CLOSE_V2 from executing multiple times per dialog open cycle
     const autoClosedRef = useRef(false)
+    
+    // Track when finalize succeeds (all files finalized, no failures) - used to disable form during auto-close delay
+    const [isFinalizeSuccess, setIsFinalizeSuccess] = useState(false)
 
     // ═══════════════════════════════════════════════════════════════
     // CLEAN UPLOADER V2 — TEMPORARILY DISABLED LEGACY
@@ -322,10 +330,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return
     }, [open])
     
-    // FINAL FIX: Reset auto-closed flag when dialog opens
+    // FINAL FIX: Reset auto-closed flag when dialog opens (allows retry after errors)
     useEffect(() => {
         if (open) {
             autoClosedRef.current = false
+            setIsFinalizeSuccess(false) // Reset success state when dialog opens
         }
     }, [open])
     
@@ -339,9 +348,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // Freeze legacy Phase 2 cleanup logic
         if (!USE_LEGACY_UPLOADER) {
             // Clear refs on close (safe to do even when frozen)
-            if (!open) {
-                currentlyAddingRef.current.clear()
-            }
+            // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) {
+            //     currentlyAddingRef.current.clear()
+            // }
             return // Early return - legacy logic frozen
         }
         
@@ -374,17 +383,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             })
             
             if (uploadsToRemove.length > 0) {
-                console.log('[Dialog Open] Removing old rehydrated uploads', {
-                    count: uploadsToRemove.length,
-                    uploads: uploadsToRemove.map(([key, upload]) => ({
-                        key,
-                        clientReference: upload.clientReference,
-                        status: upload.status,
-                        hasFile: !!upload.file,
-                        uploadSessionId: upload.uploadSessionId
-                    }))
-                })
-                
                 uploadsToRemove.forEach(([key, upload]) => {
                     phase2Manager.removeUpload(key)
                 })
@@ -625,6 +623,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         const fileArray = Array.from(selectedFiles)
         console.log('[FILE_SELECT] Processing files', { count: fileArray.length, fileNames: fileArray.map(f => f.name) })
         
+        // Helper to derive initial resolvedFilename from filename
+        const deriveInitialResolvedFilename = (filename) => {
+            const lastDotIndex = filename.lastIndexOf('.')
+            const extension = lastDotIndex > 0 ? filename.substring(lastDotIndex + 1) : ''
+            const baseName = lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename
+            const slugified = baseName.toLowerCase().trim()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/[\s_-]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+            return extension ? `${slugified}.${extension}` : slugified
+        }
+
         // Create clean file entries for v2Files state
         const newV2FileEntries = fileArray.map((file) => ({
             clientId: (window.crypto?.randomUUID || (() => {
@@ -639,6 +649,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             status: 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
             progress: 0, // 0-100
             uploadKey: null, // Set when upload completes
+            title: null, // Will be derived from filename, can be edited
+            resolvedFilename: null, // Will be derived initially, can be edited directly
             metadataDraft: {}, // Per-file metadata overrides (empty = inherit global)
             error: null
         }))
@@ -1685,9 +1697,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // Clean up ref when dialog closes
     useEffect(() => {
-        if (!open) {
-            lastSyncedRef.current.clear()
-        }
+        // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) {
+        //     lastSyncedRef.current.clear()
+        // }
     }, [open])
 
     /**
@@ -1989,10 +2001,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
     // Clean up starting ref and currently adding ref when dialog closes
     useEffect(() => {
-        if (!open) {
-            startingUploadsRef.current.clear()
-            currentlyAddingRef.current.clear()
-        }
+        // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) {
+        //     startingUploadsRef.current.clear()
+        //     currentlyAddingRef.current.clear()
+        // }
     }, [open])
 
     /**
@@ -2395,18 +2407,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             const extension = lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1) : ''
             const baseName = lastDotIndex > 0 ? fileName.substring(0, lastDotIndex) : fileName
             
-            // Normalize title (Title Case, clean)
-            const normalizedTitle = normalizeTitle(baseName) || normalizeTitle(fileName) || null
+            // Use user-edited title from v2File if available, otherwise derive from filename
+            // This ensures user edits are preserved during finalize
+            const userTitle = fileEntry.title || null
+            const normalizedTitle = userTitle || normalizeTitle(baseName) || normalizeTitle(fileName) || null
             
-            // Derive resolvedFilename from normalized title + extension (slugified)
-            const resolvedFilename = deriveResolvedFilename(normalizedTitle || baseName, extension)
+            // Use resolvedFilename from v2File if set (user edited), otherwise derive it
+            const resolvedFilename = fileEntry.resolvedFilename || deriveResolvedFilename(normalizedTitle || baseName, extension)
             
             return {
                 upload_key: uploadKey,
                 expected_size: fileEntry.file.size,
                 category_id: selectedCategoryId,
                 metadata: getEffectiveMetadataV2(fileEntry.clientId),
-                title: normalizedTitle,
+                title: normalizedTitle, // This now includes user-edited title if available
                 resolved_filename: resolvedFilename,
             }
         })
@@ -2567,6 +2581,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
             // batchStatus is now computed from v2Files, no manual update needed
             console.log('[FINALIZE_V2] Results processed', { successCount: finalizedCount, failureCount: failedCount })
+            
+            // Set success state if all files finalized and no failures (for UI overlay during auto-close delay)
+            if (finalizedCount > 0 && failedCount === 0) {
+                setIsFinalizeSuccess(true)
+            }
         } catch (error) {
             console.error('[FINALIZE_V2] Error during finalize', error)
             // Network / unexpected errors - mark ALL manifest files as failed
@@ -2981,11 +3000,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
     // Reset when dialog closes
     useEffect(() => {
-        if (!open) {
-            // Note: We don't clear Phase 3 state on close to preserve uploads
-            // If you want to clear, you'd need to add a reset method to the manager
-            setIsDragging(false)
-        }
+        // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) {
+        //     // Note: We don't clear Phase 3 state on close to preserve uploads
+        //     // If you want to clear, you'd need to add a reset method to the manager
+        //     setIsDragging(false)
+        // }
     }, [open])
 
     // DISABLED: batchStatus is now computed deterministically from v2Files using useMemo
@@ -3133,27 +3152,30 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
         const failedCount = v2Files.filter((f) => f.status === 'failed').length
 
-        if (finalizedCount === 0 || failedCount > 0) {
+        // CRITICAL: Reset auto-closed flag if there are failures (allow user to retry)
+        if (failedCount > 0) {
+            autoClosedRef.current = false
+            return
+        }
+
+        if (finalizedCount === 0) {
             // Conditions not met - don't auto-close
-            console.log('[AUTO_CLOSE_V2] Conditions not met', { finalizedCount, failedCount })
             return
         }
 
         // FINAL FIX: Mark as auto-closed BEFORE setting timeout to prevent double execution
         autoClosedRef.current = true
 
-        console.log('[AUTO_CLOSE_V2] Conditions met — closing dialog', { finalizedCount, failedCount })
-        console.log('[AUTO_CLOSE_V2] Starting auto-close timer', { finalizedCount })
-        
         // Delay 400-700ms for perceived completion
         const delay = 400 + Math.random() * 300 // 400-700ms
         const timeoutId = setTimeout(() => {
-            console.log('[AUTO_CLOSE_V2] Auto-closing dialog')
-            
             // Trigger refresh callback if provided (e.g., to refresh asset grid)
             if (onFinalizeComplete) {
-                console.log('[AUTO_CLOSE_V2] Triggering onFinalizeComplete callback')
-                onFinalizeComplete()
+                try {
+                    onFinalizeComplete()
+                } catch (error) {
+                    console.error('[AUTO_CLOSE_V2] Error calling onFinalizeComplete:', error)
+                }
             }
             
             resetV2State()
@@ -3161,7 +3183,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }, delay)
 
         return () => {
-            clearTimeout(timeoutId)
+            // CRITICAL FIX: Only clear timeout if we haven't already marked as auto-closed
+            // If autoClosedRef is true, the timeout is about to fire - don't clear it
+            if (!autoClosedRef.current) {
+                clearTimeout(timeoutId)
+            }
         }
     }, [v2Files, uploadManagerStateVersion, open, onClose, resetV2State, onFinalizeComplete])
 
@@ -3173,6 +3199,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     ? { ...f, title: newTitle }
                     : f
             )
+        )
+    }, [])
+
+    // CLEAN UPLOADER V2: Helper function to update resolvedFilename in v2Files (direct edit)
+    const setResolvedFilenameV2 = useCallback((clientId, newResolvedFilename) => {
+        setV2Files((prevFiles) => 
+            prevFiles.map((f) => {
+                if (f.clientId === clientId) {
+                    return { ...f, resolvedFilename: newResolvedFilename }
+                }
+                return f
+            })
         )
     }, [])
 
@@ -3211,6 +3249,17 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     // Phase 2.8: Cancelled uploads are excluded from finalize gating
                 }
                 
+                // Derive resolvedFilename if not set in v2File (use same logic as finalize)
+                const fileName = v2File.file.name || 'unknown'
+                const lastDotIndex = fileName.lastIndexOf('.')
+                const extension = lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1) : ''
+                const baseName = lastDotIndex > 0 ? fileName.substring(0, lastDotIndex) : fileName
+                const slugified = baseName.toLowerCase().trim()
+                    .replace(/[^\w\s-]/g, '')
+                    .replace(/[\s_-]+/g, '-')
+                    .replace(/^-+|-+$/g, '')
+                const defaultResolvedFilename = extension ? `${slugified}.${extension}` : slugified
+                
                 return {
                     clientId: v2File.clientId,
                     uploadStatus: uploadStatus,
@@ -3218,13 +3267,24 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     originalFilename: v2File.file.name,
                     file: v2File.file,
                     title: v2File.title || null,
-                    resolvedFilename: null,
+                    resolvedFilename: v2File.resolvedFilename || defaultResolvedFilename,
                     metadataDraft: v2File.metadataDraft || {},
                     error: uploadManagerUpload.error || uploadManagerUpload.errorInfo?.message || null,
                 }
             }
             
             // For direct uploads, use v2Files state (legacy behavior)
+            // Derive resolvedFilename if not set in v2File (use same logic as finalize)
+            const fileName = v2File.file.name || 'unknown'
+            const lastDotIndex = fileName.lastIndexOf('.')
+            const extension = lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1) : ''
+            const baseName = lastDotIndex > 0 ? fileName.substring(0, lastDotIndex) : fileName
+            const slugified = baseName.toLowerCase().trim()
+                .replace(/[^\w\s-]/g, '')
+                .replace(/[\s_-]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+            const defaultResolvedFilename = extension ? `${slugified}.${extension}` : slugified
+            
             return {
                 clientId: v2File.clientId,
                 uploadStatus: v2File.status === 'selected' ? 'queued' : 
@@ -3237,7 +3297,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 originalFilename: v2File.file.name,
                 file: v2File.file,
                 title: v2File.title || null, // Use title from v2File if available
-                resolvedFilename: null, // Optional
+                resolvedFilename: v2File.resolvedFilename || defaultResolvedFilename,
                 metadataDraft: v2File.metadataDraft || {}, // Per-file metadata overrides
                 error: v2File.error || null, // Include error object for failed uploads
             }
@@ -3254,6 +3314,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             markUploadStarted: () => {},
             // Title method
             setTitle: setTitleV2,
+            // Resolved filename method (direct edit)
+            setResolvedFilename: setResolvedFilenameV2,
             // Metadata methods
             getEffectiveMetadata: (clientId) => getEffectiveMetadataV2(clientId),
             setGlobalMetadata: (fieldKey, value) => setGlobalMetadataV2(fieldKey, value),
@@ -3320,10 +3382,19 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const hasFiles = v2UploadManager.hasItems
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
 
-    if (!open) return null
+
+    // BUGFIX: Early return after all hooks to ensure dialog unmounts when open=false
+    // This must come AFTER all hooks to comply with Rules of Hooks
+    // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) return null
 
     return (
-        <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div
+            data-upload-dialog-root
+            className="fixed inset-0 z-50 overflow-y-auto"
+            aria-labelledby="modal-title"
+            role="dialog"
+            aria-modal="true"
+        >
             <div className="flex min-h-screen items-end justify-center px-4 pt-4 pb-20 text-center sm:block sm:p-0">
                 {/* Background overlay */}
                 <div
@@ -3333,7 +3404,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                 {/* Modal panel - wider for Phase 3 layout */}
                 <div className="relative inline-block transform overflow-hidden rounded-lg bg-white text-left align-bottom shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-4xl sm:align-middle">
-                    <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
+                    <div className={`bg-white px-4 pt-5 pb-4 sm:p-6 relative ${isFinalizeSuccess ? 'opacity-20 pointer-events-none' : ''}`}>
                         {/* Header */}
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
@@ -3371,16 +3442,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 </label>
                                 <div
                                     ref={dropZoneRef}
-                                    onDragEnter={handleDragEnter}
-                                    onDragLeave={handleDragLeave}
-                                    onDragOver={handleDragOver}
-                                    onDrop={handleDrop}
-                                    className={`border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors p-6 ${
-                                        isDragging
-                                            ? 'border-indigo-500 bg-indigo-50'
-                                            : 'border-gray-300 hover:border-gray-400'
+                                    onDragEnter={isFinalizeSuccess ? undefined : handleDragEnter}
+                                    onDragLeave={isFinalizeSuccess ? undefined : handleDragLeave}
+                                    onDragOver={isFinalizeSuccess ? undefined : handleDragOver}
+                                    onDrop={isFinalizeSuccess ? undefined : handleDrop}
+                                    className={`border-2 border-dashed rounded-lg text-center transition-colors p-6 ${
+                                        isFinalizeSuccess
+                                            ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-50'
+                                            : isDragging
+                                                ? 'border-indigo-500 bg-indigo-50 cursor-pointer'
+                                                : 'border-gray-300 hover:border-gray-400 cursor-pointer'
                                     }`}
-                                    onClick={() => fileInputRef.current?.click()}
+                                    onClick={isFinalizeSuccess ? undefined : () => fileInputRef.current?.click()}
                                 >
                                     <CloudArrowUpIcon className="mx-auto h-12 w-12 text-gray-400" />
                                     <p className="mt-2 text-sm text-gray-600">
@@ -3394,6 +3467,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         multiple
                                         className="hidden"
                                         onChange={(e) => handleFileSelect(e.target.files)}
+                                        disabled={isFinalizeSuccess}
                                     />
                                 </div>
                             </div>
@@ -3410,17 +3484,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                                 {/* Compact Drop Zone - above uploads list, always visible */}
                                 <div className="mb-4">
-                                    <div
-                                        ref={dropZoneRef}
-                                        onDragEnter={handleDragEnter}
-                                        onDragLeave={handleDragLeave}
-                                        onDragOver={handleDragOver}
-                                        onDrop={handleDrop}
-                                        className={`border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors p-3 border-gray-300 bg-gray-50 hover:bg-gray-100 ${
-                                            isDragging ? 'border-indigo-400 bg-indigo-50' : ''
-                                        }`}
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
+                                <div
+                                    ref={dropZoneRef}
+                                    onDragEnter={isFinalizeSuccess ? undefined : handleDragEnter}
+                                    onDragLeave={isFinalizeSuccess ? undefined : handleDragLeave}
+                                    onDragOver={isFinalizeSuccess ? undefined : handleDragOver}
+                                    onDrop={isFinalizeSuccess ? undefined : handleDrop}
+                                    className={`border-2 border-dashed rounded-lg text-center transition-colors p-3 border-gray-300 bg-gray-50 ${
+                                        isFinalizeSuccess
+                                            ? 'cursor-not-allowed opacity-50'
+                                            : isDragging
+                                                ? 'border-indigo-400 bg-indigo-50 cursor-pointer hover:bg-gray-100'
+                                                : 'cursor-pointer hover:bg-gray-100'
+                                    }`}
+                                    onClick={isFinalizeSuccess ? undefined : () => fileInputRef.current?.click()}
+                                >
                                         <p className="text-sm text-gray-600">
                                             {isDragging
                                                 ? 'Drop files here'
@@ -3432,6 +3510,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                             multiple
                                             className="hidden"
                                             onChange={(e) => handleFileSelect(e.target.files)}
+                                            disabled={isFinalizeSuccess}
                                         />
                                                 </div>
                                             </div>
@@ -3441,6 +3520,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     uploadManager={v2UploadManager}
                                     categories={filteredCategories}
                                     onCategoryChange={handleCategoryChangeV2}
+                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
 
                                 {/* Upload Tray */}
@@ -3451,7 +3531,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         // Remove file from v2Files state
                                         removeFile(clientId)
                                     }}
-                                    disabled={batchStatus === 'finalizing'}
+                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
                                     </div>
                                 )}
@@ -3544,7 +3624,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 ) : null}
                                 
                                 {(() => {
-                                    const disableClose = batchStatus === 'finalizing'
+                                    const disableClose = batchStatus === 'finalizing' || isFinalizeSuccess
                                     
                                     return (
                                         <button
@@ -3560,7 +3640,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                     ? 'text-gray-400 cursor-not-allowed opacity-50'
                                                     : 'text-gray-700 hover:bg-gray-50'
                                             }`}
-                                            title={disableClose ? 'Finalizing uploads…' : undefined}
+                                            title={disableClose ? (isFinalizeSuccess ? 'Assets created successfully. Dialog closing...' : 'Finalizing uploads…') : undefined}
                                         >
                                             {hasFiles ? 'Close' : 'Cancel'}
                                         </button>
@@ -3572,9 +3652,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 <button
                                         type="button"
                                         onClick={handleFinalizeV2}
-                                        disabled={!canFinalizeV2 || batchStatus === 'finalizing'}
+                                        disabled={!canFinalizeV2 || batchStatus === 'finalizing' || isFinalizeSuccess}
                                         className={`rounded-md px-4 py-2 text-sm font-medium flex items-center gap-2 ${
-                                            canFinalizeV2 && batchStatus !== 'finalizing'
+                                            canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess
                                                 ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
@@ -3596,6 +3676,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             )}
                         </div>
                     </div>
+                    
+                    {/* Success overlay - shown after finalize succeeds, before auto-close */}
+                    {isFinalizeSuccess && (
+                        <div className="absolute inset-0 bg-white bg-opacity-95 flex items-center justify-center z-50 rounded-lg">
+                            <div className="text-center">
+                                <CheckCircleIcon className="mx-auto h-16 w-16 text-green-500 mb-4" />
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                    Assets created successfully!
+                                </h3>
+                                <p className="text-sm text-gray-600">
+                                    The dialog will close automatically...
+                                </p>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
