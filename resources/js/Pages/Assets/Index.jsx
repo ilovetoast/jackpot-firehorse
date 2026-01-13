@@ -25,7 +25,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // FINAL FIX: Remount key to force page remount after finalize
     const [remountKey, setRemountKey] = useState(0)
     
-    // BUGFIX: Single source of truth for upload dialog state (page-level ownership)
+    // Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
+    // Do not convert back to prop-based visibility.
     const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
     
     // Prevent reopening dialog during auto-close timeout (400-700ms delay)
@@ -160,18 +161,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
         
-        // ROOT CAUSE FIX: Explicitly reset dialog state before preserveState navigation
+        // Phase 2 invariant: Explicitly reset dialog state before preserveState navigation
         // This prevents Inertia from preserving isUploadDialogOpen=true across category changes
-        setIsUploadDialogOpen(prev => {
-            console.log('[DIALOG_STATE_CHANGE]', {
-                file: 'Assets/Index.jsx',
-                location: 'handleCategorySelect',
-                from: prev,
-                to: false,
-                stack: new Error().stack.split('\n').slice(1,6).join(' -> ')
-            })
-            return false
-        })
+        setIsUploadDialogOpen(false)
         
         setSelectedCategoryId(categoryId)
         
@@ -475,7 +467,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 )}
             </div>
             
-            {/* FINAL FIX: Conditionally mount UploadAssetDialog to ensure it unmounts when closed */}
+            {/* Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
+                Do not convert back to prop-based visibility. */}
             {isUploadDialogOpen && (
                 <UploadAssetDialog
                     open={true}

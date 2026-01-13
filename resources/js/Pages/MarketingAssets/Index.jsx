@@ -20,7 +20,8 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
     
-    // BUGFIX: Single source of truth for upload dialog state (page-level ownership)
+    // Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
+    // Do not convert back to prop-based visibility.
     const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
     
     // Store only asset ID to prevent stale object references after Inertia reloads
@@ -107,18 +108,9 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
         
-        // ROOT CAUSE FIX: Explicitly reset dialog state before preserveState navigation
+        // Phase 2 invariant: Explicitly reset dialog state before preserveState navigation
         // This prevents Inertia from preserving isUploadDialogOpen=true across category changes
-        setIsUploadDialogOpen(prev => {
-            console.log('[DIALOG_STATE_CHANGE]', {
-                file: 'MarketingAssets/Index.jsx',
-                location: 'handleCategorySelect',
-                from: prev,
-                to: false,
-                stack: new Error().stack.split('\n').slice(1,6).join(' -> ')
-            })
-            return false
-        })
+        setIsUploadDialogOpen(false)
         
         setSelectedCategoryId(categoryId)
         
@@ -373,7 +365,8 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                 )}
             </div>
             
-            {/* FINAL FIX: Conditionally mount UploadAssetDialog to ensure it unmounts when closed */}
+            {/* Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
+                Do not convert back to prop-based visibility. */}
             {isUploadDialogOpen && (
                 <UploadAssetDialog
                     open={true}

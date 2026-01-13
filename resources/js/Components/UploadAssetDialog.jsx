@@ -55,11 +55,8 @@ const USE_LEGACY_UPLOADER = false
  * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully (batchStatus === 'complete')
  */
 export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null }) {
-    // CRITICAL DEBUG STEP — HARD CONTROL of open prop
-    // This temporarily violates hook rules to prove control flow
-    if (open !== true) {
-        return null
-    }
+    // Phase 2 invariant: This component assumes it is mounted only when visible.
+    // Lifecycle (mount/unmount) controls visibility — not internal state.
     const { auth } = usePage().props
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef(null)
@@ -348,7 +345,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // Freeze legacy Phase 2 cleanup logic
         if (!USE_LEGACY_UPLOADER) {
             // Clear refs on close (safe to do even when frozen)
-            // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) {
             //     currentlyAddingRef.current.clear()
             // }
             return // Early return - legacy logic frozen
@@ -2319,7 +2315,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const handleFinalizeV2 = useCallback(async () => {
         // Only allow finalize if button is enabled
         if (!canFinalizeV2) {
-            console.log('[FINALIZE_V2] Button disabled, returning early')
             return
         }
 
@@ -2350,7 +2345,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         })
         
         if (uploadedFiles.length === 0) {
-            console.log('[FINALIZE_V2] No uploaded files found, returning early')
             return // Should not happen if canFinalizeV2 is true, but guard anyway
         }
 
@@ -2580,7 +2574,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             })
 
             // batchStatus is now computed from v2Files, no manual update needed
-            console.log('[FINALIZE_V2] Results processed', { successCount: finalizedCount, failureCount: failedCount })
             
             // Set success state if all files finalized and no failures (for UI overlay during auto-close delay)
             if (finalizedCount > 0 && failedCount === 0) {
@@ -3117,7 +3110,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // FINAL FIX: Clear mapping when resetting state
         v2ToUploadManagerMapRef.current.clear()
         // Note: batchStatus is now computed from v2Files, will be 'idle' when v2Files is empty
-        console.log('[RESET_V2] State reset complete')
     }, [initialCategoryId])
 
     /**
@@ -3383,9 +3375,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
 
 
-    // BUGFIX: Early return after all hooks to ensure dialog unmounts when open=false
-    // This must come AFTER all hooks to comply with Rules of Hooks
-    // TEMPORARILY COMMENTED FOR DIAGNOSTIC: if (!open) return null
 
     return (
         <div
@@ -3630,7 +3619,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                console.log('[CLOSE_BUTTON_V2] Close button clicked, resetting v2 state')
                                                 resetV2State()
                                                 onClose()
                                             }}
