@@ -90,25 +90,61 @@ class AssetThumbnailController extends Controller
         $this->authorizeAsset($request, $asset);
         $this->validateStyle($style);
 
-        // CRITICAL: Preview thumbnails are only available if processing has started
-        // but final thumbnail is not yet ready. If final is ready, return 404 to force
-        // UI to use final endpoint instead.
-        $thumbnailStatus = $asset->thumbnail_status;
-
-        // If final thumbnail is ready, preview is no longer available
-        if ($thumbnailStatus === ThumbnailStatus::COMPLETED) {
-            abort(404, 'Preview not available - final thumbnail is ready');
+        // Step 6: Serve actual preview thumbnail files (LQIP)
+        // Preview thumbnails are real derivative images, not placeholders
+        // They are generated early in the pipeline and stored separately from final thumbnails
+        
+        // Check if preview thumbnail exists in metadata
+        $metadata = $asset->metadata ?? [];
+        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+        
+        // For preview endpoint, we only serve the 'preview' style (LQIP)
+        // Other styles (thumb, medium, large) should use the final endpoint
+        if ($style !== 'preview') {
+            abort(404, 'Preview endpoint only serves preview style');
         }
-
-        // If thumbnail generation failed or was skipped, no preview available
-        if ($thumbnailStatus === ThumbnailStatus::FAILED || $thumbnailStatus === ThumbnailStatus::SKIPPED) {
-            abort(404, 'Preview not available');
+        
+        $previewData = $previewThumbnails['preview'] ?? null;
+        if (!$previewData || !isset($previewData['path'])) {
+            abort(404, 'Preview thumbnail not available');
         }
-
-        // For now, preview endpoint returns 404 (no preview thumbnails generated yet)
-        // Future: Generate low-quality preview thumbnails during processing
-        // This ensures preview and final URLs are always distinct
-        abort(404, 'Preview thumbnail not available');
+        
+        $previewPath = $previewData['path'];
+        $bucket = $asset->storageBucket;
+        
+        if (!$bucket) {
+            abort(404, 'Storage bucket not found');
+        }
+        
+            // Stream preview thumbnail from S3
+            try {
+                $s3Client = $this->getS3Client();
+                $result = $s3Client->getObject([
+                'Bucket' => $bucket->name,
+                'Key' => $previewPath,
+            ]);
+            
+            $content = $result['Body']->getContents();
+            $contentType = $result['ContentType'] ?? 'image/jpeg';
+            
+            return response($content, 200)
+                ->header('Content-Type', $contentType)
+                ->header('Cache-Control', 'public, max-age=3600') // Cache preview for 1 hour
+                ->header('X-Thumbnail-Type', 'preview'); // Header to identify preview vs final
+        } catch (S3Exception $e) {
+            if ($e->getStatusCode() === 404) {
+                abort(404, 'Preview thumbnail file not found');
+            }
+            
+            Log::error('Failed to stream preview thumbnail from S3', [
+                'asset_id' => $asset->id,
+                'preview_path' => $previewPath,
+                'bucket' => $bucket->name,
+                'error' => $e->getMessage(),
+            ]);
+            
+            abort(500, 'Failed to retrieve preview thumbnail');
+        }
     }
 
     /**

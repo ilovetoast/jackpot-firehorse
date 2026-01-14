@@ -114,6 +114,33 @@ services:
             - sail
         depends_on:
             - mysql
+    queue:
+        build:
+            context: './vendor/laravel/sail/runtimes/8.5'
+            dockerfile: Dockerfile
+            args:
+                WWWGROUP: '${WWWGROUP}'
+        image: 'sail-8.5/app'
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        environment:
+            WWWUSER: '${WWWUSER}'
+            LARAVEL_SAIL: 1
+        volumes:
+            - '.:/var/www/html'
+        networks:
+            - sail
+        depends_on:
+            - mysql
+            - redis
+        restart: unless-stopped
+        # Queue worker configuration:
+        # --tries=3: Maximum retry attempts per job
+        # --timeout=90: Job timeout in seconds (matches queue config)
+        # --sleep=3: Seconds to sleep when no jobs available
+        # --max-jobs=1000: Restart worker after N jobs (prevents memory leaks)
+        # --max-time=3600: Restart worker after 1 hour (prevents memory leaks)
+        command: php artisan queue:work --tries=3 --timeout=90 --sleep=3 --max-jobs=1000 --max-time=3600
 networks:
     sail:
         driver: bridge

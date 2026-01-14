@@ -60,6 +60,26 @@ return [
 
     'thumbnail_styles' => [
         /*
+         * Step 6: Low-quality preview thumbnail (LQIP).
+         * Extremely small, heavily blurred preview shown immediately while final thumbnails process.
+         * Generated early in pipeline to provide instant visual feedback.
+         * 
+         * Rules:
+         * - Size: ~32x32 (extremely small for fast generation and transfer)
+         * - Format: same as final (jpg/webp)
+         * - Heavy blur applied during generation
+         * - Preview and final URLs are ALWAYS distinct (no cache confusion)
+         * - Preview existence does NOT mark COMPLETED (final controls completion)
+         */
+        'preview' => [
+            'width' => 32,
+            'height' => 32,
+            'quality' => 60, // Lower quality for smaller file size
+            'fit' => 'contain', // maintain aspect ratio, fit within dimensions
+            'blur' => true, // Apply heavy blur for LQIP effect
+        ],
+
+        /*
          * Small grid thumbnail.
          * Used for asset grid views and list previews.
          */

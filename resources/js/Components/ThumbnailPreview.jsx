@@ -1,228 +1,157 @@
 /**
- * ThumbnailPreview Component - Step 2: Frontend Rendering with Strict Priority
+ * ThumbnailPreview Component
  * 
- * CRITICAL RENDERING PRIORITY (enforced strictly):
- * ================================================
+ * Renders asset thumbnails with strict priority: final > preview > icon
  * 
- * 1. FINAL THUMBNAIL (highest priority)
- *    - If final_thumbnail_url exists → render <img> immediately
- *    - No fade on initial render (prevents UI jank)
- *    - No icon or placeholder shown
- *    - Final thumbnails are permanent, full-quality, versioned
+ * HARD STABILIZATION: In grid context, thumbnails are snapshot-only by design.
+ * Grid thumbnails are locked on first render and never update after mount.
+ * This prevents flicker and re-render thrash.
  * 
- * 2. PREVIEW THUMBNAIL (second priority)
- *    - If preview_thumbnail_url exists → render preview <img> immediately
- *    - Apply blur/pixelation styling to indicate it's temporary
- *    - Optional subtle spinner (top-right only) if still processing
- *    - Preview thumbnails are temporary, low-quality, shown during processing
- * 
- * 3. ICON (last resort)
- *    - Only render when NO thumbnails exist (unsupported format, failed, or not ready)
- *    - Never show icons if preview or final exists
- *    - Icons are a last resort, not a first choice
- * 
- * WHY THIS PRIORITY EXISTS:
- * -------------------------
- * - Prevents icon flash: Icons never render before checking for thumbnails
- * - Prevents green tiles: No placeholder images means no cached placeholders
- * - Enables clean preview→final swap: Different URLs ensure no cache collision
- * - Final always wins: Once final exists, preview is ignored
- * 
- * PREVIEW vs FINAL SEPARATION:
- * ----------------------------
- * - Preview and final URLs are distinct (different paths)
- * - Browser treats them as separate resources (no cache confusion)
- * - Preview can be replaced by final without cache issues
- * - Version query param on final ensures browser refetches when version changes
+ * Live thumbnail updates are ONLY enabled in AssetDrawer context via useDrawerThumbnailPoll.
  * 
  * @param {Object} props
- * @param {Object} props.asset - Asset object with preview_thumbnail_url, final_thumbnail_url, thumbnail_status
+ * @param {Object} props.asset - Asset object
  * @param {string} props.alt - Alt text for image
- * @param {string} props.className - CSS classes for container
- * @param {number} props.retryCount - Current retry count (for UI-only retry logic)
- * @param {Function} props.onRetry - Callback when retry is requested (UI only)
- * @param {string} props.size - Icon size ('sm', 'md', 'lg')
- * @param {string} props.thumbnailVersion - Stable version signal (derived from asset props)
- * @param {boolean} props.shouldAnimateThumbnail - If true, apply fade-in animation (only set on meaningful state transitions)
+ * @param {string} props.className - Additional CSS classes
+ * @param {number} props.retryCount - Retry count (UI only)
+ * @param {string} props.size - Size variant ('sm', 'md', 'lg')
+ * @param {number|null} props.thumbnailVersion - Thumbnail version (ignored in grid context)
+ * @param {boolean} props.shouldAnimateThumbnail - Whether to animate thumbnail appearance
+ * @param {string|null} props.primaryColor - Brand primary color for placeholder
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { usePage } from '@inertiajs/react'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import FileTypeIcon from './FileTypeIcon'
+import AssetPlaceholder from './AssetPlaceholder'
+
 
 export default function ThumbnailPreview({
     asset,
     alt = 'Asset',
     className = '',
     retryCount = 0,
-    onRetry = null,
     size = 'md',
     thumbnailVersion = null,
     shouldAnimateThumbnail = false,
+    primaryColor = null
 }) {
+    const { auth } = usePage().props
+    // Use current brand's primary color, fallback to default if not provided
+    const brandPrimaryColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const [imageLoaded, setImageLoaded] = useState(false)
     const [imageError, setImageError] = useState(false)
     const [isAnimating, setIsAnimating] = useState(false)
     const animationCompletedRef = useRef(false)
     const imgRef = useRef(null)
+
+    // HARD STABILIZATION: Lock thumbnail URL on first render
+    // Once a thumbnail is visible, it never reloads or flashes.
+    // NOTE: Thumbnails intentionally do NOT live-update on the grid.
+    // Stability > real-time updates.
+    // Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
     
-    // Get thumbnail state with preview and final URLs
-    const { state, thumbnailUrl, previewThumbnailUrl, finalThumbnailUrl, canRetry } = useMemo(() => {
+    // Lock the URL on first render - never update after mount
+    const [lockedUrl] = useState(() => {
+        // Determine initial URL: final > preview > null
+        const initialFinal = asset?.final_thumbnail_url
+        const initialPreview = asset?.preview_thumbnail_url
+        return initialFinal || initialPreview || null
+    })
+    
+    // Also lock the type (final vs preview) at mount time
+    const [lockedType] = useState(() => {
+        if (asset?.final_thumbnail_url) return 'final'
+        if (asset?.preview_thumbnail_url) return 'preview'
+        return null
+    })
+    
+    // Determine if locked URL is final or preview (based on what was locked at mount)
+    const lockedIsFinal = lockedType === 'final'
+    const lockedIsPreview = lockedType === 'preview'
+    
+    // Final thumbnails only win AFTER they successfully load
+    // If final exists but failed to load (imageError), fall back to preview
+    const canUseFinal = lockedIsFinal && !imageError
+    const activeThumbnailUrl = lockedUrl
+    const isPreview = lockedIsPreview
+    
+    // Get state for icon rendering (but don't use it to change URLs)
+    // NOTE: Thumbnails intentionally do NOT live-update on the grid.
+    // Stability > real-time updates.
+    const { state } = useMemo(() => {
         return getThumbnailState(asset, retryCount)
-    }, [asset?.id, thumbnailVersion, retryCount, asset?.preview_thumbnail_url, asset?.final_thumbnail_url])
-    
-    // Determine which thumbnail URL to use (final > preview > null)
-    const activeThumbnailUrl = finalThumbnailUrl || previewThumbnailUrl || thumbnailUrl
-    const isPreview = !finalThumbnailUrl && !!previewThumbnailUrl
-    
-    // Handle animation trigger from parent (meaningful state transition detected)
+    }, [asset?.id, retryCount])
+
+    /* ------------------------------------------------------------
+       Animation trigger (only for meaningful transitions)
+    ------------------------------------------------------------ */
     useEffect(() => {
         if (shouldAnimateThumbnail && !animationCompletedRef.current) {
             setIsAnimating(true)
-            const timer = setTimeout(() => {
+            const t = setTimeout(() => {
                 setIsAnimating(false)
                 animationCompletedRef.current = true
             }, 500)
-            return () => clearTimeout(timer)
+            return () => clearTimeout(t)
         }
     }, [shouldAnimateThumbnail])
-    
-    // Reset animation state when thumbnail URL changes
-    useEffect(() => {
-        if (activeThumbnailUrl) {
-            animationCompletedRef.current = false
-            setIsAnimating(false)
-            
-            // Pre-check if image is already loaded (cached images may not fire onLoad)
-            const img = new Image()
-            let isHandled = false
-            
-            const handleLoad = () => {
-                if (!isHandled) {
-                    isHandled = true
-                    setImageLoaded(true)
-                    setImageError(false)
-                }
-            }
-            
-            const handleError = () => {
-                if (!isHandled) {
-                    isHandled = true
-                    setImageError(true)
-                    setImageLoaded(false)
-                }
-            }
-            
-            img.onload = handleLoad
-            img.onerror = handleError
-            img.src = activeThumbnailUrl
-            
-            // Check if image is already cached
-            if (img.complete) {
-                if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                    setImageLoaded(true)
-                    setImageError(false)
-                } else {
-                    setImageError(true)
-                    setImageLoaded(false)
-                }
-            } else {
-                setImageLoaded(false)
-                setImageError(false)
-            }
-        } else {
-            setImageLoaded(false)
-            setImageError(false)
-        }
-    }, [activeThumbnailUrl, thumbnailVersion])
-    
+
+    // HARD STABILIZATION: Never reset imageLoaded after mount
+    // Removed all image state resets to prevent flashing
+
+    /* ------------------------------------------------------------
+       Load / error handling
+       - Preview errors are NON-TERMINAL
+       - Final errors are TERMINAL
+    ------------------------------------------------------------ */
     const handleImageLoad = () => {
         setImageLoaded(true)
         setImageError(false)
     }
-    
+
     const handleImageError = () => {
-        console.error('[ThumbnailPreview] Runtime image error', {
-            assetId: asset?.id,
-            thumbnailUrl: activeThumbnailUrl,
-            isPreview,
-            state,
-            note: 'Image failed to load - falling back to FileTypeIcon',
-        })
-        setImageError(true)
-        setImageLoaded(false)
+        if (isPreview) {
+            console.warn('[ThumbnailPreview] Preview load failed (non-terminal)', {
+                assetId: asset?.id,
+                url: activeThumbnailUrl,
+            })
+            setImageLoaded(false)
+            setImageError(false)
+        } else {
+            console.error('[ThumbnailPreview] Final thumbnail failed', {
+                assetId: asset?.id,
+                url: activeThumbnailUrl,
+            })
+            setImageLoaded(false)
+            setImageError(true)
+        }
     }
-    
-    // Check if image is already loaded after render (handles cached images)
-    useEffect(() => {
-        if (activeThumbnailUrl && imgRef.current) {
-            const img = imgRef.current
-            if (img.complete) {
-                if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                    if (!imageLoaded) {
-                        setImageLoaded(true)
-                        setImageError(false)
-                    }
-                } else {
-                    if (!imageError) {
-                        setImageError(true)
-                        setImageLoaded(false)
-                    }
-                }
-            }
-        }
-    }, [activeThumbnailUrl, imageLoaded, imageError])
-    
-    // Extract file extension and MIME type for FileTypeIcon
-    const fileExtension = asset?.file_extension || 
-                         asset?.original_filename?.split('.').pop()?.toLowerCase() ||
-                         asset?.file?.name?.split('.').pop()?.toLowerCase()
-    const mimeType = asset?.mime_type || asset?.file?.type
-    
-    // ============================================================================
-    // PRIORITY 1: FINAL THUMBNAIL (highest priority)
-    // ============================================================================
-    // If final thumbnail exists, render it immediately.
-    // No icon, no placeholder, no fade on initial render.
-    // Final thumbnails are permanent, full-quality, and versioned.
-    // ============================================================================
-    if (finalThumbnailUrl) {
-        // Runtime error - fallback to icon
-        if (imageError) {
-            return (
-                <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
-                    <FileTypeIcon
-                        fileExtension={fileExtension}
-                        mimeType={mimeType}
-                        size={size}
-                    />
-                </div>
-            )
-        }
-        
-        // Render final thumbnail immediately
+
+    /* ------------------------------------------------------------
+       PRIORITY 1 — FINAL THUMBNAIL (only if successfully loaded)
+       HARD STABILIZATION: Render ONLY lockedUrl - never respond to updates
+    ------------------------------------------------------------ */
+    if (canUseFinal && lockedUrl) {
         return (
             <div className={`relative ${className}`}>
-                {/* Icon shown only while loading */}
-                {!imageLoaded && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-                        <FileTypeIcon
-                            fileExtension={fileExtension}
-                            mimeType={mimeType}
-                            size={size}
-                        />
-                    </div>
+                {/* Background placeholder - only show if image not loaded and not animating */}
+                {!imageLoaded && !isAnimating && (
+                    <div className="absolute inset-0 bg-gray-100" />
                 )}
-                
-                {/* Final thumbnail - no blur, full quality */}
+
                 <img
+                    key={lockedUrl}
                     ref={imgRef}
-                    src={finalThumbnailUrl}
+                    src={lockedUrl}
                     alt={alt}
                     className="w-full h-full object-cover"
                     loading="eager"
                     style={{
-                        opacity: imageLoaded && !imageError ? 1 : 0,
-                        transition: isAnimating && imageLoaded ? 'opacity 500ms ease-out' : 'none',
+                        opacity: imageLoaded ? 1 : 0,
+                        transition: isAnimating && imageLoaded
+                            ? 'opacity 500ms ease-out'
+                            : 'none',
                     }}
                     onLoad={handleImageLoad}
                     onError={handleImageError}
@@ -230,83 +159,94 @@ export default function ThumbnailPreview({
             </div>
         )
     }
-    
-    // ============================================================================
-    // PRIORITY 2: PREVIEW THUMBNAIL (second priority)
-    // ============================================================================
-    // If preview thumbnail exists, render it immediately with blur/pixelation.
-    // Preview thumbnails are temporary, low-quality, shown during processing.
-    // Optional subtle spinner if still processing.
-    // ============================================================================
-    if (previewThumbnailUrl) {
-        // Runtime error - fallback to icon
-        if (imageError) {
-            return (
-                <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
-                    <FileTypeIcon
-                        fileExtension={fileExtension}
-                        mimeType={mimeType}
-                        size={size}
-                    />
-                </div>
-            )
-        }
-        
-        // Check if thumbnail is still processing (show spinner)
+
+
+
+    /* ------------------------------------------------------------
+       FALLBACK: Final failed but preview exists → render preview
+       HARD STABILIZATION: Render ONLY lockedUrl - never respond to updates
+    ------------------------------------------------------------ */
+    if (lockedIsFinal && imageError && lockedIsPreview && lockedUrl) {
+        // HARD TERMINAL STATE: Spinner may ONLY render when actively processing
+        // Spinner must NEVER render for terminal states (COMPLETED, FAILED, SKIPPED)
+        // Spinner must NEVER render when final thumbnail exists
         const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
-        const isProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
-        const thumbnailExpected = supportsThumbnail(mimeType, fileExtension)
+        const hasFinalThumbnail = !!asset?.final_thumbnail_url
+        const hasThumbnailError = !!asset?.thumbnail_error
+        
+        // Explicit terminal state guard - spinner must never render for these
+        const isTerminalState = thumbnailStatus === 'COMPLETED' || 
+                               thumbnailStatus === 'FAILED' || 
+                               thumbnailStatus === 'SKIPPED'
+        
+        // Strict condition: spinner ONLY when actively processing
+        const isActivelyProcessing = thumbnailStatus === 'PROCESSING' &&
+                                     !hasFinalThumbnail &&
+                                     !hasThumbnailError &&
+                                     !isTerminalState
+        
+        // Debug logging (temporary)
+        if (isActivelyProcessing) {
+            console.debug('[ThumbnailSpinner] Spinner visible (fallback preview)', {
+                asset_id: asset?.id,
+                thumbnail_status: thumbnailStatus,
+                has_final: hasFinalThumbnail,
+                has_error: hasThumbnailError,
+                is_terminal: isTerminalState,
+            })
+        }
         
         return (
             <div className={`relative ${className}`}>
-                {/* Icon shown only while loading */}
-                {!imageLoaded && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-                        <FileTypeIcon
-                            fileExtension={fileExtension}
-                            mimeType={mimeType}
-                            size={size}
-                        />
-                    </div>
-                )}
-                
-                {/* Preview thumbnail - blur/pixelation to indicate temporary */}
+                {/* Preview image always renders when preview_thumbnail_url exists */}
+                {/* imageLoaded only affects opacity, not DOM presence */}
                 <img
+                    key={lockedUrl}
                     ref={imgRef}
-                    src={previewThumbnailUrl}
+                    src={lockedUrl}
                     alt={alt}
                     className="w-full h-full object-cover"
                     loading="eager"
                     style={{
-                        opacity: imageLoaded && !imageError ? 1 : 0,
-                        filter: 'blur(2px)', // Blur to indicate it's temporary/preview
-                        transition: isAnimating && imageLoaded ? 'opacity 500ms ease-out' : 'none',
+                        opacity: imageLoaded ? 1 : 0.5,
+                        imageRendering: isPreview ? 'pixelated' : 'auto',
+                        transform: isPreview ? 'scale(1.03)' : 'none',
+                        transition: isAnimating && imageLoaded
+                            ? 'opacity 500ms ease-out'
+                            : 'none',
                     }}
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />
-                
-                {/* Subtle spinner - top-right corner only, only when processing */}
-                {isProcessing && thumbnailExpected && (
-                    <div className="absolute top-2 right-2">
-                        <svg 
-                            className="h-4 w-4 text-gray-400 opacity-50 animate-spin" 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            fill="none" 
+
+                {/* Preview spinner overlay - bottom-right corner */}
+                {/* ONLY render when actively processing (strict terminal-aware condition) */}
+                {isActivelyProcessing && (
+                    <div 
+                        className="absolute bottom-2 right-2 pointer-events-none flex items-center justify-center rounded-full"
+                        style={{
+                            width: '28px',
+                            height: '28px',
+                            backgroundColor: brandPrimaryColor,
+                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                        }}
+                    >
+                        <svg
+                            className="w-4 h-4 animate-spin"
+                            style={{
+                                color: 'rgba(255, 255, 255, 0.8)',
+                                animationDuration: '1.2s',
+                            }}
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
                             viewBox="0 0 24 24"
+                            stroke="currentColor"
                         >
-                            <circle 
-                                className="opacity-25" 
-                                cx="12" 
-                                cy="12" 
-                                r="10" 
-                                stroke="currentColor" 
-                                strokeWidth="4"
-                            />
-                            <path 
-                                className="opacity-75" 
-                                fill="currentColor" 
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                             />
                         </svg>
                     </div>
@@ -314,65 +254,106 @@ export default function ThumbnailPreview({
             </div>
         )
     }
-    
-    // ============================================================================
-    // PRIORITY 3: ICON (last resort - only when NO thumbnails exist)
-    // ============================================================================
-    // Icons are only shown when:
-    // - Unsupported format (NOT_SUPPORTED)
-    // - Failed thumbnail generation (FAILED)
-    // - Skipped thumbnail generation (SKIPPED)
-    // - Pending/processing with no preview available (PENDING)
-    // 
-    // Icons are NEVER shown if preview or final thumbnails exist.
-    // This prevents icon flash and ensures thumbnails always win.
-    // ============================================================================
-    
-    // State A) NOT_SUPPORTED - File type doesn't support thumbnails
-    if (state === 'NOT_SUPPORTED') {
-        return (
-            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
-                <FileTypeIcon
-                    fileExtension={fileExtension}
-                    mimeType={mimeType}
-                    size={size}
-                />
-            </div>
-        )
-    }
-    
-    // State B) PENDING / PROCESSING - Thumbnail generation in progress
-    if (state === 'PENDING') {
-        const thumbnailExpected = supportsThumbnail(mimeType, fileExtension)
+
+    /* ------------------------------------------------------------
+       PRIORITY 2 — PREVIEW THUMBNAIL (NO ICONS EVER)
+       HARD STABILIZATION: Render ONLY lockedUrl - never respond to updates
+       Preview must render immediately when preview_thumbnail_url exists
+       imageLoaded only affects opacity, not whether image exists in DOM
+    ------------------------------------------------------------ */
+    if (lockedIsPreview && lockedUrl) {
+        // HARD TERMINAL STATE: Spinner may ONLY render when actively processing
+        // Spinner must NEVER render for terminal states (COMPLETED, FAILED, SKIPPED)
+        // Spinner must NEVER render when final thumbnail exists
+        const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
+        const hasFinalThumbnail = !!asset?.final_thumbnail_url
+        const hasThumbnailError = !!asset?.thumbnail_error
+        
+        // Explicit terminal state guard - spinner must never render for these
+        const isTerminalState = thumbnailStatus === 'COMPLETED' || 
+                               thumbnailStatus === 'FAILED' || 
+                               thumbnailStatus === 'SKIPPED'
+        
+        // Strict condition: spinner ONLY when actively processing
+        // ALL of these must be true:
+        // 1. thumbnail_status is PROCESSING (not terminal)
+        // 2. No final thumbnail exists yet (final means processing is done)
+        // 3. No thumbnail error exists (error means processing failed)
+        // 4. Not in a terminal state (explicit guard)
+        const isActivelyProcessing = thumbnailStatus === 'PROCESSING' &&
+                                     !hasFinalThumbnail &&
+                                     !hasThumbnailError &&
+                                     !isTerminalState
+        
+        // Debug logging (temporary)
+        if (isActivelyProcessing) {
+            console.debug('[ThumbnailSpinner] Spinner visible', {
+                asset_id: asset?.id,
+                thumbnail_status: thumbnailStatus,
+                has_final: hasFinalThumbnail,
+                has_preview: !!asset?.preview_thumbnail_url,
+                has_error: hasThumbnailError,
+                is_terminal: isTerminalState,
+            })
+        }
         
         return (
-            <div className={`relative flex items-center justify-center bg-gray-50 ${className}`}>
-                <FileTypeIcon
-                    fileExtension={fileExtension}
-                    mimeType={mimeType}
-                    size={size}
+            <div className={`relative ${className}`}>
+                {/* Background placeholder - show while image loads */}
+                {!imageLoaded && (
+                    <div className="absolute inset-0 bg-gray-100" />
+                )}
+                
+                {/* Preview image always renders when preview_thumbnail_url exists */}
+                {/* NEVER render FileTypeIcon when preview exists */}
+                {/* imageLoaded only affects opacity, not DOM presence */}
+                <img
+                    key={lockedUrl}
+                    ref={imgRef}
+                    src={lockedUrl}
+                    alt={alt}
+                    className="w-full h-full object-cover"
+                    loading="eager"
+                    style={{
+                        opacity: imageLoaded ? 1 : 0.5,
+                        imageRendering: isPreview ? 'pixelated' : 'auto',
+                        transform: isPreview ? 'scale(1.03)' : 'none',
+                        transition: isAnimating && imageLoaded
+                            ? 'opacity 500ms ease-out'
+                            : 'none',
+                    }}
+                    onLoad={handleImageLoad}
+                    onError={handleImageError}
                 />
-                {/* Subtle spinner - top-right corner only, only when thumbnail is expected */}
-                {thumbnailExpected && (
-                    <div className="absolute top-2 right-2">
-                        <svg 
-                            className="h-4 w-4 text-gray-400 opacity-50 animate-spin" 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            fill="none" 
+
+                {/* Preview spinner overlay - bottom-right corner */}
+                {/* ONLY render when actively processing (strict terminal-aware condition) */}
+                {isActivelyProcessing && (
+                    <div 
+                        className="absolute bottom-2 right-2 pointer-events-none flex items-center justify-center rounded-full"
+                        style={{
+                            width: '28px',
+                            height: '28px',
+                            backgroundColor: brandPrimaryColor,
+                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                        }}
+                    >
+                        <svg
+                            className="w-4 h-4 animate-spin"
+                            style={{
+                                color: 'rgba(255, 255, 255, 0.8)',
+                                animationDuration: '1.2s',
+                            }}
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
                             viewBox="0 0 24 24"
+                            stroke="currentColor"
                         >
-                            <circle 
-                                className="opacity-25" 
-                                cx="12" 
-                                cy="12" 
-                                r="10" 
-                                stroke="currentColor" 
-                                strokeWidth="4"
-                            />
-                            <path 
-                                className="opacity-75" 
-                                fill="currentColor" 
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                             />
                         </svg>
                     </div>
@@ -380,41 +361,58 @@ export default function ThumbnailPreview({
             </div>
         )
     }
+
+    /* ------------------------------------------------------------
+       PRIORITY 3 — ICON (STRICT RULES)
+       Icons may ONLY render when:
+       - state === NOT_SUPPORTED
+       - state === FAILED
+       - state === SKIPPED
+       - state === PENDING AND preview_thumbnail_url is null AND final_thumbnail_url is null
+       
+       CRITICAL: Icons NEVER render when preview_thumbnail_url exists
+       Icons may render if final_thumbnail_url exists but failed (no preview available)
+    ------------------------------------------------------------ */
+    // Icons are terminal-only - never render if preview exists
+    // Guard: If preview exists, we should have already returned above
+    // HARD STABILIZATION: Check locked URL, not live URL
+    if (lockedUrl) {
+        // Should not reach here - preview/final branch should have handled it
+        // Return null to prevent icon rendering
+        return null
+    }
     
-    // State C) FAILED - Thumbnail generation failed
-    if (state === 'FAILED') {
+    if (state === 'NOT_SUPPORTED' || state === 'FAILED' || state === 'SKIPPED') {
         return (
             <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
-                <FileTypeIcon
-                    fileExtension={fileExtension}
-                    mimeType={mimeType}
-                    size={size}
+                <AssetPlaceholder
+                    asset={asset}
+                    primaryColor={brandPrimaryColor}
+                    />
+            </div>
+        )
+    }
+
+    // PENDING state - only show icon if no preview and no final exists
+    // HARD STABILIZATION: Check locked URL, not live URL
+    if (state === 'PENDING' && !lockedUrl) {
+        return (
+            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+                <AssetPlaceholder
+                asset={asset}
+                    primaryColor={brandPrimaryColor}
                 />
             </div>
         )
     }
-    
-    // State D) SKIPPED - Thumbnail generation skipped
-    if (state === 'SKIPPED') {
-        return (
-            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
-                <FileTypeIcon
-                    fileExtension={fileExtension}
-                    mimeType={mimeType}
-                    size={size}
-                />
-            </div>
-        )
-    }
-    
+
     // Fallback: Should not reach here, but show icon if we do
     return (
         <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
-            <FileTypeIcon
-                fileExtension={fileExtension}
-                mimeType={mimeType}
-                size={size}
-            />
+            <AssetPlaceholder
+                asset={asset}
+                    primaryColor={brandPrimaryColor}
+                />
         </div>
     )
 }

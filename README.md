@@ -19,6 +19,107 @@
 
 ---
 
+## 🚀 Queue Workers (Local Development)
+
+**Queue workers are required for thumbnail processing and background jobs.**
+
+### Quick Start
+
+Queue workers run automatically via Docker Compose:
+
+```bash
+# Start all services (including queue worker)
+./vendor/bin/sail up -d
+
+# Verify queue worker is running
+./vendor/bin/sail ps | grep queue
+```
+
+### Manual Commands
+
+**Start queue worker:**
+```bash
+./vendor/bin/sail up -d queue
+```
+
+**Stop queue worker:**
+```bash
+./vendor/bin/sail stop queue
+```
+
+**View queue worker logs:**
+```bash
+./vendor/bin/sail logs -f queue
+```
+
+**Process jobs manually (one-time):**
+```bash
+./vendor/bin/sail artisan queue:work --once
+```
+
+### Health Check
+
+Check for stuck jobs and missing workers:
+
+```bash
+./vendor/bin/sail artisan queue:health-check
+```
+
+This command will:
+- ✓ Report if queue is healthy (no jobs)
+- ⚠️ Warn if jobs are stuck (>5 minutes old)
+- Show total jobs and stale job count
+
+### Troubleshooting
+
+**Problem: Thumbnails never complete, "Processing (1)" stuck**
+
+1. Check if queue worker is running:
+   ```bash
+   ./vendor/bin/sail ps | grep queue
+   ```
+
+2. Check for stuck jobs:
+   ```bash
+   ./vendor/bin/sail artisan queue:health-check
+   ```
+
+3. If jobs are stuck, restart the queue worker:
+   ```bash
+   ./vendor/bin/sail restart queue
+   ```
+
+4. Or manually process stuck jobs:
+   ```bash
+   ./vendor/bin/sail artisan queue:work --once --tries=1
+   # Repeat until queue is empty
+   ```
+
+**Problem: Queue worker keeps crashing**
+
+Check logs for errors:
+```bash
+./vendor/bin/sail logs queue
+```
+
+Common issues:
+- Database connection errors → Ensure MySQL is running
+- Memory limits → Increase PHP memory limit in Dockerfile
+- Timeout errors → Jobs exceeding 90s timeout
+
+### Configuration
+
+Queue connection: `database` (configured in `config/queue.php`)
+
+Worker settings (in `compose.yaml`):
+- `--tries=3` - Maximum retry attempts
+- `--timeout=90` - Job timeout in seconds
+- `--sleep=3` - Seconds to sleep when no jobs available
+- `--max-jobs=1000` - Restart worker after processing N jobs (prevents memory leaks)
+- `--max-time=3600` - Restart worker after N seconds (1 hour)
+
+---
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

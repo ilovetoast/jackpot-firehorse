@@ -54,7 +54,7 @@ const USE_LEGACY_UPLOADER = false
  * @param {number|null} initialCategoryId - Optional initial category ID to prepopulate
  * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully (batchStatus === 'complete')
  */
-export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null }) {
+export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null, initialFiles = null }) {
     // Phase 2 invariant: This component assumes it is mounted only when visible.
     // Lifecycle (mount/unmount) controls visibility — not internal state.
     const { auth } = usePage().props
@@ -335,6 +335,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
     }, [open])
     
+    // Handle initial files from drag-and-drop when dialog opens
+    useEffect(() => {
+        if (open && initialFiles && initialFiles.length > 0) {
+            // Add files automatically when dialog opens with initial files
+            handleFileSelect(initialFiles)
+        }
+    }, [open, initialFiles]) // eslint-disable-line react-hooks/exhaustive-deps
+    
     // DISABLED LEGACY CODE (commented out for clean uploader v2):
     /*
     // LEGACY — DO NOT USE: Clean up old uploads when dialog opens
@@ -390,13 +398,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [open])
     */
 
-    // Filter categories by asset type
+    // Filter categories by asset type and exclude deleted system categories
     const filteredCategories = (categories || []).filter(cat => {
-        if (defaultAssetType === 'asset') {
-            return cat.asset_type === 'asset' || cat.asset_type === 'basic'
-        } else {
-            return cat.asset_type === 'marketing'
+        // Filter by asset type
+        const matchesAssetType = defaultAssetType === 'asset' 
+            ? (cat.asset_type === 'asset' || cat.asset_type === 'basic')
+            : cat.asset_type === 'marketing'
+        
+        if (!matchesAssetType) {
+            return false
         }
+        
+        // Exclude system categories where the template has been deleted
+        // Check both template_exists flag and deletion_available flag
+        if (cat.is_system === true) {
+            // If template_exists is explicitly false, exclude it
+            if (cat.template_exists === false) {
+                return false
+            }
+            // Also check deletion_available flag if present
+            if (cat.deletion_available === true) {
+                return false
+            }
+        }
+        
+        return true
     })
 
     /**

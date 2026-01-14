@@ -17,12 +17,38 @@
  * @param {Object} props.asset - Asset object with id, title, metadata, etc.
  * @param {Function} props.onClose - Callback when drawer should close
  */
+/**
+ * AssetDrawer Component
+ * 
+ * Right-side drawer panel for displaying asset details.
+ * Pushes the grid content when open (desktop/tablet), overlays on mobile.
+ * 
+ * LIVE THUMBNAIL BEHAVIOR: This component implements live thumbnail polling
+ * for the active asset ONLY. Polling is completely isolated from grid state.
+ * 
+ * Features:
+ * - Large preview using /app/assets/{id}/thumbnail/medium
+ * - Asset header (title, file type, status indicators)
+ * - Metadata summary (category, file size, MIME type, created date)
+ * - Activity timeline
+ * - Processing state (thumbnail status, errors)
+ * - Keyboard accessible (Esc to close)
+ * - Focus trap on mobile
+ * - Live thumbnail updates (preview → final swap)
+ * 
+ * @param {Object} props
+ * @param {Object} props.asset - Asset object with id, title, metadata, etc.
+ * @param {Function} props.onClose - Callback when drawer should close
+ * @param {Array} props.assets - Array of all assets (for carousel navigation)
+ * @param {number|null} props.currentAssetIndex - Current asset index in carousel
+ */
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
+import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 
 export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null }) {
     const drawerRef = useRef(null)
@@ -161,7 +187,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         return null
     }
 
-    const currentCarouselAsset = imageAssets[carouselIndex] || asset
+    // Use displayAsset for carousel (with live updates)
+    const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
     const canNavigateLeft = carouselIndex > 0
     const canNavigateRight = carouselIndex < imageAssets.length - 1
 
@@ -224,21 +251,38 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [showZoomModal, canNavigateLeft, canNavigateRight, isTransitioning])
 
+    // LIVE THUMBNAIL BEHAVIOR: Poll thumbnail status for drawer asset only
+    // This is completely isolated from grid state - drawer updates never affect grid
+    const { drawerAsset } = useDrawerThumbnailPoll({
+        asset,
+        onAssetUpdate: (updatedAsset) => {
+            // Update local state for drawer display only
+            // This does NOT mutate grid assets
+            // The drawer will re-render with updated thumbnail URLs
+        },
+    })
+
+    // Use drawerAsset (with live updates) for thumbnail display
+    // Fallback to prop asset if drawerAsset not yet initialized
+    const displayAsset = drawerAsset || asset
+
     // Extract file extension
-    const fileExtension = asset.file_extension || asset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
-    const isImage = asset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
+    // Use displayAsset (with live updates) instead of prop asset
+    const fileExtension = displayAsset.file_extension || displayAsset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
+    const isImage = displayAsset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
 
     // Phase 3.1: Derive stable thumbnail version signal
-    // This ensures ThumbnailPreview re-evaluates after background reconciliation updates asset props
-    const thumbnailVersion = useMemo(() => getThumbnailVersion(asset), [
-        asset?.id,
-        asset?.thumbnail_url,
-        asset?.thumbnail_status?.value || asset?.thumbnail_status,
-        asset?.updated_at,
+    // This ensures ThumbnailPreview re-evaluates after live polling updates
+    const thumbnailVersion = useMemo(() => getThumbnailVersion(displayAsset), [
+        displayAsset?.id,
+        displayAsset?.thumbnail_url,
+        displayAsset?.thumbnail_status?.value || displayAsset?.thumbnail_status,
+        displayAsset?.updated_at,
     ])
 
     // Check thumbnail status (for legacy compatibility - ThumbnailPreview handles state machine)
-    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
+    // Use displayAsset (with live updates) instead of prop asset
+    const thumbnailStatus = displayAsset.thumbnail_status?.value || displayAsset.thumbnail_status || 'pending'
     const thumbnailsComplete = thumbnailStatus === 'completed'
     const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
     const thumbnailsFailed = thumbnailStatus === 'failed'
@@ -249,8 +293,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Asset.status represents visibility only, not processing state
     // Phase 3.1: Processing badge should only appear when thumbnail state is 'pending'
     // Do not rely on legacy asset.status flags alone - thumbnail state is the source of truth
-    const thumbnailState = useMemo(() => getThumbnailState(asset, thumbnailRetryCount), [
-        asset?.id,
+    // Use displayAsset (with live updates) instead of prop asset
+    const thumbnailState = useMemo(() => getThumbnailState(displayAsset, thumbnailRetryCount), [
+        displayAsset?.id,
         thumbnailVersion,
         thumbnailRetryCount,
     ])
@@ -270,11 +315,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         const currentState = thumbnailState.state
         
         // Phase 3.1E: Detect transition from non-AVAILABLE → AVAILABLE (meaningful state change)
-        // This happens when background reconciliation detects thumbnail completion
-        // Log when polling promotes thumbnail to AVAILABLE
+        // This happens when drawer polling detects thumbnail completion
+        // Log when drawer polling promotes thumbnail to AVAILABLE
         if (prevState !== null && prevState !== 'AVAILABLE' && currentState === 'AVAILABLE') {
-            console.log('[ThumbnailPoll] Polling promoted thumbnail to AVAILABLE', {
-                assetId: asset.id,
+            console.log('[DrawerThumbnailPoll] Drawer polling promoted thumbnail to AVAILABLE', {
+                assetId: displayAsset.id,
                 prevState,
                 currentState,
                 thumbnailUrl: thumbnailState.thumbnailUrl,
@@ -287,12 +332,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         }
         
         prevThumbnailStateRef.current = currentState
-    }, [thumbnailState.state, asset?.id, thumbnailState.thumbnailUrl])
+    }, [thumbnailState.state, displayAsset?.id, thumbnailState.thumbnailUrl])
     
     // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
     // If status is VISIBLE, asset was uploaded correctly (not processing)
     // Asset.status represents visibility only, not processing state
-    const assetStatus = asset.status?.value || asset.status || 'visible'
+    // Use displayAsset (with live updates) instead of prop asset
+    const assetStatus = displayAsset.status?.value || displayAsset.status || 'visible'
     const isVisible = assetStatus === 'visible'
 
     // Format file size
@@ -320,7 +366,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     }
 
     // Get category name
-    const categoryName = asset.category?.name || 'Uncategorized'
+    // Use displayAsset (with live updates) instead of prop asset
+    const categoryName = displayAsset.category?.name || 'Uncategorized'
 
     return (
         <div
@@ -336,7 +383,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             {/* Header */}
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
                 <h2 id="drawer-title" className="text-lg font-semibold text-gray-900 truncate pr-4">
-                    {asset.title || asset.original_filename || 'Asset Details'}
+                    {displayAsset.title || displayAsset.original_filename || 'Asset Details'}
                 </h2>
                 <button
                     ref={closeButtonRef}
@@ -352,28 +399,29 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             {/* Content */}
             <div className="px-6 py-6 space-y-6">
                 {/* Phase 3.1: Uploaded By - moved above preview for better visual hierarchy */}
-                {asset.uploaded_by && (
+                {/* Use displayAsset (with live updates) instead of prop asset */}
+                {displayAsset.uploaded_by && (
                     <div className="flex items-center gap-2 pb-4 border-b border-gray-200">
-                        {asset.uploaded_by.avatar_url ? (
+                        {displayAsset.uploaded_by.avatar_url ? (
                             <img
-                                src={asset.uploaded_by.avatar_url}
-                                alt={asset.uploaded_by.name || 'User'}
+                                src={displayAsset.uploaded_by.avatar_url}
+                                alt={displayAsset.uploaded_by.name || 'User'}
                                 className="h-6 w-6 rounded-full object-cover flex-shrink-0"
                             />
                         ) : (
                             <div className="h-6 w-6 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
                                 <span className="text-xs font-medium text-gray-600">
-                                    {(asset.uploaded_by.first_name?.[0] || asset.uploaded_by.name?.[0] || '?').toUpperCase()}
+                                    {(displayAsset.uploaded_by.first_name?.[0] || displayAsset.uploaded_by.name?.[0] || '?').toUpperCase()}
                                 </span>
                             </div>
                         )}
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-gray-900 truncate">
-                                {asset.uploaded_by.name || `${asset.uploaded_by.first_name || ''} ${asset.uploaded_by.last_name || ''}`.trim() || 'Unknown User'}
+                                {displayAsset.uploaded_by.name || `${displayAsset.uploaded_by.first_name || ''} ${displayAsset.uploaded_by.last_name || ''}`.trim() || 'Unknown User'}
                             </p>
-                            {asset.uploaded_by.email && (
+                            {displayAsset.uploaded_by.email && (
                                 <p className="text-xs text-gray-500 truncate">
-                                    {asset.uploaded_by.email}
+                                    {displayAsset.uploaded_by.email}
                                 </p>
                             )}
                         </div>
@@ -389,21 +437,22 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >
-                            {isImage && asset.id ? (
+                            {isImage && displayAsset.id ? (
                                 // Image files: Use ThumbnailPreview with state machine
+                                // Use displayAsset (with live updates) instead of prop asset
                                 <div
                                     className="w-full h-full cursor-pointer group"
                                     onClick={() => {
                                         // Only allow zoom if thumbnail is available
-                                        const { state } = getThumbnailState(asset, thumbnailRetryCount)
+                                        const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
                                         if (state === 'AVAILABLE') {
                                             setShowZoomModal(true)
                                         }
                                     }}
                                 >
                                     <ThumbnailPreview
-                                        asset={asset}
-                                        alt={asset.title || asset.original_filename || 'Asset preview'}
+                                        asset={displayAsset}
+                                        alt={displayAsset.title || displayAsset.original_filename || 'Asset preview'}
                                         className="w-full h-full"
                                         retryCount={thumbnailRetryCount}
                                         onRetry={() => {
@@ -420,7 +469,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
                                     />
                                     {/* Zoom overlay (only shown when thumbnail is available) */}
-                                    {asset.thumbnail_url && (
+                                    {displayAsset.thumbnail_url && (
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
                                             <span className="text-white text-sm font-medium">Click to zoom</span>
                                         </div>
@@ -428,9 +477,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </div>
                             ) : (
                                 // Non-image files: Use ThumbnailPreview for consistent icon display
+                                // Use displayAsset (with live updates) instead of prop asset
                                 <ThumbnailPreview
-                                    asset={asset}
-                                    alt={asset.title || asset.original_filename || 'Asset preview'}
+                                    asset={displayAsset}
+                                    alt={displayAsset.title || displayAsset.original_filename || 'Asset preview'}
                                     className="w-full h-full"
                                     retryCount={thumbnailRetryCount}
                                     onRetry={() => {
@@ -460,7 +510,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         <div className="flex justify-between">
                             <dt className="text-sm text-gray-500">File Size</dt>
                             <dd className="text-sm font-medium text-gray-900">
-                                {formatFileSize(asset.size_bytes)}
+                                {formatFileSize(displayAsset.size_bytes)}
                             </dd>
                         </div>
                         <div className="flex justify-between">
@@ -475,11 +525,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </span>
                             </dd>
                         </div>
-                        {asset.created_at && (
+                        {displayAsset.created_at && (
                             <div className="flex justify-between">
                                 <dt className="text-sm text-gray-500">Uploaded</dt>
                                 <dd className="text-sm font-medium text-gray-900">
-                                    {formatDate(asset.created_at)}
+                                    {formatDate(displayAsset.created_at)}
                                 </dd>
                             </div>
                         )}
@@ -489,11 +539,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 {categoryName}
                             </dd>
                         </div>
-                        {asset.original_filename && (
+                        {displayAsset.original_filename && (
                             <div>
                                 <dt className="text-sm text-gray-500 mb-1">Filename</dt>
                                 <dd className="text-sm font-mono text-gray-700 break-all">
-                                    {asset.original_filename}
+                                    {displayAsset.original_filename}
                                 </dd>
                             </div>
                         )}
@@ -501,16 +551,33 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 </div>
 
                 {/* Processing State - Skipped (informational, not error) */}
+                {/* Step 5: Show clear message for skipped assets with skip reason */}
                 {thumbnailsSkipped && (
                     <div className="border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900 mb-2">Preview Status</h3>
                         <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                            <p className="text-sm text-blue-800">
+                            <p className="text-sm font-medium text-blue-800 mb-1">
                                 Preview not available for this file type.
                             </p>
-                            {asset.thumbnail_error && (
+                            {/* Show skip reason if available in metadata */}
+                            {/* Use displayAsset (with live updates) instead of prop asset */}
+                            {displayAsset.metadata?.thumbnail_skip_reason && (
                                 <p className="text-xs text-blue-600 mt-1">
-                                    {asset.thumbnail_error}
+                                    Reason: {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' 
+                                        ? 'Unsupported file type (TIFF)' 
+                                        : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
+                                        ? 'Unsupported file type (AVIF)'
+                                        : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
+                                        ? 'Unsupported file type (BMP)'
+                                        : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
+                                        ? 'Unsupported file type (SVG)'
+                                        : 'Unsupported file type'}
+                                </p>
+                            )}
+                            {/* Fallback to thumbnail_error if skip_reason not in metadata */}
+                            {!displayAsset.metadata?.thumbnail_skip_reason && displayAsset.thumbnail_error && (
+                                <p className="text-xs text-blue-600 mt-1">
+                                    {displayAsset.thumbnail_error}
                                 </p>
                             )}
                         </div>
@@ -518,14 +585,15 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 )}
 
                 {/* Processing State - Failed (error with details) */}
-                {thumbnailsFailed && asset.thumbnail_error && (
+                {/* Use displayAsset (with live updates) instead of prop asset */}
+                {thumbnailsFailed && displayAsset.thumbnail_error && (
                     <div className="border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900 mb-2">Processing Error</h3>
                         <div className="bg-red-50 border border-red-200 rounded-md p-3">
                             <p className="text-sm font-medium text-red-800 mb-1">
                                 Preview failed to generate
                             </p>
-                            <p className="text-sm text-red-700">{asset.thumbnail_error}</p>
+                            <p className="text-sm text-red-700">{displayAsset.thumbnail_error}</p>
                         </div>
                     </div>
                 )}

@@ -94,6 +94,25 @@ class AssetController extends Controller
                 })->filter()->values()->toArray();
             }
             
+            // Check if system category template still exists (for deleted system categories)
+            $templateExists = true;
+            $deletionAvailable = false;
+            if ($category->is_system) {
+                // Primary check: Use the model method to check if template exists in DB
+                $templateExists = $category->systemTemplateExists();
+                
+                // Secondary check: Verify against the active systemTemplates collection
+                // If no matching template in the active templates list, the template was deleted
+                // This is the authoritative check since getTemplatesByAssetType only returns active templates
+                if (!$matchingTemplate) {
+                    // No matching template in active templates = template was deleted
+                    $templateExists = false;
+                }
+                
+                // If template doesn't exist, deletion is available
+                $deletionAvailable = !$templateExists;
+            }
+            
             $allCategories->push([
                 'id' => $category->id,
                 'name' => $category->name,
@@ -106,6 +125,8 @@ class AssetController extends Controller
                 'is_hidden' => $category->is_hidden,
                 'sort_order' => $matchingTemplate ? $matchingTemplate->sort_order : 999, // Use template sort_order or high default
                 'access_rules' => $accessRules,
+                'template_exists' => $templateExists, // Flag to indicate if system template still exists
+                'deletion_available' => $deletionAvailable, // Flag to indicate if category can be deleted (template deleted)
             ]);
         }
 
@@ -225,6 +246,18 @@ class AssetController extends Controller
         }
 
         $assets = $assetsQuery->get();
+        
+        // HARD TERMINAL STATE: Check for stuck assets and repair them
+        // This prevents infinite processing states by automatically failing
+        // assets that have been processing longer than the timeout threshold
+        $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
+        foreach ($assets as $asset) {
+            if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
+                $timeoutGuard->checkAndRepair($asset);
+                // Reload asset to get updated status if it was repaired
+                $asset->refresh();
+            }
+        }
         
         // AUDIT: Log query results and sample asset brand_ids for comparison
         if ($assets->count() > 0) {
@@ -347,26 +380,34 @@ class AssetController extends Controller
                     }
                 }
 
-                // Generate distinct thumbnail URLs for preview and final
+                // Step 6: Generate distinct thumbnail URLs for preview and final
                 // CRITICAL: Preview and final URLs must NEVER be the same to prevent cache confusion
-                // Preview: /app/assets/{asset_id}/thumbnail/preview/{style} (temporary, low-quality)
+                // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
                 // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
-                $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                    'asset' => $asset->id,
-                    'style' => 'thumb',
-                ]);
+                
+                $metadata = $asset->metadata ?? [];
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                    ? $asset->thumbnail_status->value 
+                    : ($asset->thumbnail_status ?? 'pending');
+                
+                // Step 6: Preview thumbnail URL only if preview exists in metadata
+                // Preview thumbnails are generated early and stored separately
+                $previewThumbnailUrl = null;
+                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+                if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+                    // Preview exists - construct URL to preview endpoint
+                    $previewThumbnailUrl = route('assets.thumbnail.preview', [
+                        'asset' => $asset->id,
+                        'style' => 'preview', // Preview endpoint serves 'preview' style
+                    ]);
+                }
                 
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
                 
                 // Final thumbnail URL only provided when thumbnail_status === COMPLETED
                 // Includes version query param (thumbnails_generated_at) for cache busting
-                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                    ? $asset->thumbnail_status->value 
-                    : ($asset->thumbnail_status ?? 'pending');
-                
                 if ($thumbnailStatus === 'completed') {
-                    $metadata = $asset->metadata ?? [];
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     
                     $finalThumbnailUrl = route('assets.thumbnail.final', [
@@ -402,7 +443,8 @@ class AssetController extends Controller
                     // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
                     'thumbnail_url' => $finalThumbnailUrl ?? null,
                     'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
-                    'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed
+                    'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
+                    'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
                 ];
@@ -561,6 +603,20 @@ class AssetController extends Controller
             ]);
         }
         
+        // HARD TERMINAL STATE: Check for stuck assets before returning status
+        // This prevents infinite processing states by automatically failing
+        // assets that have been processing longer than the timeout threshold
+        $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
+        $stuckAssets = Asset::where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->whereIn('id', $assetIds)
+            ->where('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING)
+            ->get();
+        
+        foreach ($stuckAssets as $asset) {
+            $timeoutGuard->checkAndRepair($asset);
+        }
+        
         // Limit to reasonable batch size
         $assetIds = array_slice($assetIds, 0, 50);
         
@@ -569,7 +625,8 @@ class AssetController extends Controller
                 ->where('brand_id', $brand->id)
                 ->whereIn('id', $assetIds)
                 ->whereNull('deleted_at')
-                ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata'])
+                ->with('storageBucket')
+                ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata', 'storage_bucket_id'])
                 ->map(function ($asset) {
                     $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
                         ? $asset->thumbnail_status->value 
@@ -578,24 +635,101 @@ class AssetController extends Controller
                     $metadata = $asset->metadata ?? [];
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     
+                    // Step 4: CRITICAL - Never return status COMPLETED if final thumbnail URL does not exist
+                    // Verify thumbnail file exists before returning COMPLETED status
+                    // This prevents UI from showing "completed" when files don't exist
                     $finalThumbnailUrl = null;
+                    $verifiedStatus = $thumbnailStatus;
+                    
                     if ($thumbnailStatus === 'completed') {
-                        $finalThumbnailUrl = route('assets.thumbnail.final', [
-                            'asset' => $asset->id,
-                            'style' => 'thumb',
-                        ]);
+                        // Verify thumbnail file actually exists before returning COMPLETED
+                        $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
                         
-                        if ($thumbnailVersion) {
-                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        if ($thumbnailPath && $asset->storageBucket) {
+                            try {
+                                // Create S3 client for verification
+                                $s3Client = $this->createS3ClientForVerification();
+                                $result = $s3Client->headObject([
+                                    'Bucket' => $asset->storageBucket->name,
+                                    'Key' => $thumbnailPath,
+                                ]);
+                                
+                                // Verify file size > minimum threshold (1KB)
+                                $contentLength = $result['ContentLength'] ?? 0;
+                                $minValidSize = 1024; // 1KB
+                                
+                                if ($contentLength >= $minValidSize) {
+                                    // File exists and is valid - return final URL
+                                    $finalThumbnailUrl = route('assets.thumbnail.final', [
+                                        'asset' => $asset->id,
+                                        'style' => 'thumb',
+                                    ]);
+                                    
+                                    if ($thumbnailVersion) {
+                                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                                    }
+                                } else {
+                                    // File exists but is too small - downgrade to failed
+                                    $verifiedStatus = 'failed';
+                                    Log::warning('[batchThumbnailStatus] Thumbnail file too small, downgrading status', [
+                                        'asset_id' => $asset->id,
+                                        'content_length' => $contentLength,
+                                        'expected_min' => $minValidSize,
+                                    ]);
+                                }
+                            } catch (\Aws\S3\Exception\S3Exception $e) {
+                                if ($e->getStatusCode() === 404) {
+                                    // File doesn't exist - downgrade to failed
+                                    $verifiedStatus = 'failed';
+                                    Log::warning('[batchThumbnailStatus] Thumbnail file not found, downgrading status', [
+                                        'asset_id' => $asset->id,
+                                        'thumbnail_path' => $thumbnailPath,
+                                    ]);
+                                } else {
+                                    // Other S3 error - log but don't downgrade (might be transient)
+                                    Log::error('[batchThumbnailStatus] S3 error checking thumbnail', [
+                                        'asset_id' => $asset->id,
+                                        'error' => $e->getMessage(),
+                                    ]);
+                                }
+                            }
+                        } else {
+                            // No thumbnail path or bucket - downgrade to failed
+                            $verifiedStatus = 'failed';
+                            Log::warning('[batchThumbnailStatus] Thumbnail path or bucket missing, downgrading status', [
+                                'asset_id' => $asset->id,
+                                'has_path' => !!$thumbnailPath,
+                                'has_bucket' => !!$asset->storageBucket,
+                            ]);
                         }
+                    }
+                    
+                    // Get skip reason from metadata if status is skipped
+                    $skipReason = null;
+                    if ($verifiedStatus === 'skipped') {
+                        $metadata = $asset->metadata ?? [];
+                        $skipReason = $metadata['thumbnail_skip_reason'] ?? 'unsupported_file_type';
+                    }
+                    
+                    // Preview thumbnail URL - returned even when status is pending or processing
+                    $previewThumbnailUrl = null;
+                    $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+                    if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+                        // Preview exists - construct URL to preview endpoint
+                        $previewThumbnailUrl = route('assets.thumbnail.preview', [
+                            'asset' => $asset->id,
+                            'style' => 'preview',
+                        ]);
                     }
                     
                     return [
                         'asset_id' => $asset->id,
-                        'thumbnail_status' => $thumbnailStatus,
+                        'thumbnail_status' => $verifiedStatus, // Use verified status, not raw status
                         'thumbnail_version' => $thumbnailVersion,
-                        'final_thumbnail_url' => $finalThumbnailUrl,
+                        'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (available even when pending/processing)
+                        'final_thumbnail_url' => $finalThumbnailUrl, // Only set if file exists and is valid
                         'thumbnail_error' => $asset->thumbnail_error,
+                        'thumbnail_skip_reason' => $skipReason, // Skip reason for skipped assets
                     ];
                 })
                 ->values()
@@ -615,6 +749,35 @@ class AssetController extends Controller
                 'assets' => [],
             ], 500);
         }
+    }
+
+    /**
+     * Create S3 client instance for file verification.
+     *
+     * @return \Aws\S3\S3Client
+     */
+    protected function createS3ClientForVerification(): \Aws\S3\S3Client
+    {
+        if (!class_exists(\Aws\S3\S3Client::class)) {
+            throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
+        }
+
+        $config = [
+            'version' => 'latest',
+            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+            'credentials' => [
+                'key' => env('AWS_ACCESS_KEY_ID'),
+                'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            ],
+        ];
+
+        // Support MinIO for local development
+        if (env('AWS_ENDPOINT')) {
+            $config['endpoint'] = env('AWS_ENDPOINT');
+            $config['use_path_style_endpoint'] = env('AWS_USE_PATH_STYLE_ENDPOINT', true);
+        }
+
+        return new \Aws\S3\S3Client($config);
     }
 
     /**
@@ -654,17 +817,22 @@ class AssetController extends Controller
             : ($asset->thumbnail_status ?? 'pending');
 
         // Generate distinct thumbnail URLs for preview and final
-        $previewThumbnailUrl = route('assets.thumbnail.preview', [
-            'asset' => $asset->id,
-            'style' => 'thumb',
-        ]);
+        // Step 6: Preview thumbnail URL only if preview exists in metadata
+        $metadata = $asset->metadata ?? [];
+        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+        $previewThumbnailUrl = null;
+        if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+            $previewThumbnailUrl = route('assets.thumbnail.preview', [
+                'asset' => $asset->id,
+                'style' => 'preview', // Preview endpoint serves 'preview' style
+            ]);
+        }
         
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
         
         // Final thumbnail URL only provided when thumbnail_status === COMPLETED
         if ($thumbnailStatus === 'completed') {
-            $metadata = $asset->metadata ?? [];
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             
             $finalThumbnailUrl = route('assets.thumbnail.final', [
@@ -685,6 +853,7 @@ class AssetController extends Controller
             'thumbnail_version' => $thumbnailVersion,
             'thumbnail_url' => $finalThumbnailUrl ?? null, // Legacy compatibility
             'thumbnails_generated_at' => $thumbnailVersion, // Legacy compatibility
+            'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
         ], 200);
     }
 

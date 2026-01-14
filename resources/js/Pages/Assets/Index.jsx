@@ -75,40 +75,44 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             setActiveAssetId(null)
         }
     }, [activeAssetId, activeAsset, localAssets])
+
+    // Category switches should reset the drawer selection,
+    // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
+    useEffect(() => {
+        setActiveAssetId(null)
+    }, [selectedCategoryId])
     
-    // Phase 3.1: Background Asset Reconciliation
-    // Bounded, non-invasive background reconciliation loop for asset thumbnails and processing state.
-    // Only polls when at least one visible asset is processing.
-    // Auto-stops when no assets are processing, max attempts reached, or category changes.
-    // This is NOT a live subscription - it's a quiet, page-level refresh loop.
-    // Phase 3.1 invariant: Background reconciliation MUST pause while upload dialog is open.
-    // Inertia reloads reset page-owned state (dialogs, modals).
-    useAssetReconciliation({
-        assets: localAssets,
-        selectedCategoryId,
-        isPaused: isUploadDialogOpen,
-    })
+    // HARD STABILIZATION: Background reconciliation disabled
+    // Assets only change when Inertia provides a new snapshot.
+    // NOTE: Thumbnails intentionally do NOT live-update on the grid.
+    // Stability > real-time updates.
+    // useAssetReconciliation({
+    //     assets: localAssets,
+    //     selectedCategoryId,
+    //     isPaused: isUploadDialogOpen,
+    // })
     
-    // Step 3: Smart Polling for Preview → Final Thumbnails
-    // Grid-scoped polling that automatically updates preview thumbnails to final thumbnails.
-    // Only polls assets with preview but not final, stops automatically when no targets remain.
-    const handleThumbnailUpdate = useCallback((updatedAsset) => {
-        setLocalAssets(prevAssets => {
-            return prevAssets.map(asset => {
-                if (asset.id === updatedAsset.id) {
-                    // Merge updated asset data
-                    return mergeAsset(asset, updatedAsset)
-                }
-                return asset
-            })
-        })
-    }, [])
-    
-    useThumbnailSmartPoll({
-        assets: localAssets,
-        onAssetUpdate: handleThumbnailUpdate,
-        selectedCategoryId,
-    })
+    // HARD STABILIZATION: Thumbnail polling disabled
+    // NOTE: Thumbnails intentionally do NOT live-update on the grid.
+    // Stability > real-time updates.
+    // Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
+    // const handleThumbnailUpdate = useCallback((updatedAsset) => {
+    //     setLocalAssets(prevAssets => {
+    //         return prevAssets.map(asset => {
+    //             if (asset.id === updatedAsset.id) {
+    //                 // Merge updated asset data
+    //                 return mergeAsset(asset, updatedAsset)
+    //             }
+    //             return asset
+    //         })
+    //     })
+    // }, [])
+    // 
+    // useThumbnailSmartPoll({
+    //     assets: localAssets,
+    //     onAssetUpdate: handleThumbnailUpdate,
+    //     selectedCategoryId,
+    // })
     
     // Track drawer animation state to freeze grid layout during animation
     // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
@@ -219,11 +223,19 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         })
     }, [])
     
+    // Drag-and-drop state for files dropped on grid
+    const [droppedFiles, setDroppedFiles] = useState(null)
+    const [isDraggingOver, setIsDraggingOver] = useState(false)
+    
     // BUGFIX: Single handler to open upload dialog
-    const handleOpenUploadDialog = useCallback(() => {
+    const handleOpenUploadDialog = useCallback((files = null) => {
         // Prevent opening if auto-close is in progress
         if (isAutoClosing) {
             return
+        }
+        // Store dropped files if provided
+        if (files) {
+            setDroppedFiles(files)
         }
         setIsUploadDialogOpen(true)
     }, [isAutoClosing])
@@ -232,7 +244,52 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const handleCloseUploadDialog = useCallback(() => {
         setIsUploadDialogOpen(false)
         setIsAutoClosing(false) // Reset flag if manually closed
+        setDroppedFiles(null) // Clear dropped files when dialog closes
     }, [])
+    
+    // Handle drag-and-drop on grid area
+    const handleDragOver = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only show drag overlay if dragging files (not other elements)
+        if (e.dataTransfer.types.includes('Files')) {
+            setIsDraggingOver(true)
+        }
+    }, [])
+    
+    const handleDragEnter = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only show drag overlay if dragging files (not other elements)
+        if (e.dataTransfer.types.includes('Files')) {
+            setIsDraggingOver(true)
+        }
+    }, [])
+    
+    const handleDragLeave = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only clear drag state if we're leaving the drop zone entirely
+        // (not just moving between child elements)
+        if (!e.currentTarget.contains(e.relatedTarget)) {
+            setIsDraggingOver(false)
+        }
+    }, [])
+    
+    const handleDrop = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDraggingOver(false) // Clear drag state on drop
+        
+        const files = Array.from(e.dataTransfer.files || [])
+        if (files.length > 0) {
+            // Filter to only image files (or adjust as needed)
+            const imageFiles = files.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/') || file.type === 'application/pdf')
+            if (imageFiles.length > 0) {
+                handleOpenUploadDialog(imageFiles)
+            }
+        }
+    }, [handleOpenUploadDialog])
 
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
@@ -250,13 +307,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const activeBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'
     
 
-    // FINAL FIX: Force page remount via key to prevent multiple instances
-    // This ensures React unmounts the old page instance when props change
-    // Remount key forces remount after finalize (ensures clean state reset)
-    const pageKey = `assets-${selectedCategoryId || 'all'}-${assets?.length || 0}-${total_asset_count || 0}-${remountKey}`
-
     return (
-        <div key={pageKey} className="h-screen flex flex-col overflow-hidden">
+        <div className="h-screen flex flex-col overflow-hidden">
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
@@ -315,7 +367,17 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         {/* Show all categories (both basic and marketing) in a single list */}
                                         {categories && categories.length > 0 ? (
                                             categories
-                                                .filter(category => category.id != null && category.id !== undefined && category.id !== 0)
+                                                .filter(category => {
+                                                    // Filter out templates (no ID)
+                                                    if (category.id == null || category.id === undefined || category.id === 0) {
+                                                        return false
+                                                    }
+                                                    // Filter out deleted system categories (template no longer exists)
+                                                    if (category.is_system && category.template_exists === false) {
+                                                        return false
+                                                    }
+                                                    return true
+                                                })
                                                 .map((category) => {
                                                     const isSelected = selectedCategoryId === category.id && selectedCategoryId !== null && selectedCategoryId !== undefined
                                                     return (
@@ -404,7 +466,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
                     <div 
-                        className="h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out"
+                        className="h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative"
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -412,12 +474,46 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
                             paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
                         }}
+                        onDragOver={handleDragOver}
+                        onDragEnter={handleDragEnter}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
                     >
+                        {/* Drag and drop overlay */}
+                        {isDraggingOver && (() => {
+                            const primaryColor = auth.activeBrand?.primary_color || '#6366f1'
+                            // Ensure color has # prefix, then add 60% opacity (99 in hex = ~60%)
+                            const colorWithOpacity = primaryColor.startsWith('#') 
+                                ? `${primaryColor}99` 
+                                : `#${primaryColor}99`
+                            
+                            return (
+                                <div 
+                                    className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none"
+                                    style={{
+                                        backgroundColor: colorWithOpacity,
+                                    }}
+                                >
+                                    <div className="text-center">
+                                        <div className="text-2xl font-semibold text-white mb-2">
+                                            Drag and drop here...
+                                        </div>
+                                        <div className="text-lg text-white opacity-90">
+                                            Release to upload files
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Asset Grid Toolbar */}
                         {localAssets && localAssets.length > 0 && (
                             <div className="mb-6">
                                 <AssetGridToolbar
+                                    onRefreshThumbnails={() => {
+                                        // Manual refresh: reload assets only, preserve scroll
+                                        router.reload({ only: ['assets'], preserveScroll: true })
+                                    }}
                                     showInfo={showInfo}
                                     onToggleInfo={() => setShowInfo(v => !v)}
                                     cardSize={cardSize}
@@ -499,6 +595,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     categories={categories || []}
                     initialCategoryId={selectedCategoryId}
                     onFinalizeComplete={handleFinalizeComplete}
+                    initialFiles={droppedFiles}
                 />
             )}
         </div>

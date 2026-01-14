@@ -22,10 +22,15 @@ export function canMutatePreview(asset) {
 /**
  * Merges incoming asset data into previous asset state with field-level protection.
  * 
- * Field-level immutability (not object immutability):
- * - Allows title, filename, metadata updates even for completed assets
- * - Protects only thumbnail-related fields (thumbnail_url, preview_url, thumbnails)
- * - Allows first successful thumbnail hydration (when prev had no thumbnail, incoming has one)
+ * CRITICAL: Thumbnail fields are ALWAYS authoritative from incoming asset.
+ * These fields must NEVER be preserved from prevAsset:
+ * - preview_thumbnail_url
+ * - final_thumbnail_url
+ * - thumbnail_status
+ * - thumbnail_version
+ * - thumbnail_error
+ * 
+ * This ensures polling updates immediately replace UI state without flashes.
  * 
  * @param {Object} prev - Previous asset state
  * @param {Object} incoming - Incoming asset update
@@ -35,29 +40,29 @@ export function mergeAsset(prev, incoming) {
     if (!prev) return incoming
     if (!incoming) return prev
     
-    const thumbnailStatus = prev.thumbnail_status?.value || prev.thumbnail_status || 'pending'
-    const isCompleted = thumbnailStatus === 'completed'
-    const hadThumbnail = !!(prev.thumbnail_url || prev.preview_url)
-    const incomingHasThumbnail = !!(incoming.thumbnail_url || incoming.preview_url)
-    
-    // Allow first successful thumbnail hydration
-    if (!hadThumbnail && incomingHasThumbnail) {
-        return incoming
+    // HARD STABILIZATION: Stop re-merging identical assets
+    // Prevents useless object replacement → prevents re-renders
+    if (
+        prev.preview_thumbnail_url === incoming.preview_thumbnail_url &&
+        prev.final_thumbnail_url === incoming.final_thumbnail_url &&
+        prev.thumbnail_version === incoming.thumbnail_version
+    ) {
+        return prev
     }
     
-    // Protect thumbnail fields after completion, but allow other field updates
-    if (isCompleted) {
-        return {
-            ...incoming, // Allow title, filename, metadata, and other field updates
-            thumbnail_url: prev.thumbnail_url, // Protect thumbnail URL
-            preview_url: prev.preview_url, // Protect preview URL (if it exists)
-            // Note: thumbnails field not in current schema, but protect if it exists
-            ...(prev.thumbnails ? { thumbnails: prev.thumbnails } : {}),
-        }
+    // CRITICAL: Thumbnail fields MUST ALWAYS come from incoming asset
+    // Never preserve stale thumbnail state from prevAsset
+    // This ensures polling updates immediately replace UI state
+    return {
+        ...prev, // Preserve all previous fields
+        ...incoming, // Overwrite with incoming data
+        // Explicitly ensure thumbnail fields come from incoming (authoritative)
+        preview_thumbnail_url: incoming.preview_thumbnail_url ?? null,
+        final_thumbnail_url: incoming.final_thumbnail_url ?? null,
+        thumbnail_status: incoming.thumbnail_status ?? prev.thumbnail_status,
+        thumbnail_version: incoming.thumbnail_version ?? null,
+        thumbnail_error: incoming.thumbnail_error ?? null,
     }
-    
-    // Default behavior: use incoming data
-    return incoming
 }
 
 /**

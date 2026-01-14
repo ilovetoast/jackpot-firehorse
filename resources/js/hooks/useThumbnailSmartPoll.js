@@ -27,19 +27,25 @@
  * @returns {void} - Hook manages polling internally
  */
 import { useEffect, useRef } from 'react'
-import { getThumbnailState } from '../utils/thumbnailUtils'
+import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
+import { mergeAsset } from '../utils/assetUtils'
 
 // Exponential backoff schedule: 10s → 15s → 30s → 60s → 60s → stop
 const POLL_SCHEDULE = [10000, 15000, 30000, 60000, 60000] // milliseconds
 const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
 
+/**
+ * HARD STABILIZATION: Thumbnail polling is disabled to prevent flashing and visual instability.
+ * 
+ * NOTE: Thumbnails intentionally do NOT live-update on the grid.
+ * Stability > real-time updates.
+ * 
+ * Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
+ */
 export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryId = null }) {
-    const timeoutIdRef = useRef(null)
-    const pollAttemptRef = useRef(0)
-    const prevCategoryIdRef = useRef(selectedCategoryId)
-    const assetsRef = useRef(assets)
-    const onAssetUpdateRef = useRef(onAssetUpdate)
-    const isActiveRef = useRef(false)
+    // HARD STABILIZATION: Disable polling entirely
+    // No polling. No background updates. No thrashing.
+    return
 
     // Keep refs in sync
     useEffect(() => {
@@ -50,15 +56,13 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
         onAssetUpdateRef.current = onAssetUpdate
     }, [onAssetUpdate])
 
-    // Derive poll targets: assets with preview but not final
+    // Derive poll targets: assets that are pending/processing, support thumbnails, and don't have final yet
+    // Do NOT depend on preview existence - poll for all eligible assets
     const getPollTargets = () => {
         const currentAssets = assetsRef.current || []
         
         return currentAssets.filter(asset => {
             if (!asset || !asset.id) return false
-            
-            // Must have preview thumbnail URL
-            if (!asset.preview_thumbnail_url) return false
             
             // Must NOT have final thumbnail URL (if it exists, no need to poll)
             if (asset.final_thumbnail_url) return false
@@ -70,6 +74,23 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
             // Must NOT have thumbnail error (failed assets don't poll)
             if (asset.thumbnail_error) return false
             
+            // Must NOT be failed status (failed assets don't poll)
+            const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status
+            if (thumbnailStatus === 'failed') return false
+            
+            // Must NOT be skipped status (skipped assets don't poll)
+            if (thumbnailStatus === 'skipped') return false
+            
+            // Must be pending OR processing (or null status for legacy)
+            const isPendingOrProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing' || !thumbnailStatus
+            if (!isPendingOrProcessing) return false
+            
+            // Must support thumbnails (expected to have thumbnails)
+            const thumbnailExpected = supportsThumbnail(asset?.mime_type, asset?.file_extension)
+            if (!thumbnailExpected) return false
+            
+            // Poll for all assets that meet the above criteria
+            // Do NOT depend on preview_thumbnail_url existence
             return true
         })
     }
@@ -142,27 +163,59 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
                 // Check if final thumbnail is now available
                 const finalNowAvailable = !!updatedAsset.final_thumbnail_url && !currentAsset.final_thumbnail_url
                 
-                // Check if asset failed
-                const hasError = !!updatedAsset.thumbnail_error
+                // Check if preview thumbnail is now available
+                const previewNowAvailable = !!updatedAsset.preview_thumbnail_url && !currentAsset.preview_thumbnail_url
                 
-                if (versionChanged || finalNowAvailable || hasError) {
-                    console.log('[useThumbnailSmartPoll] Version change detected', {
+                // Check if asset failed (status changed to failed OR error exists)
+                const statusFailed = updatedAsset.thumbnail_status === 'failed'
+                const hasError = !!updatedAsset.thumbnail_error
+                const isFailed = statusFailed || hasError
+                
+                // Check if any thumbnail-related field changed
+                const thumbnailStatusChanged = updatedAsset.thumbnail_status !== currentAsset.thumbnail_status
+                const previewUrlChanged = updatedAsset.preview_thumbnail_url !== currentAsset.preview_thumbnail_url
+                const finalUrlChanged = updatedAsset.final_thumbnail_url !== currentAsset.final_thumbnail_url
+                const errorChanged = updatedAsset.thumbnail_error !== currentAsset.thumbnail_error
+                
+                // Only update if something actually changed (prevent unnecessary re-renders)
+                if (versionChanged || finalNowAvailable || previewNowAvailable || isFailed || 
+                    thumbnailStatusChanged || previewUrlChanged || finalUrlChanged || errorChanged) {
+                    console.log('[useThumbnailSmartPoll] Status change detected', {
                         assetId,
                         currentVersion,
                         newVersion,
                         finalNowAvailable,
+                        previewNowAvailable,
+                        isFailed,
+                        statusFailed,
                         hasError,
+                        thumbnailStatusChanged,
+                        previewUrlChanged,
+                        finalUrlChanged,
                     })
                     
                     hasUpdates = true
                     
-                    // Update asset
-                    const updatedAssetData = {
-                        ...currentAsset,
+                    // Map updatedAsset to match currentAsset structure
+                    const mappedUpdatedAsset = {
+                        ...updatedAsset,
+                        id: updatedAsset.asset_id || updatedAsset.id,
+                        preview_thumbnail_url: updatedAsset.preview_thumbnail_url,
+                        final_thumbnail_url: updatedAsset.final_thumbnail_url,
                         thumbnail_status: updatedAsset.thumbnail_status,
                         thumbnail_version: updatedAsset.thumbnail_version,
-                        final_thumbnail_url: updatedAsset.final_thumbnail_url || currentAsset.final_thumbnail_url,
-                        thumbnail_error: updatedAsset.thumbnail_error || currentAsset.thumbnail_error,
+                        thumbnail_error: updatedAsset.thumbnail_error,
+                    }
+                    
+                    // Use mergeAsset() to ensure thumbnail fields are authoritative from updatedAsset
+                    const updatedAssetData = mergeAsset(currentAsset, mappedUpdatedAsset)
+                    
+                    // If asset failed, stop polling for it (remove from poll targets)
+                    if (isFailed) {
+                        console.log('[useThumbnailSmartPoll] Asset failed, will stop polling', {
+                            assetId,
+                            error: updatedAsset.thumbnail_error,
+                        })
                     }
                     
                     // Notify parent component

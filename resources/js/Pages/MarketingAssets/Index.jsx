@@ -157,15 +157,68 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
     // This ensures React unmounts the old page instance when props change
     const pageKey = `marketing-assets-${selectedCategoryId || 'all'}-${assets?.length || 0}`
     
+    // Drag-and-drop state for files dropped on grid
+    const [droppedFiles, setDroppedFiles] = useState(null)
+    const [isDraggingOver, setIsDraggingOver] = useState(false)
+    
     // BUGFIX: Single handler to open upload dialog
-    const handleOpenUploadDialog = useCallback(() => {
+    const handleOpenUploadDialog = useCallback((files = null) => {
+        // Store dropped files if provided
+        if (files) {
+            setDroppedFiles(files)
+        }
         setIsUploadDialogOpen(true)
     }, [])
     
     // BUGFIX: Single handler to close upload dialog
     const handleCloseUploadDialog = useCallback(() => {
         setIsUploadDialogOpen(false)
+        setDroppedFiles(null) // Clear dropped files when dialog closes
     }, [])
+    
+    // Handle drag-and-drop on grid area
+    const handleDragOver = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only show drag overlay if dragging files (not other elements)
+        if (e.dataTransfer.types.includes('Files')) {
+            setIsDraggingOver(true)
+        }
+    }, [])
+    
+    const handleDragEnter = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only show drag overlay if dragging files (not other elements)
+        if (e.dataTransfer.types.includes('Files')) {
+            setIsDraggingOver(true)
+        }
+    }, [])
+    
+    const handleDragLeave = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // Only clear drag state if we're leaving the drop zone entirely
+        // (not just moving between child elements)
+        if (!e.currentTarget.contains(e.relatedTarget)) {
+            setIsDraggingOver(false)
+        }
+    }, [])
+    
+    const handleDrop = useCallback((e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDraggingOver(false) // Clear drag state on drop
+        
+        const files = Array.from(e.dataTransfer.files || [])
+        if (files.length > 0) {
+            // Filter to only image files (or adjust as needed)
+            const imageFiles = files.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/') || file.type === 'application/pdf')
+            if (imageFiles.length > 0) {
+                handleOpenUploadDialog(imageFiles)
+            }
+        }
+    }, [handleOpenUploadDialog])
 
     return (
         <div key={pageKey} className="h-screen flex flex-col overflow-hidden">
@@ -299,7 +352,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
                     <div 
-                        className="h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out"
+                        className="h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative"
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -307,7 +360,37 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                             // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
                             paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
                         }}
+                        onDragOver={handleDragOver}
+                        onDragEnter={handleDragEnter}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
                     >
+                        {/* Drag and drop overlay */}
+                        {isDraggingOver && (() => {
+                            const primaryColor = auth.activeBrand?.primary_color || '#6366f1'
+                            // Ensure color has # prefix, then add 60% opacity (99 in hex = ~60%)
+                            const colorWithOpacity = primaryColor.startsWith('#') 
+                                ? `${primaryColor}99` 
+                                : `#${primaryColor}99`
+                            
+                            return (
+                                <div 
+                                    className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none"
+                                    style={{
+                                        backgroundColor: colorWithOpacity,
+                                    }}
+                                >
+                                    <div className="text-center">
+                                        <div className="text-2xl font-semibold text-white mb-2">
+                                            Drag and drop here...
+                                        </div>
+                                        <div className="text-lg text-white opacity-90">
+                                            Release to upload files
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Asset Grid Toolbar */}
                         {assets && assets.length > 0 && (
@@ -392,6 +475,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                     defaultAssetType="marketing"
                     categories={categories || []}
                     initialCategoryId={selectedCategoryId}
+                    initialFiles={droppedFiles}
                 />
             )}
         </div>

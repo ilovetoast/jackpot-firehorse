@@ -76,15 +76,154 @@ class ThumbnailGenerationService
             throw new \RuntimeException('No thumbnail styles configured');
         }
 
+        // CRITICAL: Use the correct source path for thumbnail generation
+        // For newly uploaded assets, storage_root_path points to temp upload location
+        // This is the SAME source used for metadata extraction
+        // 
+        // IMPORTANT: Preview thumbnails MUST be generated from the REAL uploaded file,
+        // not from a placeholder or corrupted file. The source must be the actual
+        // image file that was uploaded (stored at temp/uploads/{upload_session_id}/original).
+        $sourceS3Path = $asset->storage_root_path;
+        
+        // If asset has upload_session_id, verify we're using the temp upload path
+        // This ensures previews are generated from the same source as metadata extraction
+        if ($asset->upload_session_id) {
+            $expectedTempPath = "temp/uploads/{$asset->upload_session_id}/original";
+            if ($sourceS3Path !== $expectedTempPath) {
+                Log::warning('[ThumbnailGenerationService] Source path mismatch - using storage_root_path', [
+                    'asset_id' => $asset->id,
+                    'storage_root_path' => $sourceS3Path,
+                    'expected_temp_path' => $expectedTempPath,
+                    'upload_session_id' => $asset->upload_session_id,
+                ]);
+                // Continue with storage_root_path (may have been promoted already)
+            } else {
+                Log::info('[ThumbnailGenerationService] Using temp upload path for thumbnail generation', [
+                    'asset_id' => $asset->id,
+                    'source_s3_path' => $sourceS3Path,
+                    'upload_session_id' => $asset->upload_session_id,
+                ]);
+            }
+        }
+        
+        Log::info('[ThumbnailGenerationService] Generating thumbnails from source', [
+            'asset_id' => $asset->id,
+            'source_s3_path' => $sourceS3Path,
+            'bucket' => $bucket->name,
+        ]);
+
         // Download original file to temporary location
-        $tempPath = $this->downloadFromS3($bucket, $asset->storage_root_path);
+        // This is the SAME source file used for metadata extraction
+        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path);
+        
+        // Verify downloaded file is valid and resembles an image
+        if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+            throw new \RuntimeException('Downloaded source file is invalid or empty');
+        }
+        
+        $sourceFileSize = filesize($tempPath);
+        
+        // Verify file is actually an image (not corrupted or wrong format)
+        $imageInfo = @getimagesize($tempPath);
+        if ($imageInfo === false) {
+            throw new \RuntimeException("Downloaded file is not a valid image (size: {$sourceFileSize} bytes)");
+        }
+        
+        Log::info('[ThumbnailGenerationService] Source file downloaded and verified', [
+            'asset_id' => $asset->id,
+            'temp_path' => $tempPath,
+            'source_file_size' => $sourceFileSize,
+            'image_width' => $imageInfo[0] ?? null,
+            'image_height' => $imageInfo[1] ?? null,
+            'image_type' => $imageInfo[2] ?? null,
+        ]);
         
         try {
             // Determine file type and generate thumbnails
             $fileType = $this->detectFileType($asset);
             $thumbnails = [];
             
+            // Step 6: Generate preview thumbnail FIRST (before final thumbnails)
+            // This provides immediate visual feedback while final thumbnails process
+            // Preview is optional but preferred - if it fails, continue with final generation
+            // CRITICAL: Preview must be generated from the SAME source file as final thumbnails
+            // to ensure it resembles the original image (blurred, not garbage)
+            $previewThumbnails = [];
+            if (isset($styles['preview'])) {
+                try {
+                    Log::info('[ThumbnailGenerationService] Generating preview thumbnail', [
+                        'asset_id' => $asset->id,
+                        'source_temp_path' => $tempPath,
+                        'source_file_size' => filesize($tempPath),
+                        'file_type' => $fileType,
+                    ]);
+                    
+                    $previewPath = $this->generateThumbnail(
+                        $asset,
+                        $tempPath, // SAME source as final thumbnails
+                        'preview',
+                        $styles['preview'],
+                        $fileType
+                    );
+                    
+                    if ($previewPath && file_exists($previewPath)) {
+                        $previewFileSize = filesize($previewPath);
+                        Log::info('[ThumbnailGenerationService] Preview thumbnail generated', [
+                            'asset_id' => $asset->id,
+                            'preview_path' => $previewPath,
+                            'preview_file_size' => $previewFileSize,
+                        ]);
+                        
+                        // Upload preview thumbnail to S3
+                        $s3PreviewPath = $this->uploadThumbnailToS3(
+                            $bucket,
+                            $asset,
+                            $previewPath,
+                            'preview'
+                        );
+                        
+                        // Get preview thumbnail metadata
+                        $previewInfo = $this->getThumbnailMetadata($previewPath);
+                        
+                        $previewThumbnails['preview'] = [
+                            'path' => $s3PreviewPath,
+                            'width' => $previewInfo['width'] ?? null,
+                            'height' => $previewInfo['height'] ?? null,
+                            'size_bytes' => $previewInfo['size_bytes'] ?? filesize($previewPath),
+                            'generated_at' => now()->toIso8601String(),
+                        ];
+                        
+                        Log::info('[ThumbnailGenerationService] Preview thumbnail uploaded to S3', [
+                            'asset_id' => $asset->id,
+                            's3_path' => $s3PreviewPath,
+                            'width' => $previewInfo['width'] ?? null,
+                            'height' => $previewInfo['height'] ?? null,
+                        ]);
+                        
+                        // Clean up local preview thumbnail
+                        @unlink($previewPath);
+                    } else {
+                        Log::warning('[ThumbnailGenerationService] Preview thumbnail generation returned null or file missing', [
+                            'asset_id' => $asset->id,
+                            'preview_path' => $previewPath ?? 'null',
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    // Preview generation failure is non-fatal - continue with final thumbnails
+                    Log::warning('[ThumbnailGenerationService] Failed to generate preview thumbnail (non-fatal)', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                }
+            }
+            
+            // Generate final thumbnails (thumb, medium, large) - exclude preview
             foreach ($styles as $styleName => $styleConfig) {
+                // Skip preview - already generated above
+                if ($styleName === 'preview') {
+                    continue;
+                }
                 try {
                     $thumbnailPath = $this->generateThumbnail(
                         $asset,
@@ -127,7 +266,9 @@ class ThumbnailGenerationService
                 }
             }
             
-            return $thumbnails;
+            // Step 6: Merge preview thumbnails with final thumbnails
+            // Preview thumbnails are stored separately in metadata but returned together
+            return array_merge($previewThumbnails, $thumbnails);
         } finally {
             // Clean up temporary file
             if (file_exists($tempPath)) {
@@ -147,20 +288,51 @@ class ThumbnailGenerationService
     protected function downloadFromS3(StorageBucket $bucket, string $s3Key): string
     {
         try {
+            Log::info('[ThumbnailGenerationService] Downloading source file from S3', [
+                'bucket' => $bucket->name,
+                's3_key' => $s3Key,
+            ]);
+            
             $result = $this->s3Client->getObject([
                 'Bucket' => $bucket->name,
                 'Key' => $s3Key,
             ]);
             
+            // Verify object exists and has content
+            $body = $result['Body'];
+            $bodyContents = (string) $body;
+            $contentLength = strlen($bodyContents);
+            
+            if ($contentLength === 0) {
+                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes)");
+            }
+            
+            Log::info('[ThumbnailGenerationService] Source file downloaded from S3', [
+                'bucket' => $bucket->name,
+                's3_key' => $s3Key,
+                'content_length' => $contentLength,
+            ]);
+            
             $tempPath = tempnam(sys_get_temp_dir(), 'thumb_');
-            file_put_contents($tempPath, $result['Body']);
+            file_put_contents($tempPath, $bodyContents);
+            
+            // Verify file was written correctly
+            if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
+                throw new \RuntimeException("Failed to write downloaded file to temp location");
+            }
+            
+            Log::info('[ThumbnailGenerationService] Source file saved to temp location', [
+                'temp_path' => $tempPath,
+                'file_size' => filesize($tempPath),
+            ]);
             
             return $tempPath;
         } catch (S3Exception $e) {
-            Log::error('Failed to download asset from S3 for thumbnail generation', [
+            Log::error('[ThumbnailGenerationService] Failed to download asset from S3 for thumbnail generation', [
                 'bucket' => $bucket->name,
                 'key' => $s3Key,
                 'error' => $e->getMessage(),
+                'aws_error_code' => $e->getAwsErrorCode(),
             ]);
             throw new \RuntimeException("Failed to download asset from S3: {$e->getMessage()}", 0, $e);
         }
@@ -277,13 +449,31 @@ class ThumbnailGenerationService
             throw new \RuntimeException('GD extension is required for image thumbnail generation');
         }
         
+        // Verify source file exists and is readable
+        if (!file_exists($sourcePath)) {
+            throw new \RuntimeException("Source file does not exist: {$sourcePath}");
+        }
+        
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException("Source file is empty (size: 0 bytes)");
+        }
+        
         // Load source image
         $sourceInfo = getimagesize($sourcePath);
         if ($sourceInfo === false) {
-            throw new \RuntimeException('Unable to read source image');
+            throw new \RuntimeException("Unable to read source image: {$sourcePath} (size: {$sourceFileSize} bytes)");
         }
         
         [$sourceWidth, $sourceHeight, $sourceType] = $sourceInfo;
+        
+        Log::info('[ThumbnailGenerationService] Source image loaded', [
+            'source_path' => $sourcePath,
+            'source_width' => $sourceWidth,
+            'source_height' => $sourceHeight,
+            'source_type' => $sourceType,
+            'source_file_size' => $sourceFileSize,
+        ]);
         
         // Create source image resource
         $sourceImage = match ($sourceType) {
@@ -340,6 +530,18 @@ class ThumbnailGenerationService
                 $sourceWidth,
                 $sourceHeight
             );
+            
+            // Step 6: Apply blur for preview thumbnails (LQIP effect)
+            // Preview thumbnails are intentionally blurred to indicate they're temporary
+            // BUT: They must still resemble the original image (blurred, not garbage)
+            // Use moderate blur (1-2 passes) to maintain image resemblance
+            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                // Apply moderate blur (2 passes) to create LQIP effect while preserving image resemblance
+                // Too much blur (3+ passes) makes previews look like garbage instead of blurred images
+                for ($i = 0; $i < 2; $i++) {
+                    imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
+                }
+            }
             
             // Save thumbnail to temporary file
             $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';

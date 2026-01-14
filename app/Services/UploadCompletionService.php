@@ -623,10 +623,21 @@ class UploadCompletionService
             if ($this->supportsThumbnailGeneration($asset)) {
                 GenerateThumbnailsJob::dispatch($asset->id);
             } else {
-                // Mark as skipped immediately - no job dispatched, no work attempted
+                // Step 5: Mark as skipped immediately - no job dispatched, no work attempted
+                // Determine skip reason based on file type
+                $mimeType = strtolower($asset->mime_type ?? '');
+                $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+                $skipReason = $this->determineSkipReason($mimeType, $extension);
+                
+                // Store skip reason in metadata for UI display
+                $metadata = $asset->metadata ?? [];
+                $metadata['thumbnail_skip_reason'] = $skipReason;
+                
+                // Mark as skipped with clear error message
                 $asset->update([
                     'thumbnail_status' => \App\Enums\ThumbnailStatus::SKIPPED,
-                    'thumbnail_error' => 'Thumbnail generation skipped: unsupported file type',
+                    'thumbnail_error' => "Thumbnail generation skipped: {$skipReason}",
+                    'metadata' => $metadata,
                 ]);
                 
                 // Log skipped event (truthful - work never happened)
@@ -635,9 +646,9 @@ class UploadCompletionService
                         $asset,
                         \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
                         [
-                            'reason' => 'unsupported_file_type',
+                            'reason' => $skipReason,
                             'mime_type' => $asset->mime_type,
-                            'file_extension' => pathinfo($asset->original_filename, PATHINFO_EXTENSION),
+                            'file_extension' => $extension,
                         ]
                     );
                 } catch (\Exception $e) {
@@ -646,6 +657,13 @@ class UploadCompletionService
                         'error' => $e->getMessage(),
                     ]);
                 }
+                
+                Log::info('Thumbnail generation skipped - unsupported file type', [
+                    'asset_id' => $asset->id,
+                    'mime_type' => $asset->mime_type,
+                    'extension' => $extension,
+                    'skip_reason' => $skipReason,
+                ]);
             }
 
             // Dispatch metadata extraction job if applicable (images and other extractable file types)
@@ -1004,30 +1022,30 @@ class UploadCompletionService
         $mimeType = strtolower($asset->mime_type ?? '');
         $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
         
-        // Supported image MIME types (matches frontend THUMBNAIL_SUPPORTED_TYPES)
+        // Supported image MIME types - ONLY formats that GD library can actually process
+        // GD library supports: JPEG, PNG, WEBP, GIF
+        // TIFF, BMP, SVG are NOT supported by GD (would require Imagick or other tools)
         $supportedMimeTypes = [
             'image/jpeg',
             'image/jpg',
             'image/png',
             'image/gif',
             'image/webp',
-            'image/svg+xml',
-            'image/bmp',
-            'image/tiff',
-            'image/tif',
+            // TIFF excluded: GD library does not support TIFF (requires Imagick)
+            // BMP excluded: GD library has limited BMP support, not reliable
+            // SVG excluded: GD library does not support SVG (requires Imagick or other tools)
         ];
         
-        // Supported extensions (matches frontend THUMBNAIL_SUPPORTED_EXTENSIONS)
+        // Supported extensions - ONLY formats that GD library can actually process
         $supportedExtensions = [
             'jpg',
             'jpeg',
             'png',
             'gif',
             'webp',
-            'svg',
-            'bmp',
-            'tiff',
-            'tif',
+            // TIFF excluded: GD library does not support TIFF
+            // BMP excluded: GD library has limited BMP support
+            // SVG excluded: GD library does not support SVG
         ];
         
         // AVIF is explicitly excluded (backend doesn't support it yet)
@@ -1083,5 +1101,40 @@ class UploadCompletionService
         }
 
         return new S3Client($config);
+    }
+    
+    /**
+     * Determine skip reason for unsupported file types.
+     * 
+     * Step 5: Provides human-readable skip reasons for UI display.
+     * 
+     * @param string $mimeType
+     * @param string $extension
+     * @return string Skip reason (e.g., "unsupported_format:tiff", "unsupported_format:avif")
+     */
+    protected function determineSkipReason(string $mimeType, string $extension): string
+    {
+        // TIFF - GD library does not support TIFF (requires Imagick)
+        if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
+            return 'unsupported_format:tiff';
+        }
+        
+        // AVIF - Backend pipeline does not support AVIF yet
+        if ($mimeType === 'image/avif' || $extension === 'avif') {
+            return 'unsupported_format:avif';
+        }
+        
+        // BMP - GD library has limited BMP support, not reliable
+        if ($mimeType === 'image/bmp' || $extension === 'bmp') {
+            return 'unsupported_format:bmp';
+        }
+        
+        // SVG - GD library does not support SVG (requires Imagick or other tools)
+        if ($mimeType === 'image/svg+xml' || $extension === 'svg') {
+            return 'unsupported_format:svg';
+        }
+        
+        // Generic fallback
+        return 'unsupported_file_type';
     }
 }

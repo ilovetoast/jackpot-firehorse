@@ -9,6 +9,7 @@
  * - Filter chips (static placeholders)
  * - "Show Info" toggle (controls asset card metadata visibility)
  * - Grid scale slider (card size control)
+ * - Optional "Refresh thumbnails" button (triggers Inertia reload)
  * - Responsive layout (mobile-first)
  * 
  * @param {Object} props
@@ -17,8 +18,10 @@
  * @param {number} props.cardSize - Current card size in pixels (160-360, default 220)
  * @param {Function} props.onCardSizeChange - Callback when card size changes
  * @param {string} props.primaryColor - Brand primary color for slider styling
+ * @param {Function} props.onRefreshThumbnails - Optional callback to refresh thumbnails (triggers router.reload)
  */
 import { useState } from 'react'
+import { ArrowPathIcon } from '@heroicons/react/24/outline'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -26,6 +29,7 @@ export default function AssetGridToolbar({
     cardSize = 220,
     onCardSizeChange = () => {},
     primaryColor = '#6366f1', // Default indigo-600
+    onRefreshThumbnails = null, // Optional: callback to refresh thumbnails
 }) {
     // Static filter chip placeholders (non-functional)
     const filterChips = ['Nature', 'Space', 'Color-grading', 'Amsterdam', 'Summer']
@@ -135,6 +139,19 @@ export default function AssetGridToolbar({
 
                 {/* Controls - Right Side on Desktop */}
                 <div className="flex items-center gap-4 flex-shrink-0">
+                    {/* Optional: Refresh Thumbnails Button */}
+                    {onRefreshThumbnails && (
+                        <button
+                            type="button"
+                            onClick={onRefreshThumbnails}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                            title="Refresh thumbnails (reloads asset data)"
+                        >
+                            <ArrowPathIcon className="h-4 w-4" />
+                            <span className="hidden sm:inline">Refresh</span>
+                        </button>
+                    )}
+
                     {/* Show Info Toggle */}
                     <label className="flex items-center gap-2 cursor-pointer">
                         <button

@@ -4,6 +4,14 @@
  * Grid layout for displaying assets with true CSS Grid scaling.
  * Uses AssetGridContainer for variable column sizing.
  * 
+ * HARD STABILIZATION: Grid thumbnails are snapshot-only by design to prevent flicker and re-render thrash.
+ * Thumbnails in the grid must ONLY update via:
+ * - Full page reload
+ * - Explicit router.reload({ only: ['assets'] })
+ * 
+ * Live thumbnail updates are intentionally disabled in the grid context.
+ * See AssetDrawer for live thumbnail behavior when viewing asset details.
+ * 
  * @param {Object} props
  * @param {Array} props.assets - Array of asset objects to display
  * @param {Function} props.onAssetClick - Optional click handler when an asset is clicked
@@ -41,7 +49,9 @@ export default function AssetGrid({
         <AssetGridContainer cardSize={cardSize}>
             {assets.map((asset) => (
                 <AssetCard
-                    key={asset.id || asset.uuid || asset.title}
+                    // CRITICAL: Stable key to prevent remounts/flashing.
+                    // Asset cards must be keyed by asset.id ONLY.
+                    key={asset.id}
                     asset={asset}
                     onClick={onAssetClick}
                     showInfo={showInfo}

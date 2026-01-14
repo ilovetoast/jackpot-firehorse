@@ -206,6 +206,7 @@ class Asset extends Model
         'metadata',
         'thumbnail_status',
         'thumbnail_error',
+        'thumbnail_started_at',
     ];
 
     /**

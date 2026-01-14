@@ -45,7 +45,14 @@ class ProcessAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $asset = Asset::findOrFail($this->assetId);
+        Log::info('[ProcessAssetJob] Job started', [
+            'asset_id' => $this->assetId,
+            'job_id' => $this->job->getJobId() ?? 'unknown',
+            'attempt' => $this->attempts(),
+        ]);
+
+        try {
+            $asset = Asset::findOrFail($this->assetId);
 
         // Skip if failed (don't reprocess failed assets automatically)
         if ($asset->status === AssetStatus::FAILED) {
@@ -73,6 +80,21 @@ class ProcessAssetJob implements ShouldQueue
         if (isset($metadata['processing_started'])) {
             Log::info('Asset processing skipped - processing already started', [
                 'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+        
+        // Prevent re-processing: Skip if thumbnails are already in a terminal state
+        // Terminal states: COMPLETED, FAILED, SKIPPED
+        // Only PENDING and PROCESSING should trigger new processing
+        if ($asset->thumbnail_status && in_array($asset->thumbnail_status, [
+            \App\Enums\ThumbnailStatus::COMPLETED,
+            \App\Enums\ThumbnailStatus::FAILED,
+            \App\Enums\ThumbnailStatus::SKIPPED,
+        ])) {
+            Log::info('Asset processing skipped - thumbnail already in terminal state', [
+                'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status->value,
             ]);
             return;
         }
@@ -125,6 +147,22 @@ class ProcessAssetJob implements ShouldQueue
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),
         ])->dispatch();
+
+        Log::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
+            'asset_id' => $asset->id,
+            'job_id' => $this->job->getJobId() ?? 'unknown',
+            'attempt' => $this->attempts(),
+        ]);
+        } catch (\Throwable $e) {
+            Log::error('[ProcessAssetJob] Job failed with exception', [
+                'asset_id' => $this->assetId,
+                'job_id' => $this->job->getJobId() ?? 'unknown',
+                'attempt' => $this->attempts(),
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     /**
