@@ -20,6 +20,7 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             'asset.thumbnail.started': 'Thumbnail generation started',
             'asset.thumbnail.completed': 'Thumbnail generation completed',
             'asset.thumbnail.failed': 'Thumbnail generation failed',
+            'asset.thumbnail.skipped': 'Thumbnail generation skipped (unsupported format)',
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
         }
@@ -36,7 +37,8 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
         if (eventType.includes('thumbnail.started')) {
             return allEvents.some(e => 
                 e.event_type === 'asset.thumbnail.completed' || 
-                e.event_type === 'asset.thumbnail.failed'
+                e.event_type === 'asset.thumbnail.failed' ||
+                e.event_type === 'asset.thumbnail.skipped'
             )
         }
         // Add other started event types here if needed
@@ -49,6 +51,15 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                 icon: XCircleIcon,
                 color: 'text-red-500',
                 bgColor: 'bg-red-50',
+            }
+        }
+        
+        // Skipped events are informational (not error, not success)
+        if (eventType.includes('skipped')) {
+            return {
+                icon: CheckCircleIcon,
+                color: 'text-blue-500',
+                bgColor: 'bg-blue-50',
             }
         }
         
@@ -163,6 +174,13 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                 <div className="mt-1 text-xs text-gray-500">
                                                     {event.metadata.error && (
                                                         <p className="text-red-600">{event.metadata.error}</p>
+                                                    )}
+                                                    {event.metadata.reason && event.event_type === 'asset.thumbnail.skipped' && (
+                                                        <p className="text-blue-600">
+                                                            {event.metadata.reason === 'unsupported_file_type' 
+                                                                ? 'Unsupported file type' 
+                                                                : event.metadata.reason}
+                                                        </p>
                                                     )}
                                                     {event.metadata.styles && (
                                                         <p>Styles: {event.metadata.styles.join(', ')}</p>

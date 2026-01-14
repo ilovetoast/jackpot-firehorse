@@ -24,7 +24,7 @@ export default function SystemCategories({ templates, asset_types }) {
     const [localTemplates, setLocalTemplates] = useState(templates || [])
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, template: null })
 
-    const { data, setData, post, put, delete: destroy, processing, errors, reset } = useForm({
+    const { data, setData, post, put, processing, errors, reset } = useForm({
         name: '',
         slug: '',
         icon: 'folder',
@@ -81,7 +81,8 @@ export default function SystemCategories({ templates, asset_types }) {
 
     const confirmDelete = () => {
         if (deleteConfirm.template) {
-            destroy(`/app/admin/system-categories/${deleteConfirm.template.id}`, {
+            router.delete(`/app/admin/system-categories/${deleteConfirm.template.id}`, {
+                preserveScroll: true,
                 onSuccess: () => {
                     setDeleteConfirm({ open: false, template: null })
                     setDeletingTemplate(null)
@@ -663,6 +664,23 @@ export default function SystemCategories({ templates, asset_types }) {
                 </div>
             </main>
             <AppFooter />
+            
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                open={deleteConfirm.open}
+                onClose={() => setDeleteConfirm({ open: false, template: null })}
+                onConfirm={confirmDelete}
+                title="Delete System Category"
+                message={
+                    deleteConfirm.template
+                        ? `Are you sure you want to delete the system category "${deleteConfirm.template.name}"? This will mark the template for deletion and allow tenants to delete their existing categories based on this template. This action cannot be undone.`
+                        : ''
+                }
+                confirmText="Delete"
+                cancelText="Cancel"
+                variant="danger"
+                loading={processing}
+            />
         </div>
     )
 }

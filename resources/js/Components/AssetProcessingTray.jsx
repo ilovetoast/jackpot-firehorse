@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import { usePage, router } from '@inertiajs/react'
 import {
     ArrowPathIcon,
     XCircleIcon,
@@ -11,17 +10,24 @@ import {
 /**
  * AssetProcessingTray Component
  * 
- * Google Drive-style floating tray that shows assets currently processing thumbnails.
- * Automatically tracks assets where thumbnail_status !== 'completed'.
+ * Backend-driven processing indicator that shows assets currently processing.
+ * 
+ * CRITICAL RULES:
+ * - NO optimistic UI tracking - all state comes from backend
+ * - Polls /app/assets/processing endpoint (authoritative source)
+ * - Automatically clears when backend reports zero active jobs
+ * - Never persists across reloads unless backend confirms jobs exist
+ * - Includes TTL safety (stale jobs >10 minutes are auto-cleared)
  * 
  * Features:
  * - Expandable/minimizable (remembers state in sessionStorage)
  * - Auto-dismisses when all assets complete
  * - Shows processing status for each asset
  * - Handles failure states gracefully
+ * - Defensive logging for debugging
  */
 export default function AssetProcessingTray() {
-    const { processing_assets = [] } = usePage().props
+    const [processingAssets, setProcessingAssets] = useState([])
     const [isExpanded, setIsExpanded] = useState(() => {
         // Restore minimized state from sessionStorage
         if (typeof window !== 'undefined') {
@@ -31,39 +37,126 @@ export default function AssetProcessingTray() {
         return true
     })
     const [isDismissed, setIsDismissed] = useState(false)
+    const [isLoading, setIsLoading] = useState(true)
     const autoDismissTimerRef = useRef(null)
+    const pollIntervalRef = useRef(null)
+    const lastFetchRef = useRef(null)
 
-    // Filter to only show assets that are actually processing (not completed)
-    // Include assets where thumbnail_status is null (legacy assets) or not 'completed'
-    const processingAssets = processing_assets.filter(
-        (asset) => !asset.thumbnail_status || asset.thumbnail_status !== 'completed'
-    )
+    // Poll backend endpoint for active processing jobs
+    const fetchActiveJobs = async () => {
+        try {
+            const response = await window.axios.get('/app/assets/processing')
+            const { active_jobs = [], stale_count = 0, fetched_at } = response.data
 
-    // Auto-dismiss when all assets complete
-    useEffect(() => {
-        if (processingAssets.length === 0 && !isDismissed) {
-            // Wait 2 seconds before auto-dismissing to show completion briefly
-            autoDismissTimerRef.current = setTimeout(() => {
-                setIsDismissed(true)
-            }, 2000)
+            // Log when items are added/removed
+            const previousCount = processingAssets.length
+            const currentCount = active_jobs.length
 
-            return () => {
+            if (currentCount !== previousCount) {
+                console.log('[AssetProcessingTray] Processing count changed', {
+                    previous: previousCount,
+                    current: currentCount,
+                    added: currentCount > previousCount ? currentCount - previousCount : 0,
+                    removed: previousCount > currentCount ? previousCount - currentCount : 0,
+                    stale_count,
+                    fetched_at,
+                })
+            }
+
+            // Log when items are added
+            if (currentCount > previousCount) {
+                const addedIds = active_jobs
+                    .filter(job => !processingAssets.find(prev => prev.id === job.id))
+                    .map(job => job.id)
+                if (addedIds.length > 0) {
+                    console.log('[AssetProcessingTray] Processing items added', {
+                        asset_ids: addedIds,
+                        count: addedIds.length,
+                    })
+                }
+            }
+
+            // Log when items are removed
+            if (previousCount > currentCount) {
+                const removedIds = processingAssets
+                    .filter(prev => !active_jobs.find(job => job.id === prev.id))
+                    .map(prev => prev.id)
+                if (removedIds.length > 0) {
+                    console.log('[AssetProcessingTray] Processing items removed', {
+                        asset_ids: removedIds,
+                        count: removedIds.length,
+                        reason: 'terminal_state_reached',
+                    })
+                }
+            }
+
+            // Log stale jobs
+            if (stale_count > 0) {
+                console.warn('[AssetProcessingTray] Stale jobs detected', {
+                    stale_count,
+                    message: 'Jobs processing longer than 10 minutes - auto-cleared from UI',
+                })
+            }
+
+            // Update state with backend truth
+            setProcessingAssets(active_jobs)
+            lastFetchRef.current = fetched_at
+            setIsLoading(false)
+
+            // Auto-dismiss when backend reports zero active jobs
+            if (active_jobs.length === 0 && !isDismissed) {
+                // Wait 2 seconds before auto-dismissing to show completion briefly
                 if (autoDismissTimerRef.current) {
                     clearTimeout(autoDismissTimerRef.current)
                 }
+                autoDismissTimerRef.current = setTimeout(() => {
+                    console.log('[AssetProcessingTray] Auto-dismissing - no active jobs')
+                    setIsDismissed(true)
+                }, 2000)
+            } else if (active_jobs.length > 0) {
+                // Cancel auto-dismiss if new assets start processing
+                if (autoDismissTimerRef.current) {
+                    clearTimeout(autoDismissTimerRef.current)
+                }
+                setIsDismissed(false)
             }
-        } else if (processingAssets.length > 0) {
-            // Cancel auto-dismiss if new assets start processing
+        } catch (error) {
+            console.error('[AssetProcessingTray] Error fetching active jobs', {
+                error: error.message,
+                response: error.response?.data,
+            })
+            setIsLoading(false)
+            // On error, clear processing assets (fail-safe)
+            setProcessingAssets([])
+        }
+    }
+
+    // Initial fetch and polling setup
+    useEffect(() => {
+        // Initial fetch immediately
+        fetchActiveJobs()
+
+        // Poll every 5 seconds when component is mounted
+        pollIntervalRef.current = setInterval(() => {
+            fetchActiveJobs()
+        }, 5000)
+
+        return () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current)
+            }
             if (autoDismissTimerRef.current) {
                 clearTimeout(autoDismissTimerRef.current)
             }
-            setIsDismissed(false)
         }
-    }, [processingAssets.length, isDismissed])
+    }, []) // Empty deps - only run on mount/unmount
 
-    // Cleanup timer on unmount
+    // Cleanup timers on unmount
     useEffect(() => {
         return () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current)
+            }
             if (autoDismissTimerRef.current) {
                 clearTimeout(autoDismissTimerRef.current)
             }
@@ -71,6 +164,7 @@ export default function AssetProcessingTray() {
     }, [])
 
     // Don't render if dismissed or no processing assets
+    // CRITICAL: Only show if backend confirms active jobs exist
     if (isDismissed || processingAssets.length === 0) {
         return null
     }
@@ -85,6 +179,7 @@ export default function AssetProcessingTray() {
     }
 
     const handleDismiss = () => {
+        console.log('[AssetProcessingTray] Manually dismissed by user')
         setIsDismissed(true)
         // Clear session storage on manual dismiss
         if (typeof window !== 'undefined') {
@@ -181,7 +276,11 @@ export default function AssetProcessingTray() {
                 {/* Expanded content */}
                 {isExpanded && (
                     <div className="max-h-96 overflow-y-auto">
-                        {processingAssets.length === 0 ? (
+                        {isLoading ? (
+                            <div className="px-4 py-8 text-center text-sm text-gray-500">
+                                Loading...
+                            </div>
+                        ) : processingAssets.length === 0 ? (
                             <div className="px-4 py-8 text-center text-sm text-gray-500">
                                 All assets are ready
                             </div>

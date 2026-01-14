@@ -163,6 +163,8 @@ export function getThumbnailState(asset, retryCount = 0) {
         return {
             state: 'NOT_SUPPORTED',
             thumbnailUrl: null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: null,
             canRetry: false,
         }
     }
@@ -172,6 +174,8 @@ export function getThumbnailState(asset, retryCount = 0) {
         return {
             state: 'NOT_SUPPORTED',
             thumbnailUrl: null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: null,
             canRetry: false,
         }
     }
@@ -182,16 +186,54 @@ export function getThumbnailState(asset, retryCount = 0) {
     // ============================================================================
     // ABSOLUTE PRIORITY: REAL THUMBNAILS ALWAYS WIN OVER STATE
     // ============================================================================
-    // If thumbnail_url exists, it MUST be returned regardless of thumbnail_status.
-    // This prevents state contracts from blocking real thumbnails.
-    // Reality wins over state - if a thumbnail exists, show it.
+    // Priority order: final_thumbnail_url > preview_thumbnail_url > icon
+    // 
+    // WHY FINAL ALWAYS WINS:
+    // - Final thumbnails are permanent, full-quality, and include version for cache busting
+    // - Once final exists, preview is no longer needed
+    // - Final URL changes when version changes, ensuring browser refetches
+    // 
+    // WHY PREVIEW EXISTS:
+    // - Preview thumbnails are temporary, low-quality thumbnails shown during processing
+    // - They provide immediate visual feedback while final thumbnail is being generated
+    // - Preview and final URLs are distinct, preventing cache confusion
+    // 
+    // WHY ICONS ARE LAST RESORT:
+    // - Icons only show when no thumbnail exists (unsupported format, failed, or not ready)
+    // - Never show icons if preview or final exists - thumbnails always win
     // ============================================================================
+    
+    // Priority 1: Final thumbnail (permanent, full-quality, versioned)
+    if (asset?.final_thumbnail_url) {
+        return {
+            state: 'AVAILABLE',
+            thumbnailUrl: asset.final_thumbnail_url,
+            previewThumbnailUrl: null, // Final exists, no need for preview
+            finalThumbnailUrl: asset.final_thumbnail_url,
+            canRetry: false,
+        }
+    }
+    
+    // Priority 2: Preview thumbnail (temporary, low-quality)
+    if (asset?.preview_thumbnail_url) {
+        return {
+            state: 'PENDING', // Still processing, but preview available
+            thumbnailUrl: asset.preview_thumbnail_url,
+            previewThumbnailUrl: asset.preview_thumbnail_url,
+            finalThumbnailUrl: null,
+            canRetry: false,
+        }
+    }
+    
+    // Legacy support: fallback to thumbnail_url if new fields not available
     if (asset?.thumbnail_url) {
-        // Thumbnail exists - return it immediately
-        // State is AVAILABLE because we have a real thumbnail to show
+        // Assume it's final if thumbnail_status is completed
+        const isFinal = thumbnailStatus === 'completed'
         return {
             state: 'AVAILABLE',
             thumbnailUrl: asset.thumbnail_url,
+            previewThumbnailUrl: isFinal ? null : asset.thumbnail_url,
+            finalThumbnailUrl: isFinal ? asset.thumbnail_url : null,
             canRetry: false,
         }
     }
@@ -201,24 +243,42 @@ export function getThumbnailState(asset, retryCount = 0) {
     // ============================================================================
     
     // Phase 3.1E: State C) FAILED - thumbnail_status === 'failed'
-    // Only applies when thumbnail_url does NOT exist
+    // Only applies when no thumbnail URLs exist
     // Never render <img>, show FileTypeIcon with error message
     if (thumbnailStatus === 'failed') {
         // Allow retry if retryCount < 2 (UI-only, max 2 retries)
         return {
             state: 'FAILED',
             thumbnailUrl: null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: null,
             canRetry: retryCount < 2,
         }
     }
     
+    // Phase 3.1E: State D) SKIPPED - thumbnail_status === 'skipped'
+    // Only applies when no thumbnail URLs exist
+    // Never render <img>, show FileTypeIcon only
+    // This means thumbnail generation was never attempted (unsupported file type)
+    if (thumbnailStatus === 'skipped') {
+        return {
+            state: 'SKIPPED',
+            thumbnailUrl: null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: null,
+            canRetry: false,
+        }
+    }
+    
     // Phase 3.1E: State B) PENDING / PROCESSING - thumbnail_status !== 'completed'
-    // Only applies when thumbnail_url does NOT exist
+    // Only applies when no thumbnail URLs exist
     // Never render <img>, show FileTypeIcon + processing indicator
     // Smart poll will check backend for availability
     return {
         state: 'PENDING',
         thumbnailUrl: null,
+        previewThumbnailUrl: null,
+        finalThumbnailUrl: null,
         canRetry: false,
     }
 }

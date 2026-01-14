@@ -617,7 +617,36 @@ class UploadCompletionService
             // Dispatch post-finalize processing jobs (async, non-blocking)
             // Jobs are dispatched immediately after asset creation to ensure processing happens eventually
             // Order: ThumbnailGenerationJob -> MetadataExtractionJob (if applicable) -> AssetProcessingCompleteEvent
-            GenerateThumbnailsJob::dispatch($asset->id);
+            
+            // Check if thumbnail generation is supported for this file type
+            // Skip job dispatch for unsupported formats (e.g., AVIF) to prevent false "started" events
+            if ($this->supportsThumbnailGeneration($asset)) {
+                GenerateThumbnailsJob::dispatch($asset->id);
+            } else {
+                // Mark as skipped immediately - no job dispatched, no work attempted
+                $asset->update([
+                    'thumbnail_status' => \App\Enums\ThumbnailStatus::SKIPPED,
+                    'thumbnail_error' => 'Thumbnail generation skipped: unsupported file type',
+                ]);
+                
+                // Log skipped event (truthful - work never happened)
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
+                        [
+                            'reason' => 'unsupported_file_type',
+                            'mime_type' => $asset->mime_type,
+                            'file_extension' => pathinfo($asset->original_filename, PATHINFO_EXTENSION),
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    Log::error('Failed to log thumbnail skipped event', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
 
             // Dispatch metadata extraction job if applicable (images and other extractable file types)
             // For now, dispatch for all assets - future refinement can add file type checks
@@ -959,6 +988,64 @@ class UploadCompletionService
         
         // Capitalize first letter of each word
         return ucwords(strtolower($trimmed));
+    }
+
+    /**
+     * Check if thumbnail generation is supported for an asset.
+     * 
+     * Matches frontend logic: only image types that the backend pipeline can actually process.
+     * AVIF is excluded because the backend thumbnail pipeline does not yet support it.
+     * 
+     * @param Asset $asset
+     * @return bool True if thumbnail generation is supported
+     */
+    protected function supportsThumbnailGeneration(Asset $asset): bool
+    {
+        $mimeType = strtolower($asset->mime_type ?? '');
+        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        
+        // Supported image MIME types (matches frontend THUMBNAIL_SUPPORTED_TYPES)
+        $supportedMimeTypes = [
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/gif',
+            'image/webp',
+            'image/svg+xml',
+            'image/bmp',
+            'image/tiff',
+            'image/tif',
+        ];
+        
+        // Supported extensions (matches frontend THUMBNAIL_SUPPORTED_EXTENSIONS)
+        $supportedExtensions = [
+            'jpg',
+            'jpeg',
+            'png',
+            'gif',
+            'webp',
+            'svg',
+            'bmp',
+            'tiff',
+            'tif',
+        ];
+        
+        // AVIF is explicitly excluded (backend doesn't support it yet)
+        if ($mimeType === 'image/avif' || $extension === 'avif') {
+            return false;
+        }
+        
+        // Check MIME type first
+        if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
+            return true;
+        }
+        
+        // Fallback to extension check
+        if ($extension && in_array($extension, $supportedExtensions)) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**

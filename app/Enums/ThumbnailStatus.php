@@ -34,4 +34,11 @@ enum ThumbnailStatus: string
      * Asset remains usable even if thumbnails fail.
      */
     case FAILED = 'failed';
+
+    /**
+     * Thumbnail generation was skipped because the file type is not supported.
+     * No job was dispatched, no work was attempted.
+     * This is different from FAILED - skipped means the work never happened.
+     */
+    case SKIPPED = 'skipped';
 }

@@ -347,15 +347,38 @@ class AssetController extends Controller
                     }
                 }
 
-                // Generate thumbnail URL using secure backend endpoint
-                // Pattern: /app/assets/{asset_id}/thumbnail/{style}
-                // The endpoint handles missing thumbnails gracefully by returning placeholders
-                // For grid view, we provide 'thumb' style (smaller, faster loading)
-                // The frontend can request 'medium' or 'large' for detail views if needed
-                $thumbnailUrl = route('assets.thumbnail', [
+                // Generate distinct thumbnail URLs for preview and final
+                // CRITICAL: Preview and final URLs must NEVER be the same to prevent cache confusion
+                // Preview: /app/assets/{asset_id}/thumbnail/preview/{style} (temporary, low-quality)
+                // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
+                $previewThumbnailUrl = route('assets.thumbnail.preview', [
                     'asset' => $asset->id,
-                    'style' => 'thumb', // Use thumb style for grid cards (320px)
+                    'style' => 'thumb',
                 ]);
+                
+                $finalThumbnailUrl = null;
+                $thumbnailVersion = null;
+                
+                // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+                // Includes version query param (thumbnails_generated_at) for cache busting
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                    ? $asset->thumbnail_status->value 
+                    : ($asset->thumbnail_status ?? 'pending');
+                
+                if ($thumbnailStatus === 'completed') {
+                    $metadata = $asset->metadata ?? [];
+                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                    
+                    $finalThumbnailUrl = route('assets.thumbnail.final', [
+                        'asset' => $asset->id,
+                        'style' => 'thumb',
+                    ]);
+                    
+                    // Add version query param if available (ensures browser refetches when version changes)
+                    if ($thumbnailVersion) {
+                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                    }
+                }
 
                 return [
                     'id' => $asset->id,
@@ -372,8 +395,14 @@ class AssetController extends Controller
                         'name' => $categoryName,
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
-                    // Thumbnail URL using secure backend endpoint (returns placeholder if not yet generated)
-                    'thumbnail_url' => $thumbnailUrl,
+                    // Thumbnail URLs - distinct paths prevent cache confusion
+                    'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
+                    'final_thumbnail_url' => $finalThumbnailUrl, // Final thumbnail (permanent, full-quality, only when completed)
+                    'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
+                    // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
+                    'thumbnail_url' => $finalThumbnailUrl ?? null,
+                    'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
+                    'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
                 ];
@@ -391,6 +420,201 @@ class AssetController extends Controller
             'total_asset_count' => $totalAssetCount, // Total count for "All" button
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
         ]);
+    }
+
+    /**
+     * GET /app/assets/processing
+     * 
+     * Returns all assets currently processing (backend-driven truth).
+     * This is the authoritative source for processing indicators.
+     * 
+     * CRITICAL RULES:
+     * - Only returns assets with terminal states excluded (pending, processing, or null)
+     * - Includes TTL check to detect stale jobs (>10 minutes)
+     * - Terminal states (completed, failed, skipped) are never returned
+     * 
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function activeProcessingJobs(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = $request->user();
+        
+        if (!$tenant || !$brand || !$user) {
+            return response()->json([
+                'active_jobs' => [],
+                'stale_count' => 0,
+            ]);
+        }
+        
+        $now = now();
+        $staleThreshold = 10; // 10 minutes
+        $staleCount = 0;
+        
+        try {
+            // CRITICAL: Only include assets that are actively processing
+            // Terminal states (failed, skipped, completed) are automatically excluded
+            $processingAssets = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where(function ($query) {
+                    // Only include actively processing states: pending, processing, or null (legacy)
+                    $query->where('thumbnail_status', \App\Enums\ThumbnailStatus::PENDING->value)
+                          ->orWhere('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING->value)
+                          ->orWhereNull('thumbnail_status'); // Legacy assets (null = pending)
+                })
+                ->whereNull('deleted_at')
+                ->orderBy('created_at', 'desc')
+                ->limit(100) // Reasonable limit
+                ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at'])
+                ->map(function ($asset) use ($now, $staleThreshold, &$staleCount) {
+                    $ageMinutes = $asset->created_at->diffInMinutes($now);
+                    $isStale = $ageMinutes > $staleThreshold;
+                    
+                    if ($isStale) {
+                        $staleCount++;
+                        Log::warning('[AssetProcessingTray] Stale processing job detected', [
+                            'asset_id' => $asset->id,
+                            'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                            'age_minutes' => $ageMinutes,
+                            'created_at' => $asset->created_at->toIso8601String(),
+                        ]);
+                    }
+                    
+                    return [
+                        'id' => $asset->id,
+                        'title' => $asset->title ?? $asset->original_filename ?? 'Untitled Asset',
+                        'thumbnail_status' => $asset->thumbnail_status?->value ?? 'pending',
+                        'thumbnail_error' => $asset->thumbnail_error,
+                        'status' => $asset->status?->value ?? 'pending',
+                        'created_at' => $asset->created_at->toIso8601String(),
+                        'age_minutes' => $ageMinutes,
+                        'is_stale' => $isStale,
+                    ];
+                })
+                ->filter(function ($asset) {
+                    // Filter out stale jobs from active list (but count them)
+                    return !$asset['is_stale'];
+                })
+                ->values()
+                ->toArray();
+            
+            Log::info('[AssetProcessingTray] Active processing jobs fetched', [
+                'active_count' => count($processingAssets),
+                'stale_count' => $staleCount,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            
+            return response()->json([
+                'active_jobs' => $processingAssets,
+                'stale_count' => $staleCount,
+                'fetched_at' => $now->toIso8601String(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('[AssetProcessingTray] Error fetching active processing jobs', [
+                'error' => $e->getMessage(),
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            
+            return response()->json([
+                'active_jobs' => [],
+                'stale_count' => 0,
+                'error' => 'Failed to fetch processing jobs',
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /app/assets/thumbnail-status/batch
+     * 
+     * Batch endpoint for checking thumbnail status of multiple assets.
+     * Used by smart polling to efficiently check which assets have final thumbnails ready.
+     * 
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function batchThumbnailStatus(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = $request->user();
+        
+        if (!$tenant || !$brand || !$user) {
+            return response()->json([
+                'assets' => [],
+            ]);
+        }
+        
+        // Get asset IDs from request (comma-separated or array)
+        $assetIds = $request->input('asset_ids', []);
+        
+        if (is_string($assetIds)) {
+            $assetIds = explode(',', $assetIds);
+        }
+        
+        if (!is_array($assetIds) || empty($assetIds)) {
+            return response()->json([
+                'assets' => [],
+            ]);
+        }
+        
+        // Limit to reasonable batch size
+        $assetIds = array_slice($assetIds, 0, 50);
+        
+        try {
+            $assets = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereIn('id', $assetIds)
+                ->whereNull('deleted_at')
+                ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata'])
+                ->map(function ($asset) {
+                    $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                        ? $asset->thumbnail_status->value 
+                        : ($asset->thumbnail_status ?? 'pending');
+                    
+                    $metadata = $asset->metadata ?? [];
+                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                    
+                    $finalThumbnailUrl = null;
+                    if ($thumbnailStatus === 'completed') {
+                        $finalThumbnailUrl = route('assets.thumbnail.final', [
+                            'asset' => $asset->id,
+                            'style' => 'thumb',
+                        ]);
+                        
+                        if ($thumbnailVersion) {
+                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        }
+                    }
+                    
+                    return [
+                        'asset_id' => $asset->id,
+                        'thumbnail_status' => $thumbnailStatus,
+                        'thumbnail_version' => $thumbnailVersion,
+                        'final_thumbnail_url' => $finalThumbnailUrl,
+                        'thumbnail_error' => $asset->thumbnail_error,
+                    ];
+                })
+                ->values()
+                ->toArray();
+            
+            return response()->json([
+                'assets' => $assets,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Error fetching batch thumbnail status', [
+                'error' => $e->getMessage(),
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            
+            return response()->json([
+                'assets' => [],
+            ], 500);
+        }
     }
 
     /**
@@ -429,32 +653,38 @@ class AssetController extends Controller
             ? $asset->thumbnail_status->value 
             : ($asset->thumbnail_status ?? 'pending');
 
-        // Generate thumbnail URL using existing grid thumbnail logic
-        $thumbnailUrl = route('assets.thumbnail', [
+        // Generate distinct thumbnail URLs for preview and final
+        $previewThumbnailUrl = route('assets.thumbnail.preview', [
             'asset' => $asset->id,
             'style' => 'thumb',
         ]);
-
-        // Get thumbnails_generated_at from metadata
-        $metadata = $asset->metadata ?? [];
-        $thumbnailsGeneratedAt = $metadata['thumbnails_generated_at'] ?? null;
-
-        // Append cache-busting query param using thumbnails_generated_at timestamp
-        if ($thumbnailsGeneratedAt) {
-            // Convert ISO8601 timestamp to unix timestamp for cache busting
-            try {
-                $timestamp = \Carbon\Carbon::parse($thumbnailsGeneratedAt)->timestamp;
-                $thumbnailUrl .= '?t=' . $timestamp;
-            } catch (\Exception $e) {
-                // If parsing fails, use current timestamp as fallback
-                $thumbnailUrl .= '?t=' . time();
+        
+        $finalThumbnailUrl = null;
+        $thumbnailVersion = null;
+        
+        // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+        if ($thumbnailStatus === 'completed') {
+            $metadata = $asset->metadata ?? [];
+            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+            
+            $finalThumbnailUrl = route('assets.thumbnail.final', [
+                'asset' => $asset->id,
+                'style' => 'thumb',
+            ]);
+            
+            // Add version query param if available
+            if ($thumbnailVersion) {
+                $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
             }
         }
 
         return response()->json([
             'thumbnail_status' => $thumbnailStatus,
-            'thumbnail_url' => $thumbnailUrl,
-            'thumbnails_generated_at' => $thumbnailsGeneratedAt,
+            'preview_thumbnail_url' => $previewThumbnailUrl,
+            'final_thumbnail_url' => $finalThumbnailUrl,
+            'thumbnail_version' => $thumbnailVersion,
+            'thumbnail_url' => $finalThumbnailUrl ?? null, // Legacy compatibility
+            'thumbnails_generated_at' => $thumbnailVersion, // Legacy compatibility
         ], 200);
     }
 

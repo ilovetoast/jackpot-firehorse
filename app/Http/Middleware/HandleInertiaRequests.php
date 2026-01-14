@@ -309,44 +309,10 @@ class HandleInertiaRequests extends Middleware
             $parentShared['old'] = $sessionOldInput;
         }
         
-        // Get processing assets for the tray (only for authenticated users on app pages)
-        // Only show assets that are actively processing (pending, processing)
-        // Exclude failed assets - they're not processing anymore
-        // Note: thumbnail_status can be null for legacy assets or enum value for new assets
+        // DEPRECATED: Processing assets are now fetched via /app/assets/processing endpoint
+        // This shared prop is kept for backward compatibility but AssetProcessingTray now polls the endpoint
+        // Remove this in a future cleanup after confirming the new polling approach works
         $processingAssets = [];
-        if ($user && $activeBrand && $tenant) {
-            try {
-                $processingAssets = \App\Models\Asset::where('tenant_id', $tenant->id)
-                    ->where('brand_id', $activeBrand->id)
-                    ->where(function ($query) {
-                        // Include assets where thumbnail_status is pending, processing, or null (legacy)
-                        // Exclude failed and completed assets
-                        $query->where(function ($q) {
-                            $q->where('thumbnail_status', \App\Enums\ThumbnailStatus::PENDING->value)
-                              ->orWhere('thumbnail_status', \App\Enums\ThumbnailStatus::PROCESSING->value)
-                              ->orWhereNull('thumbnail_status');
-                        });
-                    })
-                    ->whereNull('deleted_at')
-                    ->orderBy('created_at', 'desc')
-                    ->limit(50) // Limit to most recent 50 to avoid performance issues
-                    ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at'])
-                    ->map(function ($asset) {
-                        return [
-                            'id' => $asset->id,
-                            'title' => $asset->title ?? $asset->original_filename ?? 'Untitled Asset',
-                            'thumbnail_status' => $asset->thumbnail_status?->value ?? 'pending',
-                            'thumbnail_error' => $asset->thumbnail_error,
-                            'status' => $asset->status?->value ?? 'pending',
-                            'created_at' => $asset->created_at?->toIso8601String(),
-                        ];
-                    })
-                    ->toArray();
-            } catch (\Exception $e) {
-                // If there's an error, just use empty array (don't break the request)
-                $processingAssets = [];
-            }
-        }
 
         $shared = [
             ...$parentShared,

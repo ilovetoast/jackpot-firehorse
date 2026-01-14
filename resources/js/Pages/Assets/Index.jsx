@@ -8,6 +8,7 @@ import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
+import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import {
     FolderIcon,
     TagIcon,
@@ -86,6 +87,27 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         assets: localAssets,
         selectedCategoryId,
         isPaused: isUploadDialogOpen,
+    })
+    
+    // Step 3: Smart Polling for Preview → Final Thumbnails
+    // Grid-scoped polling that automatically updates preview thumbnails to final thumbnails.
+    // Only polls assets with preview but not final, stops automatically when no targets remain.
+    const handleThumbnailUpdate = useCallback((updatedAsset) => {
+        setLocalAssets(prevAssets => {
+            return prevAssets.map(asset => {
+                if (asset.id === updatedAsset.id) {
+                    // Merge updated asset data
+                    return mergeAsset(asset, updatedAsset)
+                }
+                return asset
+            })
+        })
+    }, [])
+    
+    useThumbnailSmartPoll({
+        assets: localAssets,
+        onAssetUpdate: handleThumbnailUpdate,
+        selectedCategoryId,
     })
     
     // Track drawer animation state to freeze grid layout during animation

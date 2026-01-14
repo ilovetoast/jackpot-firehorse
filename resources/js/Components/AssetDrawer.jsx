@@ -242,6 +242,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const thumbnailsComplete = thumbnailStatus === 'completed'
     const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
     const thumbnailsFailed = thumbnailStatus === 'failed'
+    const thumbnailsSkipped = thumbnailStatus === 'skipped'
 
     // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
     // If status is VISIBLE, asset was uploaded correctly (not processing)
@@ -499,12 +500,32 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </dl>
                 </div>
 
-                {/* Processing State */}
+                {/* Processing State - Skipped (informational, not error) */}
+                {thumbnailsSkipped && (
+                    <div className="border-t border-gray-200 pt-6">
+                        <h3 className="text-sm font-medium text-gray-900 mb-2">Preview Status</h3>
+                        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                            <p className="text-sm text-blue-800">
+                                Preview not available for this file type.
+                            </p>
+                            {asset.thumbnail_error && (
+                                <p className="text-xs text-blue-600 mt-1">
+                                    {asset.thumbnail_error}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Processing State - Failed (error with details) */}
                 {thumbnailsFailed && asset.thumbnail_error && (
                     <div className="border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900 mb-2">Processing Error</h3>
                         <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                            <p className="text-sm text-red-800">{asset.thumbnail_error}</p>
+                            <p className="text-sm font-medium text-red-800 mb-1">
+                                Preview failed to generate
+                            </p>
+                            <p className="text-sm text-red-700">{asset.thumbnail_error}</p>
                         </div>
                     </div>
                 )}

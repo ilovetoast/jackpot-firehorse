@@ -206,15 +206,6 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     shouldAnimateThumbnail={shouldAnimateThumbnail}
                 />
                 
-                {/* Processing badge - bottom left - Shows while thumbnail is processing */}
-                {isProcessing && (
-                    <div className="absolute bottom-2 left-2 pointer-events-none">
-                        <span className="inline-flex items-center rounded-md bg-gray-900/70 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white">
-                            Processing…
-                        </span>
-                    </div>
-                )}
-                
                 {/* File type badge overlay - top right - Conditionally hidden based on showInfo prop */}
                 {showInfo && (
                     <div className="absolute top-2 right-2">

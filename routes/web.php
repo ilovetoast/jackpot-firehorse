@@ -174,9 +174,15 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
 
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
+            Route::get('/assets/processing', [\App\Http\Controllers\AssetController::class, 'activeProcessingJobs'])->name('assets.processing');
+            Route::get('/assets/thumbnail-status/batch', [\App\Http\Controllers\AssetController::class, 'batchThumbnailStatus'])->name('assets.thumbnail-status.batch');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
+            // Thumbnail endpoints - distinct URLs for preview and final to prevent cache confusion
+            Route::get('/assets/{asset}/thumbnail/preview/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'preview'])->name('assets.thumbnail.preview');
+            Route::get('/assets/{asset}/thumbnail/final/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'final'])->name('assets.thumbnail.final');
+            // Legacy endpoint for backward compatibility (redirects to final)
             Route::get('/assets/{asset}/thumbnail/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'show'])->name('assets.thumbnail');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/marketing-assets', [\App\Http\Controllers\MarketingAssetController::class, 'index'])->name('marketing-assets.index');

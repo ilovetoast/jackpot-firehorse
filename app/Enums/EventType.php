@@ -77,6 +77,7 @@ class EventType
     public const ASSET_THUMBNAIL_STARTED = 'asset.thumbnail.started';
     public const ASSET_THUMBNAIL_COMPLETED = 'asset.thumbnail.completed';
     public const ASSET_THUMBNAIL_FAILED = 'asset.thumbnail.failed';
+    public const ASSET_THUMBNAIL_SKIPPED = 'asset.thumbnail.skipped';
     public const ASSET_PROMOTED = 'asset.promoted';
     public const ASSET_READY = 'asset.ready';
 
@@ -193,6 +194,7 @@ class EventType
             self::ASSET_THUMBNAIL_STARTED,
             self::ASSET_THUMBNAIL_COMPLETED,
             self::ASSET_THUMBNAIL_FAILED,
+            self::ASSET_THUMBNAIL_SKIPPED,
             self::ASSET_PROMOTED,
             self::ASSET_READY,
             self::ASSET_DOWNLOAD_CREATED,

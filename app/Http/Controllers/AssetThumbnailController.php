@@ -17,17 +17,33 @@ use Illuminate\Support\Facades\Storage;
  * Secure thumbnail delivery endpoint that streams thumbnails from S3 through the backend.
  * Does NOT expose S3 URLs publicly - all access is controlled via this endpoint.
  *
- * Endpoint: GET /app/assets/{asset}/thumbnail/{style}
- *
+ * CRITICAL CACHE CORRECTNESS RULES:
+ * =================================
+ * 
+ * 1. NO PLACEHOLDER IMAGES
+ *    - Backend MUST NEVER return fake/placeholder images (1x1 pixel, solid colors, etc.)
+ *    - Missing or invalid thumbnails MUST return 404
+ *    - This prevents browser from caching placeholder images that can never be replaced
+ * 
+ * 2. PREVIEW vs FINAL SEPARATION
+ *    - Preview thumbnails: /app/assets/{asset}/thumbnail/preview/{style}
+ *    - Final thumbnails: /app/assets/{asset}/thumbnail/final/{style}
+ *    - These URLs MUST NEVER be the same to prevent cache confusion
+ * 
+ * 3. VERSION-BASED CACHE BUSTING
+ *    - Final thumbnails include thumbnail_version query param
+ *    - Version changes ONLY when final thumbnail is ready (thumbnails_generated_at)
+ *    - Browser will refetch final thumbnail when version changes
+ *    - Preview thumbnails do NOT include version (they're temporary)
+ * 
+ * 4. WHY THIS MATTERS
+ *    - Prevents cached placeholders: Browser never caches 404s
+ *    - Prevents green tiles: No placeholder images means no cached placeholders
+ *    - Enables safe preview→final swap: Different URLs ensure no cache collision
+ * 
  * Authorization:
  * - Asset must belong to authenticated user's tenant
  * - Asset must belong to active brand (unless tenant owner/admin)
- *
- * Thumbnail Resolution:
- * - Validates style against config('assets.thumbnail_styles')
- * - Returns processing placeholder if thumbnail_status !== completed
- * - Returns failed placeholder if thumbnail_status === failed
- * - Streams thumbnail from S3 if completed
  *
  * Future work notes (see ThumbnailGenerationService for implementation details):
  * @todo PSD / PSB thumbnail generation (Imagick) - See ThumbnailGenerationService::generatePsdThumbnail()
@@ -54,9 +70,167 @@ class AssetThumbnailController extends Controller
     }
 
     /**
-     * Stream thumbnail for an asset.
+     * Stream preview thumbnail for an asset.
+     *
+     * GET /app/assets/{asset}/thumbnail/preview/{style}
+     *
+     * Preview thumbnails are temporary, low-quality thumbnails shown while processing.
+     * They are NOT cached with version numbers and should be replaced by final thumbnails.
+     *
+     * CRITICAL: This endpoint MUST return 404 if thumbnail is not ready.
+     * NO placeholder images are ever returned - browser must never cache fake images.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @param string $style Thumbnail style (thumb, medium, large)
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
+    public function preview(Request $request, Asset $asset, string $style): \Symfony\Component\HttpFoundation\Response
+    {
+        $this->authorizeAsset($request, $asset);
+        $this->validateStyle($style);
+
+        // CRITICAL: Preview thumbnails are only available if processing has started
+        // but final thumbnail is not yet ready. If final is ready, return 404 to force
+        // UI to use final endpoint instead.
+        $thumbnailStatus = $asset->thumbnail_status;
+
+        // If final thumbnail is ready, preview is no longer available
+        if ($thumbnailStatus === ThumbnailStatus::COMPLETED) {
+            abort(404, 'Preview not available - final thumbnail is ready');
+        }
+
+        // If thumbnail generation failed or was skipped, no preview available
+        if ($thumbnailStatus === ThumbnailStatus::FAILED || $thumbnailStatus === ThumbnailStatus::SKIPPED) {
+            abort(404, 'Preview not available');
+        }
+
+        // For now, preview endpoint returns 404 (no preview thumbnails generated yet)
+        // Future: Generate low-quality preview thumbnails during processing
+        // This ensures preview and final URLs are always distinct
+        abort(404, 'Preview thumbnail not available');
+    }
+
+    /**
+     * Stream final thumbnail for an asset.
+     *
+     * GET /app/assets/{asset}/thumbnail/final/{style}?v={thumbnail_version}
+     *
+     * Final thumbnails are the completed, full-quality thumbnails.
+     * They include a version query parameter (thumbnails_generated_at timestamp)
+     * that changes ONLY when the final thumbnail is ready, ensuring browser refetches.
+     *
+     * CRITICAL: This endpoint MUST return 404 if thumbnail is not ready.
+     * NO placeholder images are ever returned - browser must never cache fake images.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @param string $style Thumbnail style (thumb, medium, large)
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
+    public function final(Request $request, Asset $asset, string $style): \Symfony\Component\HttpFoundation\Response
+    {
+        $this->authorizeAsset($request, $asset);
+        $this->validateStyle($style);
+
+        // CRITICAL: Final thumbnails are ONLY available when thumbnail_status === COMPLETED
+        // All other states (pending, processing, failed, skipped) MUST return 404
+        // This prevents browser from caching placeholder images that can never be replaced
+        $thumbnailStatus = $asset->thumbnail_status;
+
+        if ($thumbnailStatus !== ThumbnailStatus::COMPLETED) {
+            abort(404, 'Final thumbnail not ready');
+        }
+
+        // Verify thumbnail file exists in metadata
+        $thumbnailPath = $asset->thumbnailPathForStyle($style);
+        
+        if (!$thumbnailPath) {
+            Log::warning('Final thumbnail path not found in asset metadata', [
+                'asset_id' => $asset->id,
+                'style' => $style,
+                'thumbnail_status' => $thumbnailStatus?->value ?? 'null',
+            ]);
+            
+            // Downgrade thumbnail_status to prevent false "completed" state
+            if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
+                $asset->thumbnail_status = ThumbnailStatus::PENDING;
+                $asset->save();
+            }
+            
+            abort(404, 'Final thumbnail not found');
+        }
+
+        // Stream thumbnail from S3
+        try {
+            $response = $this->streamThumbnailFromS3($asset, $thumbnailPath);
+            
+            // Add version-based cache headers for final thumbnails
+            // Version is thumbnails_generated_at timestamp - changes only when final is ready
+            $metadata = $asset->metadata ?? [];
+            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+            
+            if ($thumbnailVersion) {
+                // Add version to ETag to ensure cache invalidation when version changes
+                $headers = $response->headers->all();
+                if (isset($headers['etag'][0])) {
+                    $headers['etag'][0] = $headers['etag'][0] . '-' . md5($thumbnailVersion);
+                }
+                $response->headers->set('X-Thumbnail-Version', $thumbnailVersion);
+            }
+            
+            return $response;
+        } catch (\RuntimeException $e) {
+            // All errors result in 404 - NO placeholder images
+            if (str_contains($e->getMessage(), 'not found') || str_contains($e->getMessage(), '404')) {
+                Log::warning('Final thumbnail not found in S3, returning 404', [
+                    'asset_id' => $asset->id,
+                    'style' => $style,
+                    'thumbnail_path' => $thumbnailPath,
+                    'error' => $e->getMessage(),
+                ]);
+                abort(404, 'Final thumbnail not found');
+            }
+            
+            if (str_contains($e->getMessage(), 'too small') || str_contains($e->getMessage(), 'invalid')) {
+                Log::warning('Final thumbnail file invalid, returning 404', [
+                    'asset_id' => $asset->id,
+                    'style' => $style,
+                    'thumbnail_path' => $thumbnailPath,
+                    'error' => $e->getMessage(),
+                ]);
+                abort(404, 'Final thumbnail file is invalid');
+            }
+
+            Log::error('Failed to stream final thumbnail from S3', [
+                'asset_id' => $asset->id,
+                'style' => $style,
+                'thumbnail_path' => $thumbnailPath,
+                'error' => $e->getMessage(),
+            ]);
+
+            // CRITICAL: Return 404, not placeholder - prevents cached fake images
+            abort(404, 'Final thumbnail unavailable');
+        } catch (\Exception $e) {
+            Log::error('Unexpected error streaming final thumbnail', [
+                'asset_id' => $asset->id,
+                'style' => $style,
+                'thumbnail_path' => $thumbnailPath,
+                'error' => $e->getMessage(),
+            ]);
+
+            // CRITICAL: Return 404, not placeholder - prevents cached fake images
+            abort(404, 'Final thumbnail unavailable');
+        }
+    }
+
+    /**
+     * Legacy endpoint for backward compatibility.
      *
      * GET /app/assets/{asset}/thumbnail/{style}
+     *
+     * DEPRECATED: Use /preview/{style} or /final/{style} instead.
+     * This endpoint redirects to final if completed, otherwise returns 404.
      *
      * @param Request $request
      * @param Asset $asset
@@ -64,6 +238,20 @@ class AssetThumbnailController extends Controller
      * @return \Symfony\Component\HttpFoundation\Response
      */
     public function show(Request $request, Asset $asset, string $style): \Symfony\Component\HttpFoundation\Response
+    {
+        // Legacy endpoint - delegate to final() method
+        // This maintains backward compatibility while enforcing new rules
+        return $this->final($request, $asset, $style);
+    }
+
+    /**
+     * Authorize asset access.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return void
+     */
+    protected function authorizeAsset(Request $request, Asset $asset): void
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -83,102 +271,19 @@ class AssetThumbnailController extends Controller
                 abort(403, 'Asset does not belong to active brand');
             }
         }
+    }
 
-        // Validate style against configuration
+    /**
+     * Validate thumbnail style.
+     *
+     * @param string $style
+     * @return void
+     */
+    protected function validateStyle(string $style): void
+    {
         $styles = config('assets.thumbnail_styles', []);
         if (!isset($styles[$style])) {
             abort(404, 'Invalid thumbnail style');
-        }
-
-        // Handle thumbnail status: return appropriate placeholder or stream thumbnail
-        $thumbnailStatus = $asset->thumbnail_status;
-
-        // If thumbnails are still processing or pending, return processing placeholder
-        if (!$thumbnailStatus || $thumbnailStatus === ThumbnailStatus::PENDING || $thumbnailStatus === ThumbnailStatus::PROCESSING) {
-            return $this->streamPlaceholder('processing');
-        }
-
-        // If thumbnail generation failed, return failed placeholder
-        if ($thumbnailStatus === ThumbnailStatus::FAILED) {
-            return $this->streamPlaceholder('failed');
-        }
-
-        // If thumbnail generation is not completed, return processing placeholder
-        if ($thumbnailStatus !== ThumbnailStatus::COMPLETED) {
-            return $this->streamPlaceholder('processing');
-        }
-
-        // Phase 3.1E: Defensive guard - verify thumbnail file exists before treating as completed
-        // If thumbnail_status === completed but file does not exist, downgrade to pending
-        // This prevents false "completed" states that cause UI to skip processing/icon states
-        // Ensures new uploads behave the same as existing assets
-        $thumbnailPath = $asset->thumbnailPathForStyle($style);
-        
-        if (!$thumbnailPath) {
-            Log::warning('Thumbnail path not found in asset metadata - downgrading status', [
-                'asset_id' => $asset->id,
-                'style' => $style,
-                'thumbnail_status' => $thumbnailStatus?->value ?? 'null',
-            ]);
-            
-            // Downgrade thumbnail_status to prevent false "completed" state
-            // This ensures UI doesn't expect a thumbnail that doesn't exist
-            if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
-                $asset->thumbnail_status = ThumbnailStatus::PENDING;
-                $asset->save();
-            }
-            
-            return $this->streamPlaceholder('processing');
-        }
-
-        // Stream thumbnail from S3
-        try {
-            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
-        } catch (\RuntimeException $e) {
-            // streamThumbnailFromS3 throws RuntimeException on errors
-            // Check error message to determine if it's a 404 (not found), invalid size, or other error
-            if (str_contains($e->getMessage(), 'not found') || str_contains($e->getMessage(), '404')) {
-                Log::warning('Thumbnail not found in S3, returning 404', [
-                    'asset_id' => $asset->id,
-                    'style' => $style,
-                    'thumbnail_path' => $thumbnailPath,
-                    'error' => $e->getMessage(),
-                ]);
-                // Phase 3.1E: Return 404 instead of placeholder to allow UI fallback
-                abort(404, 'Thumbnail not found');
-            }
-            
-            // Phase 3.1E: Handle invalid thumbnail size (1x1 pixel, too small, etc.)
-            if (str_contains($e->getMessage(), 'too small') || str_contains($e->getMessage(), 'invalid')) {
-                Log::warning('Thumbnail file invalid (too small or corrupted), returning 404', [
-                    'asset_id' => $asset->id,
-                    'style' => $style,
-                    'thumbnail_path' => $thumbnailPath,
-                    'error' => $e->getMessage(),
-                ]);
-                // Return 404 to allow UI fallback to file icon
-                abort(404, 'Thumbnail file is invalid');
-            }
-
-            Log::error('Failed to stream thumbnail from S3', [
-                'asset_id' => $asset->id,
-                'style' => $style,
-                'thumbnail_path' => $thumbnailPath,
-                'error' => $e->getMessage(),
-            ]);
-
-            // Return failed placeholder on S3 errors
-            return $this->streamPlaceholder('failed');
-        } catch (\Exception $e) {
-            Log::error('Unexpected error streaming thumbnail', [
-                'asset_id' => $asset->id,
-                'style' => $style,
-                'thumbnail_path' => $thumbnailPath,
-                'error' => $e->getMessage(),
-            ]);
-
-            // Return failed placeholder on unexpected errors
-            return $this->streamPlaceholder('failed');
         }
     }
 
@@ -283,31 +388,22 @@ class AssetThumbnailController extends Controller
     }
 
     /**
-     * Stream placeholder image.
+     * REMOVED: streamPlaceholder() method
      *
-     * Returns a placeholder image for processing or failed states.
+     * This method has been removed to enforce cache correctness.
      *
-     * @param string $type Placeholder type: 'processing' or 'failed'
-     * @return \Symfony\Component\HttpFoundation\Response
+     * WHY REMOVED:
+     * - Placeholder images (1x1 pixel, solid colors, etc.) get cached by browsers
+     * - Once cached, browser never refetches, causing "green tiles" that never update
+     * - Missing thumbnails MUST return 404 so browser doesn't cache fake images
+     * - UI can safely handle 404s and show file icons instead
+     *
+     * REPLACEMENT:
+     * - All endpoints now return 404 when thumbnail is not ready
+     * - Preview endpoint: /app/assets/{asset}/thumbnail/preview/{style}
+     * - Final endpoint: /app/assets/{asset}/thumbnail/final/{style}?v={version}
+     * - These distinct URLs prevent cache confusion
      */
-    protected function streamPlaceholder(string $type): \Symfony\Component\HttpFoundation\Response
-    {
-        $placeholderPath = resource_path("images/placeholders/thumbnail-{$type}.png");
-
-        // If placeholder doesn't exist, return a simple 1x1 transparent PNG
-        if (!file_exists($placeholderPath)) {
-            return response(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), 200, [
-                'Content-Type' => 'image/png',
-                'Cache-Control' => 'private, max-age=300', // Shorter cache for placeholders
-            ]);
-        }
-
-        // Stream placeholder file
-        return response()->file($placeholderPath, [
-            'Content-Type' => 'image/png',
-            'Cache-Control' => 'private, max-age=300', // Shorter cache for placeholders
-        ]);
-    }
 
     /**
      * Infer content type from file path.
