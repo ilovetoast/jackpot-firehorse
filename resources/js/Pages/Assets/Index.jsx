@@ -7,7 +7,7 @@ import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
-import { useThumbnailPolling } from '../../hooks/useThumbnailPolling'
+import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import {
     FolderIcon,
     TagIcon,
@@ -75,21 +75,17 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         }
     }, [activeAssetId, activeAsset, localAssets])
     
-    // Safe thumbnail polling - only for assets waiting for thumbnails
-    // Polls only qualifying assets (not completed, not error, no thumbnail_url)
-    // Stops immediately when asset completes or errors
-    // Never touches completed or errored assets
-    useThumbnailPolling(localAssets, (updatedAsset) => {
-        // Update local asset state when thumbnail becomes available
-        setLocalAssets(prevAssets =>
-            prevAssets.map(a => {
-                if (a.id === updatedAsset.id) {
-                    // Use mergeAsset to safely merge (protects completed thumbnails)
-                    return mergeAsset(a, updatedAsset)
-                }
-                return a
-            })
-        )
+    // Phase 3.1: Background Asset Reconciliation
+    // Bounded, non-invasive background reconciliation loop for asset thumbnails and processing state.
+    // Only polls when at least one visible asset is processing.
+    // Auto-stops when no assets are processing, max attempts reached, or category changes.
+    // This is NOT a live subscription - it's a quiet, page-level refresh loop.
+    // Phase 3.1 invariant: Background reconciliation MUST pause while upload dialog is open.
+    // Inertia reloads reset page-owned state (dialogs, modals).
+    useAssetReconciliation({
+        assets: localAssets,
+        selectedCategoryId,
+        isPaused: isUploadDialogOpen,
     })
     
     // Track drawer animation state to freeze grid layout during animation
@@ -450,6 +446,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
+                                assets={localAssets}
+                                currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
                             />
                         </div>
                     )}
@@ -462,6 +460,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         <AssetDrawer
                             asset={activeAsset}
                             onClose={() => setActiveAssetId(null)}
+                            assets={localAssets}
+                            currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
                         />
                     </div>
                 )}

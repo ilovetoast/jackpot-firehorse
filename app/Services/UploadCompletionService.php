@@ -469,6 +469,18 @@ class UploadCompletionService
                     $finalOriginalFilename = $filename;
                 }
                 
+                // Phase 3.1E: Determine initial thumbnail_status
+                // ALL newly created image assets must start with thumbnail_status = 'pending'
+                // Even if thumbnail jobs are dispatched immediately, status must be 'pending'
+                // 'completed' may ONLY be set by GenerateThumbnailsJob AFTER file existence is verified
+                // This prevents UI from rendering thumbnails before files exist
+                // WHY: Prevents UI from skipping processing/icon states and showing green blocks
+                // Ensures new uploads behave the same as existing assets
+                $mimeType = $fileInfo['mime_type'] ?? '';
+                $isImageFile = str_starts_with($mimeType, 'image/') && 
+                               !in_array(strtolower($mimeType), ['image/avif']); // AVIF excluded (not supported yet)
+                $initialThumbnailStatus = $isImageFile ? \App\Enums\ThumbnailStatus::PENDING : null;
+                
                 $asset = Asset::create([
                     'tenant_id' => $uploadSession->tenant_id,
                     'brand_id' => $targetBrandId,
@@ -483,6 +495,10 @@ class UploadCompletionService
                     'size_bytes' => $fileInfo['size_bytes'],
                     'storage_root_path' => $storagePath, // Uses finalFilename (resolvedFilename from frontend if provided)
                     'metadata' => $metadataArray, // JSON object with category_id and fields
+                    // Phase 3.1E: Explicitly set thumbnail_status = PENDING for image assets
+                    // Prevents false "completed" states that cause UI to skip processing/icon states
+                    // Ensures new uploads behave the same as existing assets
+                    'thumbnail_status' => $initialThumbnailStatus,
                 ]);
                 
                 Log::info('[UploadCompletionService] Asset::create() succeeded', [

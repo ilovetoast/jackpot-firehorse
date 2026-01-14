@@ -440,8 +440,32 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             })
             
             if (!response.ok) {
-                const errorText = await response.text().catch(() => 'Unknown error')
-                throw new Error(`Upload initiation failed: ${response.status} ${response.statusText} - ${errorText}`)
+                // Phase 3.0C: Improved error handling for HTML error pages (419 CSRF, etc.)
+                const contentType = response.headers.get('content-type') || ''
+                let errorMessage = `Upload initiation failed: ${response.status} ${response.statusText}`
+                
+                if (contentType.includes('text/html')) {
+                    // Server returned HTML error page (e.g., 419 Page Expired)
+                    if (response.status === 419) {
+                        errorMessage = 'Session expired. Please refresh the page and try again.'
+                    } else {
+                        errorMessage = `Server error (${response.status}). Please refresh the page and try again.`
+                    }
+                } else {
+                    // Try to parse JSON error response
+                    try {
+                        const errorData = await response.json()
+                        errorMessage = errorData.message || errorData.error || errorMessage
+                    } catch {
+                        // Not JSON, try text but limit length to prevent HTML dump
+                        const errorText = await response.text().catch(() => '')
+                        if (errorText && errorText.length < 200 && !errorText.includes('<html')) {
+                            errorMessage = errorText
+                        }
+                    }
+                }
+                
+                throw new Error(errorMessage)
             }
             
             const responseData = await response.json()
@@ -902,8 +926,32 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         console.log('[INITIATE] fetch response status', { status: response.status, statusText: response.statusText })
         
         if (!response.ok) {
-            const errorText = await response.text().catch(() => 'Unknown error')
-            throw new Error(`Upload initiation failed: ${response.status} ${response.statusText} - ${errorText}`)
+            // Phase 3.0C: Improved error handling for HTML error pages (419 CSRF, etc.)
+            const contentType = response.headers.get('content-type') || ''
+            let errorMessage = `Upload initiation failed: ${response.status} ${response.statusText}`
+            
+            if (contentType.includes('text/html')) {
+                // Server returned HTML error page (e.g., 419 Page Expired)
+                if (response.status === 419) {
+                    errorMessage = 'Session expired. Please refresh the page and try again.'
+                } else {
+                    errorMessage = `Server error (${response.status}). Please refresh the page and try again.`
+                }
+            } else {
+                // Try to parse JSON error response
+                try {
+                    const errorData = await response.json()
+                    errorMessage = errorData.message || errorData.error || errorMessage
+                } catch {
+                    // Not JSON, try text but limit length to prevent HTML dump
+                    const errorText = await response.text().catch(() => '')
+                    if (errorText && errorText.length < 200 && !errorText.includes('<html')) {
+                        errorMessage = errorText
+                    }
+                }
+            }
+            
+            throw new Error(errorMessage)
         }
         
         // Parse JSON response
@@ -2189,29 +2237,32 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return false // No active uploads
         }
         
-        // Check for completed uploads (direct or multipart)
-        const hasCompleted = activeV2Files.some((f) => {
-            // Direct uploads: check v2Files status
+        // Phase 3.0: Enhanced finalize gating - require ALL uploads to complete
+        // Check if ALL files are completed (not just some)
+        const allCompleted = activeV2Files.every((f) => {
+            // Direct uploads: must be 'uploaded'
             if (f.status === 'uploaded') {
                 return true
             }
             
-            // Multipart uploads: check UploadManager status
+            // Multipart uploads: must be 'completed' in UploadManager
             const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
             if (uploadManagerClientRef) {
                 const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
                 if (uploadManagerUpload?.status === 'completed') {
                     return true
                 }
+                return false
             }
             
+            // Not a multipart upload, so must be direct upload with status 'uploaded'
             return false
         })
         
-        // Check for active uploads (direct or multipart)
+        // Check for active uploads (direct or multipart) - ANY active upload blocks finalize
         const hasUploading = activeV2Files.some((f) => {
             // Direct uploads: check v2Files status
-            if (f.status === 'uploading') {
+            if (f.status === 'uploading' || f.status === 'selected') {
                 return true
             }
             
@@ -2252,13 +2303,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
         const hasCategory = selectedCategoryId !== null
 
-        // Can finalize if:
-        // - Has at least one completed upload
-        // - No active uploads
+        // Phase 3.0: Can finalize ONLY when:
+        // - ALL uploads are completed (not just some)
+        // - No active uploads (no uploading, no queued/selected)
         // - No failed uploads (failed blocks finalize)
         // - Not currently finalizing
         // - Category is selected
-        return hasCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory
+        return allCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory
     }, [v2Files, selectedCategoryId, uploadManagerStateVersion])
 
     /**
@@ -2284,17 +2335,27 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     /**
      * CLEAN UPLOADER V2 — Get Finalize button label based on batchStatus
      */
+    // Phase 3.0: Enhanced button label - clearly indicate when uploads are in progress
+    // Button label reflects current state and prevents confusion about when finalize is available
     const finalizeButtonLabelV2 = useMemo(() => {
-        if (batchStatus === 'uploading') {
-            return 'Uploading…'
-        } else if (batchStatus === 'ready' || batchStatus === 'partial_success') {
-            return 'Finalize uploads'
-        } else if (batchStatus === 'finalizing') {
+        if (batchStatus === 'finalizing') {
             return 'Finalizing uploads…'
+        } else if (batchStatus === 'uploading') {
+            return 'Uploading…'
+        } else if (canFinalizeV2) {
+            // Button is enabled - show finalize label
+            return 'Finalize uploads'
         } else {
-            return 'Finalize uploads' // Default label (button will be disabled)
+            // Button is disabled - show why (uploads in progress or category missing)
+            if (batchStatus === 'ready' || batchStatus === 'partial_success') {
+                // Uploads complete but category missing
+                return 'Select category'
+            } else {
+                // Uploads still in progress
+                return 'Uploading…'
+            }
         }
-    }, [batchStatus])
+    }, [batchStatus, canFinalizeV2])
 
     /**
      * ═══════════════════════════════════════════════════════════════
@@ -3224,6 +3285,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             
             // For multipart uploads, use UploadManager as source of truth
             if (uploadManagerUpload && uploadManagerUpload.uploadType === 'chunked') {
+                // Phase 3.0: Enhanced status mapping with processing state
                 // Map UploadManager status to UploadTray status
                 let uploadStatus = 'queued'
                 if (uploadManagerUpload.status === 'initiating') {
@@ -3231,7 +3293,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 } else if (uploadManagerUpload.status === 'uploading') {
                     uploadStatus = 'uploading'
                 } else if (uploadManagerUpload.status === 'completing') {
-                    uploadStatus = 'uploading' // Show as uploading during completion
+                    uploadStatus = 'processing' // Phase 3.0: Show as processing during completion
                 } else if (uploadManagerUpload.status === 'completed') {
                     uploadStatus = 'complete'
                 } else if (uploadManagerUpload.status === 'failed') {
@@ -3277,12 +3339,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 .replace(/^-+|-+$/g, '')
             const defaultResolvedFilename = extension ? `${slugified}.${extension}` : slugified
             
+            // Phase 3.0: Enhanced status mapping for better UX feedback
+            // Map finalizing to processing state for clearer visual feedback
             return {
                 clientId: v2File.clientId,
                 uploadStatus: v2File.status === 'selected' ? 'queued' : 
                              v2File.status === 'uploading' ? 'uploading' :
                              v2File.status === 'uploaded' ? 'complete' :
-                             v2File.status === 'finalizing' ? 'complete' : // Show as complete while finalizing
+                             v2File.status === 'finalizing' ? 'processing' : // Phase 3.0: Show as processing during finalize
                              v2File.status === 'finalized' ? 'complete' :
                              v2File.status === 'failed' ? 'failed' : 'queued',
                 progress: v2File.progress,

@@ -11,7 +11,9 @@
  * @param {boolean} props.isSelected - Whether this asset is currently selected
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
-import AssetImage from './AssetImage'
+import { useMemo, useState, useEffect, useRef } from 'react'
+import ThumbnailPreview from './ThumbnailPreview'
+import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
 export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1' }) {
     // Extract file extension from original_filename, file_extension, or mime_type
@@ -77,16 +79,58 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     const extLower = fileExtension.toLowerCase()
     const isImage = asset.mime_type?.startsWith('image/') || imageExtensions.includes(extLower)
     
-    // Check if asset processing is complete
-    // If thumbnail_url exists, consider it complete (thumbnails are generated)
-    // Otherwise, check thumbnail_status === 'completed'
-    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
-    const hasThumbnail = !!(asset.thumbnail_url || asset.preview_url)
-    const isComplete = hasThumbnail || thumbnailStatus === 'completed'
-    const isProcessing = !isComplete
+    // Phase 3.1: Derive stable thumbnail version signal
+    // This ensures memoized components re-render when thumbnail availability changes
+    // after background reconciliation. Recompute only when asset id or thumbnailVersion changes.
+    const thumbnailVersion = useMemo(() => getThumbnailVersion(asset), [
+        asset?.id,
+        asset?.thumbnail_url,
+        asset?.thumbnail_status?.value || asset?.thumbnail_status,
+        asset?.updated_at,
+    ])
     
-    // Get thumbnail URL or preview URL
-    const thumbnailUrl = asset.thumbnail_url || asset.preview_url || asset.url || asset.storage_url
+    // Phase 3.1: Get thumbnail state for processing badge
+    // Recompute only when asset id or thumbnailVersion changes (same as thumbnailVersion memo)
+    const thumbnailState = useMemo(() => getThumbnailState(asset), [
+        asset?.id,
+        thumbnailVersion,
+    ])
+    
+    // Phase 3.1E: Processing badge shows only when thumbnail state is 'PENDING'
+    // This ensures badge disappears when thumbnail becomes available after reconciliation
+    const isProcessing = thumbnailState.state === 'PENDING'
+    
+    // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
+    // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
+    // Animation should ONLY trigger on meaningful state changes (e.g., after background reconciliation)
+    // NEVER animate on initial render - prevents UI jank
+    // Smart poll authority: only polling/reconciliation may promote to AVAILABLE
+    const [shouldAnimateThumbnail, setShouldAnimateThumbnail] = useState(false)
+    const prevThumbnailStateRef = useRef(null)
+    
+    useEffect(() => {
+        const prevState = prevThumbnailStateRef.current
+        const currentState = thumbnailState.state
+        
+        // Phase 3.1E: Detect transition from non-AVAILABLE → AVAILABLE (meaningful state change)
+        // This happens when background reconciliation detects thumbnail completion
+        // Log when polling promotes thumbnail to AVAILABLE
+        if (prevState !== null && prevState !== 'AVAILABLE' && currentState === 'AVAILABLE') {
+            console.log('[ThumbnailPoll] Polling promoted thumbnail to AVAILABLE', {
+                assetId: asset.id,
+                prevState,
+                currentState,
+                thumbnailUrl: thumbnailState.thumbnailUrl,
+            })
+            setShouldAnimateThumbnail(true)
+            // Reset after animation completes (handled by ThumbnailPreview)
+        } else {
+            // No meaningful transition - don't animate
+            setShouldAnimateThumbnail(false)
+        }
+        
+        prevThumbnailStateRef.current = currentState
+    }, [thumbnailState.state, asset?.id, thumbnailState.thumbnailUrl])
     
     // Get appropriate icon for non-image files
     const getFileIcon = () => {
@@ -147,30 +191,20 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                 '--primary-color': primaryColor,
             }}
         >
-            {/* Thumbnail container - fixed aspect ratio (4:3) */}
+            {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) */}
+            {/* Use ThumbnailPreview component for consistent state machine and fade-in */}
+            {/* FORBIDDEN: Never use green placeholders. ThumbnailPreview handles all states with FileTypeIcon fallback. */}
             <div className="aspect-[4/3] bg-gray-50 relative overflow-hidden">
-                {isImage && asset.id ? (
-                    <AssetImage
-                        assetId={asset.id}
-                        alt={asset.title || asset.original_filename || 'Asset'}
-                        className="w-full h-full object-cover"
-                        containerWidth={400} // Grid cards are ~400px wide on large screens
-                        lazy={true}
-                        thumbnailUrl={asset.thumbnail_url}
-                    />
-                ) : (
-                    // Fallback icon for non-image files
-                    <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                        <div className="text-center">
-                            <div className="mx-auto mb-2">
-                                {getFileIcon()}
-                            </div>
-                            <span className="text-xs font-medium text-gray-500 uppercase">
-                                {fileExtension}
-                            </span>
-                        </div>
-                    </div>
-                )}
+                <ThumbnailPreview
+                    asset={asset}
+                    alt={asset.title || asset.original_filename || 'Asset'}
+                    className="w-full h-full"
+                    retryCount={0}
+                    onRetry={null}
+                    size="lg"
+                    thumbnailVersion={thumbnailVersion}
+                    shouldAnimateThumbnail={shouldAnimateThumbnail}
+                />
                 
                 {/* Processing badge - bottom left - Shows while thumbnail is processing */}
                 {isProcessing && (

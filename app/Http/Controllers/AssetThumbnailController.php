@@ -108,14 +108,26 @@ class AssetThumbnailController extends Controller
             return $this->streamPlaceholder('processing');
         }
 
-        // Get thumbnail path from asset metadata
+        // Phase 3.1E: Defensive guard - verify thumbnail file exists before treating as completed
+        // If thumbnail_status === completed but file does not exist, downgrade to pending
+        // This prevents false "completed" states that cause UI to skip processing/icon states
+        // Ensures new uploads behave the same as existing assets
         $thumbnailPath = $asset->thumbnailPathForStyle($style);
         
         if (!$thumbnailPath) {
-            Log::warning('Thumbnail path not found in asset metadata', [
+            Log::warning('Thumbnail path not found in asset metadata - downgrading status', [
                 'asset_id' => $asset->id,
                 'style' => $style,
+                'thumbnail_status' => $thumbnailStatus?->value ?? 'null',
             ]);
+            
+            // Downgrade thumbnail_status to prevent false "completed" state
+            // This ensures UI doesn't expect a thumbnail that doesn't exist
+            if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
+                $asset->thumbnail_status = ThumbnailStatus::PENDING;
+                $asset->save();
+            }
+            
             return $this->streamPlaceholder('processing');
         }
 
@@ -124,15 +136,28 @@ class AssetThumbnailController extends Controller
             return $this->streamThumbnailFromS3($asset, $thumbnailPath);
         } catch (\RuntimeException $e) {
             // streamThumbnailFromS3 throws RuntimeException on errors
-            // Check error message to determine if it's a 404 (not found) or other error
+            // Check error message to determine if it's a 404 (not found), invalid size, or other error
             if (str_contains($e->getMessage(), 'not found') || str_contains($e->getMessage(), '404')) {
-                Log::warning('Thumbnail not found in S3, returning processing placeholder', [
+                Log::warning('Thumbnail not found in S3, returning 404', [
                     'asset_id' => $asset->id,
                     'style' => $style,
                     'thumbnail_path' => $thumbnailPath,
                     'error' => $e->getMessage(),
                 ]);
-                return $this->streamPlaceholder('processing');
+                // Phase 3.1E: Return 404 instead of placeholder to allow UI fallback
+                abort(404, 'Thumbnail not found');
+            }
+            
+            // Phase 3.1E: Handle invalid thumbnail size (1x1 pixel, too small, etc.)
+            if (str_contains($e->getMessage(), 'too small') || str_contains($e->getMessage(), 'invalid')) {
+                Log::warning('Thumbnail file invalid (too small or corrupted), returning 404', [
+                    'asset_id' => $asset->id,
+                    'style' => $style,
+                    'thumbnail_path' => $thumbnailPath,
+                    'error' => $e->getMessage(),
+                ]);
+                // Return 404 to allow UI fallback to file icon
+                abort(404, 'Thumbnail file is invalid');
             }
 
             Log::error('Failed to stream thumbnail from S3', [
@@ -184,6 +209,29 @@ class AssetThumbnailController extends Controller
                 'Key' => $thumbnailPath,
             ]);
 
+            // Phase 3.1E: Validate thumbnail file size - reject 1x1 pixel placeholders
+            // If thumbnail is < 1KB, it's likely a failed generation (1x1 pixel ~70 bytes)
+            // DO NOT return invalid thumbnails - let UI fall back to file icon
+            $contentLength = $result['ContentLength'] ?? 0;
+            $minValidSize = 1024; // 1KB threshold
+            
+            if ($contentLength < $minValidSize) {
+                Log::error('Thumbnail file too small (likely 1x1 pixel placeholder)', [
+                    'asset_id' => $asset->id,
+                    'thumbnail_path' => $thumbnailPath,
+                    'bucket' => $bucket->name,
+                    'content_length' => $contentLength,
+                    'expected_min' => $minValidSize,
+                ]);
+                
+                // Downgrade thumbnail_status to prevent false "completed" state
+                // This ensures UI doesn't expect a thumbnail that doesn't exist
+                $asset->thumbnail_status = \App\Enums\ThumbnailStatus::FAILED;
+                $asset->save();
+                
+                throw new \RuntimeException('Thumbnail file is invalid (too small)');
+            }
+
             // Get content type from S3 metadata or infer from file extension
             $contentType = $result['ContentType'] ?? $this->inferContentType($thumbnailPath);
 
@@ -198,7 +246,7 @@ class AssetThumbnailController extends Controller
             }, 200, [
                 'Content-Type' => $contentType,
                 'Cache-Control' => 'private, max-age=3600',
-                'Content-Length' => $result['ContentLength'] ?? null,
+                'Content-Length' => $contentLength,
                 'ETag' => $result['ETag'] ?? null,
             ]);
         } catch (S3Exception $e) {
@@ -209,6 +257,14 @@ class AssetThumbnailController extends Controller
                     'thumbnail_path' => $thumbnailPath,
                     'bucket' => $bucket->name,
                 ]);
+                
+                // Phase 3.1E: Downgrade thumbnail_status if file doesn't exist
+                // Prevents false "completed" state when file is missing
+                if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+                    $asset->thumbnail_status = \App\Enums\ThumbnailStatus::FAILED;
+                    $asset->save();
+                }
+                
                 throw new \RuntimeException('Thumbnail not found in storage');
             }
 
@@ -220,6 +276,9 @@ class AssetThumbnailController extends Controller
                 'status_code' => $e->getStatusCode(),
             ]);
             throw new \RuntimeException("Failed to stream thumbnail from S3: {$e->getMessage()}", 0, $e);
+        } catch (\RuntimeException $e) {
+            // Re-throw RuntimeException (includes our size validation error)
+            throw $e;
         }
     }
 

@@ -17,12 +17,14 @@
  * @param {Object} props.asset - Asset object with id, title, metadata, etc.
  * @param {Function} props.onClose - Callback when drawer should close
  */
-import { useEffect, useRef, useState } from 'react'
-import { XMarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { useEffect, useRef, useState, useMemo } from 'react'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
+import ThumbnailPreview from './ThumbnailPreview'
+import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 
-export default function AssetDrawer({ asset, onClose }) {
+export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null }) {
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
     const [showZoomModal, setShowZoomModal] = useState(false)
@@ -32,6 +34,34 @@ export default function AssetDrawer({ asset, onClose }) {
     // When drawer opens, grid container padding animates (300ms), causing CSS Grid to recalculate
     // This state delays preview render until layout stabilizes
     const [isLayoutSettling, setIsLayoutSettling] = useState(true)
+    // Phase 3.0C: Track thumbnail retry count (UI only, max 2 retries)
+    const [thumbnailRetryCount, setThumbnailRetryCount] = useState(0)
+    
+    // Phase 3.1: Get image assets for carousel (filter to image assets only)
+    const imageAssets = useMemo(() => {
+        if (!assets || assets.length === 0) return []
+        return assets.filter(a => {
+            const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
+            return a.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(ext)
+        })
+    }, [assets])
+
+    // Phase 3.1: Carousel state for zoom modal
+    // Track current asset index in carousel (for navigation)
+    const [carouselIndex, setCarouselIndex] = useState(0)
+    const [transitionDirection, setTransitionDirection] = useState(null) // 'left' or 'right' for animation
+    const [isTransitioning, setIsTransitioning] = useState(false)
+    
+    // Phase 3.1: Initialize and update carousel index when asset or imageAssets change
+    // Only update if not in zoom modal (to allow carousel navigation)
+    useEffect(() => {
+        if (!showZoomModal && imageAssets.length > 0 && asset?.id) {
+            const index = imageAssets.findIndex(a => a.id === asset.id)
+            if (index >= 0 && index !== carouselIndex) {
+                setCarouselIndex(index)
+            }
+        }
+    }, [asset?.id, imageAssets, carouselIndex, showZoomModal])
 
     // Handle ESC key to close drawer
     useEffect(() => {
@@ -131,11 +161,83 @@ export default function AssetDrawer({ asset, onClose }) {
         return null
     }
 
+    const currentCarouselAsset = imageAssets[carouselIndex] || asset
+    const canNavigateLeft = carouselIndex > 0
+    const canNavigateRight = carouselIndex < imageAssets.length - 1
+
+    // Phase 3.1: Carousel navigation handlers with smooth transitions
+    const handlePrevious = (e) => {
+        e.stopPropagation()
+        if (canNavigateLeft && !isTransitioning) {
+            setIsTransitioning(true)
+            setTransitionDirection('right')
+            setTimeout(() => {
+                setCarouselIndex(prev => prev - 1)
+                setTransitionDirection(null)
+                setTimeout(() => setIsTransitioning(false), 300)
+            }, 150) // Half of transition duration
+        }
+    }
+
+    const handleNext = (e) => {
+        e.stopPropagation()
+        if (canNavigateRight && !isTransitioning) {
+            setIsTransitioning(true)
+            setTransitionDirection('left')
+            setTimeout(() => {
+                setCarouselIndex(prev => prev + 1)
+                setTransitionDirection(null)
+                setTimeout(() => setIsTransitioning(false), 300)
+            }, 150) // Half of transition duration
+        }
+    }
+
+    // Phase 3.1: Keyboard navigation for carousel
+    useEffect(() => {
+        if (!showZoomModal) return
+
+        const handleKeyDown = (e) => {
+            if (e.key === 'ArrowLeft' && canNavigateLeft && !isTransitioning) {
+                e.preventDefault()
+                setIsTransitioning(true)
+                setTransitionDirection('right')
+                setTimeout(() => {
+                    setCarouselIndex(prev => prev - 1)
+                    setTransitionDirection(null)
+                    setTimeout(() => setIsTransitioning(false), 300)
+                }, 150)
+            } else if (e.key === 'ArrowRight' && canNavigateRight && !isTransitioning) {
+                e.preventDefault()
+                setIsTransitioning(true)
+                setTransitionDirection('left')
+                setTimeout(() => {
+                    setCarouselIndex(prev => prev + 1)
+                    setTransitionDirection(null)
+                    setTimeout(() => setIsTransitioning(false), 300)
+                }, 150)
+            } else if (e.key === 'Escape') {
+                setShowZoomModal(false)
+            }
+        }
+
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
+    }, [showZoomModal, canNavigateLeft, canNavigateRight, isTransitioning])
+
     // Extract file extension
     const fileExtension = asset.file_extension || asset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
     const isImage = asset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
 
-    // Check thumbnail status
+    // Phase 3.1: Derive stable thumbnail version signal
+    // This ensures ThumbnailPreview re-evaluates after background reconciliation updates asset props
+    const thumbnailVersion = useMemo(() => getThumbnailVersion(asset), [
+        asset?.id,
+        asset?.thumbnail_url,
+        asset?.thumbnail_status?.value || asset?.thumbnail_status,
+        asset?.updated_at,
+    ])
+
+    // Check thumbnail status (for legacy compatibility - ThumbnailPreview handles state machine)
     const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
     const thumbnailsComplete = thumbnailStatus === 'completed'
     const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
@@ -144,9 +246,53 @@ export default function AssetDrawer({ asset, onClose }) {
     // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
     // If status is VISIBLE, asset was uploaded correctly (not processing)
     // Asset.status represents visibility only, not processing state
+    // Phase 3.1: Processing badge should only appear when thumbnail state is 'pending'
+    // Do not rely on legacy asset.status flags alone - thumbnail state is the source of truth
+    const thumbnailState = useMemo(() => getThumbnailState(asset, thumbnailRetryCount), [
+        asset?.id,
+        thumbnailVersion,
+        thumbnailRetryCount,
+    ])
+    // Phase 3.1E: Processing badge shows only when thumbnail state is 'PENDING'
+    const isThumbnailProcessing = thumbnailState.state === 'PENDING'
+    
+    // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
+    // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
+    // Animation should ONLY trigger on meaningful state changes (e.g., after background reconciliation)
+    // NEVER animate on initial render - prevents UI jank
+    // Smart poll authority: only polling/reconciliation may promote to AVAILABLE
+    const [shouldAnimateThumbnail, setShouldAnimateThumbnail] = useState(false)
+    const prevThumbnailStateRef = useRef(null)
+    
+    useEffect(() => {
+        const prevState = prevThumbnailStateRef.current
+        const currentState = thumbnailState.state
+        
+        // Phase 3.1E: Detect transition from non-AVAILABLE → AVAILABLE (meaningful state change)
+        // This happens when background reconciliation detects thumbnail completion
+        // Log when polling promotes thumbnail to AVAILABLE
+        if (prevState !== null && prevState !== 'AVAILABLE' && currentState === 'AVAILABLE') {
+            console.log('[ThumbnailPoll] Polling promoted thumbnail to AVAILABLE', {
+                assetId: asset.id,
+                prevState,
+                currentState,
+                thumbnailUrl: thumbnailState.thumbnailUrl,
+            })
+            setShouldAnimateThumbnail(true)
+            // Reset after animation completes (handled by ThumbnailPreview)
+        } else {
+            // No meaningful transition - don't animate
+            setShouldAnimateThumbnail(false)
+        }
+        
+        prevThumbnailStateRef.current = currentState
+    }, [thumbnailState.state, asset?.id, thumbnailState.thumbnailUrl])
+    
+    // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
+    // If status is VISIBLE, asset was uploaded correctly (not processing)
+    // Asset.status represents visibility only, not processing state
     const assetStatus = asset.status?.value || asset.status || 'visible'
     const isVisible = assetStatus === 'visible'
-    const isProcessing = !isVisible
 
     // Format file size
     const formatFileSize = (bytes) => {
@@ -204,51 +350,99 @@ export default function AssetDrawer({ asset, onClose }) {
 
             {/* Content */}
             <div className="px-6 py-6 space-y-6">
+                {/* Phase 3.1: Uploaded By - moved above preview for better visual hierarchy */}
+                {asset.uploaded_by && (
+                    <div className="flex items-center gap-2 pb-4 border-b border-gray-200">
+                        {asset.uploaded_by.avatar_url ? (
+                            <img
+                                src={asset.uploaded_by.avatar_url}
+                                alt={asset.uploaded_by.name || 'User'}
+                                className="h-6 w-6 rounded-full object-cover flex-shrink-0"
+                            />
+                        ) : (
+                            <div className="h-6 w-6 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
+                                <span className="text-xs font-medium text-gray-600">
+                                    {(asset.uploaded_by.first_name?.[0] || asset.uploaded_by.name?.[0] || '?').toUpperCase()}
+                                </span>
+                            </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                                {asset.uploaded_by.name || `${asset.uploaded_by.first_name || ''} ${asset.uploaded_by.last_name || ''}`.trim() || 'Unknown User'}
+                            </p>
+                            {asset.uploaded_by.email && (
+                                <p className="text-xs text-gray-500 truncate">
+                                    {asset.uploaded_by.email}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Large Preview */}
                 <div className="space-y-3">
                     <h3 className="text-sm font-medium text-gray-900">Preview</h3>
                     
+                    {/* Phase 3.0C: Thumbnail preview with state machine and fade-in */}
                     <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative" style={{ aspectRatio: '16/9', minHeight: '240px' }}>
-                        {thumbnailsProcessing ? (
-                            <div className="text-center">
-                                <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto animate-spin" />
-                                <p className="mt-3 text-sm text-gray-500">Processing preview...</p>
-                                <p className="mt-1 text-xs text-gray-400">This may take a moment</p>
-                            </div>
-                        ) : thumbnailsFailed ? (
-                            <div className="text-center p-6">
-                                <div className="text-red-500 text-sm font-medium mb-2">Thumbnail generation failed</div>
-                                {asset.thumbnail_error && (
-                                    <p className="text-xs text-gray-500">{asset.thumbnail_error}</p>
-                                )}
-                            </div>
-                        ) : isImage && asset.id ? (
-                            <div 
-                                className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
-                            >
+                        <div 
+                            className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
+                        >
+                            {isImage && asset.id ? (
+                                // Image files: Use ThumbnailPreview with state machine
                                 <div
                                     className="w-full h-full cursor-pointer group"
-                                    onClick={() => setShowZoomModal(true)}
+                                    onClick={() => {
+                                        // Only allow zoom if thumbnail is available
+                                        const { state } = getThumbnailState(asset, thumbnailRetryCount)
+                                        if (state === 'AVAILABLE') {
+                                            setShowZoomModal(true)
+                                        }
+                                    }}
                                 >
-                                    <AssetImage
-                                        assetId={asset.id}
+                                    <ThumbnailPreview
+                                        asset={asset}
                                         alt={asset.title || asset.original_filename || 'Asset preview'}
-                                        className="w-full h-full object-contain"
-                                        containerWidth={448}
-                                        lazy={false}
-                                        thumbnailUrl={asset.thumbnail_url}
+                                        className="w-full h-full"
+                                        retryCount={thumbnailRetryCount}
+                                        onRetry={() => {
+                                            // Phase 3.0C: UI-only retry (max 2 retries)
+                                            if (thumbnailRetryCount < 2) {
+                                                setThumbnailRetryCount(prev => prev + 1)
+                                                // Trigger a re-render by updating asset reference
+                                                // This is UI-only - no backend call
+                                                // The thumbnail will be re-checked on next render
+                                            }
+                                        }}
+                                        size="lg"
+                                        thumbnailVersion={thumbnailVersion}
+                                        shouldAnimateThumbnail={shouldAnimateThumbnail}
                                     />
-                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
-                                        <span className="text-white text-sm font-medium">Click to zoom</span>
-                                    </div>
+                                    {/* Zoom overlay (only shown when thumbnail is available) */}
+                                    {asset.thumbnail_url && (
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                                            <span className="text-white text-sm font-medium">Click to zoom</span>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        ) : (
-                            <div className="text-center p-6">
-                                <div className="text-gray-400 text-sm font-medium mb-2 uppercase">{fileExtension}</div>
-                                <p className="text-xs text-gray-500">Preview not available</p>
-                            </div>
-                        )}
+                            ) : (
+                                // Non-image files: Use ThumbnailPreview for consistent icon display
+                                <ThumbnailPreview
+                                    asset={asset}
+                                    alt={asset.title || asset.original_filename || 'Asset preview'}
+                                    className="w-full h-full"
+                                    retryCount={thumbnailRetryCount}
+                                    onRetry={() => {
+                                        if (thumbnailRetryCount < 2) {
+                                            setThumbnailRetryCount(prev => prev + 1)
+                                        }
+                                    }}
+                                    size="lg"
+                                    thumbnailVersion={thumbnailVersion}
+                                    shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                />
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -294,36 +488,6 @@ export default function AssetDrawer({ asset, onClose }) {
                                 {categoryName}
                             </dd>
                         </div>
-                        {asset.uploaded_by && (
-                            <div>
-                                <dt className="text-sm text-gray-500 mb-1">Uploaded By</dt>
-                                <dd className="flex items-center space-x-2">
-                                    {asset.uploaded_by.avatar_url ? (
-                                        <img
-                                            src={asset.uploaded_by.avatar_url}
-                                            alt={asset.uploaded_by.name || 'User'}
-                                            className="h-6 w-6 rounded-full object-cover"
-                                        />
-                                    ) : (
-                                        <div className="h-6 w-6 rounded-full bg-gray-300 flex items-center justify-center">
-                                            <span className="text-xs font-medium text-gray-600">
-                                                {(asset.uploaded_by.first_name?.[0] || asset.uploaded_by.name?.[0] || '?').toUpperCase()}
-                                            </span>
-                                        </div>
-                                    )}
-                                    <div className="flex flex-col">
-                                        <span className="text-sm font-medium text-gray-900">
-                                            {asset.uploaded_by.name || `${asset.uploaded_by.first_name || ''} ${asset.uploaded_by.last_name || ''}`.trim() || 'Unknown User'}
-                                        </span>
-                                        {asset.uploaded_by.email && (
-                                            <span className="text-xs text-gray-500">
-                                                {asset.uploaded_by.email}
-                                            </span>
-                                        )}
-                                    </div>
-                                </dd>
-                            </div>
-                        )}
                         {asset.original_filename && (
                             <div>
                                 <dt className="text-sm text-gray-500 mb-1">Filename</dt>
@@ -346,28 +510,89 @@ export default function AssetDrawer({ asset, onClose }) {
                 )}
 
                 {/* Asset Timeline */}
-                <AssetTimeline events={activityEvents} loading={activityLoading} />
+                <AssetTimeline 
+                    events={activityEvents} 
+                    loading={activityLoading}
+                    onThumbnailRetry={() => {
+                        // Phase 3.0C: UI-only retry (max 2 retries)
+                        if (thumbnailRetryCount < 2) {
+                            setThumbnailRetryCount(prev => prev + 1)
+                            // Trigger a re-render by updating asset reference
+                            // This is UI-only - no backend call
+                            // The thumbnail will be re-checked on next render
+                        }
+                    }}
+                    thumbnailRetryCount={thumbnailRetryCount}
+                />
             </div>
 
-            {/* Zoom Modal for Images */}
-            {showZoomModal && isImage && asset.id && (
+            {/* Phase 3.1: Zoom Modal with Carousel for Images */}
+            {showZoomModal && isImage && currentCarouselAsset?.id && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                     onClick={() => setShowZoomModal(false)}
                 >
+                    {/* Close button */}
                     <button
                         type="button"
                         onClick={() => setShowZoomModal(false)}
-                        className="absolute top-4 right-4 text-white hover:text-gray-300"
+                        className="absolute top-4 right-4 z-10 text-white hover:text-gray-300 transition-colors"
+                        aria-label="Close"
                     >
                         <XMarkIcon className="h-8 w-8" />
                     </button>
-                    <img
-                        src={`/app/assets/${asset.id}/thumbnail/large`}
-                        alt={asset.title || asset.original_filename || 'Asset preview'}
-                        className="max-w-full max-h-full object-contain"
+
+                    {/* Left arrow - Previous asset */}
+                    {canNavigateLeft && (
+                        <button
+                            type="button"
+                            onClick={handlePrevious}
+                            className="absolute left-4 z-10 text-white hover:text-gray-300 transition-colors p-2 rounded-full hover:bg-white/10"
+                            aria-label="Previous asset"
+                        >
+                            <ChevronLeftIcon className="h-10 w-10" />
+                        </button>
+                    )}
+
+                    {/* Right arrow - Next asset */}
+                    {canNavigateRight && (
+                        <button
+                            type="button"
+                            onClick={handleNext}
+                            className="absolute right-4 z-10 text-white hover:text-gray-300 transition-colors p-2 rounded-full hover:bg-white/10"
+                            aria-label="Next asset"
+                        >
+                            <ChevronRightIcon className="h-10 w-10" />
+                        </button>
+                    )}
+
+                    {/* Image with smooth slide transition */}
+                    <div 
+                        className="relative w-full h-full flex items-center justify-center overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
-                    />
+                    >
+                        <img
+                            key={currentCarouselAsset.id} // Key forces remount for clean transition
+                            src={`/app/assets/${currentCarouselAsset.id}/thumbnail/large`}
+                            alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
+                            className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out"
+                            style={{
+                                transform: transitionDirection === 'left' 
+                                    ? 'translateX(30px)' 
+                                    : transitionDirection === 'right' 
+                                    ? 'translateX(-30px)' 
+                                    : 'translateX(0)',
+                                opacity: transitionDirection ? 0 : 1,
+                            }}
+                        />
+                    </div>
+
+                    {/* Title at bottom center - subtle and small */}
+                    <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-10 pointer-events-none">
+                        <p className="text-white/80 text-sm font-medium text-center px-4 py-2 bg-black/40 backdrop-blur-sm rounded-lg">
+                            {currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Untitled Asset'}
+                        </p>
+                    </div>
                 </div>
             )}
         </div>

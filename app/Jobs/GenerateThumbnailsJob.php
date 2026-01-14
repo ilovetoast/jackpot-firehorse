@@ -8,6 +8,8 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
 use App\Services\ThumbnailGenerationService;
+use Aws\S3\S3Client;
+use Aws\S3\Exception\S3Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -111,6 +113,45 @@ class GenerateThumbnailsJob implements ShouldQueue
             // Generate all thumbnail styles atomically
             $thumbnails = $thumbnailService->generateThumbnails($asset);
 
+            // Phase 3.1E: Verify thumbnail files exist before marking as completed
+            // Only set thumbnail_status = COMPLETED after verifying files were actually created
+            // This prevents false "completed" states that cause UI to skip processing/icon states
+            $bucket = $asset->storageBucket;
+            $s3Client = $this->createS3Client();
+            $allThumbnailsExist = true;
+            
+            foreach ($thumbnails as $styleName => $thumbnailData) {
+                $thumbnailPath = $thumbnailData['path'] ?? null;
+                if (!$thumbnailPath) {
+                    $allThumbnailsExist = false;
+                    Log::warning('Thumbnail path missing in generated metadata', [
+                        'asset_id' => $asset->id,
+                        'style' => $styleName,
+                    ]);
+                    continue;
+                }
+                
+                // Verify thumbnail file exists in S3
+                try {
+                    $s3Client->headObject([
+                        'Bucket' => $bucket->name,
+                        'Key' => $thumbnailPath,
+                    ]);
+                } catch (S3Exception $e) {
+                    if ($e->getStatusCode() === 404) {
+                        $allThumbnailsExist = false;
+                        Log::error('Thumbnail file not found in S3 after generation', [
+                            'asset_id' => $asset->id,
+                            'style' => $styleName,
+                            'thumbnail_path' => $thumbnailPath,
+                            'bucket' => $bucket->name,
+                        ]);
+                    } else {
+                        throw $e; // Re-throw non-404 errors
+                    }
+                }
+            }
+
             // Update asset metadata with thumbnail information
             $currentMetadata = $asset->metadata ?? [];
             $currentMetadata['thumbnails_generated'] = true;
@@ -121,11 +162,31 @@ class GenerateThumbnailsJob implements ShouldQueue
             // Processing jobs (thumbnails, metadata, previews) must NOT mutate Asset.status
             // Processing progress is tracked via thumbnail_status, metadata flags, and activity events
             // AssetController queries only status = UPLOADED, so changing status hides assets from the grid
-            $asset->update([
-                'thumbnail_status' => ThumbnailStatus::COMPLETED,
-                'thumbnail_error' => null,
-                'metadata' => $currentMetadata,
-            ]);
+            // Phase 3.1E: Only mark as COMPLETED if all thumbnail files exist
+            // If files are missing, keep status as PROCESSING to allow retry
+            if ($allThumbnailsExist) {
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::COMPLETED,
+                    'thumbnail_error' => null,
+                    'metadata' => $currentMetadata,
+                ]);
+            } else {
+                // Phase 3.1E: Some thumbnails are missing after generation
+                // This should not happen if upload succeeded, but we verify to prevent false "completed" states
+                // Keep as PROCESSING (not FAILED) to allow job retry mechanism to handle transient issues
+                Log::error('Thumbnail generation incomplete - some files missing after upload', [
+                    'asset_id' => $asset->id,
+                    'thumbnail_count' => count($thumbnails),
+                ]);
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::PROCESSING, // Keep as processing to allow retry
+                    'thumbnail_error' => 'Some thumbnail files are missing after generation',
+                    'metadata' => $currentMetadata,
+                ]);
+                // Re-throw to trigger job retry mechanism
+                // Job will retry up to $tries times, then mark as FAILED in failed() method
+                throw new \RuntimeException('Thumbnail files missing after generation');
+            }
 
             // Emit thumbnails generated event
             AssetEvent::create([
@@ -242,5 +303,34 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'attempts' => $this->attempts(),
             ]);
         }
+    }
+
+    /**
+     * Create S3 client instance for file verification.
+     *
+     * @return S3Client
+     */
+    protected function createS3Client(): S3Client
+    {
+        if (!class_exists(S3Client::class)) {
+            throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
+        }
+
+        $config = [
+            'version' => 'latest',
+            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+            'credentials' => [
+                'key' => env('AWS_ACCESS_KEY_ID'),
+                'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            ],
+        ];
+
+        // Support MinIO for local development
+        if (env('AWS_ENDPOINT')) {
+            $config['endpoint'] = env('AWS_ENDPOINT');
+            $config['use_path_style_endpoint'] = env('AWS_USE_PATH_STYLE_ENDPOINT', true);
+        }
+
+        return new S3Client($config);
     }
 }

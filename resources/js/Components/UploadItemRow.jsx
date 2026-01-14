@@ -7,7 +7,7 @@
  * @module UploadItemRow
  */
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, memo } from 'react';
 import {
     CheckCircleIcon,
     ExclamationCircleIcon,
@@ -20,6 +20,14 @@ import {
     PencilIcon
 } from '@heroicons/react/24/outline';
 import MetadataFieldRenderer from './MetadataFieldRenderer';
+import FileTypeIcon from './FileTypeIcon';
+
+/**
+ * Phase 3.0B: Performance instrumentation
+ * 
+ * Dev-only logging to diagnose UI slowness in upload dialog.
+ * Tracks render frequency per row to identify unnecessary re-renders.
+ */
 
 /**
  * Heartbeat fallback for large multipart uploads
@@ -83,6 +91,12 @@ function useUploadHeartbeat(item) {
  * @param {string} status - Upload status
  * @returns {Object} Badge config with color and icon
  */
+/**
+ * Phase 3.0: Enhanced status configuration with improved visual hierarchy
+ * 
+ * Provides status badge configuration with icons, colors, and labels.
+ * Visual states are optimized for clarity without changing upload mechanics.
+ */
 function getStatusConfig(status) {
     switch (status) {
         case 'queued':
@@ -91,47 +105,62 @@ function getStatusConfig(status) {
                 bgColor: 'bg-gray-100',
                 textColor: 'text-gray-700',
                 icon: ClockIcon,
-                iconColor: 'text-gray-500'
+                iconColor: 'text-gray-500',
+                pulse: false
             };
         case 'initiating':
             return {
-                label: 'Preparing upload…',
-                bgColor: 'bg-blue-100',
+                label: 'Preparing…',
+                bgColor: 'bg-blue-50 border border-blue-200',
                 textColor: 'text-blue-700',
                 icon: ArrowPathIcon,
-                iconColor: 'text-blue-500'
+                iconColor: 'text-blue-600',
+                pulse: true
             };
         case 'uploading':
             return {
                 label: 'Uploading',
-                bgColor: 'bg-blue-100',
+                bgColor: 'bg-blue-50 border border-blue-200',
                 textColor: 'text-blue-700',
                 icon: ArrowPathIcon,
-                iconColor: 'text-blue-500'
+                iconColor: 'text-blue-600',
+                pulse: true
+            };
+        case 'processing':
+            return {
+                label: 'Processing…',
+                bgColor: 'bg-indigo-50 border border-indigo-200',
+                textColor: 'text-indigo-700',
+                icon: ArrowPathIcon,
+                iconColor: 'text-indigo-600',
+                pulse: true
             };
         case 'completing':
             return {
                 label: 'Finalizing…',
-                bgColor: 'bg-blue-100',
-                textColor: 'text-blue-700',
+                bgColor: 'bg-indigo-50 border border-indigo-200',
+                textColor: 'text-indigo-700',
                 icon: ArrowPathIcon,
-                iconColor: 'text-blue-500'
+                iconColor: 'text-indigo-600',
+                pulse: true
             };
         case 'complete':
             return {
                 label: 'Complete',
-                bgColor: 'bg-green-100',
+                bgColor: 'bg-green-100 border border-green-200',
                 textColor: 'text-green-700',
                 icon: CheckCircleIcon,
-                iconColor: 'text-green-500'
+                iconColor: 'text-green-600',
+                pulse: false
             };
         case 'failed':
             return {
                 label: 'Failed',
-                bgColor: 'bg-red-100',
+                bgColor: 'bg-red-100 border border-red-200',
                 textColor: 'text-red-700',
                 icon: ExclamationCircleIcon,
-                iconColor: 'text-red-500'
+                iconColor: 'text-red-600',
+                pulse: false
             };
         default:
             return {
@@ -139,7 +168,8 @@ function getStatusConfig(status) {
                 bgColor: 'bg-gray-100',
                 textColor: 'text-gray-700',
                 icon: ClockIcon,
-                iconColor: 'text-gray-500'
+                iconColor: 'text-gray-500',
+                pulse: false
             };
     }
 }
@@ -165,7 +195,15 @@ function formatFileSize(bytes) {
  * @param {Object} props.uploadManager - Phase 3 upload manager instance
  * @param {Function} [props.onRemove] - Callback when item should be removed
  */
-export default function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
+/**
+ * Phase 3.0B: UploadItemRow with render containment optimization
+ * 
+ * This component is memoized to prevent unnecessary re-renders when other rows update.
+ * Without memoization, updating progress on one file causes ALL rows to re-render,
+ * causing janky UI with 40+ files. With memoization, only the active row re-renders.
+ */
+function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
+
     // CLEAN UPLOADER V2: DEV warning for failed files
     if (process.env.NODE_ENV === 'development' && item.uploadStatus === 'failed') {
         console.warn('[UPLOAD_V2_UI] rendering failed file', { 
@@ -214,10 +252,17 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
     // Heartbeat fallback for large multipart uploads (shows "Uploading..." when queued >7.5s with no progress)
     const shouldShowUploadingHeartbeat = useUploadHeartbeat(item);
     
+    // Phase 3.0: Enhanced status display logic
     // Use heartbeat status override if active (shows "Uploading..." even when Phase 3 status is 'queued')
     // Also check if we should show "Preparing upload..." (uploading status with 0% progress = initiating phase)
     const isLikelyInitiating = item.uploadStatus === 'uploading' && (item.progress || 0) === 0 && !shouldShowUploadingHeartbeat;
-    const displayStatus = shouldShowUploadingHeartbeat ? 'uploading' : (isLikelyInitiating ? 'initiating' : item.uploadStatus);
+    let displayStatus = shouldShowUploadingHeartbeat ? 'uploading' : (isLikelyInitiating ? 'initiating' : item.uploadStatus);
+    
+    // Phase 3.0: Map 'completing' to 'processing' for clearer visual distinction
+    if (displayStatus === 'completing') {
+        displayStatus = 'processing';
+    }
+    
     const statusConfig = getStatusConfig(displayStatus);
     const StatusIcon = statusConfig.icon;
     
@@ -380,15 +425,38 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
         }
     };
 
-    // Get progress bar color based on display status (includes heartbeat override)
+    // Phase 3.0: Enhanced visual state indicators
+    // Phase 3.0B: Calculate isActive for animation gating
+    // Only active rows (uploading/initiating/processing) should animate to reduce CPU usage
+    const isActive = displayStatus === 'uploading' || displayStatus === 'initiating' || displayStatus === 'processing';
+    const isComplete = displayStatus === 'complete';
+    const isFailed = displayStatus === 'failed';
+    
+    /**
+     * Phase 3.0B: Animation gating - critical for performance
+     * 
+     * Animations (pulse, spin, sheen) are CPU-intensive. With 40+ files, animating all rows
+     * causes frame drops and janky scrolling. By gating animations to only active rows,
+     * we ensure smooth UI even with large upload queues.
+     * 
+     * Completed/queued/failed rows remain visually static (no animations).
+     */
+    const shouldAnimate = isActive && (
+        displayStatus === 'initiating' ||
+        displayStatus === 'uploading' ||
+        displayStatus === 'processing'
+    );
+    
+    // Phase 3.0: Enhanced progress bar color coding
     const getProgressBarColor = () => {
         switch (displayStatus) {
             case 'queued':
                 return 'bg-gray-300';
             case 'initiating':
             case 'uploading':
-            case 'completing':
                 return 'bg-blue-600';
+            case 'processing':
+                return 'bg-indigo-600';
             case 'complete':
                 return 'bg-green-600';
             case 'failed':
@@ -398,14 +466,20 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
         }
     };
     
-    // Check if we should show animated sheen (uploading, initiating, or completing status, including heartbeat)
+    // Phase 3.0: Animated sheen for active states (uploading, initiating, or processing)
+    // Phase 3.0B: Gate sheen animation to active rows only (performance optimization)
     // Sheen indicates active work is happening even if progress hasn't updated yet
-    const shouldShowSheen = displayStatus === 'uploading' || displayStatus === 'initiating' || displayStatus === 'completing';
+    const shouldShowSheen = shouldAnimate;
 
-    // Get progress percentage (heartbeat shows indeterminate progress)
+    // Phase 3.0: Enhanced progress percentage calculation
     const getProgressPercentage = () => {
         if (item.uploadStatus === 'complete') return 100;
         if (item.uploadStatus === 'failed') return 0;
+        
+        // Phase 3.0: Processing state shows 95% to indicate near-completion
+        if (displayStatus === 'processing') {
+            return Math.max(item.progress || 0, 95); // Show high progress during finalization
+        }
         
         // If heartbeat is active, show small indeterminate progress (5% with pulse animation)
         if (shouldShowUploadingHeartbeat) {
@@ -415,25 +489,63 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
         return item.progress || 0;
     };
 
+
     return (
-        <div className="bg-white">
-            {/* Main row */}
+        <div className={`bg-white transition-colors ${
+            isActive ? 'border-l-2 border-l-blue-500' : 
+            isComplete ? 'border-l-2 border-l-green-500' :
+            isFailed ? 'border-l-2 border-l-red-500' : ''
+        }`}>
+            {/* Phase 3.0: Main row with enhanced visual hierarchy */}
             <div
-                className="px-4 py-3 hover:bg-gray-50 transition-colors"
+                className={`px-4 py-3 transition-colors ${
+                    isActive ? 'bg-blue-50/30 hover:bg-blue-50/50' :
+                    isComplete ? 'bg-green-50/30 hover:bg-green-50/50' :
+                    isFailed ? 'bg-red-50/30 hover:bg-red-50/50' :
+                    'hover:bg-gray-50'
+                }`}
             >
                 <div className="flex items-center justify-between">
                     {/* Left: Title and status */}
                     <div className="flex items-center flex-1 min-w-0">
-                        {/* Image preview or status icon */}
+                        {/* Phase 3.0C: Thumbnail preview or file-type icon */}
                         <div className="flex-shrink-0 mr-3">
                             {isImage && previewUrl ? (
-                                <img
-                                    src={previewUrl}
-                                    alt={resolvedFilename}
-                                    className="h-10 w-10 object-cover rounded border border-gray-200"
-                                />
+                                // Show file preview for images during upload (blob URL from file object)
+                                <div className="relative h-10 w-10 rounded border border-gray-200 overflow-hidden bg-gray-50">
+                                    <img
+                                        src={previewUrl}
+                                        alt={resolvedFilename}
+                                        className="h-full w-full object-cover"
+                                        onError={(e) => {
+                                            // If preview fails to load, hide image and show icon instead
+                                            e.currentTarget.style.display = 'none'
+                                            const iconContainer = e.currentTarget.nextElementSibling
+                                            if (iconContainer) {
+                                                iconContainer.style.display = 'flex'
+                                            }
+                                        }}
+                                    />
+                                    {/* Fallback file-type icon (hidden by default, shown if image fails) */}
+                                    <div className="absolute inset-0 flex items-center justify-center" style={{ display: 'none' }}>
+                                        <FileTypeIcon
+                                            fileExtension={extension}
+                                            mimeType={item.file?.type}
+                                            size="sm"
+                                            iconClassName="text-gray-400"
+                                        />
+                                    </div>
+                                </div>
                             ) : (
-                                <StatusIcon className={`h-5 w-5 ${statusConfig.iconColor}`} />
+                                // Show file-type icon for non-image files or when no preview available
+                                <div className="h-10 w-10 flex items-center justify-center">
+                                    <FileTypeIcon
+                                        fileExtension={extension}
+                                        mimeType={item.file?.type}
+                                        size="sm"
+                                        iconClassName={statusConfig.iconColor}
+                                    />
+                                </div>
                             )}
                         </div>
 
@@ -486,37 +598,51 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
                                 {item.file?.size ? formatFileSize(item.file.size) : 'Unknown size'}
                             </p>
                             
-                            {/* Inline progress bar - always visible */}
+                            {/* Phase 3.0: Enhanced progress bar with percentage */}
                             <div className="mt-2 w-full">
-                                <div className="relative h-1 w-full overflow-hidden rounded-full bg-gray-200">
-                                    <div
-                                        className={`h-full transition-[width] duration-300 ${getProgressBarColor()}`}
-                                        style={{ width: `${getProgressPercentage()}%` }}
-                                    />
-                                    {/* Animated sheen overlay (uploading/initiating only) */}
-                                    {shouldShowSheen && (
-                                        <div className="absolute inset-0 overflow-hidden rounded-full">
-                                            <div 
-                                                className="upload-sheen"
-                                                style={{
-                                                    position: 'absolute',
-                                                    inset: 0,
-                                                    background: 'linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.35) 37%, transparent 63%)',
-                                                    backgroundSize: '200% 100%',
-                                                    animation: 'upload-sheen-animation 1.6s linear infinite'
-                                                }}
-                                            />
-                                        </div>
-                                    )}
+                                <div className="flex items-center gap-2">
+                                    <div className="relative flex-1 h-2 overflow-hidden rounded-full bg-gray-200">
+                                        <div
+                                            className={`h-full transition-[width] duration-300 ${getProgressBarColor()}`}
+                                            style={{ width: `${getProgressPercentage()}%` }}
+                                        />
+                                        {/* Animated sheen overlay (uploading/initiating/processing only) */}
+                                        {shouldShowSheen && (
+                                            <div className="absolute inset-0 overflow-hidden rounded-full">
+                                                <div 
+                                                    className="upload-sheen"
+                                                    style={{
+                                                        position: 'absolute',
+                                                        inset: 0,
+                                                        background: 'linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.35) 37%, transparent 63%)',
+                                                        backgroundSize: '200% 100%',
+                                                        animation: 'upload-sheen-animation 1.6s linear infinite'
+                                                    }}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                    {/* Phase 3.0: Progress percentage text */}
+                                    <span className="text-xs font-medium text-gray-600 tabular-nums min-w-[3rem] text-right">
+                                        {item.uploadStatus === 'complete' ? '100%' : 
+                                         item.uploadStatus === 'failed' ? '—' :
+                                         `${Math.round(getProgressPercentage())}%`}
+                                    </span>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Status badge */}
+                        {/* Phase 3.0: Enhanced status badge with icon */}
+                        {/* Phase 3.0B: Animations gated to active rows only for performance */}
                         <div className="flex-shrink-0 mr-4 flex items-center gap-2">
                             <span
-                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor}`}
+                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor} ${
+                                    shouldAnimate && statusConfig.pulse ? 'animate-pulse' : ''
+                                }`}
                             >
+                                <StatusIcon className={`h-3.5 w-3.5 ${statusConfig.iconColor} ${
+                                    shouldAnimate && statusConfig.pulse ? 'animate-spin' : ''
+                                }`} />
                                 {statusConfig.label}
                             </span>
                             {/* Show "Expired" badge for rehydrated/expired uploads - safe access */}
@@ -574,8 +700,15 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
                                 }`}>
                                     {item.error?.message || 'Upload failed'}
                                 </p>
+                                {/* Phase 3.0C: Show specific message for session expiration (419 CSRF errors) */}
+                                {item.error?.message && item.error.message.includes('Session expired') && (
+                                    <p className="text-xs text-amber-600 mt-1 font-medium">
+                                        Your session has expired. Please refresh the page to continue uploading.
+                                    </p>
+                                )}
                                 {/* Show indicator if this was a rehydrated/expired upload - safe access */}
-                                {(item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired' || 
+                                {!item.error?.message?.includes('Session expired') && 
+                                 (item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired' || 
                                   (item.error?.message && (item.error.message.includes('expired') || item.error.message.includes('Previous upload session') || item.error.message.includes('does not exist in S3')))) && (
                                     <p className="text-xs text-gray-500 mt-1">
                                         This upload was from a previous session and cannot be resumed. Remove it and upload the file again.
@@ -587,10 +720,15 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
                 )}
             </div>
 
-            {/* Expanded details with overrides */}
+            {/* Phase 3.0: Enhanced expanded details section */}
             {isExpanded && (
                 <div 
-                    className="px-4 py-3 bg-gray-50 border-t border-gray-200"
+                    className={`px-4 py-3 border-t transition-colors ${
+                        isActive ? 'bg-blue-50/20 border-blue-100' :
+                        isComplete ? 'bg-green-50/20 border-green-100' :
+                        isFailed ? 'bg-red-50/20 border-red-100' :
+                        'bg-gray-50 border-gray-200'
+                    }`}
                     onClick={(e) => e.stopPropagation()} // Prevent collapse when clicking inside
                 >
                     <div className="space-y-6">
@@ -815,3 +953,53 @@ export default function UploadItemRow({ item, uploadManager, onRemove, disabled 
         </div>
     );
 }
+
+/**
+ * Phase 3.0B: Render containment via React.memo with custom comparator
+ * 
+ * WHY MEMOIZATION EXISTS:
+ * Without memoization, updating progress on one file triggers re-renders of ALL rows
+ * (because parent state updates cause all children to re-render). With 40+ files,
+ * this causes 40+ unnecessary re-renders per progress update, leading to janky UI.
+ * 
+ * Custom comparator (not shallow comparison) is required because:
+ * - Item object reference changes on every parent update (would always re-render)
+ * - We only care about specific fields (status, progress, title, etc.)
+ * - UploadManager and onRemove are stable references (don't need comparison)
+ * 
+ * This ensures only rows with changed data re-render, not all rows.
+ * 
+ * RENDER CONTAINMENT IS MANDATORY for all future queue features.
+ */
+export default memo(UploadItemRow, (prevProps, nextProps) => {
+    const prev = prevProps.item;
+    const next = nextProps.item;
+    
+    // Phase 3.0B: Calculate isActive for both (needed for animation gating comparison)
+    const prevDisplayStatus = prev.uploadStatus;
+    const nextDisplayStatus = next.uploadStatus;
+    const prevIsActive = prevDisplayStatus === 'uploading' || prevDisplayStatus === 'initiating' || prevDisplayStatus === 'processing';
+    const nextIsActive = nextDisplayStatus === 'uploading' || nextDisplayStatus === 'initiating' || nextDisplayStatus === 'processing';
+    
+    // Phase 3.0B: Compare only fields that affect render output
+    // Return true if all fields are equal (skip re-render)
+    const propsEqual = (
+        prev.clientId === next.clientId &&
+        prev.uploadStatus === next.uploadStatus &&
+        prev.progress === next.progress &&
+        prev.title === next.title &&
+        prev.resolvedFilename === next.resolvedFilename &&
+        // Error comparison - check both message and stage
+        ((!prev.error && !next.error) || 
+         (prev.error?.message === next.error?.message && 
+          prev.error?.stage === next.error?.stage &&
+          prev.error?.type === next.error?.type)) &&
+        prevIsActive === nextIsActive &&
+        prevProps.disabled === nextProps.disabled &&
+        // File object reference comparison (should be stable)
+        prev.file === next.file
+    );
+    
+    // Return true = props equal (skip render), false = props different (re-render)
+    return propsEqual;
+});

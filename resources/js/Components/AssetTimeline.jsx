@@ -7,10 +7,12 @@
  * @param {Object} props
  * @param {Array} props.events - Array of activity event objects
  * @param {boolean} props.loading - Loading state
+ * @param {Function} props.onThumbnailRetry - Callback for thumbnail retry (UI only, max 2 retries)
+ * @param {number} props.thumbnailRetryCount - Current retry count
  */
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 
-export default function AssetTimeline({ events = [], loading = false }) {
+export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0 }) {
     // Format event type to human-readable description
     const formatEventType = (eventType) => {
         const eventMap = {
@@ -165,11 +167,30 @@ export default function AssetTimeline({ events = [], loading = false }) {
                                                     {event.metadata.styles && (
                                                         <p>Styles: {event.metadata.styles.join(', ')}</p>
                                                     )}
-                                                    {event.metadata.from && event.metadata.to && (
+                                                    {/* Phase 3.1: Hide temp upload paths from timeline (internal-only detail, confusing for users) */}
+                                                    {event.metadata.from && event.metadata.to && 
+                                                     !event.metadata.from.includes('temp/uploads/') && 
+                                                     !event.metadata.to.includes('temp/uploads/') && (
                                                         <p className="truncate">
                                                             {event.metadata.from} → {event.metadata.to}
                                                         </p>
                                                     )}
+                                                </div>
+                                            )}
+                                            {/* Phase 3.0C: Retry affordance for failed thumbnail events (UI only, max 2 retries) */}
+                                            {event.event_type === 'asset.thumbnail.failed' && onThumbnailRetry && thumbnailRetryCount < 2 && (
+                                                <div className="mt-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            onThumbnailRetry()
+                                                        }}
+                                                        className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                                    >
+                                                        <ArrowPathIcon className="h-3.5 w-3.5" />
+                                                        Retry thumbnail generation
+                                                    </button>
                                                 </div>
                                             )}
                                         </div>

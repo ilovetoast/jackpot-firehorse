@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
+import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
@@ -38,6 +39,19 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
             setActiveAssetId(null)
         }
     }, [activeAssetId, activeAsset, assets])
+    
+    // Phase 3.1: Background Asset Reconciliation
+    // Bounded, non-invasive background reconciliation loop for asset thumbnails and processing state.
+    // Only polls when at least one visible asset is processing.
+    // Auto-stops when no assets are processing, max attempts reached, or category changes.
+    // This is NOT a live subscription - it's a quiet, page-level refresh loop.
+    // Phase 3.1 invariant: Background reconciliation MUST pause while upload dialog is open.
+    // Inertia reloads reset page-owned state (dialogs, modals).
+    useAssetReconciliation({
+        assets,
+        selectedCategoryId,
+        isPaused: isUploadDialogOpen,
+    })
     
     // Track drawer animation state to freeze grid layout during animation
     // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
@@ -348,6 +362,8 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
+                                assets={assets}
+                                currentAssetIndex={assets.findIndex(a => a.id === activeAsset.id)}
                             />
                         </div>
                     )}
@@ -360,6 +376,8 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                         <AssetDrawer
                             asset={activeAsset}
                             onClose={() => setActiveAssetId(null)}
+                            assets={assets}
+                            currentAssetIndex={assets.findIndex(a => a.id === activeAsset.id)}
                         />
                     </div>
                 )}
