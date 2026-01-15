@@ -35,13 +35,23 @@ use Illuminate\Support\Str;
  * Or explicitly:
  *   php artisan db:seed --class=DevelopmentDataSeeder --force
  * 
+ * Size Options (set via SEEDER_SIZE environment variable):
+ *   - small:  ~20 companies, ~100 users, 10-50 assets per company
+ *   - medium: ~100 companies, ~500 users, 50-500 assets per company
+ *   - large:  ~1000 companies, ~10k users, 100-1000 assets per company (default)
+ * 
+ * Example:
+ *   SEEDER_SIZE=small php artisan db:seed --class=DevelopmentDataSeeder --force
+ * 
  * This seeder:
- * - Creates 1000+ companies with dummy data
+ * - Creates companies with dummy data (count depends on size)
+ * - Each company has an owner (user with 'owner' role)
+ * - Users are associated with companies and brands
  * - Assigns random plans (some with plans, some without)
  * - Generates users based on plan limits (some companies exceed limits)
- * - Creates categories and assets (100-1000+ per company)
+ * - Creates categories and assets (counts depend on size)
  * - Fills in brand data (colors, logos, icons)
- * - Creates ~20 support tickets
+ * - Creates support tickets (count depends on size)
  * - Assigns special roles to some users (support, site admin, engineering)
  * 
  * S3 Images:
@@ -51,20 +61,98 @@ use Illuminate\Support\Str;
  */
 class DevelopmentDataSeeder extends Seeder
 {
-    private const COMPANIES_COUNT = 1000;
-    private const TICKETS_COUNT = 20;
+    // Size options: 'small', 'medium', 'large'
+    // Can be overridden via SEEDER_SIZE environment variable
+    private const SIZE = 'large'; // Default to large
     
-    // Asset counts per company (randomized)
-    private const MIN_ASSETS_PER_COMPANY = 100;
-    private const MAX_ASSETS_PER_COMPANY = 1000;
+    // Size configurations
+    private const SIZE_CONFIG = [
+        'small' => [
+            'companies' => 20,
+            'tickets' => 5,
+            'min_assets' => 10,
+            'max_assets' => 50,
+            'min_categories' => 3,
+            'max_categories' => 10,
+            'min_brands' => 1,
+            'max_brands' => 3,
+        ],
+        'medium' => [
+            'companies' => 100,
+            'tickets' => 10,
+            'min_assets' => 50,
+            'max_assets' => 500,
+            'min_categories' => 5,
+            'max_categories' => 15,
+            'min_brands' => 1,
+            'max_brands' => 4,
+        ],
+        'large' => [
+            'companies' => 1000,
+            'tickets' => 20,
+            'min_assets' => 100,
+            'max_assets' => 1000,
+            'min_categories' => 5,
+            'max_categories' => 20,
+            'min_brands' => 1,
+            'max_brands' => 5,
+        ],
+    ];
     
-    // Categories per company
-    private const MIN_CATEGORIES_PER_COMPANY = 5;
-    private const MAX_CATEGORIES_PER_COMPANY = 20;
+    private function getSize(): string
+    {
+        return env('SEEDER_SIZE', self::SIZE);
+    }
     
-    // Brands per company
-    private const MIN_BRANDS_PER_COMPANY = 1;
-    private const MAX_BRANDS_PER_COMPANY = 5;
+    private function getConfig(): array
+    {
+        $size = $this->getSize();
+        if (!isset(self::SIZE_CONFIG[$size])) {
+            $this->command->warn("Invalid size '{$size}', defaulting to 'large'");
+            $size = 'large';
+        }
+        return self::SIZE_CONFIG[$size];
+    }
+    
+    private function getCompaniesCount(): int
+    {
+        return $this->getConfig()['companies'];
+    }
+    
+    private function getTicketsCount(): int
+    {
+        return $this->getConfig()['tickets'];
+    }
+    
+    private function getMinAssetsPerCompany(): int
+    {
+        return $this->getConfig()['min_assets'];
+    }
+    
+    private function getMaxAssetsPerCompany(): int
+    {
+        return $this->getConfig()['max_assets'];
+    }
+    
+    private function getMinCategoriesPerCompany(): int
+    {
+        return $this->getConfig()['min_categories'];
+    }
+    
+    private function getMaxCategoriesPerCompany(): int
+    {
+        return $this->getConfig()['max_categories'];
+    }
+    
+    private function getMinBrandsPerCompany(): int
+    {
+        return $this->getConfig()['min_brands'];
+    }
+    
+    private function getMaxBrandsPerCompany(): int
+    {
+        return $this->getConfig()['max_brands'];
+    }
     
     // Special role percentages
     private const SUPPORT_USER_PERCENT = 0.5; // 0.5% of users
@@ -96,9 +184,19 @@ class DevelopmentDataSeeder extends Seeder
             return;
         }
         
+        // Get size configuration
+        $size = $this->getSize();
+        $companiesCount = $this->getCompaniesCount();
+        $expectedUsers = $this->estimateUserCount($companiesCount);
+        
+        $this->command->info("📊 Seeder Size: " . strtoupper($size));
+        $this->command->info("   Companies: ~{$companiesCount}");
+        $this->command->info("   Users: ~{$expectedUsers}");
+        $this->command->info("   Assets: " . $this->getMinAssetsPerCompany() . "-" . $this->getMaxAssetsPerCompany() . " per company");
+        
         // Confirmation prompt (skip if --force is used or in non-interactive mode)
         $isForced = $this->command->option('force') ?? false;
-        if (!$isForced && !$this->command->confirm('This will generate ' . self::COMPANIES_COUNT . '+ companies with extensive test data. Continue?', false)) {
+        if (!$isForced && !$this->command->confirm("This will generate {$companiesCount} companies with extensive test data. Continue?", false)) {
             $this->command->info('Seeder cancelled.');
             return;
         }
@@ -110,14 +208,14 @@ class DevelopmentDataSeeder extends Seeder
         $planLimits = $this->getPlanLimits();
         
         // Create companies in chunks to manage memory
-        $chunkSize = 50;
-        $totalChunks = ceil(self::COMPANIES_COUNT / $chunkSize);
+        $chunkSize = $size === 'small' ? 10 : ($size === 'medium' ? 25 : 50);
+        $totalChunks = ceil($companiesCount / $chunkSize);
         
         for ($chunk = 0; $chunk < $totalChunks; $chunk++) {
             $offset = $chunk * $chunkSize;
-            $count = min($chunkSize, self::COMPANIES_COUNT - $offset);
+            $count = min($chunkSize, $companiesCount - $offset);
             
-            $this->command->info("Creating companies " . ($offset + 1) . "-" . ($offset + $count) . " of " . self::COMPANIES_COUNT . "...");
+            $this->command->info("Creating companies " . ($offset + 1) . "-" . ($offset + $count) . " of " . $companiesCount . "...");
             
             for ($i = 0; $i < $count; $i++) {
                 $this->createCompanyWithData($planLimits);
@@ -184,7 +282,7 @@ class DevelopmentDataSeeder extends Seeder
         ]);
         
         // Create brands
-        $brandCount = fake()->numberBetween(self::MIN_BRANDS_PER_COMPANY, self::MAX_BRANDS_PER_COMPANY);
+        $brandCount = fake()->numberBetween($this->getMinBrandsPerCompany(), $this->getMaxBrandsPerCompany());
         $brands = [];
         
         for ($b = 0; $b < $brandCount; $b++) {
@@ -287,7 +385,7 @@ class DevelopmentDataSeeder extends Seeder
         
         // Create categories for each brand
         foreach ($brands as $brand) {
-            $categoryCount = fake()->numberBetween(self::MIN_CATEGORIES_PER_COMPANY, self::MAX_CATEGORIES_PER_COMPANY);
+            $categoryCount = fake()->numberBetween($this->getMinCategoriesPerCompany(), $this->getMaxCategoriesPerCompany());
             
             for ($c = 0; $c < $categoryCount; $c++) {
                 $baseSlug = Str::slug(fake()->words(2, true));
@@ -319,7 +417,7 @@ class DevelopmentDataSeeder extends Seeder
         }
         
         // Create assets
-        $assetCount = fake()->numberBetween(self::MIN_ASSETS_PER_COMPANY, self::MAX_ASSETS_PER_COMPANY);
+        $assetCount = fake()->numberBetween($this->getMinAssetsPerCompany(), $this->getMaxAssetsPerCompany());
         $categories = Category::where('tenant_id', $company->id)->get();
         $companyUsers = $company->users()->get();
         
@@ -395,15 +493,32 @@ class DevelopmentDataSeeder extends Seeder
     }
     
     /**
+     * Estimate user count based on company count and plan distribution.
+     */
+    private function estimateUserCount(int $companiesCount): int
+    {
+        // Rough estimate: average 5 users per company for small, 5-10 for medium, 5-20 for large
+        $size = $this->getSize();
+        $avgUsersPerCompany = match($size) {
+            'small' => 5,
+            'medium' => 7,
+            'large' => 10,
+            default => 10,
+        };
+        return (int) ($companiesCount * $avgUsersPerCompany);
+    }
+    
+    /**
      * Create support tickets.
      */
     private function createSupportTickets(): void
     {
-        $companies = Tenant::inRandomOrder()->limit(self::TICKETS_COUNT)->get();
-        $users = User::inRandomOrder()->limit(self::TICKETS_COUNT * 2)->get();
+        $ticketsCount = $this->getTicketsCount();
+        $companies = Tenant::inRandomOrder()->limit($ticketsCount)->get();
+        $users = User::inRandomOrder()->limit($ticketsCount * 2)->get();
         
         foreach ($companies as $index => $company) {
-            if ($index >= self::TICKETS_COUNT) break;
+            if ($index >= $ticketsCount) break;
             
             $createdBy = $users->random();
             $assignedTo = fake()->boolean(60) ? $users->random() : null;

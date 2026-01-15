@@ -13,6 +13,8 @@
  * - unknown: Unclassified errors
  */
 
+import { allowDiagnostics } from './environment' // Phase 2.5 Step 4: Centralized environment detection
+
 /**
  * Classify an upload error into a structured format
  * 
@@ -257,15 +259,9 @@ function checkUrlExpiration(url) {
  */
 export async function sendDiagnostics(diagnosticPayload) {
     try {
+        // Phase 2.5 Step 4: Use centralized environment detection
         // Only send in development or if explicitly enabled
-        const isDev = typeof window !== 'undefined' && (
-            window.__DEV_UPLOAD_DIAGNOSTICS__ === true ||
-            process.env.NODE_ENV === 'development' ||
-            (import.meta.env && import.meta.env.DEV) ||
-            (import.meta.env && import.meta.env.MODE && import.meta.env.MODE !== 'production')
-        );
-
-        if (!isDev) {
+        if (!allowDiagnostics()) {
             // In production, silently skip diagnostics (don't log to console)
             return;
         }

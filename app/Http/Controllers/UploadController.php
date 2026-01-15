@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Responses\UploadErrorResponse;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
@@ -48,10 +49,14 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Validate request
@@ -95,16 +100,17 @@ class UploadController extends Controller
                 'expires_at' => $result['expires_at'],
             ], 201);
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-                'limit_type' => $e->limitType,
-                'current_count' => $e->currentCount,
-                'max_allowed' => $e->maxAllowed,
-            ], 403);
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 403, [
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                'file_type' => UploadErrorResponse::extractFileType($validated['file_name'] ?? null),
+            ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to initiate upload: ' . $e->getMessage(),
-            ], 500);
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                'file_type' => UploadErrorResponse::extractFileType($validated['file_name'] ?? null),
+            ]);
         }
     }
 
@@ -122,10 +128,14 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // 🔍 DEBUG LOGGING: Log raw request before validation
@@ -162,10 +172,11 @@ class UploadController extends Controller
                 'request_data' => $request->all(),
             ]);
             
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $e->errors(),
-            ], 422);
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 422, [
+                'upload_session_id' => $request->input('upload_session_id'),
+                'pipeline_stage' => UploadErrorResponse::STAGE_FINALIZE,
+            ]);
         }
 
         // Get upload session
@@ -235,11 +246,12 @@ class UploadController extends Controller
             // Refresh to get current status (might have changed)
             $uploadSession->refresh();
 
-            return response()->json([
-                'message' => $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 400, [
                 'upload_session_id' => $uploadSession->id,
-                'upload_session_status' => $uploadSession->status->value,
-            ], 400);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_FINALIZE,
+            ]);
         } catch (\Exception $e) {
             Log::error('Unexpected error during upload completion', [
                 'upload_session_id' => $uploadSession->id,
@@ -250,11 +262,12 @@ class UploadController extends Controller
             // Refresh to get current status before error response
             $uploadSession->refresh();
 
-            return response()->json([
-                'message' => 'Failed to complete upload: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-                'upload_session_status' => $uploadSession->status->value,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_FINALIZE,
+            ]);
         }
     }
 
@@ -272,10 +285,14 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Validate request
@@ -302,9 +319,15 @@ class UploadController extends Controller
         }
 
         if (!$brand) {
-            return response()->json([
-                'message' => 'Brand not found',
-            ], 404);
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_VALIDATION_FAILED,
+                'Brand not found.',
+                404,
+                [
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         // Verify category belongs to tenant and brand (only if provided)
@@ -363,9 +386,10 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to initiate batch upload: ' . $e->getMessage(),
-            ], 500);
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -384,17 +408,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         try {
@@ -441,11 +476,12 @@ class UploadController extends Controller
             // Refresh to get current status before error response
             $uploadSession->refresh();
 
-            return response()->json([
-                'message' => 'Failed to cancel upload session: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-                'upload_session_status' => $uploadSession->status->value,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -467,17 +503,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         try {
@@ -502,11 +549,17 @@ class UploadController extends Controller
                     'is_expired' => $metadata['is_expired'],
                 ]);
 
-                return response()->json([
-                    'message' => $metadata['error'],
-                    'upload_session_id' => $uploadSession->id,
-                    ...$metadata,
-                ], 400);
+                // Phase 2.5 Step 2: Use normalized error response for resume errors
+                return UploadErrorResponse::error(
+                    UploadErrorResponse::CODE_SESSION_INVALID,
+                    $metadata['error'],
+                    400,
+                    [
+                        'upload_session_id' => $uploadSession->id,
+                        'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                        'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                    ]
+                );
             }
 
             // Return resume metadata
@@ -528,10 +581,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to get resume metadata: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -553,17 +608,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         try {
@@ -610,17 +676,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         try {
@@ -659,10 +736,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to mark as UPLOADING: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -684,17 +763,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         // Validate request input
@@ -751,12 +841,17 @@ class UploadController extends Controller
                     'error' => $errorMessage,
                 ]);
 
-                return response()->json([
-                    'message' => $errorMessage,
-                    'upload_session_id' => $uploadSession->id,
-                    'is_expired' => true,
-                    'expires_at' => $uploadSession->expires_at?->toIso8601String(),
-                ], 410); // Gone - resource no longer available
+                // Phase 2.5 Step 2: Use normalized error response
+                return UploadErrorResponse::error(
+                    UploadErrorResponse::CODE_SESSION_EXPIRED,
+                    $errorMessage,
+                    410,
+                    [
+                        'upload_session_id' => $uploadSession->id,
+                        'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                        'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                    ]
+                );
             }
 
             if (str_contains($errorMessage, 'invalid state') || str_contains($errorMessage, 'does not have a multipart upload ID')) {
@@ -784,10 +879,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => $errorMessage,
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 400, [
                 'upload_session_id' => $uploadSession->id,
-            ], 400);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         } catch (\Exception $e) {
             // Unexpected error
             Log::error('Unexpected error generating multipart part URL', [
@@ -797,10 +894,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to generate multipart part URL: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -822,17 +921,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         try {
@@ -865,10 +975,12 @@ class UploadController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            return response()->json([
-                'message' => $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 400, [
                 'upload_session_id' => $uploadSession->id,
-            ], 400);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         } catch (\Exception $e) {
             Log::error('Unexpected error initiating multipart upload', [
                 'upload_session_id' => $uploadSession->id,
@@ -876,10 +988,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to initiate multipart upload: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -898,17 +1012,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         // Validate request input
@@ -945,10 +1070,12 @@ class UploadController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            return response()->json([
-                'message' => $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 400, [
                 'upload_session_id' => $uploadSession->id,
-            ], 400);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         } catch (\Exception $e) {
             Log::error('Unexpected error signing multipart part URL', [
                 'upload_session_id' => $uploadSession->id,
@@ -957,10 +1084,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to sign multipart part URL: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -982,17 +1111,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         // Validate request input
@@ -1049,10 +1189,12 @@ class UploadController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            return response()->json([
-                'message' => $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 400, [
                 'upload_session_id' => $uploadSession->id,
-            ], 400);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         } catch (\Exception $e) {
             Log::error('Unexpected error completing multipart upload', [
                 'upload_session_id' => $uploadSession->id,
@@ -1061,10 +1203,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to complete multipart upload: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -1086,17 +1230,28 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Verify upload session belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Upload session not found',
-            ], 404);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_SESSION_NOT_FOUND,
+                'Upload session not found.',
+                404,
+                [
+                    'upload_session_id' => $uploadSession->id,
+                    'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+                ]
+            );
         }
 
         try {
@@ -1127,10 +1282,12 @@ class UploadController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            return response()->json([
-                'message' => $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 400, [
                 'upload_session_id' => $uploadSession->id,
-            ], 400);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         } catch (\Exception $e) {
             Log::error('Unexpected error aborting multipart upload', [
                 'upload_session_id' => $uploadSession->id,
@@ -1138,10 +1295,12 @@ class UploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return response()->json([
-                'message' => 'Failed to abort multipart upload: ' . $e->getMessage(),
+            // Phase 2.5 Step 2: Use normalized error response
+            return UploadErrorResponse::fromException($e, 500, [
                 'upload_session_id' => $uploadSession->id,
-            ], 500);
+                'file_type' => UploadErrorResponse::extractFileType(null, $uploadSession),
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         }
     }
 
@@ -1185,10 +1344,14 @@ class UploadController extends Controller
         }
 
         // Verify user belongs to tenant
+        // Phase 2.5 Step 2: Use normalized error response
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
         }
 
         // Validate request structure
@@ -1343,14 +1506,27 @@ class UploadController extends Controller
                 // Note: Activity logging is handled by UploadCompletionService::complete()
                 // which logs ASSET_UPLOAD_FINALIZED (the canonical event for processing start)
             } catch (\RuntimeException $e) {
-                // Validation/business logic errors - return as failed item
-                $errorCode = 'validation_error';
+                // Phase 2.5 Step 2: Normalize error response for finalize failures
                 $errorMessage = $e->getMessage();
                 
-                // Determine if this is a file missing error (S3 verification failed)
-                $isFileMissing = str_contains($errorMessage, 'does not exist in S3') || 
-                                 str_contains($errorMessage, 'not found in S3') ||
-                                 str_contains($errorMessage, 'Upload does not exist');
+                // Determine error code and category from exception
+                // Map to normalized error codes matching frontend expectations
+                $errorCode = UploadErrorResponse::CODE_VALIDATION_FAILED;
+                if (str_contains($errorMessage, 'does not exist in S3') || 
+                    str_contains($errorMessage, 'not found in S3') ||
+                    str_contains($errorMessage, 'Upload does not exist')) {
+                    $errorCode = UploadErrorResponse::CODE_FILE_MISSING;
+                } elseif (str_contains($errorMessage, 'not found') || 
+                         str_contains($errorMessage, 'does not exist')) {
+                    $errorCode = UploadErrorResponse::CODE_SESSION_NOT_FOUND;
+                }
+                
+                $category = UploadErrorResponse::getCategoryFromErrorCode($errorCode);
+                
+                // Extract file type from upload session
+                $fileType = $uploadSession 
+                    ? UploadErrorResponse::extractFileType(null, $uploadSession)
+                    : null;
                 
                 $results[] = [
                     'upload_key' => $uploadKey,
@@ -1358,6 +1534,14 @@ class UploadController extends Controller
                     'error' => [
                         'code' => $errorCode,
                         'message' => $errorMessage,
+                        // Include normalized error structure for AI agents
+                        'error_code' => $errorCode,
+                        'category' => $category,
+                        'context' => [
+                            'upload_session_id' => $uploadSession?->id,
+                            'file_type' => $fileType,
+                            'pipeline_stage' => UploadErrorResponse::STAGE_FINALIZE,
+                        ],
                     ],
                 ];
 

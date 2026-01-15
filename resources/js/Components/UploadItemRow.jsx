@@ -21,6 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 import MetadataFieldRenderer from './MetadataFieldRenderer';
 import FileTypeIcon from './FileTypeIcon';
+import { isDev } from '../utils/environment'; // Phase 2.5 Step 4: Centralized environment detection
 
 /**
  * Phase 3.0B: Performance instrumentation
@@ -205,7 +206,8 @@ function formatFileSize(bytes) {
 function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
 
     // CLEAN UPLOADER V2: DEV warning for failed files
-    if (process.env.NODE_ENV === 'development' && item.uploadStatus === 'failed') {
+    // Phase 2.5 Step 4: Use centralized environment detection - no prod logging noise
+    if (isDev() && item.uploadStatus === 'failed') {
         console.warn('[UPLOAD_V2_UI] rendering failed file', { 
             clientId: item.clientId, 
             error: item.error 
@@ -688,6 +690,8 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                 </div>
 
                 {/* Error message (if failed) - safe access */}
+                {/* Phase 2.5 Step 1: Display normalized errors with retryability indicator */}
+                {/* Phase 2.5 Step 5: Enhanced retry-state clarity - visual indicators for retryability */}
                 {item.uploadStatus === 'failed' && item.error && (
                     <div className="mt-2 ml-8">
                         <div className="flex items-start">
@@ -695,19 +699,48 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                                 item.error?.stage === 'finalize' ? 'text-amber-500' : 'text-red-500'
                             }`} />
                             <div className="flex-1">
-                                <p className={`text-sm ${
+                                {/* Phase 2.5 Step 1: Use normalized error message if available, fallback to legacy */}
+                                <p className={`text-sm font-medium ${
                                     item.error?.stage === 'finalize' ? 'text-amber-700' : 'text-red-600'
                                 }`}>
-                                    {item.error?.message || 'Upload failed'}
+                                    {item.error?.normalized?.message || item.error?.message || 'Upload failed'}
                                 </p>
+                                
+                                {/* Phase 2.5 Step 5: Enhanced retry-state clarity - prominent visual indicator */}
+                                {item.error?.normalized && item.error.normalized.retryable !== undefined && (
+                                    <div className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${
+                                        item.error.normalized.retryable
+                                            ? 'bg-green-50 text-green-700 border border-green-200'
+                                            : 'bg-gray-50 text-gray-600 border border-gray-200'
+                                    }`}>
+                                        {item.error.normalized.retryable ? (
+                                            <>
+                                                <svg className="h-3.5 w-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                </svg>
+                                                <span>Retryable — Remove and upload again</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg className="h-3.5 w-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                                <span>Not retryable — Remove and start over</span>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                                
                                 {/* Phase 3.0C: Show specific message for session expiration (419 CSRF errors) */}
-                                {item.error?.message && item.error.message.includes('Session expired') && (
+                                {(item.error?.normalized?.category === 'AUTH' || 
+                                  (item.error?.message && item.error.message.includes('Session expired'))) && (
                                     <p className="text-xs text-amber-600 mt-1 font-medium">
                                         Your session has expired. Please refresh the page to continue uploading.
                                     </p>
                                 )}
+                                
                                 {/* Show indicator if this was a rehydrated/expired upload - safe access */}
-                                {!item.error?.message?.includes('Session expired') && 
+                                {!item.error?.normalized && !item.error?.message?.includes('Session expired') && 
                                  (item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired' || 
                                   (item.error?.message && (item.error.message.includes('expired') || item.error.message.includes('Previous upload session') || item.error.message.includes('does not exist in S3')))) && (
                                     <p className="text-xs text-gray-500 mt-1">

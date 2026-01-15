@@ -1,4 +1,8 @@
 /**
+ * 🔒 Phase 2.5 — Observability Layer (LOCKED)
+ * This file is part of a locked phase. Do not refactor or change behavior.
+ * Future phases may consume emitted signals only.
+ * 
  * Phase 2.5 - Step 1: Upload Error Normalization Utility
  * 
  * Normalizes upload errors into a consistent, AI-ready format.
@@ -23,6 +27,8 @@
  * - "Company X had 5 failed uploads in 1 hour"
  * - "All PDFs are failing thumbnail generation"
  */
+
+import { allowDiagnostics } from './environment' // Phase 2.5 Step 4: Centralized environment detection
 
 /**
  * Normalized error shape for upload failures
@@ -270,7 +276,8 @@ export function normalizeUploadError(error, context = {}) {
         file_type: resolvedFileType,
         retryable,
         // Raw error payload (dev only) - preserve original for debugging
-        raw: process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.__DEV_UPLOAD_DIAGNOSTICS__) 
+        // Phase 2.5 Step 4: Use centralized environment detection
+        raw: allowDiagnostics() 
             ? { 
                 originalError: error,
                 originalMessage: errorMessage,
@@ -286,7 +293,8 @@ export function normalizeUploadError(error, context = {}) {
     };
 
     // Dev-only logging: console.debug normalized error
-    if (process.env.NODE_ENV === 'development' || (typeof window !== 'undefined' && window.__DEV_UPLOAD_DIAGNOSTICS__)) {
+    // Phase 2.5 Step 4: Use centralized environment detection - no prod logging noise
+    if (allowDiagnostics()) {
         console.debug('[Upload Error Normalized]', {
             category: normalized.category,
             error_code: normalized.error_code,

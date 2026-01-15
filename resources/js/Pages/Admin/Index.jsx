@@ -29,11 +29,13 @@ import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 
-export default function AdminIndex({ companies, users, stats: initialStats, all_users, pagination }) {
+export default function AdminIndex({ companies, users: initialUsers, stats: initialStats, all_users, pagination }) {
     const { auth } = usePage().props
     const [activeTab, setActiveTab] = useState('companies')
     const [stats, setStats] = useState(initialStats || null)
     const [loadingStats, setLoadingStats] = useState(!initialStats)
+    const [users, setUsers] = useState(initialUsers || [])
+    const [loadingUsers, setLoadingUsers] = useState(false)
     const [expandedCompany, setExpandedCompany] = useState(null)
     const [expandedDetails, setExpandedDetails] = useState(null)
     const [showBrandRoles, setShowBrandRoles] = useState(false)
@@ -141,6 +143,23 @@ export default function AdminIndex({ companies, users, stats: initialStats, all_
                 })
         }
     }, [stats])
+
+    // Load users when users tab is activated
+    useEffect(() => {
+        if (activeTab === 'users' && users.length === 0 && !loadingUsers) {
+            setLoadingUsers(true)
+            fetch('/app/admin/api/users')
+                .then(res => res.json())
+                .then(data => {
+                    setUsers(data.data || [])
+                    setLoadingUsers(false)
+                })
+                .catch(err => {
+                    console.error('Failed to load users:', err)
+                    setLoadingUsers(false)
+                })
+        }
+    }, [activeTab, users.length, loadingUsers])
 
     const summaryCards = [
         { name: 'Total Companies', value: stats?.total_companies ?? 0, subtitle: `${stats?.total_companies ?? 0} with Stripe accounts`, icon: BuildingOfficeIcon },
@@ -254,7 +273,7 @@ export default function AdminIndex({ companies, users, stats: initialStats, all_
                                 >
                                     Users
                                     <span className="ml-2 bg-gray-100 text-gray-900 py-0.5 px-2.5 rounded-full text-xs font-medium">
-                                        {users.length}
+                                        {stats?.total_users ?? users.length}
                                     </span>
                                 </button>
                             </nav>
@@ -946,7 +965,12 @@ export default function AdminIndex({ companies, users, stats: initialStats, all_
                             </div>
                             <div className="px-6 py-4">
                                 <div className="space-y-4">
-                                    {users.length === 0 ? (
+                                    {loadingUsers ? (
+                                        <div className="text-center py-8">
+                                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                                            <p className="mt-2 text-sm text-gray-500">Loading users...</p>
+                                        </div>
+                                    ) : users.length === 0 ? (
                                         <p className="text-sm text-gray-500 text-center py-8">No users found</p>
                                     ) : (
                                         users.map((user) => {

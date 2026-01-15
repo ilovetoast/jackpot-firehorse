@@ -25,6 +25,8 @@ import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
 import UploadManager from '../utils/UploadManager' // Phase 2 singleton - import directly
+import { normalizeUploadError } from '../utils/uploadErrorNormalizer' // Phase 2.5 Step 1: Error normalization
+import DevUploadDiagnostics from './DevUploadDiagnostics' // Phase 2.5 Step 3: Dev-only diagnostics panel
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -467,6 +469,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             
             if (!response.ok) {
                 // Phase 3.0C: Improved error handling for HTML error pages (419 CSRF, etc.)
+                // Phase 2.5 Step 1: Extract error message, then normalize in catch block
                 const contentType = response.headers.get('content-type') || ''
                 let errorMessage = `Upload initiation failed: ${response.status} ${response.statusText}`
                 
@@ -491,7 +494,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     }
                 }
                 
-                throw new Error(errorMessage)
+                // Create error with Response attached for normalization
+                const error = new Error(errorMessage)
+                error.status = response.status
+                error.response = response
+                throw error
             }
             
             const responseData = await response.json()
@@ -629,7 +636,17 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         } catch (error) {
             console.error('[UPLOAD_V2] error', { clientId, error: error.message })
             
-            // Update v2Files state: set status to 'failed' and store error
+            // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
+            const normalizedError = normalizeUploadError(error, {
+                httpStatus: error.response?.status || error.status,
+                uploadSessionId: null, // Not yet available at initiation stage
+                fileName: file.name,
+                file: file,
+                stage: 'upload',
+            })
+            
+            // Update v2Files state: set status to 'failed' and store normalized error
+            // Store both normalized shape (for AI agents) and backward-compatible shape (for UI)
             setV2Files((prevFiles) => {
                 return prevFiles.map((f) => {
                     if (f.clientId === clientId) {
@@ -637,8 +654,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             ...f,
                             status: 'failed',
                             error: {
-                                message: error.message,
-                                stage: 'upload'
+                                // Backward-compatible shape for UI
+                                message: normalizedError.message,
+                                stage: 'upload',
+                                code: normalizedError.error_code,
+                                // Normalized shape preserved for AI agents and future aggregation
+                                normalized: normalizedError,
                             }
                         }
                     }
@@ -2591,13 +2612,27 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             uploadKey: f.uploadKey,
                             isMultipart: !!v2ToUploadManagerMapRef.current.get(f.clientId)
                         })
+                        
+                        // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
+                        const normalizedError = normalizeUploadError(
+                            new Error('Finalize did not return a result for this file.'),
+                            {
+                                uploadSessionId: f.uploadSessionId || uploadManagerUpload?.uploadSessionId || null,
+                                fileName: f.file?.name || 'unknown',
+                                file: f.file,
+                                stage: 'finalize',
+                                assetId: null,
+                            }
+                        )
+                        
                         return {
                             ...f,
                             status: 'failed',
                             error: {
                                 stage: 'finalize',
-                                code: 'no_result',
-                                message: 'Finalize did not return a result for this file.',
+                                code: normalizedError.error_code,
+                                message: normalizedError.message,
+                                normalized: normalizedError,
                             },
                         }
                     }
@@ -2633,27 +2668,56 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         // Failure: set file.status = 'failed', set file.error with stage: 'finalize'
                         failedCount++
                         console.log('[FINALIZE_V2] File marked as failed', { clientId: f.clientId, uploadKey: f.uploadKey, error: result.error })
+                        
+                        // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
+                        const errorObj = new Error(result.error?.message || 'Finalize failed.')
+                        if (result.error?.code) {
+                            errorObj.code = result.error.code
+                        }
+                        const normalizedError = normalizeUploadError(errorObj, {
+                            uploadSessionId: f.uploadSessionId || uploadManagerUpload?.uploadSessionId || null,
+                            fileName: f.file?.name || 'unknown',
+                            file: f.file,
+                            stage: 'finalize',
+                            assetId: result.asset_id || null,
+                        })
+                        
                         return {
                             ...f,
                             status: 'failed',
                             error: {
                                 stage: 'finalize',
-                                code: result.error?.code,
-                                message: result.error?.message || 'Finalize failed.',
+                                code: normalizedError.error_code,
+                                message: normalizedError.message,
                                 fields: result.error?.fields,
+                                normalized: normalizedError,
                             },
                         }
                     } else {
                         // Unknown status - treat as failure
                         failedCount++
                         console.warn('[FINALIZE_V2] Unknown result status', { clientId: f.clientId, uploadKey: f.uploadKey, status: result.status })
+                        
+                        // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
+                        const normalizedError = normalizeUploadError(
+                            new Error(`Finalize returned unknown status: ${result.status}`),
+                            {
+                                uploadSessionId: f.uploadSessionId || uploadManagerUpload?.uploadSessionId || null,
+                                fileName: f.file?.name || 'unknown',
+                                file: f.file,
+                                stage: 'finalize',
+                                assetId: null,
+                            }
+                        )
+                        
                         return {
                             ...f,
                             status: 'failed',
                             error: {
                                 stage: 'finalize',
-                                code: 'unknown_status',
-                                message: `Finalize returned unknown status: ${result.status}`,
+                                code: normalizedError.error_code,
+                                message: normalizedError.message,
+                                normalized: normalizedError,
                             },
                         }
                     }
@@ -2669,21 +2733,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         } catch (error) {
             console.error('[FINALIZE_V2] Error during finalize', error)
             // Network / unexpected errors - mark ALL manifest files as failed
+            
+            // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
+            // We'll normalize per-file below, but first extract common error info
+            const httpStatus = error.response?.status || error.status
             const errorMessage = error.response?.data?.message || error.message || 'Finalize failed'
             
             setV2Files((prevFiles) =>
                 prevFiles.map((f) =>
                     uploadedClientIds.has(f.clientId)
-                        ? {
-                              ...f,
-                              status: 'failed',
-                              error: {
-                                  stage: 'finalize',
-                                  code: error.response?.status === 400 ? 'validation_error' : 'network_error',
-                                  message: errorMessage,
-                                  fields: undefined, // Network errors don't have field-level errors
-                              },
-                          }
+                        ? (() => {
+                            // Normalize error for this specific file
+                            const normalizedError = normalizeUploadError(error, {
+                                httpStatus,
+                                uploadSessionId: f.uploadSessionId || null,
+                                fileName: f.file?.name || 'unknown',
+                                file: f.file,
+                                stage: 'finalize',
+                                assetId: null,
+                            })
+                            
+                            return {
+                                ...f,
+                                status: 'failed',
+                                error: {
+                                    stage: 'finalize',
+                                    code: normalizedError.error_code,
+                                    message: normalizedError.message,
+                                    fields: undefined, // Network errors don't have field-level errors
+                                    normalized: normalizedError,
+                                },
+                            }
+                        })()
                         : f
                 )
             )
@@ -3612,6 +3693,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     }}
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
+
+                                {/* Phase 2.5 Step 3: Dev-only diagnostics panel */}
+                                {/* Read-only panel showing normalized errors and upload session info */}
+                                <DevUploadDiagnostics files={v2Files} />
                                     </div>
                                 )}
 
