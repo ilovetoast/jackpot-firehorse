@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\AlertCandidate;
+use App\Models\SupportTicket;
 use App\Models\TicketCreationRule;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -88,6 +90,33 @@ class AutoTicketCreationService
                     continue;
                 }
 
+                // 🔒 STABILIZATION A2: Check ticket rate cap (non-blocking)
+                if ($this->isTicketRateCapExceeded()) {
+                    $suppressionReason = 'Ticket auto-creation rate cap exceeded';
+                    Log::warning('[AutoTicketCreationService] Ticket creation suppressed due to rate cap', [
+                        'alert_candidate_id' => $alertCandidate->id,
+                        'rule_id' => $alertCandidate->rule_id,
+                        'severity' => $alertCandidate->severity,
+                        'max_per_hour' => config('alerts.tickets.max_auto_create_per_hour'),
+                        'suppression_reason' => $suppressionReason,
+                    ]);
+
+                    // Update alert context with suppression metadata
+                    $context = $alertCandidate->context ?? [];
+                    if (!is_array($context)) {
+                        $context = [];
+                    }
+                    $context['_suppression'] = [
+                        'reason' => $suppressionReason,
+                        'suppressed_at' => now()->toIso8601String(),
+                        'type' => 'ticket_rate_cap',
+                    ];
+                    $alertCandidate->update(['context' => $context]);
+
+                    // Skip ticket creation but continue with other alerts
+                    continue;
+                }
+
                 // Create ticket
                 $ticket = $this->ticketService->createTicketFromAlert($alertCandidate);
 
@@ -149,5 +178,32 @@ class AutoTicketCreationService
         }
 
         return $ticketRule->shouldCreateTicket($alertCandidate);
+    }
+
+    /**
+     * Check if ticket auto-creation rate cap is exceeded.
+     * 
+     * 🔒 STABILIZATION A2: Non-blocking rate cap check.
+     * Checks total auto-created tickets across all tenants in current hour.
+     * 
+     * @return bool True if rate cap is exceeded
+     */
+    protected function isTicketRateCapExceeded(): bool
+    {
+        $maxPerHour = config('alerts.tickets.max_auto_create_per_hour', 50);
+
+        // Disabled if set to 0
+        if ($maxPerHour <= 0) {
+            return false;
+        }
+
+        // Count tickets auto-created in current hour
+        $hourStart = Carbon::now()->startOfHour();
+        $ticketCount = SupportTicket::where('source', 'system')
+            ->where('created_at', '>=', $hourStart)
+            ->count();
+
+        // Check if cap is exceeded
+        return $ticketCount >= $maxPerHour;
     }
 }

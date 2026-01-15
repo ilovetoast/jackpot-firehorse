@@ -54,7 +54,10 @@ class AlertCandidateService
         foreach ($detectionResults as $result) {
             try {
                 $alert = $this->createOrUpdateAlert($result, $detectedAt);
-                $processed->push($alert);
+                // Alert may be null if rate cap exceeded (suppression)
+                if ($alert) {
+                    $processed->push($alert);
+                }
             } catch (\Throwable $e) {
                 Log::error('[AlertCandidateService] Error processing detection result', [
                     'rule_id' => $result['rule_id'] ?? null,
@@ -98,7 +101,7 @@ class AlertCandidateService
      * @param Carbon $detectedAt
      * @return AlertCandidate
      */
-    public function createOrUpdateAlert(array $result, Carbon $detectedAt): AlertCandidate
+    public function createOrUpdateAlert(array $result, Carbon $detectedAt): ?AlertCandidate
     {
         // Normalize subject_id (convert null to empty string for unique constraint)
         $subjectId = $result['subject_id'] ?? null;
@@ -141,6 +144,28 @@ class AlertCandidateService
             return $existing->fresh();
         }
 
+        // 🔒 STABILIZATION A2: Check alert rate cap (non-blocking)
+        if ($tenantId && $this->isAlertRateCapExceeded($tenantId)) {
+            $suppressionReason = 'Alert rate cap exceeded for tenant';
+            Log::warning('[AlertCandidateService] Alert creation suppressed due to rate cap', [
+                'tenant_id' => $tenantId,
+                'rule_id' => $result['rule_id'],
+                'scope' => $result['scope'],
+                'max_per_hour' => config('alerts.max_per_tenant_per_hour'),
+                'suppression_reason' => $suppressionReason,
+            ]);
+
+            // Return null to indicate suppression (caller should handle gracefully)
+            // Store suppression info in a way that can be tracked if needed
+            return null;
+        }
+
+        // Build context with suppression metadata if needed
+        $context = $result['metadata_summary'] ?? [];
+        if (!is_array($context)) {
+            $context = [];
+        }
+
         // Create new alert candidate
         $alert = AlertCandidate::create([
             'rule_id' => $result['rule_id'],
@@ -155,7 +180,7 @@ class AlertCandidateService
             'first_detected_at' => $detectedAt,
             'last_detected_at' => $detectedAt,
             'detection_count' => 1,
-            'context' => $result['metadata_summary'] ?? null,
+            'context' => !empty($context) ? $context : null,
         ]);
 
         Log::debug('[AlertCandidateService] Created new alert candidate', [
@@ -167,6 +192,37 @@ class AlertCandidateService
         ]);
 
         return $alert;
+    }
+
+    /**
+     * Check if alert rate cap is exceeded for a tenant.
+     * 
+     * 🔒 STABILIZATION A2: Non-blocking rate cap check.
+     * 
+     * @param int $tenantId
+     * @return bool True if rate cap is exceeded
+     */
+    protected function isAlertRateCapExceeded(int $tenantId): bool
+    {
+        $maxPerHour = config('alerts.max_per_tenant_per_hour', 100);
+
+        // Disabled if set to 0
+        if ($maxPerHour <= 0) {
+            return false;
+        }
+
+        // Count alerts created in current hour for this tenant
+        $hourStart = Carbon::now()->startOfHour();
+        $alertCount = AlertCandidate::where('tenant_id', $tenantId)
+            ->where('created_at', '>=', $hourStart)
+            ->count();
+
+        // Check if cap is exceeded
+        if ($alertCount >= $maxPerHour) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
