@@ -126,8 +126,8 @@ class CompanyCostService
 
             // Sum up costs from AI agent runs for this tenant in the specified month
             $totalCost = AIAgentRun::where('tenant_id', $tenant->id)
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->sum('cost') ?? 0;
+                ->whereBetween('started_at', [$startDate, $endDate])
+                ->sum('estimated_cost') ?? 0;
 
             // Convert from cents to dollars if stored in cents, or keep as dollars
             // Assuming cost is stored in dollars (adjust if needed)
@@ -136,7 +136,7 @@ class CompanyCostService
             return [
                 'total_cost' => round($totalCostDollars, 2),
                 'runs_count' => AIAgentRun::where('tenant_id', $tenant->id)
-                    ->whereBetween('created_at', [$startDate, $endDate])
+                    ->whereBetween('started_at', [$startDate, $endDate])
                     ->count(),
                 'period' => [
                     'month' => $month ?? now()->month,

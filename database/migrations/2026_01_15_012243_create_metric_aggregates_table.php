@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasTable('metric_aggregates')) {
+            return;
+        }
+
         Schema::create('metric_aggregates', function (Blueprint $table) {
             $table->id();
             $table->foreignId('tenant_id')->constrained()->onDelete('cascade');
@@ -32,10 +36,10 @@ return new class extends Migration
             // Unique constraint: one aggregate per asset/metric_type/period/period_start
             $table->unique(['asset_id', 'metric_type', 'period', 'period_start'], 'metric_aggregate_unique');
             
-            // Indexes for common queries
-            $table->index(['tenant_id', 'metric_type', 'period_start']);
-            $table->index(['tenant_id', 'brand_id', 'metric_type', 'period_start']);
-            $table->index(['asset_id', 'metric_type', 'period', 'period_start']);
+            // Indexes for common queries (using custom names to avoid MySQL 64-char limit)
+            $table->index(['tenant_id', 'metric_type', 'period_start'], 'ma_tenant_metric_period_idx');
+            $table->index(['tenant_id', 'brand_id', 'metric_type', 'period_start'], 'ma_tenant_brand_metric_period_idx');
+            $table->index(['asset_id', 'metric_type', 'period', 'period_start'], 'ma_asset_metric_period_idx');
         });
     }
 

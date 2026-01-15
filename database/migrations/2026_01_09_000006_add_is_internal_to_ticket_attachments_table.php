@@ -11,8 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (!Schema::hasTable('ticket_attachments')) {
+            return;
+        }
+
         Schema::table('ticket_attachments', function (Blueprint $table) {
-            $table->boolean('is_internal')->default(false)->after('mime_type')->index();
+            if (!Schema::hasColumn('ticket_attachments', 'is_internal')) {
+                $table->boolean('is_internal')->default(false)->after('mime_type')->index();
+            }
         });
     }
 

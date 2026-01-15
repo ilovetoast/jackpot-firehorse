@@ -29,9 +29,11 @@ import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 
-export default function AdminIndex({ companies, users, stats, all_users }) {
+export default function AdminIndex({ companies, users, stats: initialStats, all_users, pagination }) {
     const { auth } = usePage().props
     const [activeTab, setActiveTab] = useState('companies')
+    const [stats, setStats] = useState(initialStats || null)
+    const [loadingStats, setLoadingStats] = useState(!initialStats)
     const [expandedCompany, setExpandedCompany] = useState(null)
     const [expandedDetails, setExpandedDetails] = useState(null)
     const [showBrandRoles, setShowBrandRoles] = useState(false)
@@ -123,12 +125,29 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
         { name: 'System Categories', icon: FolderIcon, description: 'Manage system category templates', href: '/app/admin/system-categories' },
     ]
 
+    // Load stats on mount if not provided
+    useEffect(() => {
+        if (!stats) {
+            setLoadingStats(true)
+            fetch('/app/admin/api/stats')
+                .then(res => res.json())
+                .then(data => {
+                    setStats(data)
+                    setLoadingStats(false)
+                })
+                .catch(err => {
+                    console.error('Failed to load stats:', err)
+                    setLoadingStats(false)
+                })
+        }
+    }, [stats])
+
     const summaryCards = [
-        { name: 'Total Companies', value: stats.total_companies, subtitle: `${stats.total_companies} with Stripe accounts`, icon: BuildingOfficeIcon },
-        { name: 'Total Users', value: stats.total_users, subtitle: 'Across all companies', icon: UsersIcon },
-        { name: 'Active Subscriptions', value: stats.active_subscriptions || 0, subtitle: 'Currently active', icon: DocumentIcon },
-        { name: 'Stripe Accounts', value: stats.stripe_accounts || 0, subtitle: 'Connected to Stripe', icon: ChartBarIcon },
-        { name: 'Support Tickets', value: stats.support_tickets || 0, subtitle: `${stats.waiting_on_support || 0} waiting on support`, icon: QuestionMarkCircleIcon },
+        { name: 'Total Companies', value: stats?.total_companies ?? 0, subtitle: `${stats?.total_companies ?? 0} with Stripe accounts`, icon: BuildingOfficeIcon },
+        { name: 'Total Users', value: stats?.total_users ?? 0, subtitle: 'Across all companies', icon: UsersIcon },
+        { name: 'Active Subscriptions', value: stats?.active_subscriptions || 0, subtitle: 'Currently active', icon: DocumentIcon },
+        { name: 'Stripe Accounts', value: stats?.stripe_accounts || 0, subtitle: 'Connected to Stripe', icon: ChartBarIcon },
+        { name: 'Support Tickets', value: stats?.support_tickets || 0, subtitle: `${stats?.waiting_on_support || 0} waiting on support`, icon: QuestionMarkCircleIcon },
     ]
 
     return (
@@ -170,21 +189,37 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                     {/* Summary Statistics */}
                     <div className="mb-8">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                            {summaryCards.map((card) => {
-                                const IconComponent = card.icon
-                                return (
-                                    <div key={card.name} className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+                            {loadingStats ? (
+                                // Loading skeleton placeholders
+                                Array.from({ length: 5 }).map((_, index) => (
+                                    <div key={`skeleton-${index}`} className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200 animate-pulse">
                                         <div className="flex items-center">
-                                            <IconComponent className="h-6 w-6 text-gray-400 mr-3 flex-shrink-0" aria-hidden="true" />
+                                            <div className="h-6 w-6 bg-gray-200 rounded mr-3 flex-shrink-0" />
                                             <div className="flex-1">
-                                                <p className="text-sm font-medium text-gray-500">{card.name}</p>
-                                                <p className="mt-1 text-2xl font-semibold text-gray-900">{card.value}</p>
-                                                <p className="mt-1 text-xs text-gray-500">{card.subtitle}</p>
+                                                <div className="h-4 bg-gray-200 rounded w-24 mb-2" />
+                                                <div className="h-8 bg-gray-200 rounded w-16 mb-2" />
+                                                <div className="h-3 bg-gray-200 rounded w-32" />
                                             </div>
                                         </div>
                                     </div>
-                                )
-                            })}
+                                ))
+                            ) : (
+                                summaryCards.map((card) => {
+                                    const IconComponent = card.icon
+                                    return (
+                                        <div key={card.name} className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+                                            <div className="flex items-center">
+                                                <IconComponent className="h-6 w-6 text-gray-400 mr-3 flex-shrink-0" aria-hidden="true" />
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-medium text-gray-500">{card.name}</p>
+                                                    <p className="mt-1 text-2xl font-semibold text-gray-900">{card.value}</p>
+                                                    <p className="mt-1 text-xs text-gray-500">{card.subtitle}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })
+                            )}
                         </div>
                     </div>
 
@@ -829,6 +864,53 @@ export default function AdminIndex({ companies, users, stats, all_users }) {
                                         })
                                     )}
                                 </div>
+                                
+                                {/* Pagination Controls */}
+                                {pagination && pagination.total > 0 && (
+                                    <div className="mt-6 flex items-center justify-between border-t border-gray-200 px-6 py-4">
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-sm text-gray-700">
+                                                Showing <span className="font-medium">{(pagination.current_page - 1) * pagination.per_page + 1}</span> to{' '}
+                                                <span className="font-medium">{Math.min(pagination.current_page * pagination.per_page, pagination.total)}</span> of{' '}
+                                                <span className="font-medium">{pagination.total}</span> companies
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-sm text-gray-700">Per page:</label>
+                                                <select
+                                                    value={pagination.per_page}
+                                                    onChange={(e) => {
+                                                        router.get('/app/admin', { per_page: e.target.value, page: 1 }, { preserveState: false })
+                                                    }}
+                                                    className="rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                >
+                                                    <option value="10">10</option>
+                                                    <option value="25">25</option>
+                                                    <option value="50">50</option>
+                                                    <option value="100">100</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => router.get('/app/admin', { page: pagination.current_page - 1, per_page: pagination.per_page }, { preserveState: false })}
+                                                disabled={pagination.current_page === 1}
+                                                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Previous
+                                            </button>
+                                            <span className="text-sm text-gray-700">
+                                                Page {pagination.current_page} of {pagination.last_page}
+                                            </span>
+                                            <button
+                                                onClick={() => router.get('/app/admin', { page: pagination.current_page + 1, per_page: pagination.per_page }, { preserveState: false })}
+                                                disabled={pagination.current_page === pagination.last_page}
+                                                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Next
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Spatie\Permission\Models\Role;
@@ -17,15 +18,65 @@ class CompanyBrandSeeder extends Seeder
      */
     public function run(): void
     {
-        // Create initial user account (ID 1) with placeholder info
-        $initialUser = User::firstOrCreate(
-            ['email' => 'msteele@velvethammerbranding.com'],
-            [
+        // CRITICAL: Ensure msteele@velvethammerbranding.com is ALWAYS user ID 1
+        DB::statement('SET FOREIGN_KEY_CHECKS=0');
+        
+        // Check if user with email already exists
+        $existingUser = DB::table('users')->where('email', 'msteele@velvethammerbranding.com')->first();
+        
+        if ($existingUser) {
+            // User exists - check if it's already ID 1
+            if ($existingUser->id !== 1) {
+                // User exists but not as ID 1 - need to swap IDs
+                $oldId = $existingUser->id;
+                
+                // Check if ID 1 is already taken by another user
+                $userAtId1 = DB::table('users')->where('id', 1)->first();
+                if ($userAtId1 && $userAtId1->id === 1 && $userAtId1->email !== 'msteele@velvethammerbranding.com') {
+                    // ID 1 is taken by wrong user - move them to oldId temporarily, then to a high number
+                    $tempId = 999999;
+                    $this->updateUserReferences(1, $tempId);
+                    DB::table('users')->where('id', 1)->update(['id' => $tempId]);
+                }
+                
+                // Now update msteele's ID from oldId to 1
+                $this->updateUserReferences($oldId, 1);
+                DB::table('users')->where('id', $oldId)->update(['id' => 1]);
+            }
+            
+            // Update user attributes to ensure they're correct
+            DB::table('users')->where('id', 1)->update([
+                'first_name' => 'Michael',
+                'last_name' => 'Steele',
+            ]);
+        } else {
+            // User doesn't exist - create with ID 1
+            // First check if ID 1 is available
+            $userAtId1 = DB::table('users')->where('id', 1)->first();
+            if ($userAtId1) {
+                // ID 1 is taken - move that user first
+                $maxId = DB::table('users')->max('id') ?? 0;
+                $newId = $maxId + 1;
+                $this->updateUserReferences(1, $newId);
+                DB::table('users')->where('id', 1)->update(['id' => $newId]);
+            }
+            
+            // Now insert the new user with ID 1
+            DB::table('users')->insert([
+                'id' => 1,
+                'email' => 'msteele@velvethammerbranding.com',
                 'first_name' => 'Michael',
                 'last_name' => 'Steele',
                 'password' => Hash::make('gotrice'),
-            ]
-        );
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+        
+        DB::statement('SET FOREIGN_KEY_CHECKS=1');
+        
+        // Get the user as Eloquent model
+        $initialUser = User::find(1);
 
         // Create initial company for user 1
         $initialCompany = Tenant::firstOrCreate(
@@ -38,8 +89,28 @@ class CompanyBrandSeeder extends Seeder
         // make Site Owner role
         $initialUser->assignRole('site_owner');
 
-        // Get the default brand for the initial company
+        // Ensure the initial company has a default brand
         $initialDefaultBrand = $initialCompany->defaultBrand;
+        if (! $initialDefaultBrand) {
+            // Check if tenant has any brands at all
+            $anyBrand = $initialCompany->brands()->first();
+            
+            if ($anyBrand) {
+                // Mark the first brand as default
+                $anyBrand->update(['is_default' => true]);
+                $initialDefaultBrand = $anyBrand->fresh();
+            } else {
+                // Create a default brand for the tenant
+                $initialDefaultBrand = $initialCompany->brands()->create([
+                    'name' => $initialCompany->name,
+                    'slug' => $initialCompany->slug,
+                    'is_default' => true,
+                    'show_in_selector' => true,
+                ]);
+            }
+        }
+        
+        // Update the brand with styling
         if ($initialDefaultBrand) {
             $initialDefaultBrand->update([
                 'name' => 'Example Company',
@@ -151,6 +222,53 @@ class CompanyBrandSeeder extends Seeder
                     ]
                 );
             }
+        }
+    }
+    
+    /**
+     * Helper method to update all foreign key references when changing user ID
+     */
+    private function updateUserReferences(int $oldId, int $newId): void
+    {
+        $tablesWithUserId = [
+            'tenant_user' => ['user_id'],
+            'brand_user' => ['user_id'],
+            'model_has_roles' => ['model_id'],
+            'assets' => ['user_id'],
+            'asset_events' => ['user_id'],
+            'asset_metrics' => ['user_id'],
+            'tickets' => ['created_by_user_id', 'assigned_to_user_id', 'converted_by_user_id'],
+            'ticket_messages' => ['user_id'],
+            'ticket_attachments' => ['user_id'],
+            'ai_ticket_suggestions' => ['accepted_by_user_id', 'rejected_by_user_id'],
+            'ai_agent_runs' => ['user_id'],
+            'ownership_transfers' => ['initiated_by_user_id', 'from_user_id', 'to_user_id'],
+            'category_access' => ['user_id'],
+            'ai_model_overrides' => ['created_by_user_id', 'updated_by_user_id'],
+            'ai_agent_overrides' => ['created_by_user_id', 'updated_by_user_id'],
+            'ai_automation_overrides' => ['created_by_user_id', 'updated_by_user_id'],
+            'ai_budget_overrides' => ['created_by_user_id', 'updated_by_user_id'],
+            'frontend_errors' => ['user_id'],
+        ];
+        
+        foreach ($tablesWithUserId as $table => $columns) {
+            foreach ($columns as $column) {
+                try {
+                    DB::table($table)->where($column, $oldId)->update([$column => $newId]);
+                } catch (\Exception $e) {
+                    // Table or column might not exist, continue
+                }
+            }
+        }
+        
+        // Handle activity_events separately (uses actor_id with actor_type)
+        try {
+            DB::table('activity_events')
+                ->where('actor_type', 'App\Models\User')
+                ->where('actor_id', $oldId)
+                ->update(['actor_id' => $newId]);
+        } catch (\Exception $e) {
+            // Table might not exist, continue
         }
     }
 }

@@ -77,6 +77,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
 
     // Site Admin routes (only user ID 1)
     Route::get('/admin', [\App\Http\Controllers\SiteAdminController::class, 'index'])->name('admin.index');
+    
+    // Admin API endpoints (AJAX)
+    Route::get('/admin/api/stats', [\App\Http\Controllers\SiteAdminController::class, 'stats'])->name('admin.api.stats');
+    Route::get('/admin/api/companies/{tenant}/details', [\App\Http\Controllers\SiteAdminController::class, 'companyDetails'])->name('admin.api.companies.details');
+    Route::get('/admin/api/companies/{tenant}/users', [\App\Http\Controllers\SiteAdminController::class, 'companyUsers'])->name('admin.api.companies.users');
+    Route::get('/admin/api/users', [\App\Http\Controllers\SiteAdminController::class, 'allUsers'])->name('admin.api.users');
+    Route::get('/admin/api/users/selector', [\App\Http\Controllers\SiteAdminController::class, 'usersForSelector'])->name('admin.api.users.selector');
+    
     Route::get('/admin/companies/{tenant}', [\App\Http\Controllers\Admin\CompanyViewController::class, 'show'])->name('admin.companies.view');
     Route::get('/admin/billing', [\App\Http\Controllers\Admin\BillingController::class, 'index'])->name('admin.billing');
     Route::get('/admin/permissions', [\App\Http\Controllers\SiteAdminController::class, 'permissions'])->name('admin.permissions');

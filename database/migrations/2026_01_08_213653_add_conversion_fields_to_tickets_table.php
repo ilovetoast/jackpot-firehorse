@@ -11,13 +11,25 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (!Schema::hasTable('tickets')) {
+            return;
+        }
+
         Schema::table('tickets', function (Blueprint $table) {
-            $table->foreignId('converted_from_ticket_id')->nullable()->after('resolved_at')->constrained('tickets')->onDelete('set null');
-            $table->timestamp('converted_at')->nullable()->after('converted_from_ticket_id');
-            $table->foreignId('converted_by_user_id')->nullable()->after('converted_at')->constrained('users')->onDelete('set null');
+            if (!Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
+                $table->foreignId('converted_from_ticket_id')->nullable()->after('resolved_at')->constrained('tickets')->onDelete('set null');
+            }
+            if (!Schema::hasColumn('tickets', 'converted_at')) {
+                $table->timestamp('converted_at')->nullable()->after('converted_from_ticket_id');
+            }
+            if (!Schema::hasColumn('tickets', 'converted_by_user_id')) {
+                $table->foreignId('converted_by_user_id')->nullable()->after('converted_at')->constrained('users')->onDelete('set null');
+            }
             
             // Index for bi-directional lookups
-            $table->index('converted_from_ticket_id');
+            if (!Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
+                $table->index('converted_from_ticket_id');
+            }
         });
     }
 

@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
             SystemCategoryTemplateSeeder::class, // Seed system category templates first
             NotificationTemplateSeeder::class, // Seed notification templates
             CompanyBrandSeeder::class, // This creates the site owner and companies/brands
+            EnsureDefaultBrandsSeeder::class, // Ensure all tenants have default brands
             CategorySeeder::class,
         ]);
     }

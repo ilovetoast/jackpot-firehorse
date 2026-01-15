@@ -31,219 +31,315 @@ class SiteAdminController extends Controller
     /**
      * Display the site admin dashboard.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
         // Only user ID 1 (Site Owner) can access
         if (Auth::id() !== 1) {
             abort(403, 'Only site owners can access this page.');
         }
-        $companies = Tenant::with(['brands' => function ($query) {
-            $query->orderBy('is_default', 'desc')->orderBy('name');
-        }, 'users'])->get();
         
-        $stats = [
-            'total_companies' => Tenant::count(),
-            'total_brands' => Brand::count(),
-            'total_users' => User::count(),
-            'active_subscriptions' => Subscription::where('stripe_status', 'active')->count(),
-            'stripe_accounts' => Tenant::whereNotNull('stripe_id')->count(),
-            'support_tickets' => Ticket::count(),
-            'waiting_on_support' => Ticket::whereIn('status', [
-                TicketStatus::OPEN->value,
-                TicketStatus::WAITING_ON_SUPPORT->value,
-            ])->count(),
-        ];
-
-        // Get all users with their companies and roles
-        $allUsers = User::with(['tenants', 'brands.tenant'])->get()->map(function ($user) {
-            // Get site roles from Spatie (global)
-            $userRoles = $user->getRoleNames()->toArray();
-            $siteRoles = array_unique(array_filter($userRoles, fn($role) => str_contains(strtolower($role), 'site')));
-            
-            return [
-                'id' => $user->id,
-                'first_name' => $user->first_name,
-                'last_name' => $user->last_name,
-                'email' => $user->email,
-                'avatar_url' => $user->avatar_url,
-                'companies_count' => $user->tenants->count(),
-                'brands_count' => $user->brands->count(),
-                'is_suspended' => $user->isSuspended(),
-                'suspended_at' => $user->suspended_at?->toISOString(),
-                'site_roles' => array_values($siteRoles),
-                'companies' => $user->tenants->map(function ($tenant) {
-                    // Get user's role in this specific company from pivot table
-                    $role = $tenant->pivot->role ?? null;
-                    
-                    return [
-                        'id' => $tenant->id,
-                        'name' => $tenant->name,
-                        'slug' => $tenant->slug,
-                        'role' => $role ? ucfirst($role) : null,
-                    ];
-                }),
-                'brands' => $user->brands->map(function ($brand) use ($user) {
-                    $brandRole = $brand->pivot->role ?? null;
-                    // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-                    if ($brandRole === 'owner') {
-                        $brandRole = 'admin';
-                        // Update the database to reflect this change
-                        $user->setRoleForBrand($brand, 'admin');
-                    }
-                    return [
-                        'id' => $brand->id,
-                        'name' => $brand->name,
-                        'slug' => $brand->slug,
-                        'tenant_id' => $brand->tenant_id,
-                        'tenant_name' => $brand->tenant->name ?? null,
-                        'role' => $brandRole,
-                    ];
-                }),
-            ];
-        });
-
-        // Get all users for the selector (all users in the system)
-        $allUsersForSelector = User::all()->map(fn ($user) => [
-            'id' => $user->id,
-            'first_name' => $user->first_name,
-            'last_name' => $user->last_name,
-            'email' => $user->email,
-        ]);
+        // MINIMAL INITIAL LOAD - Only load basic company info
+        // Heavy data (users, costs, etc.) will be loaded via AJAX
+        $perPage = (int) $request->get('per_page', 10);
+        $companies = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override'])
+            ->orderBy('created_at', 'desc')
+            ->paginate($perPage)
+            ->appends($request->except('page'));
 
         $planService = app(\App\Services\PlanService::class);
-        $costService = app(\App\Services\CompanyCostService::class);
         
+        // Load only minimal company data - details loaded via API on expand
         return Inertia::render('Admin/Index', [
-            'companies' => $companies->map(function ($company) use ($planService, $costService) {
-                // Database role is the SINGLE source of truth - use owner() method which ensures consistency
-                // This method will automatically fix any discrepancies by setting the role in the database
-                $owner = $company->owner();
-                
-                // Get plan info
+            'companies' => $companies->map(function ($company) use ($planService) {
+                // Quick plan lookup without heavy queries
                 $planName = $planService->getCurrentPlan($company);
-                $planConfig = config("plans.{$planName}", config('plans.free'));
-                $planDisplayName = ucfirst($planName);
-                
-                // Get plan limits and check for exceeded limits
-                $limits = $planService->getPlanLimits($company);
-                $currentBrandCount = $company->brands()->count();
-                $currentUserCount = $company->users()->count();
-                $maxBrands = $limits['max_brands'] ?? PHP_INT_MAX;
-                $maxUsers = $limits['max_users'] ?? PHP_INT_MAX;
-                $brandLimitExceeded = $currentBrandCount > $maxBrands;
-                $userLimitExceeded = $currentUserCount > $maxUsers;
-                
-                // Check Stripe connection and subscription status
-                // Use direct query instead of subscribed() method which is unreliable with Tenant model
-                $stripeConnected = !empty($company->stripe_id);
-                // Get the most recent subscription (regardless of status) to show actual Stripe status
-                $latestSubscription = $company->subscriptions()
-                    ->where('name', 'default')
-                    ->orderBy('created_at', 'desc')
-                    ->first();
-                
-                // Determine status: show actual Stripe status if subscription exists, otherwise show connection status
-                if ($latestSubscription) {
-                    $stripeStatus = $latestSubscription->stripe_status; // Show actual status: active, incomplete, past_due, etc.
-                } else {
-                    $stripeStatus = $stripeConnected ? 'inactive' : 'not_connected';
-                }
-                
-                // Check if company has access to brand_manager role
-                $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($company);
-                
-                // Get all brands for this company (use fresh query to ensure all brands are included)
-                $allBrands = $company->brands()->orderBy('is_default', 'desc')->orderBy('name')->get();
                 
                 return [
                     'id' => $company->id,
                     'name' => $company->name,
                     'slug' => $company->slug,
-                    'brands_count' => $allBrands->count(),
-                    'users_count' => $company->users->count(),
-                    'plan' => $planDisplayName,
-                    'plan_name' => $planName,
-                    'stripe_connected' => $stripeConnected,
-                    'stripe_status' => $stripeStatus,
-                    'has_access_to_brand_manager' => $hasAccessToBrandManager,
-                    'owner' => $owner ? [
-                        'id' => $owner->id,
-                        'name' => trim(($owner->first_name ?? '') . ' ' . ($owner->last_name ?? '')),
-                        'email' => $owner->email,
-                    ] : null,
                     'created_at' => $company->created_at?->format('M d, Y'),
-                    'plan_limit_info' => [
-                        'brand_limit_exceeded' => $brandLimitExceeded,
-                        'current_brand_count' => $currentBrandCount,
-                        'max_brands' => $maxBrands,
-                        'user_limit_exceeded' => $userLimitExceeded,
-                        'current_user_count' => $currentUserCount,
-                        'max_users' => $maxUsers,
-                    ],
-                    'plan_management' => [
-                        'source' => $planService->getPlanManagementSource($company),
-                        'is_externally_managed' => $planService->isExternallyManaged($company),
-                        'manual_plan_override' => $company->manual_plan_override,
-                        'plan_prefix' => $this->getPlanPrefix($company, $planName, $latestSubscription, $planService),
-                    ],
-                    'can_manage_plan' => !app()->environment('production') && !$stripeConnected, // Only allow in non-production environments and when NOT connected to Stripe
-                    'brands' => $allBrands->map(fn ($brand) => [
-                        'id' => $brand->id,
-                        'name' => $brand->name,
-                        'slug' => $brand->slug,
-                        'is_default' => $brand->is_default,
-                    ]),
-                    'users' => $company->users()->orderBy('tenant_user.created_at')->get()->map(function ($user, $index) use ($company, $allBrands, $planService, $owner) {
-                        // Database role is the SINGLE source of truth
-                        $tenantRole = $user->getRoleForTenant($company);
-                        // Use tenant's isOwner() method which ONLY checks database role (no fallback)
-                        $isOwner = $company->isOwner($user);
-                        
-                        // Check if user is disabled due to plan limits (but owner is NEVER disabled)
-                        // Double-check: if user is owner, force isDisabledByPlanLimit to false
-                        $isDisabledByPlanLimit = $isOwner ? false : $user->isDisabledByPlanLimit($company);
-                        
-                        // Get brand assignments for this user in this company - map all brands with their roles
-                        $brandAssignments = $allBrands->map(function ($brand) use ($user) {
-                            $brandRole = $user->getRoleForBrand($brand); // null if not assigned
-                            // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-                            if ($brandRole === 'owner') {
-                                $brandRole = 'admin';
-                                // Update the database to reflect this change
-                                $user->setRoleForBrand($brand, 'admin');
-                            }
-                            return [
-                                'id' => $brand->id,
-                                'name' => $brand->name,
-                                'is_default' => $brand->is_default,
-                                'role' => $brandRole,
-                            ];
-                        });
-                    
-                        return [
-                            'id' => $user->id,
-                            'first_name' => $user->first_name,
-                            'last_name' => $user->last_name,
-                            'email' => $user->email,
-                            'avatar_url' => $user->avatar_url,
-                            'tenant_role' => strtolower($tenantRole ?? 'member'),
-                            'is_owner' => $isOwner,
-                            'is_disabled_by_plan_limit' => $isDisabledByPlanLimit,
-                            'join_order' => $index + 1, // 1-based index for display
-                            'brand_assignments' => $brandAssignments,
-                        ];
-                    })->values(),
-                    // Calculate costs and income for this company
-                    'costs' => $costService->calculateMonthlyCosts($company),
-                    'income' => $costService->calculateIncome($company),
-                    'profitability' => $costService->calculateProfitabilityRating($company),
+                    'plan_name' => $planName,
+                    'stripe_connected' => !empty($company->stripe_id),
+                    // All other data loaded via API on demand
+                    'details_loaded' => false,
                 ];
             }),
-            'users' => $allUsers,
-            'all_users' => $allUsersForSelector,
-            'stats' => $stats,
+            'pagination' => [
+                'current_page' => $companies->currentPage(),
+                'last_page' => $companies->lastPage(),
+                'per_page' => $companies->perPage(),
+                'total' => $companies->total(),
+            ],
+            'stats' => null, // Loaded via API
+            'users' => [], // Loaded via API
+            'all_users' => [], // Loaded via API
         ]);
     }
+
+    /**
+     * Get admin stats (AJAX endpoint).
+     */
+    public function stats(): \Illuminate\Http\JsonResponse
+    {
+        if (Auth::id() !== 1) {
+            abort(403);
+        }
+
+        // Cache stats for 5 minutes
+        $stats = cache()->remember('admin_stats', 300, function () {
+            return [
+                'total_companies' => Tenant::count(),
+                'total_brands' => Brand::count(),
+                'total_users' => User::count(),
+                'active_subscriptions' => Subscription::where('stripe_status', 'active')->count(),
+                'stripe_accounts' => Tenant::whereNotNull('stripe_id')->count(),
+                'support_tickets' => Ticket::count(),
+                'waiting_on_support' => Ticket::whereIn('status', [
+                    TicketStatus::OPEN->value,
+                    TicketStatus::WAITING_ON_SUPPORT->value,
+                ])->count(),
+            ];
+        });
+
+        return response()->json($stats);
+    }
+
+    /**
+     * Get company details (AJAX endpoint - loaded on expand).
+     */
+    public function companyDetails(Tenant $tenant): \Illuminate\Http\JsonResponse
+    {
+        if (Auth::id() !== 1) {
+            abort(403);
+        }
+
+        $planService = app(\App\Services\PlanService::class);
+        
+        // Load owner efficiently
+        $owner = $tenant->users()
+            ->wherePivot('role', 'owner')
+            ->first(['id', 'first_name', 'last_name', 'email']);
+        
+        $planName = $planService->getCurrentPlan($tenant);
+        $limits = $planService->getPlanLimits($tenant);
+        
+        // Get counts efficiently
+        $brandCount = $tenant->brands()->count();
+        $userCount = $tenant->users()->count();
+        
+        $stripeConnected = !empty($tenant->stripe_id);
+        $latestSubscription = $tenant->subscriptions()
+            ->where('name', 'default')
+            ->orderBy('created_at', 'desc')
+            ->first();
+        
+        $stripeStatus = $latestSubscription 
+            ? $latestSubscription->stripe_status 
+            : ($stripeConnected ? 'inactive' : 'not_connected');
+        
+        // Load brands
+        $brands = $tenant->brands()
+            ->orderBy('is_default', 'desc')
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug', 'is_default'])
+            ->map(fn ($brand) => [
+                'id' => $brand->id,
+                'name' => $brand->name,
+                'slug' => $brand->slug,
+                'is_default' => $brand->is_default,
+            ]);
+        
+        return response()->json([
+            'id' => $tenant->id,
+            'name' => $tenant->name,
+            'slug' => $tenant->slug,
+            'brands_count' => $brandCount,
+            'users_count' => $userCount,
+            'plan' => ucfirst($planName),
+            'plan_name' => $planName,
+            'stripe_connected' => $stripeConnected,
+            'stripe_status' => $stripeStatus,
+            'has_access_to_brand_manager' => $planService->hasAccessToBrandManagerRole($tenant),
+            'owner' => $owner ? [
+                'id' => $owner->id,
+                'name' => trim(($owner->first_name ?? '') . ' ' . ($owner->last_name ?? '')),
+                'email' => $owner->email,
+            ] : null,
+            'created_at' => $tenant->created_at?->format('M d, Y'),
+            'plan_limit_info' => [
+                'brand_limit_exceeded' => $brandCount > ($limits['max_brands'] ?? PHP_INT_MAX),
+                'current_brand_count' => $brandCount,
+                'max_brands' => $limits['max_brands'] ?? PHP_INT_MAX,
+                'user_limit_exceeded' => $userCount > ($limits['max_users'] ?? PHP_INT_MAX),
+                'current_user_count' => $userCount,
+                'max_users' => $limits['max_users'] ?? PHP_INT_MAX,
+            ],
+            'plan_management' => [
+                'source' => $planService->getPlanManagementSource($tenant),
+                'is_externally_managed' => $planService->isExternallyManaged($tenant),
+                'manual_plan_override' => $tenant->manual_plan_override,
+            ],
+            'can_manage_plan' => !app()->environment('production') && !$stripeConnected,
+            'brands' => $brands,
+            // Users loaded separately via companyUsers endpoint
+            'costs' => null,
+            'income' => null,
+            'profitability' => null,
+        ]);
+    }
+
+    /**
+     * Get company users (AJAX endpoint - loaded on expand).
+     */
+    public function companyUsers(Tenant $tenant): \Illuminate\Http\JsonResponse
+    {
+        if (Auth::id() !== 1) {
+            abort(403);
+        }
+
+        $planService = app(\App\Services\PlanService::class);
+        
+        // Load users with minimal data
+        $users = $tenant->users()
+            ->orderBy('tenant_user.created_at')
+            ->get(['users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.avatar_url'])
+            ->map(function ($user, $index) use ($tenant, $planService) {
+                $tenantRole = $user->getRoleForTenant($tenant);
+                $isOwner = $tenant->isOwner($user);
+                $isDisabledByPlanLimit = $isOwner ? false : $user->isDisabledByPlanLimit($tenant);
+                
+                // Load brand assignments efficiently
+                $brandIds = $tenant->brands()->pluck('id');
+                $userBrandRoles = DB::table('brand_user')
+                    ->where('user_id', $user->id)
+                    ->whereIn('brand_id', $brandIds)
+                    ->pluck('role', 'brand_id')
+                    ->toArray();
+                
+                $brands = $tenant->brands()
+                    ->orderBy('is_default', 'desc')
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'is_default'])
+                    ->map(function ($brand) use ($userBrandRoles) {
+                        $role = $userBrandRoles[$brand->id] ?? null;
+                        if ($role === 'owner') {
+                            $role = 'admin';
+                        }
+                        return [
+                            'id' => $brand->id,
+                            'name' => $brand->name,
+                            'is_default' => $brand->is_default,
+                            'role' => $role,
+                        ];
+                    });
+                
+                return [
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'avatar_url' => $user->avatar_url,
+                    'tenant_role' => strtolower($tenantRole ?? 'member'),
+                    'is_owner' => $isOwner,
+                    'is_disabled_by_plan_limit' => $isDisabledByPlanLimit,
+                    'join_order' => $index + 1,
+                    'brand_assignments' => $brands,
+                ];
+            });
+        
+        return response()->json($users->values());
+    }
+
+    /**
+     * Get all users for admin (AJAX endpoint).
+     */
+    public function allUsers(Request $request): \Illuminate\Http\JsonResponse
+    {
+        if (Auth::id() !== 1) {
+            abort(403);
+        }
+
+        $perPage = (int) $request->get('per_page', 50);
+        $users = User::with(['tenants', 'brands.tenant'])
+            ->paginate($perPage)
+            ->through(function ($user) {
+                $userRoles = $user->getRoleNames()->toArray();
+                $siteRoles = array_unique(array_filter($userRoles, fn($role) => str_contains(strtolower($role), 'site')));
+                
+                return [
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'avatar_url' => $user->avatar_url,
+                    'companies_count' => $user->tenants->count(),
+                    'brands_count' => $user->brands->count(),
+                    'is_suspended' => $user->isSuspended(),
+                    'suspended_at' => $user->suspended_at?->toISOString(),
+                    'site_roles' => array_values($siteRoles),
+                    'companies' => $user->tenants->map(function ($tenant) {
+                        $role = $tenant->pivot->role ?? null;
+                        return [
+                            'id' => $tenant->id,
+                            'name' => $tenant->name,
+                            'slug' => $tenant->slug,
+                            'role' => $role ? ucfirst($role) : null,
+                        ];
+                    }),
+                    'brands' => $user->brands->map(function ($brand) {
+                        $brandRole = $brand->pivot->role ?? null;
+                        if ($brandRole === 'owner') {
+                            $brandRole = 'admin';
+                        }
+                        return [
+                            'id' => $brand->id,
+                            'name' => $brand->name,
+                            'slug' => $brand->slug,
+                            'tenant_id' => $brand->tenant_id,
+                            'tenant_name' => $brand->tenant->name ?? null,
+                            'role' => $brandRole,
+                        ];
+                    }),
+                ];
+            });
+        
+        return response()->json($users);
+    }
+
+    /**
+     * Get users for selector (AJAX endpoint).
+     */
+    public function usersForSelector(Request $request): \Illuminate\Http\JsonResponse
+    {
+        if (Auth::id() !== 1) {
+            abort(403);
+        }
+
+        $search = $request->get('search', '');
+        $query = User::select(['id', 'first_name', 'last_name', 'email']);
+        
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+        
+        $users = $query->limit(100)->get()->map(fn ($user) => [
+            'id' => $user->id,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+            'email' => $user->email,
+        ]);
+        
+        return response()->json($users);
+    }
+    
+    /**
+     * Add a user to a company.
+     */
 
     /**
      * Add a user to a company.

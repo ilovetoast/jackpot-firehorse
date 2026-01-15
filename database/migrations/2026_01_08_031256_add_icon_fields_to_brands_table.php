@@ -12,8 +12,20 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('brands', function (Blueprint $table) {
-            $table->string('icon')->nullable()->after('icon_path');
-            $table->string('icon_bg_color')->nullable()->after('icon');
+            if (!Schema::hasColumn('brands', 'icon')) {
+                if (Schema::hasColumn('brands', 'icon_path')) {
+                    $table->string('icon')->nullable()->after('icon_path');
+                } else {
+                    $table->string('icon')->nullable();
+                }
+            }
+            if (!Schema::hasColumn('brands', 'icon_bg_color')) {
+                if (Schema::hasColumn('brands', 'icon')) {
+                    $table->string('icon_bg_color')->nullable()->after('icon');
+                } else {
+                    $table->string('icon_bg_color')->nullable();
+                }
+            }
         });
     }
 

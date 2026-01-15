@@ -127,7 +127,7 @@ class NotificationTemplateSeeder extends Seeder
             <p style="margin-top: 24px; padding: 16px; background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px;">
                 <strong>Important:</strong> This action is permanent and cannot be undone. Your account and all 
                 associated data have been completely removed from the system. You will no longer be able to log in 
-                to {{tenant_name}}'s workspace.
+                to {{tenant_name}}\'s workspace.
             </p>
             
             <p>

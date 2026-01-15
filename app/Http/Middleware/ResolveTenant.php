@@ -34,7 +34,17 @@ class ResolveTenant
         $tenantId = session('tenant_id');
 
         if (! $tenantId) {
-            abort(404, 'Tenant not found in session');
+            // Redirect to companies page instead of showing 404
+            // This happens when user hasn't selected a company/tenant yet
+            $user = $request->user();
+            
+            // If user has no tenants at all, redirect to error page
+            if ($user && $user->tenants()->count() === 0) {
+                return redirect()->route('errors.no-companies');
+            }
+            
+            // User has tenants but none selected - redirect to selection page
+            return redirect()->route('companies.index');
         }
 
         $tenant = Tenant::find($tenantId);

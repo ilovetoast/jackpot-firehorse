@@ -11,16 +11,32 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (!Schema::hasTable('tickets')) {
+            return;
+        }
+
         Schema::table('tickets', function (Blueprint $table) {
             // Engineering-specific fields (only for internal engineering tickets)
-            $table->string('severity')->nullable()->after('assigned_team'); // P0, P1, P2, P3
-            $table->string('environment')->nullable()->after('severity'); // production, staging, development
-            $table->string('component')->nullable()->after('environment'); // api, web, worker, billing, integrations
+            if (!Schema::hasColumn('tickets', 'severity')) {
+                $table->string('severity')->nullable()->after('assigned_team'); // P0, P1, P2, P3
+            }
+            if (!Schema::hasColumn('tickets', 'environment')) {
+                $table->string('environment')->nullable()->after('severity'); // production, staging, development
+            }
+            if (!Schema::hasColumn('tickets', 'component')) {
+                $table->string('component')->nullable()->after('environment'); // api, web, worker, billing, integrations
+            }
             
-            // Indexes for filtering
-            $table->index('severity');
-            $table->index('environment');
-            $table->index('component');
+            // Indexes for filtering (only add if columns exist)
+            if (Schema::hasColumn('tickets', 'severity')) {
+                $table->index('severity');
+            }
+            if (Schema::hasColumn('tickets', 'environment')) {
+                $table->index('environment');
+            }
+            if (Schema::hasColumn('tickets', 'component')) {
+                $table->index('component');
+            }
         });
     }
 
