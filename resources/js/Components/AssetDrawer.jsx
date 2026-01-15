@@ -1036,6 +1036,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </div>
                 </div>
 
+                {/* Phase 3.1 — Minimal drawer download action.
+                    This is a temporary test-only UI.
+                    Do not expand into full download UX here. */}
+                {displayAsset?.id && (
+                    <div className="border-t border-gray-200 pt-6">
+                        <a
+                            href={`/app/assets/${displayAsset.id}/download`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        >
+                            <ArrowDownTrayIcon className="h-5 w-5 mr-2" />
+                            Download
+                        </a>
+                    </div>
+                )}
+
                 {/* File Information */}
                 <div className="space-y-3 border-t border-gray-200 pt-6">
                     <h3 className="text-sm font-medium text-gray-900">File Information</h3>

@@ -34,6 +34,9 @@ class AITaskType
     // Asset management tasks (future)
     public const ASSET_TAG_SUGGESTION = 'asset_tag_suggestion';
     
+    // Alert and monitoring tasks
+    public const ALERT_SUMMARY = 'alert_summary';
+    
     /**
      * Get all task types as an array.
      *
@@ -51,6 +54,7 @@ class AITaskType
             self::PERFORMANCE_ANALYSIS,
             self::SYSTEM_RELIABILITY_ANALYSIS,
             self::ASSET_TAG_SUGGESTION,
+            self::ALERT_SUMMARY,
         ];
     }
     

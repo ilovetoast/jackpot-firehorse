@@ -944,7 +944,17 @@ class AssetController extends Controller
      *
      * GET /assets/{asset}/download
      *
+     * Phase 3.1 Step 4: Single file download endpoint (drawer).
+     * 
      * Generates a signed S3 URL for the asset and tracks the download metric.
+     * No Download Group created - direct file download.
+     * 
+     * Responsibilities:
+     * - Validate asset access
+     * - Ensure asset is not archived (Phase 2.8: future-proof check)
+     * - Generate signed S3 URL
+     * - Redirect to S3
+     * - Emit placeholder hooks for analytics later
      *
      * @param Asset $asset
      * @return \Illuminate\Http\RedirectResponse|JsonResponse
@@ -952,6 +962,14 @@ class AssetController extends Controller
     public function download(Asset $asset): \Illuminate\Http\RedirectResponse|JsonResponse
     {
         $this->authorize('view', $asset);
+
+        // Phase 2.8: Future-proof check for archived assets
+        // TODO: When Phase 2.8 is implemented, add check:
+        // if ($asset->isArchived()) {
+        //     return response()->json([
+        //         'message' => 'Archived assets cannot be downloaded',
+        //     ], 403);
+        // }
 
         try {
             // Generate signed S3 URL
@@ -962,11 +980,29 @@ class AssetController extends Controller
                 ], 404);
             }
 
-            $disk = Storage::disk('s3');
-            $signedUrl = $disk->temporaryUrl(
-                $asset->storage_root_path,
+            // Phase 3.1 Step 6 Fix: Force download behavior via ResponseContentDisposition
+            // Use S3Client directly to add Content-Disposition header to presigned URL
+            $s3Client = $this->createS3ClientForVerification();
+            $bucket = $asset->storageBucket;
+            
+            // Get filename for Content-Disposition
+            $filename = $asset->original_filename ?? basename($asset->storage_root_path);
+            // Ensure filename is properly encoded for Content-Disposition header
+            $filenameEncoded = rawurlencode($filename);
+            
+            // Generate presigned URL with ResponseContentDisposition to force download
+            $command = $s3Client->getCommand('GetObject', [
+                'Bucket' => $bucket->name,
+                'Key' => $asset->storage_root_path,
+                'ResponseContentDisposition' => "attachment; filename=\"{$filename}\"; filename*=UTF-8''{$filenameEncoded}",
+            ]);
+            
+            $presignedRequest = $s3Client->createPresignedRequest(
+                $command,
                 now()->addMinutes(15) // URL valid for 15 minutes
             );
+            
+            $signedUrl = (string) $presignedRequest->getUri();
 
             // Track download metric
             $metricsService = app(\App\Services\AssetMetricsService::class);
@@ -978,6 +1014,9 @@ class AssetController extends Controller
                 metadata: null,
                 user: $user
             );
+
+            // Phase 3.1 Step 5: Emit asset download requested event
+            \App\Services\DownloadEventEmitter::emitAssetDownloadRequested($asset);
 
             // Redirect to signed URL
             return redirect($signedUrl);

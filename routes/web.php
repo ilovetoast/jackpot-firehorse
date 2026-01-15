@@ -151,6 +151,10 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::post('/admin/ai/budgets/{budgetId}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateBudgetOverride'])->name('admin.ai.budgets.override');
         Route::post('/admin/ai/queue/retry/{uuid}', [\App\Http\Controllers\Admin\AIDashboardController::class, 'retryFailedJob'])->name('admin.ai.queue.retry');
         Route::get('/admin/ai/runs/{id}', [\App\Http\Controllers\Admin\AIDashboardController::class, 'showRun'])->name('admin.ai.runs.show');
+        
+        // Phase 5B Step 2: Admin Alert Actions
+        Route::post('/admin/alerts/{alert}/acknowledge', [\App\Http\Controllers\Admin\AdminAlertController::class, 'acknowledge'])->name('admin.alerts.acknowledge');
+        Route::post('/admin/alerts/{alert}/resolve', [\App\Http\Controllers\Admin\AdminAlertController::class, 'resolve'])->name('admin.alerts.resolve');
     
     // System Category management routes (site owner only)
     Route::get('/admin/system-categories', [\App\Http\Controllers\SystemCategoryController::class, 'index'])->name('admin.system-categories.index');
@@ -189,6 +193,10 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
             // Asset download endpoint with metric tracking
             Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
+            
+            // Download group endpoints (Phase 3.1 Step 4)
+            Route::get('/downloads/{download}/download', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.download');
+            
             // Metric endpoints
             Route::post('/assets/{asset}/metrics/track', [\App\Http\Controllers\AssetMetricController::class, 'track'])->name('assets.metrics.track');
             Route::get('/assets/{asset}/metrics', [\App\Http\Controllers\AssetMetricController::class, 'index'])->name('assets.metrics.index');

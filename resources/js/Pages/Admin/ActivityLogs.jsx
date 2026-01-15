@@ -1,9 +1,25 @@
 import { Link, router, usePage } from '@inertiajs/react'
 import { useState } from 'react'
+import { 
+    CloudArrowDownIcon, 
+    UserIcon, 
+    BuildingOfficeIcon,
+    DocumentIcon,
+    CreditCardIcon,
+    Cog6ToothIcon,
+    ExclamationTriangleIcon,
+    CheckCircleIcon,
+    XCircleIcon,
+    InformationCircleIcon,
+    ComputerDesktopIcon,
+    DevicePhoneMobileIcon,
+    GlobeAltIcon,
+} from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
 import BrandAvatar from '../../Components/BrandAvatar'
+import { parseUserAgent } from '../../utils/userAgentParser'
 
 export default function ActivityLogs({ events, pagination, filters, filter_options }) {
     const { auth } = usePage().props
@@ -58,10 +74,67 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
     const getEventTypeColor = (eventType) => {
         if (eventType.startsWith('asset.')) return 'bg-blue-100 text-blue-800'
         if (eventType.startsWith('user.')) return 'bg-green-100 text-green-800'
-        if (eventType.startsWith('tenant.')) return 'bg-purple-100 text-purple-800'
+        if (eventType.startsWith('tenant.') || eventType.startsWith('company.')) return 'bg-purple-100 text-purple-800'
         if (eventType.startsWith('system.')) return 'bg-red-100 text-red-800'
-        if (eventType.startsWith('subscription.')) return 'bg-yellow-100 text-yellow-800'
+        if (eventType.startsWith('subscription.') || eventType.startsWith('billing.')) return 'bg-yellow-100 text-yellow-800'
+        if (eventType.includes('download')) return 'bg-indigo-100 text-indigo-800'
         return 'bg-gray-100 text-gray-800'
+    }
+
+    const getEventTypeIcon = (eventType) => {
+        if (eventType.includes('download')) return CloudArrowDownIcon
+        if (eventType.startsWith('user.')) return UserIcon
+        if (eventType.startsWith('tenant.') || eventType.startsWith('company.')) return BuildingOfficeIcon
+        if (eventType.startsWith('asset.')) return DocumentIcon
+        if (eventType.startsWith('subscription.') || eventType.startsWith('billing.')) return CreditCardIcon
+        if (eventType.startsWith('system.')) return Cog6ToothIcon
+        if (eventType.includes('error') || eventType.includes('failed')) return XCircleIcon
+        if (eventType.includes('success') || eventType.includes('completed')) return CheckCircleIcon
+        if (eventType.includes('warning')) return ExclamationTriangleIcon
+        return InformationCircleIcon
+    }
+
+    const formatMetadata = (metadata) => {
+        if (!metadata || typeof metadata !== 'object') return null
+        
+        const formatted = []
+        
+        // Format common metadata fields nicely
+        Object.entries(metadata).forEach(([key, value]) => {
+            let displayValue = value
+            let label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+            
+            // Format file sizes
+            if (key.includes('size') || key.includes('bytes')) {
+                if (typeof value === 'number') {
+                    if (value >= 1024 * 1024 * 1024) {
+                        displayValue = `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                    } else if (value >= 1024 * 1024) {
+                        displayValue = `${(value / (1024 * 1024)).toFixed(2)} MB`
+                    } else if (value >= 1024) {
+                        displayValue = `${(value / 1024).toFixed(2)} KB`
+                    } else {
+                        displayValue = `${value} bytes`
+                    }
+                }
+            }
+            
+            // Format booleans
+            if (typeof value === 'boolean') {
+                displayValue = value ? 'Yes' : 'No'
+            }
+            
+            // Format arrays/objects
+            if (Array.isArray(value)) {
+                displayValue = value.length > 0 ? value.join(', ') : 'Empty'
+            } else if (typeof value === 'object' && value !== null) {
+                displayValue = JSON.stringify(value, null, 2)
+            }
+            
+            formatted.push({ key: label, value: displayValue, raw: value })
+        })
+        
+        return formatted
     }
 
     const toggleRowExpansion = (eventId) => {
@@ -342,9 +415,15 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-4 whitespace-nowrap">
-                                                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getEventTypeColor(event.event_type)}`}>
-                                                                {formatEventType(event.event_type)}
-                                                            </span>
+                                                            {(() => {
+                                                                const Icon = getEventTypeIcon(event.event_type)
+                                                                return (
+                                                                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${getEventTypeColor(event.event_type)}`}>
+                                                                        <Icon className="h-3.5 w-3.5" />
+                                                                        {formatEventType(event.event_type)}
+                                                                    </span>
+                                                                )
+                                                            })()}
                                                         </td>
                                                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
                                                             {event.brand ? (
@@ -368,16 +447,28 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
                                                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 max-w-xs">
                                                             {event.actor ? (
                                                                 <div className="flex items-center gap-2 min-w-0">
-                                                                    <Avatar
-                                                                        avatarUrl={event.actor.avatar_url}
-                                                                        firstName={event.actor.first_name}
-                                                                        lastName={event.actor.last_name}
-                                                                        email={event.actor.email}
-                                                                        size="sm"
-                                                                    />
+                                                                    {event.actor.type === 'user' && event.actor.avatar_url ? (
+                                                                        <Avatar
+                                                                            avatarUrl={event.actor.avatar_url}
+                                                                            firstName={event.actor.first_name}
+                                                                            lastName={event.actor.last_name}
+                                                                            email={event.actor.email}
+                                                                            size="sm"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-medium text-indigo-700">
+                                                                            {event.actor.type === 'user' ? (
+                                                                                event.actor.name?.charAt(0)?.toUpperCase() || 'U'
+                                                                            ) : (
+                                                                                event.actor.type?.charAt(0)?.toUpperCase() || 'S'
+                                                                            )}
+                                                                        </div>
+                                                                    )}
                                                                     <div className="min-w-0 flex-1">
                                                                         <div className="flex items-center gap-2">
-                                                                            <span className="font-medium truncate">{event.actor.name}</span>
+                                                                            <span className="font-medium text-gray-900 truncate">
+                                                                                {event.actor.name || 'Unknown'}
+                                                                            </span>
                                                                             {event.actor.is_system_action && (
                                                                                 <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800" title="System action performed by admin">
                                                                                     Admin
@@ -385,16 +476,23 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
                                                                             )}
                                                                         </div>
                                                                         {event.actor.email && (
-                                                                            <div className="text-xs text-gray-400 truncate" title={event.actor.email}>{event.actor.email}</div>
+                                                                            <div className="text-xs text-gray-500 truncate" title={event.actor.email}>
+                                                                                {event.actor.email}
+                                                                            </div>
+                                                                        )}
+                                                                        {event.actor.type && event.actor.type !== 'user' && (
+                                                                            <div className="text-xs text-gray-400 capitalize">
+                                                                                {event.actor.type}
+                                                                            </div>
                                                                         )}
                                                                     </div>
                                                                 </div>
                                                             ) : (
                                                                 <div className="flex items-center gap-2">
-                                                                    <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-600">
-                                                                        S
+                                                                    <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
+                                                                        <Cog6ToothIcon className="h-4 w-4 text-gray-600" />
                                                                     </div>
-                                                                    <span>System</span>
+                                                                    <span className="text-gray-900 font-medium">System</span>
                                                                 </div>
                                                             )}
                                                         </td>
@@ -428,23 +526,102 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
                                                     {isExpanded && hasMetadata && (
                                                         <tr key={`${event.id}-metadata`} className="bg-gray-50">
                                                             <td colSpan="5" className="px-4 py-4">
-                                                                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                                                                    <h4 className="text-sm font-semibold text-gray-900 mb-3">Event Metadata</h4>
-                                                                    <pre className="text-xs bg-gray-50 p-4 rounded overflow-auto max-h-96 border border-gray-200">
-                                                                        {JSON.stringify(event.metadata, null, 2)}
-                                                                    </pre>
-                                                                    <div className="mt-3 space-y-2 text-xs text-gray-500">
-                                                                        {event.ip_address && (
-                                                                            <div>
-                                                                                <span className="font-medium">IP Address:</span> {event.ip_address}
+                                                                <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
+                                                                    {/* Formatted Metadata */}
+                                                                    {(() => {
+                                                                        const formatted = formatMetadata(event.metadata)
+                                                                        if (formatted && formatted.length > 0) {
+                                                                            return (
+                                                                                <div>
+                                                                                    <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                                                                        <InformationCircleIcon className="h-4 w-4 text-gray-400" />
+                                                                                        Event Details
+                                                                                    </h4>
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                                        {formatted.map((item, idx) => (
+                                                                                            <div key={idx} className="bg-gray-50 rounded-md p-3 border border-gray-200">
+                                                                                                <div className="text-xs font-medium text-gray-600 mb-1">{item.key}</div>
+                                                                                                <div className="text-sm text-gray-900 break-words">
+                                                                                                    {typeof item.raw === 'object' && item.raw !== null && !Array.isArray(item.raw) ? (
+                                                                                                        <pre className="text-xs whitespace-pre-wrap">{item.value}</pre>
+                                                                                                    ) : (
+                                                                                                        item.value
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                </div>
+                                                                            )
+                                                                        }
+                                                                        return null
+                                                                    })()}
+                                                                    
+                                                                    {/* Request Context */}
+                                                                    {(event.ip_address || event.user_agent) && (
+                                                                        <div className="border-t border-gray-200 pt-4">
+                                                                            <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                                                                                <GlobeAltIcon className="h-4 w-4 text-gray-400" />
+                                                                                Request Context
+                                                                            </h4>
+                                                                            <div className="space-y-3">
+                                                                                {event.ip_address && (
+                                                                                    <div className="flex items-start gap-3">
+                                                                                        <div className="flex-shrink-0 mt-0.5">
+                                                                                            <div className="h-8 w-8 rounded-md bg-blue-100 flex items-center justify-center">
+                                                                                                <ComputerDesktopIcon className="h-4 w-4 text-blue-600" />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <div className="flex-1 min-w-0">
+                                                                                            <div className="text-xs font-medium text-gray-600 mb-1">IP Address</div>
+                                                                                            <div className="text-sm text-gray-900 font-mono">{event.ip_address}</div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
+                                                                                {event.user_agent && (() => {
+                                                                                    const uaInfo = parseUserAgent(event.user_agent)
+                                                                                    return (
+                                                                                        <div className="flex items-start gap-3">
+                                                                                            <div className="flex-shrink-0 mt-0.5">
+                                                                                                <div className="h-8 w-8 rounded-md bg-indigo-100 flex items-center justify-center">
+                                                                                                    {uaInfo.device === 'Mobile' ? (
+                                                                                                        <DevicePhoneMobileIcon className="h-4 w-4 text-indigo-600" />
+                                                                                                    ) : (
+                                                                                                        <ComputerDesktopIcon className="h-4 w-4 text-indigo-600" />
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="flex-1 min-w-0">
+                                                                                                <div className="text-xs font-medium text-gray-600 mb-2">Browser & Device</div>
+                                                                                                <div className="space-y-1.5">
+                                                                                                    <div className="flex items-center gap-2">
+                                                                                                        <span className="text-xs text-gray-500">Browser:</span>
+                                                                                                        <span className="text-sm text-gray-900 font-medium">{uaInfo.browser}</span>
+                                                                                                    </div>
+                                                                                                    <div className="flex items-center gap-2">
+                                                                                                        <span className="text-xs text-gray-500">OS:</span>
+                                                                                                        <span className="text-sm text-gray-900 font-medium">{uaInfo.os}</span>
+                                                                                                    </div>
+                                                                                                    <div className="flex items-center gap-2">
+                                                                                                        <span className="text-xs text-gray-500">Device:</span>
+                                                                                                        <span className="text-sm text-gray-900 font-medium">{uaInfo.device}</span>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <details className="mt-2">
+                                                                                                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                                                                                                        Show full user agent
+                                                                                                    </summary>
+                                                                                                    <pre className="mt-1 text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-200 overflow-auto max-h-32">
+                                                                                                        {uaInfo.full}
+                                                                                                    </pre>
+                                                                                                </details>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                })()}
                                                                             </div>
-                                                                        )}
-                                                                        {event.user_agent && (
-                                                                            <div>
-                                                                                <span className="font-medium">User Agent:</span> {event.user_agent}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                         </tr>

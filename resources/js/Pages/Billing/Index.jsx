@@ -153,6 +153,16 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
         features.push('Edge content delivery')
         features.push('Advanced analytics')
         
+        // Add download-related features
+        if (plan.download_features) {
+            if (plan.download_features.share_downloads_with_permissions) {
+                features.push('Share downloads with custom permissions')
+            }
+            if (plan.download_features.custom_download_permissions) {
+                features.push('Custom download link permissions')
+            }
+        }
+        
         // Add plan-specific features
         if (plan.id === 'starter' || plan.id === 'pro' || plan.id === 'enterprise') {
             features.push('Quarterly workshops')
@@ -264,7 +274,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     {currentPlanData && (
                         <div className="mb-12 bg-white rounded-lg border border-gray-200 shadow-sm p-6">
                             <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Plan: {currentPlanData.name}</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-gray-600">Brands</span>
@@ -328,6 +338,23 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             className="h-2 rounded-full transition-all"
                                             style={{
                                                 width: `${getUsagePercentage(current_usage?.storage_mb || 0, current_plan_limits?.max_storage_mb || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">Download Links</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(current_usage?.download_links || 0, current_plan_limits?.max_downloads_per_month || 0)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.download_links || 0, current_plan_limits?.max_downloads_per_month || 0)}%`,
                                                 backgroundColor: sitePrimaryColor,
                                             }}
                                         />
@@ -433,6 +460,14 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             <div className="flex justify-between">
                                                 <span>Storage:</span>
                                                 <span className="font-medium text-gray-900">{formatStorage(plan.limits.max_storage_mb)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>Download Links:</span>
+                                                <span className="font-medium text-gray-900">
+                                                    {plan.download_features?.download_links_limited === false 
+                                                        ? 'Unlimited' 
+                                                        : formatLimit(plan.limits.max_downloads_per_month)}
+                                                </span>
                                             </div>
                                         </div>
 

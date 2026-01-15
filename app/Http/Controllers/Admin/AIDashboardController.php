@@ -6,6 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\AIAgentRun;
 use App\Models\Ticket;
 use App\Models\TicketLink;
+use App\Models\AlertCandidate;
+use App\Models\AlertSummary;
+use App\Models\SupportTicket;
+use App\Models\DetectionRule;
 use App\Services\AIConfigService;
 use App\Services\AICostReportingService;
 use App\Services\AIBudgetService;
@@ -285,6 +289,128 @@ class AIDashboardController extends Controller
                         ['value' => 'tenant', 'label' => 'Tenant'],
                         ['value' => 'user', 'label' => 'User'],
                     ],
+                ],
+            ];
+        } elseif ($activeTab === 'alerts') {
+            // Phase 5B: Admin Observability UI
+            // Load alert candidates with relationships
+            $request = request();
+            $query = AlertCandidate::with(['rule', 'summary', 'supportTicket', 'tenant']);
+
+            // Default: open alerts only, sorted by severity + last_detected_at
+            if (!$request->filled('status')) {
+                $query->where('status', 'open');
+            }
+
+            // Apply filters
+            if ($request->filled('severity')) {
+                $query->where('severity', $request->severity);
+            }
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
+            if ($request->filled('scope')) {
+                $query->where('scope', $request->scope);
+            }
+            if ($request->filled('rule_id')) {
+                $query->where('rule_id', $request->rule_id);
+            }
+            if ($request->filled('has_ticket')) {
+                if ($request->has_ticket === 'yes') {
+                    $query->has('supportTicket');
+                } else {
+                    $query->doesntHave('supportTicket');
+                }
+            }
+            if ($request->filled('has_summary')) {
+                if ($request->has_summary === 'yes') {
+                    $query->has('summary');
+                } else {
+                    $query->doesntHave('summary');
+                }
+            }
+            if ($request->filled('ticket_status')) {
+                if ($request->ticket_status === 'none') {
+                    $query->doesntHave('supportTicket');
+                } else {
+                    $query->whereHas('supportTicket', function ($q) use ($request) {
+                        $q->where('status', $request->ticket_status);
+                    });
+                }
+            }
+            if ($request->filled('tenant_id')) {
+                $query->where('tenant_id', $request->tenant_id);
+            }
+
+            // Sort by severity (critical > warning > info) then last_detected_at (desc)
+            $severityOrder = ['critical' => 3, 'warning' => 2, 'info' => 1];
+            $query->orderByRaw("FIELD(severity, 'critical', 'warning', 'info') DESC")
+                ->orderBy('last_detected_at', 'desc');
+
+            $alerts = $query->paginate(50)->through(function ($alert) {
+                return [
+                    'id' => $alert->id,
+                    'rule_id' => $alert->rule_id,
+                    'rule_name' => $alert->rule->name ?? 'Unknown Rule',
+                    'scope' => $alert->scope,
+                    'subject_id' => $alert->subject_id,
+                    'tenant_id' => $alert->tenant_id,
+                    'tenant_name' => $alert->tenant->name ?? null,
+                    'severity' => $alert->severity,
+                    'observed_count' => $alert->observed_count,
+                    'threshold_count' => $alert->threshold_count,
+                    'window_minutes' => $alert->window_minutes,
+                    'status' => $alert->status,
+                    'first_detected_at' => $alert->first_detected_at->toIso8601String(),
+                    'last_detected_at' => $alert->last_detected_at->toIso8601String(),
+                    'detection_count' => $alert->detection_count,
+                    'context' => $alert->context,
+                    'has_summary' => $alert->summary !== null,
+                    'summary' => $alert->summary ? [
+                        'summary_text' => $alert->summary->summary_text,
+                        'impact_summary' => $alert->summary->impact_summary,
+                        'affected_scope' => $alert->summary->affected_scope,
+                        'suggested_actions' => $alert->summary->suggested_actions ?? [],
+                        'confidence_score' => $alert->summary->confidence_score,
+                    ] : null,
+                    'has_ticket' => $alert->supportTicket !== null,
+                    'ticket' => $alert->supportTicket ? [
+                        'id' => $alert->supportTicket->id,
+                        'summary' => $alert->supportTicket->summary,
+                        'status' => $alert->supportTicket->status,
+                        'severity' => $alert->supportTicket->severity,
+                        'source' => $alert->supportTicket->source,
+                    ] : null,
+                ];
+            });
+
+            // Get filter options
+            $detectionRules = DetectionRule::orderBy('name')->get(['id', 'name']);
+            $tenants = \App\Models\Tenant::whereIn('id', AlertCandidate::distinct()->pluck('tenant_id')->filter())
+                ->orderBy('name')
+                ->get(['id', 'name']);
+
+            $tabContent['alerts'] = [
+                'alerts' => $alerts,
+                'filterOptions' => [
+                    'severities' => [
+                        ['value' => 'info', 'label' => 'Info'],
+                        ['value' => 'warning', 'label' => 'Warning'],
+                        ['value' => 'critical', 'label' => 'Critical'],
+                    ],
+                    'statuses' => [
+                        ['value' => 'open', 'label' => 'Open'],
+                        ['value' => 'acknowledged', 'label' => 'Acknowledged'],
+                        ['value' => 'resolved', 'label' => 'Resolved'],
+                    ],
+                    'scopes' => [
+                        ['value' => 'global', 'label' => 'Global'],
+                        ['value' => 'tenant', 'label' => 'Tenant'],
+                        ['value' => 'asset', 'label' => 'Asset'],
+                        ['value' => 'download', 'label' => 'Download'],
+                    ],
+                    'rules' => $detectionRules->map(fn($rule) => ['value' => $rule->id, 'label' => $rule->name])->toArray(),
+                    'tenants' => $tenants->map(fn($tenant) => ['value' => $tenant->id, 'label' => $tenant->name])->toArray(),
                 ],
             ];
         } elseif ($activeTab === 'budgets' && Auth::user()->can('ai.budgets.view')) {

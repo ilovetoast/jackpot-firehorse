@@ -109,6 +109,16 @@ class Tenant extends Model
     }
 
     /**
+     * Get the downloads for this tenant.
+     * 
+     * Phase 3.1 — Downloader Foundations
+     */
+    public function downloads(): HasMany
+    {
+        return $this->hasMany(\App\Models\Download::class);
+    }
+
+    /**
      * Get the owner user for this tenant.
      * The database role in tenant_user.role is the SINGLE source of truth.
      * If no user has 'owner' role in the database, automatically set the first user's role to 'owner'.

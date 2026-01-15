@@ -1,6 +1,8 @@
-import { Link } from '@inertiajs/react'
+import { useState, useEffect, useRef } from 'react'
+import { Link, router, useForm } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import {
     BuildingOffice2Icon as BuildingOfficeIcon,
     ChartBarIcon,
@@ -11,6 +13,7 @@ import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
     XCircleIcon,
+    UserPlusIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AdminCompanyView({ 
@@ -22,8 +25,101 @@ export default function AdminCompanyView({
     recentActivity,
     users,
     brands,
+    all_brands = [],
     stats
 }) {
+    const [showAddUserForm, setShowAddUserForm] = useState(false)
+    const [availableUsers, setAvailableUsers] = useState([])
+    const [loadingUsers, setLoadingUsers] = useState(false)
+    const [userSearchQuery, setUserSearchQuery] = useState('')
+    const searchTimeoutRef = useRef(null)
+
+    const { data, setData, post, processing, errors, reset } = useForm({
+        user_id: null,
+        role: 'member',
+        brands: [],
+    })
+
+    // Load users from API when form is opened
+    useEffect(() => {
+        if (!showAddUserForm) {
+            setAvailableUsers([])
+            setUserSearchQuery('')
+            return
+        }
+
+        // Load initial users when form opens
+        setLoadingUsers(true)
+        const params = new URLSearchParams({
+            exclude_tenant_id: company.id,
+        })
+        fetch(`/app/admin/api/users/selector?${params}`)
+            .then(res => res.json())
+            .then(data => {
+                setAvailableUsers(data || [])
+                setLoadingUsers(false)
+            })
+            .catch(err => {
+                console.error('Failed to load users:', err)
+                setLoadingUsers(false)
+            })
+    }, [showAddUserForm, company.id])
+
+    // Load users from API when search query changes (debounced)
+    useEffect(() => {
+        if (!showAddUserForm || userSearchQuery.length < 2) {
+            return
+        }
+
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current)
+        }
+
+        searchTimeoutRef.current = setTimeout(() => {
+            setLoadingUsers(true)
+            const params = new URLSearchParams({
+                search: userSearchQuery,
+                exclude_tenant_id: company.id,
+            })
+            fetch(`/app/admin/api/users/selector?${params}`)
+                .then(res => res.json())
+                .then(data => {
+                    setAvailableUsers(data || [])
+                    setLoadingUsers(false)
+                })
+                .catch(err => {
+                    console.error('Failed to load users:', err)
+                    setLoadingUsers(false)
+                })
+        }, 300)
+
+        return () => {
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current)
+            }
+        }
+    }, [userSearchQuery, showAddUserForm, company.id])
+
+    const handleUserSelect = (user) => {
+        setData('user_id', user.id)
+    }
+
+    const handleBrandsChange = (brandAssignments) => {
+        setData('brands', brandAssignments)
+    }
+
+    const handleSubmit = (e) => {
+        e.preventDefault()
+        post(`/app/admin/companies/${company.id}/add-user`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                reset()
+                setShowAddUserForm(false)
+                setUserSearchQuery('')
+                setAvailableUsers([])
+            },
+        })
+    }
     // Format currency
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat('en-US', {
@@ -358,13 +454,154 @@ export default function AdminCompanyView({
                                         <UsersIcon className="h-5 w-5 text-gray-400" />
                                         Users
                                     </h2>
-                                    <Link
-                                        href={`/app/admin?company_id=${company.id}`}
-                                        className="text-sm text-indigo-600 hover:text-indigo-900"
-                                    >
-                                        View All ({stats.total_users})
-                                    </Link>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setShowAddUserForm(!showAddUserForm)}
+                                            className="text-sm text-indigo-600 hover:text-indigo-900 flex items-center gap-1"
+                                        >
+                                            <UserPlusIcon className="h-4 w-4" />
+                                            Add User
+                                        </button>
+                                        <Link
+                                            href={`/app/admin?company_id=${company.id}`}
+                                            className="text-sm text-indigo-600 hover:text-indigo-900"
+                                        >
+                                            View All ({stats.total_users})
+                                        </Link>
+                                    </div>
                                 </div>
+
+                                {/* Add User Form */}
+                                {showAddUserForm && (
+                                    <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                        <form onSubmit={handleSubmit} className="space-y-4">
+                                            <div>
+                                                <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">
+                                                    Select User
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={userSearchQuery}
+                                                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                                                    placeholder="Search for a user by name or email..."
+                                                    className="block w-full rounded-md border-0 py-2 pl-3 pr-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 mb-2"
+                                                />
+                                                {loadingUsers && (
+                                                    <p className="text-xs text-gray-500">Searching...</p>
+                                                )}
+                                                {!loadingUsers && availableUsers.length > 0 && (
+                                                    <div className="mt-2 max-h-60 overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm border border-gray-200">
+                                                        {availableUsers.map((user) => {
+                                                            const isSelected = data.user_id === user.id
+                                                            return (
+                                                                <div
+                                                                    key={user.id}
+                                                                    onClick={() => handleUserSelect(user)}
+                                                                    className={`relative cursor-default select-none py-2 pl-3 pr-9 ${
+                                                                        isSelected ? 'bg-indigo-50' : 'text-gray-900 hover:bg-gray-50'
+                                                                    }`}
+                                                                >
+                                                                    <div className="flex items-center">
+                                                                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-medium text-white flex-shrink-0">
+                                                                            {user.first_name && user.last_name
+                                                                                ? `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`.toUpperCase()
+                                                                                : (user.first_name ? user.first_name.charAt(0) : user.email.charAt(0)).toUpperCase()}
+                                                                        </div>
+                                                                        <div className="ml-3">
+                                                                            <span className={`block truncate ${isSelected ? 'font-semibold' : 'font-normal'}`}>
+                                                                                {user.first_name && user.last_name
+                                                                                    ? `${user.first_name} ${user.last_name}`
+                                                                                    : user.first_name || user.email}
+                                                                            </span>
+                                                                            <span className="block truncate text-xs text-gray-500">{user.email}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    {isSelected && (
+                                                                        <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-indigo-600">
+                                                                            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                                                            </svg>
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+                                                {!loadingUsers && userSearchQuery.length >= 2 && availableUsers.length === 0 && (
+                                                    <p className="text-xs text-gray-500 mt-2">No users found</p>
+                                                )}
+                                                {data.user_id && (
+                                                    <p className="text-xs text-indigo-600 mt-2">
+                                                        Selected: {availableUsers.find(u => u.id === data.user_id)?.email || 'User selected'}
+                                                    </p>
+                                                )}
+                                                {errors.user_id && (
+                                                    <p className="mt-1 text-sm text-red-600">{errors.user_id}</p>
+                                                )}
+                                            </div>
+                                            {errors.user_id && (
+                                                <p className="text-sm text-red-600">{errors.user_id}</p>
+                                            )}
+
+                                            {/* Role Selection */}
+                                            <div>
+                                                <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">
+                                                    Company Role
+                                                </label>
+                                                <select
+                                                    value={data.role}
+                                                    onChange={(e) => setData('role', e.target.value)}
+                                                    className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                >
+                                                    <option value="member">Member</option>
+                                                    <option value="admin">Admin</option>
+                                                    {company.plan_name && ['pro', 'enterprise'].includes(company.plan_name.toLowerCase()) && (
+                                                        <option value="brand_manager">Brand Manager</option>
+                                                    )}
+                                                    <option value="owner">Owner</option>
+                                                </select>
+                                                {errors.role && (
+                                                    <p className="mt-1 text-sm text-red-600">{errors.role}</p>
+                                                )}
+                                            </div>
+
+                                            {/* Brand Assignments */}
+                                            {all_brands && all_brands.length > 0 && (
+                                                <BrandRoleSelector
+                                                    brands={all_brands}
+                                                    selectedBrands={data.brands}
+                                                    onChange={handleBrandsChange}
+                                                    errors={errors}
+                                                    required={true}
+                                                />
+                                            )}
+
+                                            <div className="flex items-center gap-2 pt-2">
+                                                <button
+                                                    type="submit"
+                                                    disabled={processing}
+                                                    className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                                >
+                                                    {processing ? 'Adding...' : 'Add User'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setShowAddUserForm(false)
+                                                        reset()
+                                                        setUserSearchQuery('')
+                                                        setAvailableUsers([])
+                                                    }}
+                                                    className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
+
                                 {users && users.length > 0 ? (
                                     <div className="space-y-3">
                                         {users.map((user) => (

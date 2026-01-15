@@ -11,6 +11,7 @@ import {
     AutomationsTabContent,
     ReportsTabContent,
     BudgetsTabContent,
+    AlertsTabContent,
 } from '../../../Components/AI/TabContent'
 import {
     BoltIcon,
@@ -33,6 +34,7 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
         { id: 'agents', name: 'Agents' },
         { id: 'automations', name: 'Automations' },
         { id: 'reports', name: 'Reports' },
+        { id: 'alerts', name: 'Alerts' },
         ...(canViewBudgets ? [{ id: 'budgets', name: 'Budgets' }] : []),
     ]
 
@@ -292,6 +294,18 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                             ) : (
                                 <div className="rounded-lg bg-white p-8 shadow-sm ring-1 ring-gray-200 text-center">
                                     <p className="text-sm text-gray-500">Loading Reports...</p>
+                                </div>
+                            )
+                        )}
+                        {activeTab === 'alerts' && (
+                            tabContent.alerts ? (
+                                <AlertsTabContent 
+                                    alerts={tabContent.alerts.alerts}
+                                    filterOptions={tabContent.alerts.filterOptions}
+                                />
+                            ) : (
+                                <div className="rounded-lg bg-white p-8 shadow-sm ring-1 ring-gray-200 text-center">
+                                    <p className="text-sm text-gray-500">Loading Alerts...</p>
                                 </div>
                             )
                         )}

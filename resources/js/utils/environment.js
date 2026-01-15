@@ -34,13 +34,21 @@ export function isDev() {
     }
 
     // Vite environment detection
-    if (typeof import !== 'undefined' && import.meta && import.meta.env) {
-        if (import.meta.env.DEV === true) {
-            return true
+    // Note: import.meta is always available in ES modules
+    // Use try-catch for safety in case we're not in a module context
+    try {
+        // Check if import.meta.env exists (Vite/modern bundlers)
+        if (import.meta && import.meta.env) {
+            if (import.meta.env.DEV === true) {
+                return true
+            }
+            if (import.meta.env.MODE && import.meta.env.MODE !== 'production') {
+                return true
+            }
         }
-        if (import.meta.env.MODE && import.meta.env.MODE !== 'production') {
-            return true
-        }
+    } catch (e) {
+        // import.meta not available (e.g., in non-module contexts)
+        // Fall through to other detection methods
     }
 
     // Webpack/Node environment detection

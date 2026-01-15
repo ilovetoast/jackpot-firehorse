@@ -2,7 +2,7 @@ import { Link, usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function Notifications({ templates, has_invite_member }) {
+export default function Notifications({ templates, system_templates, tenant_templates, has_invite_member }) {
     const { auth } = usePage().props
     const { flash } = usePage().props
 
@@ -60,17 +60,63 @@ export default function Notifications({ templates, has_invite_member }) {
                         </div>
                     )}
 
-                    <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                    {/* System Emails */}
+                    <div className="mb-8 rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="px-6 py-4 border-b border-gray-200">
-                            <h2 className="text-lg font-semibold text-gray-900">Notification Templates</h2>
+                            <h2 className="text-lg font-semibold text-gray-900">System Emails (Service - Jackpot)</h2>
+                            <p className="mt-1 text-sm text-gray-500">Emails sent from the service platform</p>
                         </div>
                         <div className="divide-y divide-gray-200">
-                            {templates.length === 0 ? (
+                            {system_templates.length === 0 ? (
                                 <div className="px-6 py-8 text-center text-sm text-gray-500">
-                                    No notification templates found
+                                    No system email templates found
                                 </div>
                             ) : (
-                                templates.map((template) => (
+                                system_templates.map((template) => (
+                                    <div key={template.id} className="px-6 py-4 hover:bg-gray-50">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-3">
+                                                    <h3 className="text-sm font-semibold text-gray-900">{template.name}</h3>
+                                                    <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800">
+                                                        {template.key}
+                                                    </span>
+                                                    {!template.is_active && (
+                                                        <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-red-100 text-red-800">
+                                                            Inactive
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="mt-1 text-sm text-gray-500">{template.subject}</p>
+                                            </div>
+                                            <div className="ml-4">
+                                                <Link
+                                                    href={`/app/admin/notifications/${template.id}`}
+                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                >
+                                                    Edit
+                                                </Link>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Tenant Emails */}
+                    <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <div className="px-6 py-4 border-b border-gray-200">
+                            <h2 className="text-lg font-semibold text-gray-900">Tenant Emails</h2>
+                            <p className="mt-1 text-sm text-gray-500">Emails sent to users from tenants (contextual to company)</p>
+                        </div>
+                        <div className="divide-y divide-gray-200">
+                            {tenant_templates.length === 0 ? (
+                                <div className="px-6 py-8 text-center text-sm text-gray-500">
+                                    No tenant email templates found
+                                </div>
+                            ) : (
+                                tenant_templates.map((template) => (
                                     <div key={template.id} className="px-6 py-4 hover:bg-gray-50">
                                         <div className="flex items-center justify-between">
                                             <div className="flex-1">

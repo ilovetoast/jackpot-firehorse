@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\DownloadStatus;
+use App\Models\Download;
 use App\Services\BillingService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
@@ -53,6 +55,9 @@ class BillingController extends Controller
         $planService = new PlanService();
 
         // Get current usage counts
+        $startOfMonth = now()->startOfMonth();
+        $endOfMonth = now()->endOfMonth();
+        
         $currentUsage = [
             'brands' => $tenant->brands()->count(),
             'users' => $tenant->users()->count(),
@@ -60,6 +65,10 @@ class BillingController extends Controller
                 $query->where('is_system', false);
             }])->get()->sum('categories_count'),
             'storage_mb' => 0, // TODO: Calculate actual storage usage
+            'download_links' => Download::where('tenant_id', $tenant->id)
+                ->where('status', DownloadStatus::READY)
+                ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
+                ->count(),
         ];
 
         // Fetch Stripe price data for each plan
@@ -82,9 +91,14 @@ class BillingController extends Controller
                         ];
                     }
                 } catch (\Exception $e) {
-                    // Price not found or error fetching - will show without price
+                    // Price not found or error fetching - use fallback if available
                     $priceData = null;
                     $monthlyPrice = null;
+                }
+                
+                // Use fallback price if Stripe price not available
+                if (!$monthlyPrice && isset($plan['fallback_monthly_price'])) {
+                    $monthlyPrice = number_format($plan['fallback_monthly_price'], 2);
                 }
             }
 
@@ -94,6 +108,7 @@ class BillingController extends Controller
                 'stripe_price_id' => $plan['stripe_price_id'],
                 'limits' => $plan['limits'],
                 'features' => $plan['features'],
+                'download_features' => $plan['download_features'] ?? null,
                 'is_current' => $key === $currentPlan,
                 'price' => $priceData,
                 'monthly_price' => $monthlyPrice,

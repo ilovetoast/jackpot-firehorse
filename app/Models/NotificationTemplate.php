@@ -12,6 +12,7 @@ class NotificationTemplate extends Model
     protected $fillable = [
         'key',
         'name',
+        'category',
         'subject',
         'body_html',
         'body_text',

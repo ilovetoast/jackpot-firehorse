@@ -7,6 +7,7 @@ use App\Models\NotificationTemplate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -22,13 +23,29 @@ class NotificationController extends Controller
             abort(403, 'Only site owners can access this page.');
         }
 
-        $templates = NotificationTemplate::orderBy('name')->get();
+        // Check if category column exists
+        $hasCategoryColumn = \Schema::hasColumn('notification_templates', 'category');
+        
+        if ($hasCategoryColumn) {
+            $templates = NotificationTemplate::orderBy('category')->orderBy('name')->get();
+            // Group templates by category
+            $systemTemplates = $templates->where('category', 'system')->values();
+            $tenantTemplates = $templates->where('category', 'tenant')->values();
+        } else {
+            // Fallback if category column doesn't exist yet
+            $templates = NotificationTemplate::orderBy('name')->get();
+            // Default grouping - assume all are system for now
+            $systemTemplates = $templates->values();
+            $tenantTemplates = collect();
+        }
         
         // Check if invite_member template exists, if not suggest seeding
         $hasInviteMember = $templates->where('key', 'invite_member')->isNotEmpty();
 
         return Inertia::render('Admin/Notifications', [
             'templates' => $templates,
+            'system_templates' => $systemTemplates,
+            'tenant_templates' => $tenantTemplates,
             'has_invite_member' => $hasInviteMember,
         ]);
     }
@@ -43,10 +60,33 @@ class NotificationController extends Controller
             abort(403, 'Only site owners can access this page.');
         }
 
+        // Get tenants for company selection (for tenant emails)
+        $tenants = collect();
+        $templateCategory = $template->category ?? 'system'; // Default to system if category doesn't exist
+        if ($templateCategory === 'tenant') {
+            $tenants = \App\Models\Tenant::with(['brands' => function ($query) {
+                $query->orderBy('is_default', 'desc')->orderBy('name');
+            }])->orderBy('name')->get()->map(function ($tenant) {
+                $firstBrand = $tenant->brands->first();
+                return [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'slug' => $tenant->slug,
+                    'first_brand' => $firstBrand ? [
+                        'id' => $firstBrand->id,
+                        'name' => $firstBrand->name,
+                        'primary_color' => $firstBrand->primary_color ?? '#6366f1',
+                    ] : null,
+                ];
+            });
+        }
+
         return Inertia::render('Admin/NotificationEdit', [
             'template' => $template,
             'app_name' => config('app.name', 'Jackpot'),
             'app_url' => config('app.url', url('/')),
+            'tenants' => $tenants,
+            'saas_primary_color' => '#6366f1', // Default SaaS primary color
         ]);
     }
 

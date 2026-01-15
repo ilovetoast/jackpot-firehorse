@@ -36,6 +36,15 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
     const [loadingStats, setLoadingStats] = useState(!initialStats)
     const [users, setUsers] = useState(initialUsers || [])
     const [loadingUsers, setLoadingUsers] = useState(false)
+    const [usersPagination, setUsersPagination] = useState({
+        current_page: 1,
+        last_page: 1,
+        per_page: 50,
+        total: 0,
+    })
+    const [usersLoaded, setUsersLoaded] = useState(false)
+    const [userSearchQuery, setUserSearchQuery] = useState('')
+    const userSearchTimeoutRef = useRef(null)
     const [expandedCompany, setExpandedCompany] = useState(null)
     const [expandedDetails, setExpandedDetails] = useState(null)
     const [showBrandRoles, setShowBrandRoles] = useState(false)
@@ -144,14 +153,29 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
         }
     }, [stats])
 
-    // Load users when users tab is activated
-    useEffect(() => {
-        if (activeTab === 'users' && users.length === 0 && !loadingUsers) {
+    // Load users when users tab is activated or pagination changes
+    const loadUsers = (page = 1, perPage = 50, search = '') => {
+        if (activeTab === 'users' && !loadingUsers) {
             setLoadingUsers(true)
-            fetch('/app/admin/api/users')
+            const params = new URLSearchParams({
+                page: page.toString(),
+                per_page: perPage.toString(),
+            })
+            if (search) {
+                params.append('search', search)
+            }
+            const url = `/app/admin/api/users?${params.toString()}`
+            fetch(url)
                 .then(res => res.json())
                 .then(data => {
                     setUsers(data.data || [])
+                    setUsersPagination({
+                        current_page: data.current_page || 1,
+                        last_page: data.last_page || 1,
+                        per_page: data.per_page || 50,
+                        total: data.total || 0,
+                    })
+                    setUsersLoaded(true)
                     setLoadingUsers(false)
                 })
                 .catch(err => {
@@ -159,7 +183,40 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                     setLoadingUsers(false)
                 })
         }
-    }, [activeTab, users.length, loadingUsers])
+    }
+
+    useEffect(() => {
+        if (activeTab === 'users') {
+            if (!usersLoaded && !loadingUsers) {
+                loadUsers(1, usersPagination.per_page, userSearchQuery)
+            }
+        } else {
+            // Clear search when switching away from users tab
+            setUserSearchQuery('')
+        }
+    }, [activeTab])
+
+    // Handle search with debouncing
+    useEffect(() => {
+        if (activeTab !== 'users' || !usersLoaded) {
+            return
+        }
+
+        if (userSearchTimeoutRef.current) {
+            clearTimeout(userSearchTimeoutRef.current)
+        }
+
+        // Reset to page 1 when searching (including empty search to reload all)
+        userSearchTimeoutRef.current = setTimeout(() => {
+            loadUsers(1, usersPagination.per_page, userSearchQuery)
+        }, 300) // Debounce search by 300ms
+
+        return () => {
+            if (userSearchTimeoutRef.current) {
+                clearTimeout(userSearchTimeoutRef.current)
+            }
+        }
+    }, [userSearchQuery, activeTab, usersLoaded])
 
     const summaryCards = [
         { name: 'Total Companies', value: stats?.total_companies ?? 0, subtitle: `${stats?.total_companies ?? 0} with Stripe accounts`, icon: BuildingOfficeIcon },
@@ -956,6 +1013,8 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                         <div className="flex-1 max-w-md">
                                             <input
                                                 type="text"
+                                                value={userSearchQuery}
+                                                onChange={(e) => setUserSearchQuery(e.target.value)}
                                                 placeholder="Search users..."
                                                 className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                             />
@@ -1171,7 +1230,7 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                                                             preserveScroll: true,
                                                                                             onSuccess: () => {
                                                                                                 setOpenUserDropdown(null)
-                                                                                                router.reload({ only: ['users'] })
+                                                                                                loadUsers(usersPagination.current_page, usersPagination.per_page, userSearchQuery)
                                                                                             },
                                                                                             onError: (errors) => {
                                                                                                 console.error('Unsuspend error:', errors)
@@ -1203,7 +1262,7 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                                                             preserveScroll: true,
                                                                                             onSuccess: () => {
                                                                                                 setOpenUserDropdown(null)
-                                                                                                router.reload({ only: ['users'] })
+                                                                                                loadUsers(usersPagination.current_page, usersPagination.per_page, userSearchQuery)
                                                                                             },
                                                                                             onError: (errors) => {
                                                                                                 console.error('Suspend error:', errors)
@@ -1236,7 +1295,7 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                                                                 preserveScroll: true,
                                                                                                 onSuccess: () => {
                                                                                                     setOpenUserDropdown(null)
-                                                                                                    router.reload({ only: ['users', 'companies'] })
+                                                                                                    loadUsers(usersPagination.current_page, usersPagination.per_page)
                                                                                                 },
                                                                                             })
                                                                                         }
@@ -1279,7 +1338,7 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                                                                         preserveScroll: true,
                                                                                                         onSuccess: () => {
                                                                                                             setOpenUserDropdown(null)
-                                                                                                            router.reload({ only: ['users', 'companies'] })
+                                                                                                            loadUsers(usersPagination.current_page, usersPagination.per_page)
                                                                                                         },
                                                                                                     })
                                                                                                 }
@@ -1357,6 +1416,51 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                         })
                                     )}
                                 </div>
+                                {usersPagination && usersPagination.total > 0 && (
+                                    <div className="mt-6 flex items-center justify-between border-t border-gray-200 px-6 py-4">
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-sm text-gray-700">
+                                                Showing <span className="font-medium">{(usersPagination.current_page - 1) * usersPagination.per_page + 1}</span> to{' '}
+                                                <span className="font-medium">{Math.min(usersPagination.current_page * usersPagination.per_page, usersPagination.total)}</span> of{' '}
+                                                <span className="font-medium">{usersPagination.total}</span> users
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-sm text-gray-700">Per page:</label>
+                                                <select
+                                                    value={usersPagination.per_page}
+                                                    onChange={(e) => {
+                                                        loadUsers(1, parseInt(e.target.value), userSearchQuery)
+                                                    }}
+                                                    className="rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                >
+                                                    <option value="10">10</option>
+                                                    <option value="25">25</option>
+                                                    <option value="50">50</option>
+                                                    <option value="100">100</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => loadUsers(usersPagination.current_page - 1, usersPagination.per_page, userSearchQuery)}
+                                                disabled={usersPagination.current_page === 1 || loadingUsers}
+                                                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Previous
+                                            </button>
+                                            <span className="text-sm text-gray-700">
+                                                Page {usersPagination.current_page} of {usersPagination.last_page}
+                                            </span>
+                                            <button
+                                                onClick={() => loadUsers(usersPagination.current_page + 1, usersPagination.per_page, userSearchQuery)}
+                                                disabled={usersPagination.current_page === usersPagination.last_page || loadingUsers}
+                                                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Next
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

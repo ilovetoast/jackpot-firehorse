@@ -321,6 +321,18 @@ class Asset extends Model
     }
 
     /**
+     * Get the download groups that include this asset.
+     * 
+     * Phase 3.1 — Downloader Foundations
+     */
+    public function downloads(): BelongsToMany
+    {
+        return $this->belongsToMany(Download::class, 'download_asset')
+            ->withPivot('is_primary')
+            ->withTimestamps();
+    }
+
+    /**
      * Get the S3 thumbnail path for a specific style.
      *
      * Retrieves the thumbnail path from asset metadata.

@@ -261,8 +261,20 @@ class SiteAdminController extends Controller
         }
 
         $perPage = (int) $request->get('per_page', 50);
-        $users = User::with(['tenants', 'brands.tenant'])
-            ->paginate($perPage)
+        $search = $request->get('search', '');
+        
+        $query = User::with(['tenants', 'brands.tenant']);
+        
+        // Add search filter if provided
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+        
+        $users = $query->paginate($perPage)
             ->through(function ($user) {
                 $userRoles = $user->getRoleNames()->toArray();
                 $siteRoles = array_unique(array_filter($userRoles, fn($role) => str_contains(strtolower($role), 'site')));
@@ -309,6 +321,7 @@ class SiteAdminController extends Controller
 
     /**
      * Get users for selector (AJAX endpoint).
+     * Standardized method to query users, avoiding orphan issues.
      */
     public function usersForSelector(Request $request): \Illuminate\Http\JsonResponse
     {
@@ -317,7 +330,16 @@ class SiteAdminController extends Controller
         }
 
         $search = $request->get('search', '');
+        $excludeTenantId = $request->get('exclude_tenant_id');
+        
         $query = User::select(['id', 'first_name', 'last_name', 'email']);
+        
+        // Exclude users already in the specified tenant (if provided)
+        if ($excludeTenantId) {
+            $query->whereDoesntHave('tenants', function ($q) use ($excludeTenantId) {
+                $q->where('tenants.id', $excludeTenantId);
+            });
+        }
         
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -2328,14 +2350,19 @@ class SiteAdminController extends Controller
         }
 
         // For 'user' type, manually load the User model to avoid relationship errors
-        if ($event->actor_type === 'user' && $event->actor_id) {
+        // Also handle 'App\Models\User' class name format
+        $isUserType = $event->actor_type === 'user' || 
+                     $event->actor_type === 'App\\Models\\User' ||
+                     str_contains($event->actor_type, 'User');
+        
+        if ($isUserType && $event->actor_id) {
             try {
                 $user = \App\Models\User::find($event->actor_id);
                 if ($user) {
                     return [
                         'type' => 'user',
                         'id' => $user->id,
-                        'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                        'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->email,
                         'first_name' => $user->first_name,
                         'last_name' => $user->last_name,
                         'email' => $user->email,
@@ -2345,6 +2372,16 @@ class SiteAdminController extends Controller
             } catch (\Exception $e) {
                 // If user not found, fall through to default
             }
+        }
+
+        // Handle class name formats (e.g., "App\Models\User")
+        if (str_contains($event->actor_type, '\\')) {
+            $className = class_basename($event->actor_type);
+            return [
+                'type' => strtolower($className),
+                'name' => $className,
+                'raw_type' => $event->actor_type,
+            ];
         }
 
         return [

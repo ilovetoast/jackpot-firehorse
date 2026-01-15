@@ -1,22 +1,24 @@
-import { usePage } from '@inertiajs/react'
+import { usePage, Link } from '@inertiajs/react'
 import { 
     FolderIcon, 
     CloudArrowDownIcon,
     ServerIcon,
     ArrowUpIcon,
-    ArrowDownIcon
+    ArrowDownIcon,
+    EyeIcon
 } from '@heroicons/react/24/outline'
 import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
+import ThumbnailPreview from '../Components/ThumbnailPreview'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, stats = null }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [] }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
     const defaultStats = {
         total_assets: { value: 0, change: 0, is_positive: true },
         storage_mb: { value: 0, change: 0, is_positive: true, limit: null },
-        downloads: { value: 0, change: 0, is_positive: true },
+        download_links: { value: 0, change: 0, is_positive: true, limit: null },
     }
     const dashboardStats = stats || defaultStats
 
@@ -54,6 +56,22 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, stats = nu
         return Math.min((currentMB / limitMB) * 100, 100)
     }
 
+    // Format downloads with limit
+    const formatDownloadsWithLimit = (current, limit) => {
+        if (!limit || isUnlimited(limit)) {
+            return `${current.toLocaleString()} of Unlimited`
+        }
+        return `${current.toLocaleString()} / ${limit.toLocaleString()}`
+    }
+
+    // Calculate download usage percentage
+    const getDownloadUsagePercentage = (current, limit) => {
+        if (!limit || isUnlimited(limit)) {
+            return 0
+        }
+        return Math.min((current / limit) * 100, 100)
+    }
+
     // Format percentage change
     const formatChange = (change, isPositive) => {
         const sign = change >= 0 ? '+' : ''
@@ -71,8 +89,17 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, stats = nu
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8">
-                    <h2 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h2>
-                    <p className="mt-2 text-sm text-gray-700">Welcome to your asset management dashboard</p>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h2>
+                            <p className="mt-2 text-sm text-gray-700">Welcome to your asset management dashboard</p>
+                        </div>
+                        {plan?.show_badge && plan?.name && (
+                            <span className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
+                                {plan.name} Plan
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -167,35 +194,177 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, stats = nu
                         </div>
                     </div>
 
-                    {/* Downloads Card */}
+                    {/* Download Links Card */}
                     <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
                         <div className="flex items-center">
                             <div className="flex-shrink-0">
                                 <CloudArrowDownIcon className="h-6 w-6 text-gray-400" aria-hidden="true" />
                             </div>
                             <div className="ml-5 w-0 flex-1">
-                                <dt className="text-sm font-medium text-gray-500 truncate">Downloads</dt>
-                                <dd className="mt-1 flex items-baseline">
-                                    <div className="flex-1 flex items-baseline">
+                                <dt className="text-sm font-medium text-gray-500 truncate">Download Links</dt>
+                                <dd className="mt-1">
+                                    <div className="flex items-baseline">
                                         <span className="text-2xl font-semibold tracking-tight text-gray-900">
-                                            {dashboardStats.downloads.value.toLocaleString()}
+                                            {dashboardStats.download_links.value.toLocaleString()}
                                         </span>
-                                        {dashboardStats.downloads.change !== 0 && (
+                                        {dashboardStats.download_links.change !== 0 && (
                                             <span className="ml-2 flex items-baseline text-sm font-semibold">
-                                                {dashboardStats.downloads.is_positive ? (
+                                                {dashboardStats.download_links.is_positive ? (
                                                     <ArrowUpIcon className="h-4 w-4 text-green-500 mr-0.5" aria-hidden="true" />
                                                 ) : (
                                                     <ArrowDownIcon className="h-4 w-4 text-red-500 mr-0.5" aria-hidden="true" />
                                                 )}
-                                                {formatChange(dashboardStats.downloads.change, dashboardStats.downloads.is_positive)}
+                                                {formatChange(dashboardStats.download_links.change, dashboardStats.download_links.is_positive)}
                                             </span>
                                         )}
                                     </div>
+                                    {dashboardStats.download_links.limit && (
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            {formatDownloadsWithLimit(dashboardStats.download_links.value, dashboardStats.download_links.limit)}
+                                        </p>
+                                    )}
+                                    {dashboardStats.download_links.limit && !isUnlimited(dashboardStats.download_links.limit) && (
+                                        <div className="mt-2">
+                                            <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                                                <span>Usage</span>
+                                                <span>{getDownloadUsagePercentage(dashboardStats.download_links.value, dashboardStats.download_links.limit).toFixed(1)}%</span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-2">
+                                                <div
+                                                    className={`h-2 rounded-full transition-all ${
+                                                        getDownloadUsagePercentage(dashboardStats.download_links.value, dashboardStats.download_links.limit) >= 90
+                                                            ? 'bg-red-500'
+                                                            : getDownloadUsagePercentage(dashboardStats.download_links.value, dashboardStats.download_links.limit) >= 75
+                                                            ? 'bg-yellow-500'
+                                                            : 'bg-green-500'
+                                                    }`}
+                                                    style={{
+                                                        width: `${getDownloadUsagePercentage(dashboardStats.download_links.value, dashboardStats.download_links.limit)}%`
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                    {dashboardStats.download_links.change !== 0 && !dashboardStats.download_links.limit && (
+                                        <p className="mt-1 text-xs text-gray-500">vs last month</p>
+                                    )}
                                 </dd>
-                                {dashboardStats.downloads.change !== 0 && (
-                                    <p className="mt-1 text-xs text-gray-500">vs last month</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Most Viewed and Most Downloaded Blocks */}
+                <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    {/* Most Viewed Assets */}
+                    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <div className="px-4 py-5 sm:p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-base font-semibold leading-6 text-gray-900 flex items-center gap-2">
+                                    <EyeIcon className="h-5 w-5 text-gray-400" />
+                                    Most Viewed
+                                </h3>
+                                {most_viewed_assets.length > 0 && (
+                                    <Link
+                                        href="/app/assets"
+                                        className="text-sm text-indigo-600 hover:text-indigo-900"
+                                    >
+                                        View All
+                                    </Link>
                                 )}
                             </div>
+                            {most_viewed_assets.length > 0 ? (
+                                <div className="space-y-3">
+                                    {most_viewed_assets.map((asset) => (
+                                        <Link
+                                            key={asset.id}
+                                            href="/app/assets"
+                                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
+                                        >
+                                            <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-gray-100">
+                                                <ThumbnailPreview
+                                                    asset={asset}
+                                                    alt={asset.title}
+                                                    className="w-full h-full object-cover"
+                                                    size="sm"
+                                                />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
+                                                    {asset.title}
+                                                </p>
+                                                <div className="flex items-center gap-1 mt-1">
+                                                    <EyeIcon className="h-4 w-4 text-gray-400" />
+                                                    <span className="text-xs text-gray-500">
+                                                        {asset.view_count.toLocaleString()} {asset.view_count === 1 ? 'view' : 'views'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </Link>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <EyeIcon className="mx-auto h-8 w-8 text-gray-400" />
+                                    <p className="mt-2 text-sm text-gray-500">No views yet</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Most Downloaded Assets */}
+                    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <div className="px-4 py-5 sm:p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-base font-semibold leading-6 text-gray-900 flex items-center gap-2">
+                                    <CloudArrowDownIcon className="h-5 w-5 text-gray-400" />
+                                    Most Downloaded
+                                </h3>
+                                {most_downloaded_assets.length > 0 && (
+                                    <Link
+                                        href="/app/assets"
+                                        className="text-sm text-indigo-600 hover:text-indigo-900"
+                                    >
+                                        View All
+                                    </Link>
+                                )}
+                            </div>
+                            {most_downloaded_assets.length > 0 ? (
+                                <div className="space-y-3">
+                                    {most_downloaded_assets.map((asset) => (
+                                        <Link
+                                            key={asset.id}
+                                            href="/app/assets"
+                                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
+                                        >
+                                            <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-gray-100">
+                                                <ThumbnailPreview
+                                                    asset={asset}
+                                                    alt={asset.title}
+                                                    className="w-full h-full object-cover"
+                                                    size="sm"
+                                                />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
+                                                    {asset.title}
+                                                </p>
+                                                <div className="flex items-center gap-1 mt-1">
+                                                    <CloudArrowDownIcon className="h-4 w-4 text-gray-400" />
+                                                    <span className="text-xs text-gray-500">
+                                                        {asset.download_count.toLocaleString()} {asset.download_count === 1 ? 'download' : 'downloads'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </Link>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <CloudArrowDownIcon className="mx-auto h-8 w-8 text-gray-400" />
+                                    <p className="mt-2 text-sm text-gray-500">No downloads yet</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

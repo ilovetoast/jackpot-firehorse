@@ -1,33 +1,79 @@
 import { Link, useForm, usePage } from '@inertiajs/react'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function NotificationEdit({ template, app_name, app_url }) {
+export default function NotificationEdit({ template, app_name, app_url, tenants, saas_primary_color }) {
     const { auth } = usePage().props
     
     // Get variables from template or default list
     const templateVariables = template.variables || []
     
+    // Calculate color variations helper
+    const getColorVariations = (color) => {
+        // Convert hex to RGB
+        const hex = color.replace('#', '')
+        const r = parseInt(hex.substr(0, 2), 16)
+        const g = parseInt(hex.substr(2, 2), 16)
+        const b = parseInt(hex.substr(4, 2), 16)
+        
+        // Darken for gradient end
+        const darken = (val) => Math.max(0, Math.floor(val * 0.85))
+        const primaryColorDark = `#${darken(r).toString(16).padStart(2, '0')}${darken(g).toString(16).padStart(2, '0')}${darken(b).toString(16).padStart(2, '0')}`
+        
+        // Light background (10% opacity)
+        const primaryColorLight = `rgba(${r}, ${g}, ${b}, 0.1)`
+        
+        return {
+            primary_color: color,
+            primary_color_dark: primaryColorDark,
+            primary_color_light: primaryColorLight,
+        }
+    }
+    
+    // Get selected tenant and brand colors
+    const [selectedTenantId, setSelectedTenantId] = useState(tenants && tenants.length > 0 ? tenants[0].id : null)
+    const selectedTenant = tenants?.find(t => t.id === selectedTenantId)
+    const primaryColor = selectedTenant?.first_brand?.primary_color || saas_primary_color || '#6366f1'
+    const colorVars = getColorVariations(primaryColor)
+    
     // Initialize sample data with defaults
     const getDefaultSampleData = () => {
         const defaults = {
-            tenant_name: 'Example Company',
+            tenant_name: selectedTenant?.name || 'Example Company',
             inviter_name: 'John Doe',
             invite_url: `${window.location.origin}/invite/abc123`,
             app_name: app_name || 'Jackpot',
             app_url: app_url || window.location.origin,
             user_name: 'Jane Smith',
             user_email: 'jane@example.com',
+            ...colorVars, // Add color variables
         }
         const sampleData = {}
         templateVariables.forEach(variable => {
             sampleData[variable] = defaults[variable] || `Sample ${variable.replace(/_/g, ' ')}`
         })
+        // Always include color variables for tenant emails
+        if (template.category === 'tenant' || !template.category) {
+            Object.assign(sampleData, colorVars)
+        }
         return sampleData
     }
     
     const [sampleData, setSampleData] = useState(getDefaultSampleData())
+    
+    // Update sample data when tenant changes
+    useEffect(() => {
+        const isTenantEmail = template.category === 'tenant' || !template.category
+        if (isTenantEmail && selectedTenant) {
+            const newColorVars = getColorVariations(selectedTenant.first_brand?.primary_color || saas_primary_color || '#6366f1')
+            setSampleData(prev => ({
+                ...prev,
+                tenant_name: selectedTenant.name,
+                ...newColorVars,
+            }))
+        }
+    }, [selectedTenantId, template.category, selectedTenant, saas_primary_color])
     
     const { data, setData, put, processing, errors } = useForm({
         name: template.name || '',
@@ -50,14 +96,29 @@ export default function NotificationEdit({ template, app_name, app_url }) {
         return result
     }
     
-    // Generate preview
+    // Generate preview with color replacements
     const preview = useMemo(() => {
+        let bodyHtml = replaceVariables(data.body_html, templateVariables, sampleData)
+        
+        // Replace color variables with actual colors (for tenant emails)
+        const isTenantEmail = template.category === 'tenant' || !template.category
+        if (isTenantEmail) {
+            bodyHtml = bodyHtml.replace(/\{\{primary_color\}\}/g, colorVars.primary_color)
+            bodyHtml = bodyHtml.replace(/\{\{primary_color_dark\}\}/g, colorVars.primary_color_dark)
+            bodyHtml = bodyHtml.replace(/\{\{primary_color_light\}\}/g, colorVars.primary_color_light)
+        } else {
+            // For system emails, use SaaS primary color
+            bodyHtml = bodyHtml.replace(/\{\{primary_color\}\}/g, saas_primary_color || '#6366f1')
+            bodyHtml = bodyHtml.replace(/\{\{primary_color_dark\}\}/g, '#4f46e5')
+            bodyHtml = bodyHtml.replace(/\{\{primary_color_light\}\}/g, 'rgba(99, 102, 241, 0.1)')
+        }
+        
         return {
             subject: replaceVariables(data.subject, templateVariables, sampleData),
-            body_html: replaceVariables(data.body_html, templateVariables, sampleData),
+            body_html: bodyHtml,
             body_text: replaceVariables(data.body_text, templateVariables, sampleData),
         }
-    }, [data.subject, data.body_html, data.body_text, sampleData, templateVariables])
+    }, [data.subject, data.body_html, data.body_text, sampleData, templateVariables, template.category, colorVars, saas_primary_color])
 
     const handleSubmit = (e) => {
         e.preventDefault()
@@ -187,12 +248,49 @@ export default function NotificationEdit({ template, app_name, app_url }) {
                             <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200 p-6">
                                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Preview</h2>
                                 
+                                {/* Company Selector for Tenant Emails */}
+                                {(template.category === 'tenant' || !template.category) && tenants && tenants.length > 0 && (
+                                    <div className="mb-6 pb-6 border-b border-gray-200">
+                                        <label htmlFor="tenant_select" className="block text-sm font-medium text-gray-700 mb-2">
+                                            Preview as Company
+                                        </label>
+                                        <select
+                                            id="tenant_select"
+                                            value={selectedTenantId || ''}
+                                            onChange={(e) => {
+                                                const tenantId = parseInt(e.target.value)
+                                                setSelectedTenantId(tenantId)
+                                                const tenant = tenants.find(t => t.id === tenantId)
+                                                if (tenant) {
+                                                    setSampleData(prev => ({
+                                                        ...prev,
+                                                        tenant_name: tenant.name,
+                                                        ...getColorVariations(tenant.first_brand?.primary_color || saas_primary_color || '#6366f1'),
+                                                    }))
+                                                }
+                                            }}
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                                        >
+                                            {tenants.map(tenant => (
+                                                <option key={tenant.id} value={tenant.id}>
+                                                    {tenant.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            {selectedTenant?.first_brand 
+                                                ? `Using ${selectedTenant.first_brand.name} brand colors (${selectedTenant.first_brand.primary_color})`
+                                                : 'Using default SaaS colors'}
+                                        </p>
+                                    </div>
+                                )}
+                                
                                 {/* Sample Data Inputs */}
                                 {templateVariables.length > 0 && (
                                     <div className="mb-6 pb-6 border-b border-gray-200">
                                         <h3 className="text-sm font-medium text-gray-700 mb-3">Sample Data</h3>
                                         <div className="space-y-3">
-                                            {templateVariables.map(variable => (
+                                            {templateVariables.filter(v => !v.startsWith('primary_color')).map(variable => (
                                                 <div key={variable}>
                                                     <label htmlFor={`sample_${variable}`} className="block text-xs font-medium text-gray-600 mb-1">
                                                         {variable.replace(/_/g, ' ')}

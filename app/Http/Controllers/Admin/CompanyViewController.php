@@ -97,26 +97,13 @@ class CompanyViewController extends Controller
                 ];
             });
 
-        // Get users overview (first 5)
-        $users = $tenant->users()
-            ->orderBy('tenant_user.created_at', 'desc')
-            ->limit(5)
-            ->get()
-            ->map(function ($user) use ($tenant) {
-                return [
-                    'id' => $user->id,
-                    'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
-                    'email' => $user->email,
-                    'role' => $user->getRoleForTenant($tenant),
-                    'is_owner' => $tenant->isOwner($user),
-                ];
-            });
+        // Get users overview (first 5) - using standardized query method
+        $users = $this->getCompanyUsers($tenant, 5);
 
-        // Get brands overview (first 5)
-        $brands = $tenant->brands()
+        // Get all brands for the add user form (not just first 5)
+        $allBrands = $tenant->brands()
             ->orderBy('is_default', 'desc')
             ->orderBy('name')
-            ->limit(5)
             ->get()
             ->map(function ($brand) {
                 return [
@@ -126,6 +113,9 @@ class CompanyViewController extends Controller
                     'is_default' => $brand->is_default,
                 ];
             });
+
+        // Get brands overview (first 5) for display
+        $brands = $allBrands->take(5);
 
         // Get asset count and total storage
         // Use direct query since Tenant model doesn't have assets() relationship
@@ -162,6 +152,7 @@ class CompanyViewController extends Controller
             'recentActivity' => $recentActivity,
             'users' => $users,
             'brands' => $brands,
+            'all_brands' => $allBrands, // All brands for add user form
             'stats' => [
                 'total_users' => $tenant->users()->count(),
                 'total_brands' => $tenant->brands()->count(),
@@ -169,5 +160,33 @@ class CompanyViewController extends Controller
                 'total_storage_gb' => $totalStorageGB,
             ],
         ]);
+    }
+
+    /**
+     * Get company users using standardized query method.
+     * This ensures we avoid orphan issues by properly querying through the tenant relationship.
+     * 
+     * @param Tenant $tenant
+     * @param int|null $limit
+     * @return \Illuminate\Support\Collection
+     */
+    protected function getCompanyUsers(Tenant $tenant, ?int $limit = null)
+    {
+        $query = $tenant->users()
+            ->orderBy('tenant_user.created_at', 'desc');
+        
+        if ($limit) {
+            $query->limit($limit);
+        }
+        
+        return $query->get()->map(function ($user) use ($tenant) {
+            return [
+                'id' => $user->id,
+                'name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                'email' => $user->email,
+                'role' => $user->getRoleForTenant($tenant),
+                'is_owner' => $tenant->isOwner($user),
+            ];
+        });
     }
 }

@@ -16,6 +16,7 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'invite_member',
                 'name' => 'Invite Member',
+                'category' => 'tenant',
                 'subject' => 'You\'ve been invited to join {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
@@ -64,14 +65,15 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'account_canceled',
                 'name' => 'Account Canceled',
+                'category' => 'tenant',
                 'subject' => 'Your account has been canceled - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #ffffff; padding: 24px; text-align: center;">
+        <div style="background: linear-gradient(135deg, {{primary_color}} 0%, {{primary_color_dark}} 100%); color: #ffffff; padding: 24px; text-align: center;">
             <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
         </div>
         <div style="padding: 32px 24px;">
-            <h2 style="margin-top: 0; color: #ea580c;">Account Canceled</h2>
+            <h2 style="margin-top: 0; color: {{primary_color}};">Account Canceled</h2>
             
             <p>Hi {{user_name}},</p>
             
@@ -84,7 +86,7 @@ class NotificationTemplateSeeder extends Seeder
                 and you can still log in if you have access to other organizations.
             </p>
             
-            <p style="margin-top: 24px; padding: 16px; background-color: #fff7ed; border-left: 4px solid #f97316; border-radius: 4px;">
+            <p style="margin-top: 24px; padding: 16px; background-color: {{primary_color_light}}; border-left: 4px solid {{primary_color}}; border-radius: 4px;">
                 <strong>Important:</strong> Your account credentials remain active. If you believe this was done in error, 
                 please contact {{admin_name}} ({{admin_email}}) or reach out to support.
             </p>
@@ -108,6 +110,7 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'account_deleted',
                 'name' => 'Account Deleted',
+                'category' => 'tenant',
                 'subject' => 'Your account has been deleted - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
@@ -243,14 +246,15 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'tenant.owner_transfer_confirm',
                 'name' => 'Ownership Transfer Confirmation',
+                'category' => 'tenant',
                 'subject' => 'Confirm Ownership Transfer - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; padding: 24px; text-align: center;">
+        <div style="background: linear-gradient(135deg, {{primary_color}} 0%, {{primary_color_dark}} 100%); color: #ffffff; padding: 24px; text-align: center;">
             <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
         </div>
         <div style="padding: 32px 24px;">
-            <h2 style="margin-top: 0; color: #d97706;">Confirm Ownership Transfer</h2>
+            <h2 style="margin-top: 0; color: {{primary_color}};">Confirm Ownership Transfer</h2>
             
             <p>Hi {{current_owner_name}},</p>
             
@@ -259,7 +263,7 @@ class NotificationTemplateSeeder extends Seeder
                 <strong>{{new_owner_name}}</strong> ({{new_owner_email}}).
             </p>
             
-            <p style="margin-top: 24px; padding: 16px; background-color: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;">
+            <p style="margin-top: 24px; padding: 16px; background-color: {{primary_color_light}}; border-left: 4px solid {{primary_color}}; border-radius: 4px;">
                 <strong>Important:</strong> This action will transfer all ownership rights and responsibilities to {{new_owner_name}}. 
                 You will be downgraded to an Admin role after the transfer is completed.
             </p>
@@ -269,7 +273,7 @@ class NotificationTemplateSeeder extends Seeder
             </p>
             
             <div style="text-align: center;">
-                <a href="{{confirmation_url}}" style="display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 16px 0;">Confirm Transfer</a>
+                <a href="{{confirmation_url}}" style="display: inline-block; padding: 12px 24px; background-color: {{primary_color}}; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 16px 0;">Confirm Transfer</a>
             </div>
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
@@ -399,6 +403,7 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'password_reset',
                 'name' => 'Password Reset',
+                'category' => 'system',
                 'subject' => 'Reset Your Password - {{app_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
@@ -446,14 +451,15 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'billing_trial_expiring_warning',
                 'name' => 'Billing Trial Expiring Warning',
+                'category' => 'tenant',
                 'subject' => 'Your trial expires in {{days_until_expiration}} days - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; padding: 24px; text-align: center;">
+        <div style="background: linear-gradient(135deg, {{primary_color}} 0%, {{primary_color_dark}} 100%); color: #ffffff; padding: 24px; text-align: center;">
             <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
         </div>
         <div style="padding: 32px 24px;">
-            <h2 style="margin-top: 0; color: #d97706;">Trial Expiring Soon</h2>
+            <h2 style="margin-top: 0; color: {{primary_color}};">Trial Expiring Soon</h2>
             
             <p>Hi {{owner_name}},</p>
             
@@ -490,14 +496,15 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'billing_trial_expired',
                 'name' => 'Billing Trial Expired',
+                'category' => 'tenant',
                 'subject' => 'Your trial has expired - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #ffffff; padding: 24px; text-align: center;">
+        <div style="background: linear-gradient(135deg, {{primary_color}} 0%, {{primary_color_dark}} 100%); color: #ffffff; padding: 24px; text-align: center;">
             <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
         </div>
         <div style="padding: 32px 24px;">
-            <h2 style="margin-top: 0; color: #ea580c;">Trial Expired</h2>
+            <h2 style="margin-top: 0; color: {{primary_color}};">Trial Expired</h2>
             
             <p>Hi {{owner_name}},</p>
             
@@ -538,14 +545,15 @@ class NotificationTemplateSeeder extends Seeder
             [
                 'key' => 'billing_comped_expiring_warning',
                 'name' => 'Billing Comped Expiring Warning',
+                'category' => 'tenant',
                 'subject' => 'Your complimentary plan expires in {{days_until_expiration}} days - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: #ffffff; padding: 24px; text-align: center;">
+        <div style="background: linear-gradient(135deg, {{primary_color}} 0%, {{primary_color_dark}} 100%); color: #ffffff; padding: 24px; text-align: center;">
             <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
         </div>
         <div style="padding: 32px 24px;">
-            <h2 style="margin-top: 0; color: #7c3aed;">Complimentary Plan Expiring</h2>
+            <h2 style="margin-top: 0; color: {{primary_color}};">Complimentary Plan Expiring</h2>
             
             <p>Hi {{owner_name}},</p>
             
@@ -553,7 +561,7 @@ class NotificationTemplateSeeder extends Seeder
                 Your complimentary plan for <strong>{{tenant_name}}</strong> will expire in <strong>{{days_until_expiration}} day(s)</strong> on {{expiration_date}}.
             </p>
             
-            <p style="margin-top: 24px; padding: 16px; background-color: #faf5ff; border-left: 4px solid #8b5cf6; border-radius: 4px;">
+            <p style="margin-top: 24px; padding: 16px; background-color: {{primary_color_light}}; border-left: 4px solid {{primary_color}}; border-radius: 4px;">
                 <strong>What happens next:</strong><br>
                 When your complimentary plan expires, your account will automatically downgrade to the Free plan. 
                 To continue with your current features, please upgrade to a paid plan before {{expiration_date}}.
@@ -597,7 +605,7 @@ class NotificationTemplateSeeder extends Seeder
                 Your complimentary plan for <strong>{{tenant_name}}</strong> has expired.
             </p>
             
-            <p style="margin-top: 24px; padding: 16px; background-color: #faf5ff; border-left: 4px solid #8b5cf6; border-radius: 4px;">
+            <p style="margin-top: 24px; padding: 16px; background-color: {{primary_color_light}}; border-left: 4px solid {{primary_color}}; border-radius: 4px;">
                 <strong>What happened:</strong><br>
                 Your account has been automatically downgraded to the Free plan. You still have access to basic features, 
                 but some advanced features may be limited.

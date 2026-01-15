@@ -111,6 +111,15 @@ class EventType
     public const ZIP_GENERATED = 'zip.generated';
     public const ZIP_DOWNLOADED = 'zip.downloaded';
 
+    // Download Group events (Phase 3.1 Step 5)
+    public const DOWNLOAD_GROUP_CREATED = 'download_group.created';
+    public const DOWNLOAD_GROUP_READY = 'download_group.ready';
+    public const DOWNLOAD_GROUP_INVALIDATED = 'download_group.invalidated';
+    public const DOWNLOAD_ZIP_REQUESTED = 'download.zip.requested';
+    public const DOWNLOAD_ZIP_COMPLETED = 'download.zip.completed';
+    public const DOWNLOAD_ZIP_FAILED = 'download.zip.failed';
+    public const DOWNLOAD_GROUP_FAILED = 'download_group.failed';
+
     // Subscription/Billing events
     public const SUBSCRIPTION_CREATED = 'subscription.created';
     public const SUBSCRIPTION_UPDATED = 'subscription.updated';
@@ -218,6 +227,13 @@ class EventType
             self::SYSTEM_INFO,
             self::ZIP_GENERATED,
             self::ZIP_DOWNLOADED,
+            self::DOWNLOAD_GROUP_CREATED,
+            self::DOWNLOAD_GROUP_READY,
+            self::DOWNLOAD_GROUP_INVALIDATED,
+            self::DOWNLOAD_ZIP_REQUESTED,
+            self::DOWNLOAD_ZIP_COMPLETED,
+            self::DOWNLOAD_ZIP_FAILED,
+            self::DOWNLOAD_GROUP_FAILED,
             self::SUBSCRIPTION_CREATED,
             self::SUBSCRIPTION_UPDATED,
             self::SUBSCRIPTION_CANCELED,
