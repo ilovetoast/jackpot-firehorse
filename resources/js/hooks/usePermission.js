@@ -19,9 +19,10 @@ export function usePermission(permission, requireAll = true) {
     const permissions = Array.isArray(permission) ? permission : [permission]
     
     // Site permissions that should check direct permissions
-    const sitePermissions = ['company.manage', 'permissions.manage']
+    // Also includes admin permissions that are available to site roles
+    const sitePermissions = ['company.manage', 'permissions.manage', 'assets.regenerate_thumbnails_admin']
     const isSitePermission = (perm) => {
-        return sitePermissions.includes(perm) || perm.startsWith('site.')
+        return sitePermissions.includes(perm) || perm.startsWith('site.') || perm.endsWith('.admin')
     }
     
     // Memoize permission check to recalculate when auth props change

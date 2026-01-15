@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Illuminate\Support\Facades\DB;
@@ -47,10 +48,11 @@ class AssetController extends Controller
         }
 
         // Get only BASIC categories for the brand
-        // Filter out hidden categories unless user has permission
+        // Use the active() scope to filter out soft-deleted, templates, and deleted system categories
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('asset_type', AssetType::ASSET);
+            ->where('asset_type', AssetType::ASSET)
+            ->active(); // Filter out soft-deleted, templates, and deleted system categories
 
         // If user does not have 'manage categories' permission, filter out hidden categories
         if (! $user || ! $user->can('manage categories')) {
@@ -74,6 +76,8 @@ class AssetController extends Controller
         $allCategories = collect();
 
         // Add existing categories
+        // Note: Categories are already filtered by active() scope, but we still need to check
+        // template_exists for system categories to set the flag correctly
         foreach ($categories as $category) {
             // Find matching system template to get sort_order
             $matchingTemplate = $systemTemplates->first(function ($template) use ($category) {
@@ -95,23 +99,9 @@ class AssetController extends Controller
             }
             
             // Check if system category template still exists (for deleted system categories)
-            $templateExists = true;
-            $deletionAvailable = false;
-            if ($category->is_system) {
-                // Primary check: Use the model method to check if template exists in DB
-                $templateExists = $category->systemTemplateExists();
-                
-                // Secondary check: Verify against the active systemTemplates collection
-                // If no matching template in the active templates list, the template was deleted
-                // This is the authoritative check since getTemplatesByAssetType only returns active templates
-                if (!$matchingTemplate) {
-                    // No matching template in active templates = template was deleted
-                    $templateExists = false;
-                }
-                
-                // If template doesn't exist, deletion is available
-                $deletionAvailable = !$templateExists;
-            }
+            // Use the model's isActive() method for consistency
+            $templateExists = $category->is_system ? $category->systemTemplateExists() : true;
+            $deletionAvailable = $category->is_system ? !$templateExists : false;
             
             $allCategories->push([
                 'id' => $category->id,
@@ -271,11 +261,47 @@ class AssetController extends Controller
                 'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
             ]);
         } else {
+            // Enhanced logging for empty results - check if assets exist that don't match filters
+            $totalAssetsInBrand = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereNull('deleted_at')
+                ->count();
+            
+            $visibleAssetsInBrand = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('status', AssetStatus::VISIBLE)
+                ->whereNull('deleted_at')
+                ->count();
+            
+            $assetTypeAssets = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::ASSET)
+                ->where('status', AssetStatus::VISIBLE)
+                ->whereNull('deleted_at')
+                ->count();
+            
+            // Get most recent asset for debugging
+            $mostRecentAsset = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereNull('deleted_at')
+                ->latest('created_at')
+                ->first();
+            
             Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results (empty)', [
                 'query_tenant_id' => $tenant->id,
                 'query_brand_id' => $brand->id,
-                'assets_count' => 0,
-                'note' => 'No assets found - cannot compare brand_ids',
+                'category_filter' => $categoryId ?? 'none',
+                'total_assets_in_brand' => $totalAssetsInBrand,
+                'visible_assets_in_brand' => $visibleAssetsInBrand,
+                'asset_type_assets' => $assetTypeAssets,
+                'most_recent_asset' => $mostRecentAsset ? [
+                    'id' => $mostRecentAsset->id,
+                    'status' => $mostRecentAsset->status?->value ?? 'null',
+                    'type' => $mostRecentAsset->type?->value ?? 'null',
+                    'category_id' => $mostRecentAsset->metadata['category_id'] ?? 'null',
+                    'created_at' => $mostRecentAsset->created_at?->toIso8601String(),
+                ] : 'none',
+                'note' => 'No assets found - check status, type, brand_id, tenant_id, and category filter. If total_assets_in_brand > 0 but visible_assets_in_brand = 0, assets may have wrong status.',
             ]);
         }
         
@@ -406,18 +432,32 @@ class AssetController extends Controller
                 $thumbnailVersion = null;
                 
                 // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+                // AND thumbnail path exists in metadata (defensive check)
                 // Includes version query param (thumbnails_generated_at) for cache busting
                 if ($thumbnailStatus === 'completed') {
-                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                    // Verify thumbnail path exists in metadata before generating URL
+                    // This prevents showing broken thumbnail URLs
+                    $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
                     
-                    $finalThumbnailUrl = route('assets.thumbnail.final', [
-                        'asset' => $asset->id,
-                        'style' => 'thumb',
-                    ]);
-                    
-                    // Add version query param if available (ensures browser refetches when version changes)
-                    if ($thumbnailVersion) {
-                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                    if ($thumbnailPath) {
+                        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                        
+                        $finalThumbnailUrl = route('assets.thumbnail.final', [
+                            'asset' => $asset->id,
+                            'style' => 'thumb',
+                        ]);
+                        
+                        // Add version query param if available (ensures browser refetches when version changes)
+                        if ($thumbnailVersion) {
+                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        }
+                    } else {
+                        // Thumbnail status is completed but path is missing - log for debugging
+                        \Illuminate\Support\Facades\Log::warning('Asset marked as completed but thumbnail path missing', [
+                            'asset_id' => $asset->id,
+                            'thumbnail_status' => $thumbnailStatus,
+                            'metadata_thumbnails' => isset($metadata['thumbnails']) ? array_keys($metadata['thumbnails'] ?? []) : 'not set',
+                        ]);
                     }
                 }
 
@@ -897,6 +937,60 @@ class AssetController extends Controller
         return response()->json([
             'events' => $events,
         ], 200);
+    }
+
+    /**
+     * Download an asset.
+     *
+     * GET /assets/{asset}/download
+     *
+     * Generates a signed S3 URL for the asset and tracks the download metric.
+     *
+     * @param Asset $asset
+     * @return \Illuminate\Http\RedirectResponse|JsonResponse
+     */
+    public function download(Asset $asset): \Illuminate\Http\RedirectResponse|JsonResponse
+    {
+        $this->authorize('view', $asset);
+
+        try {
+            // Generate signed S3 URL
+            // Asset path is stored in storage_root_path field
+            if (!$asset->storage_root_path) {
+                return response()->json([
+                    'message' => 'Asset storage path not found',
+                ], 404);
+            }
+
+            $disk = Storage::disk('s3');
+            $signedUrl = $disk->temporaryUrl(
+                $asset->storage_root_path,
+                now()->addMinutes(15) // URL valid for 15 minutes
+            );
+
+            // Track download metric
+            $metricsService = app(\App\Services\AssetMetricsService::class);
+            $user = auth()->user();
+            $metricsService->recordMetric(
+                asset: $asset,
+                type: \App\Enums\MetricType::DOWNLOAD,
+                viewType: null,
+                metadata: null,
+                user: $user
+            );
+
+            // Redirect to signed URL
+            return redirect($signedUrl);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to generate download URL', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate download URL',
+            ], 500);
+        }
     }
 
     /**

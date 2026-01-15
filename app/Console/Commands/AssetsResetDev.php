@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Models\ActivityEvent;
 use App\Models\Asset;
+use App\Models\AssetMetric;
+use App\Models\MetricAggregate;
 use App\Models\UploadSession;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +21,7 @@ use Aws\Exception\AwsException;
  * This command:
  * - Deletes all assets, upload sessions, and failed jobs
  * - Removes asset-related activity events
+ * - Deletes all asset metrics and metric aggregates (analytics)
  * - Deletes all S3 objects under temp/, assets/, and thumbnails/
  *
  * WARNING: This is a destructive operation that cannot be undone!
@@ -53,6 +56,8 @@ class AssetsResetDev extends Command
         'upload_sessions_deleted' => 0,
         'failed_jobs_deleted' => 0,
         'activity_events_deleted' => 0,
+        'asset_metrics_deleted' => 0,
+        'metric_aggregates_deleted' => 0,
         's3_objects_deleted' => 0,
         's3_prefixes' => [],
         'errors' => [],
@@ -73,7 +78,7 @@ class AssetsResetDev extends Command
         }
 
         // Confirmation prompt
-        $this->warn("⚠️  WARNING: This will DELETE ALL assets, upload sessions, and S3 objects!");
+        $this->warn("⚠️  WARNING: This will DELETE ALL assets, upload sessions, analytics, and S3 objects!");
         $this->warn("   This operation cannot be undone!");
         if (!$this->confirm('Are you sure you want to continue?', false)) {
             $this->info('Operation cancelled.');
@@ -176,6 +181,38 @@ class AssetsResetDev extends Command
             $this->error("    ✗ {$error}");
             $this->stats['errors'][] = $error;
             Log::error('Assets reset: failed to delete activity events', ['error' => $e->getMessage()]);
+        }
+
+        // Delete asset metrics (individual metric records)
+        try {
+            $this->line("  → Deleting asset metrics...");
+            
+            // Delete all asset metrics (they reference assets via foreign key)
+            $count = AssetMetric::query()->delete();
+            
+            $this->stats['asset_metrics_deleted'] = $count;
+            $this->info("    ✓ Deleted {$count} asset metrics");
+        } catch (\Exception $e) {
+            $error = "Failed to delete asset metrics: {$e->getMessage()}";
+            $this->error("    ✗ {$error}");
+            $this->stats['errors'][] = $error;
+            Log::error('Assets reset: failed to delete asset metrics', ['error' => $e->getMessage()]);
+        }
+
+        // Delete metric aggregates (aggregated metric records)
+        try {
+            $this->line("  → Deleting metric aggregates...");
+            
+            // Delete all metric aggregates (they reference assets via foreign key)
+            $count = MetricAggregate::query()->delete();
+            
+            $this->stats['metric_aggregates_deleted'] = $count;
+            $this->info("    ✓ Deleted {$count} metric aggregates");
+        } catch (\Exception $e) {
+            $error = "Failed to delete metric aggregates: {$e->getMessage()}";
+            $this->error("    ✗ {$error}");
+            $this->stats['errors'][] = $error;
+            Log::error('Assets reset: failed to delete metric aggregates', ['error' => $e->getMessage()]);
         }
 
         $this->newLine();
@@ -350,6 +387,8 @@ class AssetsResetDev extends Command
                 ['Upload Sessions Deleted', $this->stats['upload_sessions_deleted']],
                 ['Failed Jobs Cleared', $this->stats['failed_jobs_deleted']],
                 ['Activity Events Deleted', $this->stats['activity_events_deleted']],
+                ['Asset Metrics Deleted', $this->stats['asset_metrics_deleted']],
+                ['Metric Aggregates Deleted', $this->stats['metric_aggregates_deleted']],
                 ['S3 Objects Deleted', $this->stats['s3_objects_deleted']],
             ]
         );

@@ -66,3 +66,11 @@ Schedule::command('billing:process-expired')
     ->dailyAt('02:00')
     ->withoutOverlapping()
     ->description('Process expired trial and comped accounts, downgrading to free plan');
+
+// Aggregate asset metrics (runs daily at 2:00 AM)
+// Aggregates previous day's metrics into daily/weekly/monthly aggregates for performance
+Schedule::job(\App\Jobs\AggregateMetricsJob::class)
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->name('aggregate-metrics')
+    ->description('Aggregate asset metrics into periodic aggregates');

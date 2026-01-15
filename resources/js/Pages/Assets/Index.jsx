@@ -9,6 +9,7 @@ import AssetDrawer from '../../Components/AssetDrawer'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
+import { filterActiveCategories } from '../../utils/categoryUtils'
 import {
     FolderIcon,
     TagIcon,
@@ -366,18 +367,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         )}
                                         {/* Show all categories (both basic and marketing) in a single list */}
                                         {categories && categories.length > 0 ? (
-                                            categories
-                                                .filter(category => {
-                                                    // Filter out templates (no ID)
-                                                    if (category.id == null || category.id === undefined || category.id === 0) {
-                                                        return false
-                                                    }
-                                                    // Filter out deleted system categories (template no longer exists)
-                                                    if (category.is_system && category.template_exists === false) {
-                                                        return false
-                                                    }
-                                                    return true
-                                                })
+                                            filterActiveCategories(categories)
                                                 .map((category) => {
                                                     const isSelected = selectedCategoryId === category.id && selectedCategoryId !== null && selectedCategoryId !== undefined
                                                     return (
@@ -510,10 +500,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         {localAssets && localAssets.length > 0 && (
                             <div className="mb-6">
                                 <AssetGridToolbar
-                                    onRefreshThumbnails={() => {
-                                        // Manual refresh: reload assets only, preserve scroll
-                                        router.reload({ only: ['assets'], preserveScroll: true })
-                                    }}
                                     showInfo={showInfo}
                                     onToggleInfo={() => setShowInfo(v => !v)}
                                     cardSize={cardSize}

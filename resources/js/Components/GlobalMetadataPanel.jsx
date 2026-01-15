@@ -12,6 +12,7 @@
 import { useState, useEffect } from 'react';
 import { ExclamationTriangleIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import MetadataFieldRenderer from './MetadataFieldRenderer';
+import { filterActiveCategories } from '../utils/categoryUtils';
 
 /**
  * GlobalMetadataPanel - Global metadata editing panel
@@ -40,9 +41,9 @@ export default function GlobalMetadataPanel({
         validateMetadata
     } = uploadManager;
 
-    // Filter categories by asset type if needed
-    // (This assumes categories have asset_type property - adjust if different)
-    const filteredCategories = categories || [];
+    // Filter categories using the reusable utility function
+    // This ensures consistency across all components (sidebar, dropdown, etc.)
+    const filteredCategories = filterActiveCategories(categories);
 
     // Get category change and metadata invalidation warnings
     const categoryWarnings = warnings.filter(

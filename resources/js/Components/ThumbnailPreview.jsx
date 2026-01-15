@@ -3,11 +3,25 @@
  * 
  * Renders asset thumbnails with strict priority: final > preview > icon
  * 
+ * 🔒 THUMBNAIL SYSTEM LOCK:
+ * This system is intentionally NON-REALTIME. Thumbnails do NOT auto-update in the grid.
+ * Users must refresh the page to see final thumbnails after processing completes.
+ * This design prioritizes stability over real-time updates.
+ * 
  * HARD STABILIZATION: In grid context, thumbnails are snapshot-only by design.
  * Grid thumbnails are locked on first render and never update after mount.
  * This prevents flicker and re-render thrash.
  * 
  * Live thumbnail updates are ONLY enabled in AssetDrawer context via useDrawerThumbnailPoll.
+ * 
+ * Terminal state guarantees:
+ * - Spinner ONLY shows when thumbnail_status === PROCESSING
+ * - Terminal states (COMPLETED, FAILED, SKIPPED) NEVER show spinners
+ * - Final thumbnail existence blocks spinner display
+ * 
+ * TODO (future): Allow manual thumbnail regeneration per asset.
+ * TODO (future): Consider websocket-based thumbnail update broadcasting.
+ * TODO (future): Consider thumbnail_version field for live UI refresh.
  * 
  * @param {Object} props
  * @param {Object} props.asset - Asset object
@@ -45,14 +59,18 @@ export default function ThumbnailPreview({
     const animationCompletedRef = useRef(false)
     const imgRef = useRef(null)
 
-    // HARD STABILIZATION: Lock thumbnail URL on first render
+    // HARD STABILIZATION: Lock thumbnail URL on first render for grid context
     // Once a thumbnail is visible, it never reloads or flashes.
     // NOTE: Thumbnails intentionally do NOT live-update on the grid.
     // Stability > real-time updates.
     // Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
     
-    // Lock the URL on first render - never update after mount
-    const [lockedUrl] = useState(() => {
+    // DRAWER CONTEXT: If thumbnailVersion is provided, allow live updates
+    // This enables drawer previews to update when new thumbnails are generated
+    const isDrawerContext = thumbnailVersion !== null
+    
+    // Lock the URL on first render for grid, but allow updates for drawer
+    const [lockedUrl, setLockedUrl] = useState(() => {
         // Determine initial URL: final > preview > null
         const initialFinal = asset?.final_thumbnail_url
         const initialPreview = asset?.preview_thumbnail_url
@@ -60,11 +78,48 @@ export default function ThumbnailPreview({
     })
     
     // Also lock the type (final vs preview) at mount time
-    const [lockedType] = useState(() => {
+    const [lockedType, setLockedType] = useState(() => {
         if (asset?.final_thumbnail_url) return 'final'
         if (asset?.preview_thumbnail_url) return 'preview'
         return null
     })
+    
+    // Track previous asset ID to detect asset changes
+    const prevAssetIdRef = useRef(asset?.id)
+    
+    // In drawer context, update URL when asset or version changes
+    useEffect(() => {
+        if (isDrawerContext && asset) {
+            const newFinal = asset?.final_thumbnail_url
+            const newPreview = asset?.preview_thumbnail_url
+            const newUrl = newFinal || newPreview || null
+            const assetIdChanged = prevAssetIdRef.current !== asset?.id
+            
+            // Update if:
+            // 1. Asset ID changed (always reset for new asset, even if no thumbnail)
+            // 2. URL changed (thumbnail became available or changed)
+            // 3. URL was removed (switching from asset with thumb to one without)
+            if (assetIdChanged || (newUrl && newUrl !== lockedUrl) || (!newUrl && lockedUrl && prevAssetIdRef.current === asset?.id)) {
+                setLockedUrl(newUrl)
+                if (newFinal) {
+                    setLockedType('final')
+                } else if (newPreview) {
+                    setLockedType('preview')
+                } else {
+                    setLockedType(null)
+                }
+                // Reset image state when URL changes
+                setImageLoaded(false)
+                setImageError(false)
+                
+                // Update ref to track current asset ID
+                prevAssetIdRef.current = asset?.id
+            }
+        } else if (isDrawerContext && !asset) {
+            // Asset became null (drawer closed) - reset tracking
+            prevAssetIdRef.current = null
+        }
+    }, [isDrawerContext, asset?.id, asset?.final_thumbnail_url, asset?.preview_thumbnail_url, thumbnailVersion, lockedUrl])
     
     // Determine if locked URL is final or preview (based on what was locked at mount)
     const lockedIsFinal = lockedType === 'final'
@@ -185,17 +240,6 @@ export default function ThumbnailPreview({
                                      !hasThumbnailError &&
                                      !isTerminalState
         
-        // Debug logging (temporary)
-        if (isActivelyProcessing) {
-            console.debug('[ThumbnailSpinner] Spinner visible (fallback preview)', {
-                asset_id: asset?.id,
-                thumbnail_status: thumbnailStatus,
-                has_final: hasFinalThumbnail,
-                has_error: hasThumbnailError,
-                is_terminal: isTerminalState,
-            })
-        }
-        
         return (
             <div className={`relative ${className}`}>
                 {/* Preview image always renders when preview_thumbnail_url exists */}
@@ -284,18 +328,6 @@ export default function ThumbnailPreview({
                                      !hasFinalThumbnail &&
                                      !hasThumbnailError &&
                                      !isTerminalState
-        
-        // Debug logging (temporary)
-        if (isActivelyProcessing) {
-            console.debug('[ThumbnailSpinner] Spinner visible', {
-                asset_id: asset?.id,
-                thumbnail_status: thumbnailStatus,
-                has_final: hasFinalThumbnail,
-                has_preview: !!asset?.preview_thumbnail_url,
-                has_error: hasThumbnailError,
-                is_terminal: isTerminalState,
-            })
-        }
         
         return (
             <div className={`relative ${className}`}>

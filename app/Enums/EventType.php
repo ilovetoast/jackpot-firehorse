@@ -78,6 +78,7 @@ class EventType
     public const ASSET_THUMBNAIL_COMPLETED = 'asset.thumbnail.completed';
     public const ASSET_THUMBNAIL_FAILED = 'asset.thumbnail.failed';
     public const ASSET_THUMBNAIL_SKIPPED = 'asset.thumbnail.skipped';
+    public const ASSET_THUMBNAIL_RETRY_REQUESTED = 'asset.thumbnail.retry_requested';
     public const ASSET_PROMOTED = 'asset.promoted';
     public const ASSET_READY = 'asset.ready';
 
@@ -85,6 +86,9 @@ class EventType
     public const ASSET_DOWNLOAD_CREATED = 'asset.download.created';
     public const ASSET_DOWNLOAD_COMPLETED = 'asset.download.completed';
     public const ASSET_DOWNLOAD_FAILED = 'asset.download.failed';
+
+    // Asset metric events
+    public const ASSET_METRIC_RECORDED = 'asset.metric.recorded';
 
     // Asset sharing events
     public const ASSET_SHARED_LINK_CREATED = 'asset.shared.link_created';
@@ -195,6 +199,7 @@ class EventType
             self::ASSET_THUMBNAIL_COMPLETED,
             self::ASSET_THUMBNAIL_FAILED,
             self::ASSET_THUMBNAIL_SKIPPED,
+            self::ASSET_THUMBNAIL_RETRY_REQUESTED,
             self::ASSET_PROMOTED,
             self::ASSET_READY,
             self::ASSET_DOWNLOAD_CREATED,

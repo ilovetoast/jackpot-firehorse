@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Models\Ticket;
+use App\Policies\AssetPolicy;
 use App\Policies\BrandPolicy;
 use App\Policies\CategoryPolicy;
 use App\Policies\CompanyPolicy;
@@ -22,6 +24,7 @@ class AuthServiceProvider extends ServiceProvider
      * @var array<class-string, class-string>
      */
     protected $policies = [
+        Asset::class => AssetPolicy::class,
         Tenant::class => CompanyPolicy::class,
         Brand::class => BrandPolicy::class,
         Category::class => CategoryPolicy::class,

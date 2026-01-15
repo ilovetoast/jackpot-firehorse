@@ -114,4 +114,56 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Thumbnail Retry Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for manual thumbnail retry feature.
+    | Allows users to retry thumbnail generation from the asset drawer UI.
+    |
+    | IMPORTANT: This feature respects the locked thumbnail pipeline:
+    | - Does not modify existing GenerateThumbnailsJob
+    | - Does not mutate Asset.status
+    | - Retry attempts are tracked for audit purposes
+    |
+    */
+
+    'thumbnail' => [
+        /*
+         * Maximum number of manual retry attempts per asset.
+         * Once this limit is reached, users cannot retry again for that asset.
+         * This prevents abuse and infinite retry loops.
+         */
+        'max_retries' => env('THUMBNAIL_MAX_RETRIES', 3),
+
+        /*
+         * PDF thumbnail generation limits and safety guards.
+         * These limits prevent resource exhaustion from large or malformed PDFs.
+         */
+        'pdf' => [
+            /*
+             * Maximum PDF file size in bytes (default: 150MB).
+             * PDFs larger than this will be rejected for thumbnail generation.
+             * This prevents memory exhaustion and processing timeouts.
+             * Can be overridden via THUMBNAIL_PDF_MAX_SIZE_BYTES environment variable.
+             */
+            'max_size_bytes' => env('THUMBNAIL_PDF_MAX_SIZE_BYTES', 150 * 1024 * 1024), // 150MB
+
+            /*
+             * Maximum page number to process (default: 1).
+             * Only the first page is used for thumbnail generation.
+             * This is enforced to prevent processing multi-page PDFs.
+             */
+            'max_page' => env('THUMBNAIL_PDF_MAX_PAGE', 1),
+
+            /*
+             * Timeout for PDF processing in seconds (default: 60).
+             * If PDF thumbnail generation takes longer than this, it will fail.
+             * This prevents stuck jobs from large or complex PDFs.
+             */
+            'timeout_seconds' => env('THUMBNAIL_PDF_TIMEOUT_SECONDS', 60),
+        ],
+    ],
+
 ];

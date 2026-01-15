@@ -281,6 +281,389 @@ class AssetThumbnailController extends Controller
     }
 
     /**
+     * Retry thumbnail generation for an asset.
+     *
+     * POST /app/assets/{asset}/thumbnails/retry
+     *
+     * Allows users to manually retry thumbnail generation from the asset drawer UI.
+     * This endpoint validates retry eligibility, enforces retry limits, and dispatches
+     * the existing GenerateThumbnailsJob without modifying it.
+     *
+     * IMPORTANT: This feature respects the locked thumbnail pipeline:
+     * - Does not modify existing GenerateThumbnailsJob
+     * - Does not mutate Asset.status (status represents visibility only)
+     * - Retry attempts are tracked for audit purposes
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function retry(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        // Authorize: User must have permission to retry thumbnails
+        $this->authorize('retryThumbnails', $asset);
+
+        $user = $request->user();
+        $retryService = app(\App\Services\ThumbnailRetryService::class);
+
+        // Validate retry eligibility
+        $canRetry = $retryService->canRetry($asset);
+        if (!$canRetry['allowed']) {
+            // Determine appropriate HTTP status code
+            $statusCode = 422; // Unprocessable Entity (default)
+            if (str_contains($canRetry['reason'] ?? '', 'Maximum retry attempts')) {
+                $statusCode = 429; // Too Many Requests
+            } elseif (str_contains($canRetry['reason'] ?? '', 'already in progress')) {
+                $statusCode = 409; // Conflict
+            } elseif (str_contains($canRetry['reason'] ?? '', 'missing')) {
+                $statusCode = 422; // Unprocessable Entity
+            }
+
+            Log::warning('[AssetThumbnailController] Thumbnail retry not allowed', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'reason' => $canRetry['reason'] ?? 'unknown',
+            ]);
+
+            return response()->json([
+                'error' => $canRetry['reason'] ?? 'Retry not allowed',
+            ], $statusCode);
+        }
+
+        // Dispatch retry
+        $result = $retryService->dispatchRetry($asset, $user->id);
+
+        if (!$result['success']) {
+            Log::error('[AssetThumbnailController] Failed to dispatch thumbnail retry', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $result['error'] ?? 'unknown',
+            ]);
+
+            return response()->json([
+                'error' => $result['error'] ?? 'Failed to dispatch thumbnail retry',
+            ], 500);
+        }
+
+        // Log activity event
+        try {
+            \App\Services\ActivityRecorder::logAsset(
+                $asset,
+                \App\Enums\EventType::ASSET_THUMBNAIL_RETRY_REQUESTED,
+                [
+                    'retry_count' => $asset->thumbnail_retry_count,
+                    'previous_status' => $asset->thumbnail_status?->value ?? 'unknown',
+                    'triggered_by_user_id' => $user->id,
+                    'job_id' => $result['job_id'] ?? null,
+                ]
+            );
+        } catch (\Exception $e) {
+            // Activity logging must never break the request
+            Log::error('Failed to log thumbnail retry event', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Refresh asset to get updated retry count
+        $asset->refresh();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Thumbnail retry job dispatched',
+            'retry_count' => $asset->thumbnail_retry_count,
+            'job_id' => $result['job_id'] ?? null,
+        ], 200);
+    }
+
+    /**
+     * Generate thumbnail for an existing asset that doesn't have one yet.
+     *
+     * POST /app/assets/{asset}/thumbnails/generate
+     *
+     * Allows users to manually trigger thumbnail generation for existing assets
+     * that were previously skipped (e.g., PDFs before PDF support was added).
+     * This is a user-triggered regeneration only - does not modify the thumbnail pipeline.
+     *
+     * IMPORTANT: This feature respects the locked thumbnail pipeline:
+     * - Does not modify existing GenerateThumbnailsJob
+     * - Does not mutate Asset.status (status represents visibility only)
+     * - Uses existing job and pipeline without changes
+     * - Idempotent: safe to call if thumbnail already exists
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generate(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        // Authorize: User must have permission to generate thumbnails (same as retry)
+        $this->authorize('retryThumbnails', $asset);
+
+        $user = $request->user();
+
+        // Safety check: If thumbnail already exists and is completed, return no-op
+        // This prevents unnecessary job dispatch and respects idempotency
+        if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+            Log::info('[AssetThumbnailController] Thumbnail generation skipped - already completed', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Thumbnail already exists',
+                'thumbnail_status' => 'completed',
+            ], 200);
+        }
+
+        // Safety check: If thumbnail is currently processing, return conflict
+        // This prevents duplicate job dispatch and respects existing job execution
+        if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
+            Log::warning('[AssetThumbnailController] Thumbnail generation already in progress', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+
+            return response()->json([
+                'error' => 'Thumbnail generation is already in progress',
+            ], 409); // Conflict
+        }
+
+        // Note: PENDING status is allowed - we reset to PENDING to allow generation
+        // The job itself has idempotency checks (checks if COMPLETED) so it's safe
+
+        // Validate file type is supported for thumbnail generation
+        // This uses the same logic as GenerateThumbnailsJob to ensure consistency
+        $mimeType = strtolower($asset->mime_type ?? '');
+        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+
+        $isSupported = false;
+        $supportReason = '';
+
+        // Check PDF support
+        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
+            if (class_exists(\Spatie\PdfToImage\Pdf::class)) {
+                $isSupported = true;
+                $supportReason = 'PDF (page 1)';
+            } else {
+                return response()->json([
+                    'error' => 'PDF thumbnail generation requires spatie/pdf-to-image package',
+                ], 422);
+            }
+        }
+
+        // Check image support (GD library)
+        if (!$isSupported) {
+            $supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            $supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+            if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
+                $isSupported = true;
+                $supportReason = 'Image';
+            } elseif ($extension && in_array($extension, $supportedExtensions)) {
+                $isSupported = true;
+                $supportReason = 'Image';
+            }
+        }
+
+        if (!$isSupported) {
+            Log::warning('[AssetThumbnailController] Thumbnail generation not supported for file type', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'mime_type' => $mimeType,
+                'extension' => $extension,
+            ]);
+
+            return response()->json([
+                'error' => 'Thumbnail generation is not supported for this file type',
+            ], 422);
+        }
+
+        // Check if asset has required storage information
+        if (!$asset->storage_root_path || !$asset->storageBucket) {
+            Log::warning('[AssetThumbnailController] Asset missing storage information', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+
+            return response()->json([
+                'error' => 'Asset storage information is missing',
+            ], 422);
+        }
+
+        // Reset thumbnail status to PENDING to allow generation
+        // This is safe because we're explicitly triggering generation
+        // IMPORTANT: We do NOT mutate Asset.status (status represents visibility only)
+        $asset->update([
+            'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
+            'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+        ]);
+
+        // Dispatch existing GenerateThumbnailsJob (unchanged, respects locked pipeline)
+        // The job will handle all thumbnail generation logic
+        // Note: Job ID is not available immediately after dispatch
+        // The job ID will be available inside the job execution via $this->job->getJobId()
+        \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
+
+        Log::info('[AssetThumbnailController] Thumbnail generation job dispatched (manual request)', [
+            'asset_id' => $asset->id,
+            'user_id' => $user->id,
+            'file_type' => $supportReason,
+            'previous_status' => 'skipped',
+        ]);
+
+        // Log activity event for timeline
+        try {
+            \App\Services\ActivityRecorder::logAsset(
+                $asset,
+                \App\Enums\EventType::ASSET_THUMBNAIL_STARTED,
+                [
+                    'triggered_by' => 'user_manual_request',
+                    'triggered_by_user_id' => $user->id,
+                    'file_type' => $supportReason,
+                    'previous_status' => 'skipped',
+                ]
+            );
+        } catch (\Exception $e) {
+            // Activity logging must never break the request
+            Log::error('Failed to log thumbnail generation started event', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Thumbnail generation job dispatched',
+            'file_type' => $supportReason,
+        ], 200);
+    }
+
+    /**
+     * Regenerate specific thumbnail styles for an asset (admin only).
+     *
+     * Site roles (site_owner, site_admin, site_support, site_engineering) can:
+     * - Regenerate specific thumbnail styles
+     * - Troubleshoot thumbnail issues
+     * - Test new file types
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function regenerateStyles(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        // Authorize: User must have admin regeneration permission (site role only)
+        $this->authorize('regenerateThumbnailsAdmin', $asset);
+
+        $user = $request->user();
+        $styleNames = $request->input('styles', []);
+
+        // Validate style names
+        $allStyles = config('assets.thumbnail_styles', []);
+        $validStyles = [];
+        
+        foreach ($styleNames as $styleName) {
+            if (isset($allStyles[$styleName])) {
+                $validStyles[] = $styleName;
+            } else {
+                Log::warning('[AssetThumbnailController] Invalid style name requested', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                    'invalid_style' => $styleName,
+                ]);
+            }
+        }
+
+        if (empty($validStyles)) {
+            return response()->json([
+                'error' => 'No valid thumbnail styles specified',
+            ], 422);
+        }
+
+        // Check if asset has required storage information
+        if (!$asset->storage_root_path || !$asset->storageBucket) {
+            Log::warning('[AssetThumbnailController] Asset missing storage information', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+
+            return response()->json([
+                'error' => 'Asset storage information is missing',
+            ], 422);
+        }
+
+        try {
+            // Admin override: Check if user wants to force ImageMagick (bypass file type checks)
+            $forceImageMagick = $request->input('force_imagick', false);
+            
+            // Regenerate specific styles
+            $thumbnailService = app(\App\Services\ThumbnailGenerationService::class);
+            $regenerated = $thumbnailService->regenerateThumbnailStyles($asset, $validStyles, $forceImageMagick);
+
+            Log::info('[AssetThumbnailController] Thumbnail styles regenerated (admin)', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'styles' => $validStyles,
+                'regenerated_styles' => array_keys($regenerated),
+            ]);
+
+            // Log activity event for timeline
+            try {
+                // Separate preview and final styles for proper tracking
+                $previewStyles = [];
+                $finalStyles = [];
+                foreach (array_keys($regenerated) as $styleName) {
+                    if ($styleName === 'preview') {
+                        $previewStyles[] = $styleName;
+                    } else {
+                        $finalStyles[] = $styleName;
+                    }
+                }
+                
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_THUMBNAIL_COMPLETED,
+                    [
+                        'triggered_by' => 'admin_regeneration',
+                        'triggered_by_user_id' => $user->id,
+                        'styles' => $finalStyles, // Only final styles for timeline indicators
+                        'preview_styles' => $previewStyles, // Preview styles separately
+                        'thumbnail_count' => count($regenerated),
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::error('Failed to log thumbnail regeneration event', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Thumbnail styles regenerated',
+                'regenerated_styles' => array_keys($regenerated),
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('[AssetThumbnailController] Thumbnail style regeneration failed', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'styles' => $validStyles,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to regenerate thumbnail styles: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Authorize asset access.
      *
      * @param Request $request

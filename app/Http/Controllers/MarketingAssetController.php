@@ -148,32 +148,84 @@ class MarketingAssetController extends Controller
             }
         }
 
-        // Query marketing assets with completed processing pipeline
-        // Query by processing state (thumbnail_status + metadata flags), not status
+        // Query marketing assets - show all visible assets regardless of processing state
+        // This matches the behavior of the regular Assets page
+        // Assets are visible immediately after upload, processing happens in background
         // Note: assets must be top-level prop for Inertia to pass to frontend component
         $assetsQuery = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', AssetType::MARKETING)
             ->where('status', AssetStatus::VISIBLE) // Only visible assets
-            ->where('thumbnail_status', \App\Enums\ThumbnailStatus::COMPLETED)
-            ->where('metadata->ai_tagging_completed', true)
-            ->where('metadata->metadata_extracted', true)
-            ->where(function ($query) {
-                // Preview generated is optional
-                $query->where('metadata->preview_generated', true)
-                      ->orWhereNull('metadata->preview_generated');
-            })
             ->whereNull('deleted_at'); // Exclude soft-deleted assets
+        
+        // HARD TERMINAL STATE: Check for stuck assets and repair them
+        // This prevents infinite processing states by automatically failing
+        // assets that have been processing longer than the timeout threshold
+        $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
 
         // Filter by category if provided (check metadata for category_id)
         if ($categoryId) {
-            // Filter assets where metadata contains category_id
-            // Note: Handles null metadata gracefully - assets without category in metadata will be excluded
+            // Filter assets where metadata->category_id matches the category ID
+            // Use direct JSON path comparison for exact integer match
+            // Cast categoryId to integer to ensure type matching with JSON integer values
             $assetsQuery->whereNotNull('metadata')
-                ->whereJsonContains('metadata->category_id', $categoryId);
+                ->where('metadata->category_id', (int) $categoryId);
         }
 
-        $assets = $assetsQuery->get()
+        $assets = $assetsQuery->get();
+        
+        // HARD TERMINAL STATE: Check for stuck assets and repair them
+        // This prevents infinite processing states by automatically failing
+        // assets that have been processing longer than the timeout threshold
+        foreach ($assets as $asset) {
+            if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
+                $timeoutGuard->checkAndRepair($asset);
+                // Reload asset to get updated status if it was repaired
+                $asset->refresh();
+            }
+        }
+        
+        // Enhanced logging for debugging missing assets
+        if ($assets->count() === 0) {
+            $totalMarketingAssets = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::MARKETING)
+                ->whereNull('deleted_at')
+                ->count();
+            
+            $visibleMarketingAssets = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::MARKETING)
+                ->where('status', AssetStatus::VISIBLE)
+                ->whereNull('deleted_at')
+                ->count();
+            
+            $mostRecentMarketingAsset = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::MARKETING)
+                ->whereNull('deleted_at')
+                ->latest('created_at')
+                ->first();
+            
+            \Illuminate\Support\Facades\Log::info('[MARKETING_ASSET_QUERY_AUDIT] MarketingAssetController::index() query results (empty)', [
+                'query_tenant_id' => $tenant->id,
+                'query_brand_id' => $brand->id,
+                'category_filter' => $categoryId ?? 'none',
+                'total_marketing_assets' => $totalMarketingAssets,
+                'visible_marketing_assets' => $visibleMarketingAssets,
+                'most_recent_asset' => $mostRecentMarketingAsset ? [
+                    'id' => $mostRecentMarketingAsset->id,
+                    'status' => $mostRecentMarketingAsset->status?->value ?? 'null',
+                    'type' => $mostRecentMarketingAsset->type?->value ?? 'null',
+                    'thumbnail_status' => $mostRecentMarketingAsset->thumbnail_status?->value ?? 'null',
+                    'category_id' => $mostRecentMarketingAsset->metadata['category_id'] ?? 'null',
+                    'created_at' => $mostRecentMarketingAsset->created_at?->toIso8601String(),
+                ] : 'none',
+                'note' => 'No marketing assets found - check status, type, brand_id, tenant_id, and category filter',
+            ]);
+        }
+        
+        $assets = $assets
             ->map(function ($asset) use ($tenant, $brand) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
@@ -275,6 +327,61 @@ class MarketingAssetController extends Controller
                     }
                 }
 
+                // Step 6: Generate distinct thumbnail URLs for preview and final
+                // CRITICAL: Preview and final URLs must NEVER be the same to prevent cache confusion
+                // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
+                // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
+                
+                $metadata = $asset->metadata ?? [];
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                    ? $asset->thumbnail_status->value 
+                    : ($asset->thumbnail_status ?? 'pending');
+                
+                // Step 6: Preview thumbnail URL only if preview exists in metadata
+                // Preview thumbnails are generated early and stored separately
+                $previewThumbnailUrl = null;
+                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+                if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+                    // Preview exists - construct URL to preview endpoint
+                    $previewThumbnailUrl = route('assets.thumbnail.preview', [
+                        'asset' => $asset->id,
+                        'style' => 'preview', // Preview endpoint serves 'preview' style
+                    ]);
+                }
+                
+                $finalThumbnailUrl = null;
+                $thumbnailVersion = null;
+                
+                // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+                // AND thumbnail path exists in metadata (defensive check)
+                // Includes version query param (thumbnails_generated_at) for cache busting
+                if ($thumbnailStatus === 'completed') {
+                    // Verify thumbnail path exists in metadata before generating URL
+                    // This prevents showing broken thumbnail URLs
+                    $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
+                    
+                    if ($thumbnailPath) {
+                        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                        
+                        $finalThumbnailUrl = route('assets.thumbnail.final', [
+                            'asset' => $asset->id,
+                            'style' => 'thumb',
+                        ]);
+                        
+                        // Add version query param if available (ensures browser refetches when version changes)
+                        if ($thumbnailVersion) {
+                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        }
+                    } else {
+                        // Thumbnail status is completed but path is missing - log for debugging
+                        \Illuminate\Support\Facades\Log::warning('Marketing asset marked as completed but thumbnail path missing', [
+                            'asset_id' => $asset->id,
+                            'thumbnail_status' => $thumbnailStatus,
+                            'metadata_thumbnails' => isset($metadata['thumbnails']) ? array_keys($metadata['thumbnails'] ?? []) : 'not set',
+                        ]);
+                    }
+                }
+
                 return [
                     'id' => $asset->id,
                     'title' => $title,
@@ -290,10 +397,17 @@ class MarketingAssetController extends Controller
                         'name' => $categoryName,
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
-                    // Thumbnail/preview URL - to be populated when storage service is available
-                    'thumbnail_url' => null,
-                    'preview_url' => null,
-                    'url' => null,
+                    // Thumbnail URLs - distinct paths prevent cache confusion
+                    'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (available even when pending/processing)
+                    'final_thumbnail_url' => $finalThumbnailUrl, // Only set if file exists and is valid
+                    'thumbnail_version' => $thumbnailVersion, // Version timestamp for cache busting
+                    // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
+                    'thumbnail_url' => $finalThumbnailUrl ?? null,
+                    'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
+                    'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
+                    'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                    'preview_url' => null, // Reserved for future full-size preview endpoint
+                    'url' => null, // Reserved for future download endpoint
                 ];
             })
             ->values();

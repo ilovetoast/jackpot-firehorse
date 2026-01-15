@@ -179,11 +179,24 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
+            // Asset download endpoint with metric tracking
+            Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
+            // Metric endpoints
+            Route::post('/assets/{asset}/metrics/track', [\App\Http\Controllers\AssetMetricController::class, 'track'])->name('assets.metrics.track');
+            Route::get('/assets/{asset}/metrics', [\App\Http\Controllers\AssetMetricController::class, 'index'])->name('assets.metrics.index');
+            Route::get('/assets/{asset}/metrics/downloads', [\App\Http\Controllers\AssetMetricController::class, 'downloads'])->name('assets.metrics.downloads');
+            Route::get('/assets/{asset}/metrics/views', [\App\Http\Controllers\AssetMetricController::class, 'views'])->name('assets.metrics.views');
             // Thumbnail endpoints - distinct URLs for preview and final to prevent cache confusion
             Route::get('/assets/{asset}/thumbnail/preview/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'preview'])->name('assets.thumbnail.preview');
             Route::get('/assets/{asset}/thumbnail/final/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'final'])->name('assets.thumbnail.final');
             // Legacy endpoint for backward compatibility (redirects to final)
             Route::get('/assets/{asset}/thumbnail/{style}', [\App\Http\Controllers\AssetThumbnailController::class, 'show'])->name('assets.thumbnail');
+            // Thumbnail retry endpoint
+            Route::post('/assets/{asset}/thumbnails/retry', [\App\Http\Controllers\AssetThumbnailController::class, 'retry'])->name('assets.thumbnails.retry');
+            // Thumbnail generation endpoint (for existing assets without thumbnails)
+            Route::post('/assets/{asset}/thumbnails/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generate'])->name('assets.thumbnails.generate');
+            // Admin thumbnail style regeneration endpoint (site roles only)
+            Route::post('/assets/{asset}/thumbnails/regenerate-styles', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateStyles'])->name('assets.thumbnails.regenerate-styles');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/marketing-assets', [\App\Http\Controllers\MarketingAssetController::class, 'index'])->name('marketing-assets.index');
 

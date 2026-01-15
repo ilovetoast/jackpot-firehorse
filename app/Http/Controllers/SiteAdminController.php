@@ -1384,6 +1384,7 @@ class SiteAdminController extends Controller
                 $query->whereIn('name', [
                     'company.manage',
                     'permissions.manage',
+                    'assets.regenerate_thumbnails_admin', // Site role permission for thumbnail regeneration
                     'tickets.view_any',
                     'tickets.view_tenant',
                     'tickets.create',
@@ -1399,6 +1400,9 @@ class SiteAdminController extends Controller
                     'tickets.link_diagnostic',
                     'ai.dashboard.view',
                     'ai.dashboard.manage',
+                    'ai.budgets.view',
+                    'ai.budgets.manage',
+                    'assets.regenerate_thumbnails_admin', // Site role permission for thumbnail regeneration
                 ])
                     ->orWhere('name', 'like', 'site.%');
             })
@@ -1425,6 +1429,9 @@ class SiteAdminController extends Controller
                     'tickets.link_diagnostic',
                     'ai.dashboard.view',
                     'ai.dashboard.manage',
+                    'ai.budgets.view',
+                    'ai.budgets.manage',
+                    'assets.regenerate_thumbnails_admin', // Exclude from company permissions
                 ])
                     ->where('name', 'not like', 'site.%');
             })
@@ -1748,6 +1755,7 @@ class SiteAdminController extends Controller
                 $query->whereIn('name', [
                     'company.manage',
                     'permissions.manage',
+                    'assets.regenerate_thumbnails_admin',
                     'tickets.view_any',
                     'tickets.view_tenant',
                     'tickets.create',
@@ -1761,6 +1769,11 @@ class SiteAdminController extends Controller
                     'tickets.create_engineering',
                     'tickets.view_engineering',
                     'tickets.link_diagnostic',
+                    'ai.dashboard.view',
+                    'ai.dashboard.manage',
+                    'ai.budgets.view',
+                    'ai.budgets.manage',
+                    'assets.regenerate_thumbnails_admin',
                 ])
                 ->orWhere('name', 'like', 'site.%');
             })
@@ -1800,8 +1813,13 @@ class SiteAdminController extends Controller
         $role = Role::where('name', $validated['role_id'])->firstOrFail();
         
         // Get only valid company permissions (all permissions except site permissions)
+        // Exclude site-only permissions like assets.regenerate_thumbnails_admin
         $validPermissions = Permission::where(function ($query) {
-                $query->whereNotIn('name', ['company.manage', 'permissions.manage'])
+                $query->whereNotIn('name', [
+                    'company.manage',
+                    'permissions.manage',
+                    'assets.regenerate_thumbnails_admin', // Site-only permission
+                ])
                     ->where('name', 'not like', 'site.%');
             })
             ->pluck('name')

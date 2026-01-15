@@ -14,13 +14,16 @@ import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24
 
 export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0 }) {
     // Format event type to human-readable description
-    const formatEventType = (eventType) => {
+    const formatEventType = (eventType, metadata = {}) => {
         const eventMap = {
             'asset.upload.finalized': 'Upload finalized',
-            'asset.thumbnail.started': 'Thumbnail generation started',
+            'asset.thumbnail.started': metadata?.triggered_by === 'user_manual_request' 
+                ? 'Thumbnail generation started (manually triggered)'
+                : 'Thumbnail generation started',
             'asset.thumbnail.completed': 'Thumbnail generation completed',
             'asset.thumbnail.failed': 'Thumbnail generation failed',
             'asset.thumbnail.skipped': 'Thumbnail generation skipped (unsupported format)',
+            'asset.thumbnail.retry_requested': 'Thumbnail generation retry requested',
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
         }
@@ -168,7 +171,7 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                     <div className="flex items-start justify-between gap-2">
                                         <div className="flex-1 min-w-0">
                                             <p className="text-xs font-medium text-gray-900">
-                                                {formatEventType(event.event_type)}
+                                                {formatEventType(event.event_type, event.metadata)}
                                             </p>
                                             {event.metadata && Object.keys(event.metadata).length > 0 && (
                                                 <div className="mt-1 text-xs text-gray-500">
@@ -182,8 +185,40 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                                 : event.metadata.reason}
                                                         </p>
                                                     )}
-                                                    {event.metadata.styles && (
-                                                        <p>Styles: {event.metadata.styles.join(', ')}</p>
+                                                    {/* Show manual trigger indicator for thumbnail started events */}
+                                                    {event.metadata.triggered_by === 'user_manual_request' && event.event_type === 'asset.thumbnail.started' && (
+                                                        <p className="text-indigo-600 italic">
+                                                            Manually triggered by user
+                                                        </p>
+                                                    )}
+                                                    {/* Show style indicators for thumbnail completed events */}
+                                                    {event.metadata.styles && event.event_type === 'asset.thumbnail.completed' && (
+                                                        <div className="mt-1.5 flex items-center gap-2">
+                                                            <span className="text-xs text-gray-500">Styles:</span>
+                                                            <div className="flex items-center gap-1.5">
+                                                                {event.metadata.styles.map((style) => (
+                                                                    <span
+                                                                        key={style}
+                                                                        className="inline-flex items-center gap-1 text-xs"
+                                                                        title={`${style.charAt(0).toUpperCase() + style.slice(1)} thumbnail generated`}
+                                                                    >
+                                                                        {/* Style indicator dot */}
+                                                                        <span className={`inline-block h-2 w-2 rounded-full ${
+                                                                            style === 'preview' ? 'bg-blue-400' :
+                                                                            style === 'thumb' ? 'bg-green-500' :
+                                                                            style === 'medium' ? 'bg-yellow-500' :
+                                                                            style === 'large' ? 'bg-purple-500' :
+                                                                            'bg-gray-400'
+                                                                        }`} />
+                                                                        <span className="text-gray-600 capitalize">{style}</span>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {/* Show text for other events that mention styles */}
+                                                    {event.metadata.styles && event.event_type !== 'asset.thumbnail.completed' && (
+                                                        <p className="text-xs text-gray-500">Styles: {event.metadata.styles.join(', ')}</p>
                                                     )}
                                                     {/* Phase 3.1: Hide temp upload paths from timeline (internal-only detail, confusing for users) */}
                                                     {event.metadata.from && event.metadata.to && 

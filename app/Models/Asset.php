@@ -207,6 +207,8 @@ class Asset extends Model
         'thumbnail_status',
         'thumbnail_error',
         'thumbnail_started_at',
+        'thumbnail_retry_count',
+        'thumbnail_last_retry_at',
     ];
 
     /**
@@ -222,6 +224,9 @@ class Asset extends Model
             'size_bytes' => 'integer',
             'metadata' => 'array',
             'thumbnail_status' => ThumbnailStatus::class,
+            'thumbnail_started_at' => 'datetime',
+            'thumbnail_retry_count' => 'integer',
+            'thumbnail_last_retry_at' => 'datetime',
         ];
     }
 

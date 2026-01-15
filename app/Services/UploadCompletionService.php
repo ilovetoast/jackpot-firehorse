@@ -1022,6 +1022,20 @@ class UploadCompletionService
         $mimeType = strtolower($asset->mime_type ?? '');
         $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
         
+        // PDF support - first-class supported type for thumbnail generation
+        // Uses spatie/pdf-to-image with ImageMagick/Ghostscript backend
+        // Only page 1 is used for thumbnail generation (enforced in ThumbnailGenerationService)
+        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
+            // Verify spatie/pdf-to-image package is available
+            if (!class_exists(\Spatie\PdfToImage\Pdf::class)) {
+                \Illuminate\Support\Facades\Log::warning('[UploadCompletionService] PDF support requires spatie/pdf-to-image package', [
+                    'asset_id' => $asset->id,
+                ]);
+                return false;
+            }
+            return true;
+        }
+        
         // Supported image MIME types - ONLY formats that GD library can actually process
         // GD library supports: JPEG, PNG, WEBP, GIF
         // TIFF, BMP, SVG are NOT supported by GD (would require Imagick or other tools)

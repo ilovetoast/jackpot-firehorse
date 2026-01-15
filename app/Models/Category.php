@@ -289,6 +289,56 @@ class Category extends Model
     }
 
     /**
+     * Scope a query to only include active, selectable categories.
+     * 
+     * Filters out:
+     * - Soft-deleted categories (deleted_at IS NOT NULL)
+     * - Templates (categories without an ID - these are virtual system templates)
+     * - Deleted system categories (where template no longer exists)
+     * 
+     * This scope should be used when fetching categories for dropdowns,
+     * sidebars, or any UI where users can select categories.
+     * 
+     * @param Builder $query
+     * @return Builder
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNull('deleted_at')
+            ->whereNotNull('id');
+    }
+
+    /**
+     * Check if this category is active and selectable.
+     * 
+     * A category is considered active if:
+     * - It's not soft-deleted (deleted_at IS NULL)
+     * - It has an ID (not a template)
+     * - If it's a system category, its template still exists
+     * 
+     * @return bool
+     */
+    public function isActive(): bool
+    {
+        // Must have an ID (not a template)
+        if (!$this->id) {
+            return false;
+        }
+
+        // Must not be soft-deleted
+        if ($this->deleted_at) {
+            return false;
+        }
+
+        // System categories must have an existing template
+        if ($this->is_system && !$this->systemTemplateExists()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Check if the system template for this category still exists.
      * Returns true if template exists, false if it's been deleted (orphaned).
      *

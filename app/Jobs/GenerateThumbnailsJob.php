@@ -38,6 +38,22 @@ use Illuminate\Support\Facades\Log;
  * - Asset.status must remain UPLOADED throughout processing (for grid visibility)
  * - Processing progress is tracked via thumbnail_status, metadata flags, and activity events
  * - Only FinalizeAssetJob should change Asset.status to COMPLETED (for dashboard stats)
+ *
+ * 🔒 THUMBNAIL SYSTEM LOCK:
+ * This system is intentionally NON-REALTIME. Thumbnails do NOT auto-update in the grid.
+ * Users must refresh the page to see final thumbnails after processing completes.
+ * This design prioritizes stability and prevents UI flicker/re-render thrash.
+ * 
+ * Terminal state guarantees:
+ * - Every asset MUST reach one of: COMPLETED, FAILED, or SKIPPED
+ * - ThumbnailTimeoutGuard enforces 5-minute timeout (prevents infinite PROCESSING)
+ * - All execution paths explicitly set terminal state
+ * 
+ * Live updates are a DEFERRED FEATURE. See THUMBNAIL_PIPELINE.md for details.
+ * 
+ * TODO (future): Allow manual thumbnail regeneration per asset.
+ * TODO (future): Consider websocket-based thumbnail update broadcasting.
+ * TODO (future): Consider thumbnail_version field for live UI refresh.
  */
 class GenerateThumbnailsJob implements ShouldQueue
 {
@@ -201,6 +217,62 @@ class GenerateThumbnailsJob implements ShouldQueue
                 ]);
             }
 
+            // CRITICAL: If NO final thumbnails were generated, mark as FAILED immediately
+            // This prevents marking as COMPLETED when all thumbnail generation failed
+            // (e.g., PDF conversion failed, all styles failed, etc.)
+            if (empty($finalThumbnails)) {
+                $errorMessage = 'Thumbnail generation failed: No thumbnails were generated (all styles failed)';
+                
+                Log::error('Thumbnail generation failed - no final thumbnails generated', [
+                    'asset_id' => $asset->id,
+                    'total_thumbnails_returned' => count($thumbnails),
+                    'preview_thumbnails' => count($previewThumbnails),
+                    'final_thumbnails' => count($finalThumbnails),
+                ]);
+                
+                // Mark as FAILED immediately - job failed, not transient issue
+                // Clear thumbnail_started_at when failed (no longer needed)
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::FAILED,
+                    'thumbnail_error' => $errorMessage,
+                    'thumbnail_started_at' => null, // Clear start time on failure
+                ]);
+                
+                Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (no thumbnails generated)', [
+                    'asset_id' => $asset->id,
+                    'error' => $errorMessage,
+                ]);
+                
+                // Log failure event (truthful - job failed)
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
+                        [
+                            'error' => $errorMessage,
+                            'reason' => 'No thumbnails were generated - all styles failed',
+                        ]
+                    );
+                } catch (\Exception $logException) {
+                    Log::error('Failed to log thumbnail failed event', [
+                        'asset_id' => $asset->id,
+                        'error' => $logException->getMessage(),
+                    ]);
+                }
+                
+                // Update metadata to record failure
+                // Step 6: Preserve preview thumbnails even if final generation fails
+                $currentMetadata = $asset->metadata ?? [];
+                $currentMetadata['thumbnail_generation_failed'] = true;
+                $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
+                $currentMetadata['thumbnail_generation_error'] = $errorMessage;
+                // Preview thumbnails remain in metadata (if they were generated)
+                $asset->update(['metadata' => $currentMetadata]);
+                
+                // Throw exception to prevent "completed" event logging below
+                throw new \RuntimeException($errorMessage);
+            }
+
             // CRITICAL: Verify FINAL thumbnail files exist AND are valid before marking as completed
             // Step 4: Job truth enforcement - never mark COMPLETED unless files are real and readable
             // Step 6: Preview thumbnails are EXCLUDED from verification - they don't mark COMPLETED
@@ -356,10 +428,31 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'metadata' => $currentMetadata,
             ]);
             
+            // Refresh asset to ensure metadata is loaded correctly
+            $asset->refresh();
+            
+            // Verify metadata was saved correctly (defensive check)
+            $savedMetadata = $asset->metadata ?? [];
+            $savedThumbnails = $savedMetadata['thumbnails'] ?? [];
+            $thumbPath = $asset->thumbnailPathForStyle('thumb');
+            
             Log::info('[GenerateThumbnailsJob] Marked asset as COMPLETED', [
                 'asset_id' => $asset->id,
                 'thumbnail_count' => count($finalThumbnails),
+                'saved_thumbnail_styles' => array_keys($savedThumbnails),
+                'thumb_path_exists' => $thumbPath !== null,
+                'thumb_path' => $thumbPath,
             ]);
+            
+            // If metadata wasn't saved correctly, log warning (but don't fail - status is already set)
+            if (empty($savedThumbnails) || !$thumbPath) {
+                Log::warning('[GenerateThumbnailsJob] Thumbnail metadata may not have saved correctly', [
+                    'asset_id' => $asset->id,
+                    'expected_thumbnails' => array_keys($finalThumbnails),
+                    'saved_thumbnails' => array_keys($savedThumbnails),
+                    'metadata_structure' => $savedMetadata,
+                ]);
+            }
 
             // Emit thumbnails generated event
             AssetEvent::create([
@@ -377,13 +470,16 @@ class GenerateThumbnailsJob implements ShouldQueue
             ]);
 
             // Log thumbnail generation completed (non-blocking)
+            // Track which final styles were generated (exclude preview)
             try {
                 \App\Services\ActivityRecorder::logAsset(
                     $asset,
                     \App\Enums\EventType::ASSET_THUMBNAIL_COMPLETED,
                     [
-                        'styles' => array_keys($thumbnails),
-                        'thumbnail_count' => count($thumbnails),
+                        'styles' => array_keys($finalThumbnails), // Only final styles (exclude preview)
+                        'preview_styles' => array_keys($previewThumbnails), // Preview styles separately
+                        'thumbnail_count' => count($finalThumbnails),
+                        'preview_count' => count($previewThumbnails),
                     ]
                 );
             } catch (\Exception $e) {
@@ -428,8 +524,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $errorMessage .= ' (Previous: ' . $previous->getMessage() . ')';
             }
             
-            // Include exception class name for better debugging
-            $errorMessage = get_class($e) . ': ' . $errorMessage;
+            // Include exception class name for better debugging (for logs only)
+            $fullErrorMessage = get_class($e) . ': ' . $errorMessage;
             
             // $asset may not be defined if exception occurred before findOrFail
             $asset = $asset ?? Asset::find($this->assetId);
@@ -437,23 +533,27 @@ class GenerateThumbnailsJob implements ShouldQueue
             if ($asset) {
                 Log::error('[GenerateThumbnailsJob] Thumbnail generation failed', [
                     'asset_id' => $asset->id,
-                    'error' => $errorMessage,
+                    'error' => $fullErrorMessage,
                     'exception_class' => get_class($e),
                     'attempt' => $this->attempts(),
                     'trace' => $e->getTraceAsString(),
                 ]);
                 
-                // Mark as FAILED with actual error message
+                // Sanitize error message for user display (remove technical details)
+                $userFriendlyError = $this->sanitizeErrorMessage($errorMessage);
+                
+                // Mark as FAILED with user-friendly error message
                 // Clear thumbnail_started_at when failed (no longer needed)
                 $asset->update([
                     'thumbnail_status' => ThumbnailStatus::FAILED,
-                    'thumbnail_error' => $errorMessage,
+                    'thumbnail_error' => $userFriendlyError,
                     'thumbnail_started_at' => null, // Clear start time on failure
                 ]);
                 
                 Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (exception)', [
                     'asset_id' => $asset->id,
-                    'error' => $errorMessage,
+                    'error' => $fullErrorMessage,
+                    'user_friendly_error' => $userFriendlyError,
                     'exception_class' => get_class($e),
                 ]);
 
@@ -511,11 +611,14 @@ class GenerateThumbnailsJob implements ShouldQueue
         $asset = Asset::find($this->assetId);
 
         if ($asset) {
+            // Sanitize error message for user display
+            $userFriendlyError = $this->sanitizeErrorMessage($exception->getMessage());
+            
             // Update thumbnail status to failed
             // Clear thumbnail_started_at when failed (no longer needed)
             $asset->update([
                 'thumbnail_status' => ThumbnailStatus::FAILED,
-                'thumbnail_error' => $exception->getMessage(),
+                'thumbnail_error' => $userFriendlyError,
                 'thumbnail_started_at' => null, // Clear start time on failure
             ]);
             
@@ -573,8 +676,10 @@ class GenerateThumbnailsJob implements ShouldQueue
     /**
      * Check if thumbnail generation is supported for an asset.
      * 
-     * Matches frontend logic: only image types that the backend pipeline can actually process.
-     * AVIF is excluded because the backend thumbnail pipeline does not yet support it.
+     * Supports both image types (via GD library) and PDFs (via spatie/pdf-to-image).
+     * This is the central authority for thumbnail support - used by both jobs and retry service.
+     * 
+     * IMPORTANT: PDF support is additive - does not modify existing image processing logic.
      * 
      * @param Asset $asset
      * @return bool True if thumbnail generation is supported
@@ -583,6 +688,20 @@ class GenerateThumbnailsJob implements ShouldQueue
     {
         $mimeType = strtolower($asset->mime_type ?? '');
         $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        
+        // PDF support - first-class supported type for thumbnail generation
+        // Uses spatie/pdf-to-image with ImageMagick/Ghostscript backend
+        // Only page 1 is used for thumbnail generation (enforced in ThumbnailGenerationService)
+        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
+            // Verify spatie/pdf-to-image package is available
+            if (!class_exists(\Spatie\PdfToImage\Pdf::class)) {
+                Log::warning('[GenerateThumbnailsJob] PDF support requires spatie/pdf-to-image package', [
+                    'asset_id' => $asset->id,
+                ]);
+                return false;
+            }
+            return true;
+        }
         
         // Supported image MIME types - ONLY formats that GD library can actually process
         // GD library supports: JPEG, PNG, WEBP, GIF
@@ -661,5 +780,68 @@ class GenerateThumbnailsJob implements ShouldQueue
         
         // Generic fallback
         return 'unsupported_file_type';
+    }
+
+    /**
+     * Convert technical error messages to user-friendly messages.
+     * 
+     * This sanitizes exception messages and technical details that users shouldn't see,
+     * replacing them with clear, actionable error messages.
+     * 
+     * @param string $errorMessage The raw error message
+     * @return string User-friendly error message
+     */
+    protected function sanitizeErrorMessage(string $errorMessage): string
+    {
+        // Map technical errors to user-friendly messages
+        $errorMappings = [
+            // PDF-related errors
+            'Call to undefined method.*setPage' => 'PDF processing error. Please try again or contact support if the issue persists.',
+            'Call to undefined method.*selectPage' => 'PDF processing error. Please try again or contact support if the issue persists.',
+            'PDF file does not exist' => 'The PDF file could not be found or accessed.',
+            'Invalid PDF format' => 'The PDF file appears to be corrupted or invalid.',
+            'PDF thumbnail generation failed' => 'Unable to generate preview from PDF. The file may be corrupted or too large.',
+            
+            // Image processing errors
+            'getimagesize.*failed' => 'Unable to read image file. The file may be corrupted.',
+            'imagecreatefrom.*failed' => 'Unable to process image. The file format may not be supported.',
+            'imagecopyresampled.*failed' => 'Unable to resize image. Please try again.',
+            
+            // Storage errors
+            'S3.*error' => 'Unable to save thumbnail. Please try again.',
+            'Storage.*failed' => 'Unable to save thumbnail. Please check storage configuration.',
+            
+            // Timeout errors
+            'timeout' => 'Thumbnail generation timed out. The file may be too large or complex.',
+            'Maximum execution time' => 'Thumbnail generation took too long. The file may be too large.',
+            
+            // Generic technical errors
+            'Error:' => 'An error occurred during thumbnail generation.',
+            'Exception:' => 'An error occurred during thumbnail generation.',
+            'Fatal error' => 'An error occurred during thumbnail generation.',
+        ];
+        
+        // Check for specific error patterns and replace with user-friendly messages
+        foreach ($errorMappings as $pattern => $friendlyMessage) {
+            if (preg_match('/' . $pattern . '/i', $errorMessage)) {
+                return $friendlyMessage;
+            }
+        }
+        
+        // If error contains class names or technical paths, provide generic message
+        if (preg_match('/(\\\\[A-Z][a-zA-Z0-9\\\\]+|::|->|at\s+\/.*\.php)/', $errorMessage)) {
+            return 'An error occurred during thumbnail generation. Please try again or contact support if the issue persists.';
+        }
+        
+        // For other errors, try to extract a meaningful message
+        // Remove common technical prefixes
+        $cleaned = preg_replace('/^(Error|Exception|Fatal error):\s*/i', '', $errorMessage);
+        
+        // If the cleaned message is still too technical, use generic message
+        if (strlen($cleaned) > 200 || preg_match('/[{}()\[\]\\\]/', $cleaned)) {
+            return 'An error occurred during thumbnail generation. Please try again.';
+        }
+        
+        return $cleaned;
     }
 }

@@ -15,6 +15,17 @@ use Illuminate\Support\Facades\Log;
  * 
  * This prevents infinite processing states where assets remain in
  * thumbnail_status = processing forever.
+ * 
+ * 🔒 THUMBNAIL SYSTEM LOCK:
+ * This service is part of the locked thumbnail pipeline. It ensures
+ * every asset reaches a terminal state (COMPLETED, FAILED, SKIPPED).
+ * 
+ * The thumbnail system is intentionally NON-REALTIME:
+ * - Grid thumbnails do NOT auto-update
+ * - Users must refresh to see final thumbnails
+ * - This prevents UI flicker and re-render thrash
+ * 
+ * See THUMBNAIL_PIPELINE.md for full system documentation.
  */
 class ThumbnailTimeoutGuard
 {
@@ -89,7 +100,17 @@ class ThumbnailTimeoutGuard
             $startTime = $asset->thumbnail_started_at;
         }
         
-        return $startTime && $startTime->lt(now()->subMinutes(self::TIMEOUT_MINUTES));
+        // Ensure $startTime is a Carbon instance (handle case where it might be a string)
+        if (!$startTime) {
+            return false;
+        }
+        
+        // Convert to Carbon if it's a string (defensive programming)
+        if (is_string($startTime)) {
+            $startTime = \Carbon\Carbon::parse($startTime);
+        }
+        
+        return $startTime->lt(now()->subMinutes(self::TIMEOUT_MINUTES));
     }
 
     /**
