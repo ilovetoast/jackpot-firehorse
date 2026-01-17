@@ -1,0 +1,334 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Metadata Schema Resolver
+ *
+ * Phase 1.5 – Step 3: Read-only resolver for metadata schema.
+ *
+ * This service computes the effective metadata schema for a given context
+ * by applying visibility overrides in the correct inheritance order.
+ *
+ * Rules:
+ * - Deterministic and side-effect free
+ * - Never mutates data
+ * - Never creates missing rows
+ * - Never infers defaults not explicitly defined
+ *
+ * Inheritance order (lowest → highest priority):
+ * 1. System defaults (metadata_fields)
+ * 2. Tenant-level overrides
+ * 3. Brand-level overrides
+ * 4. Category-level overrides
+ *
+ * Last override wins.
+ *
+ * @see docs/PHASE_1_5_METADATA_SCHEMA.md
+ */
+class MetadataSchemaResolver
+{
+    /**
+     * Resolve the metadata schema for a given context.
+     *
+     * @param int $tenantId Required tenant ID
+     * @param int|null $brandId Optional brand ID
+     * @param int|null $categoryId Optional category ID
+     * @param string $assetType Required: 'image' | 'video' | 'document'
+     * @return array Resolved schema with fields and options
+     */
+    public function resolve(
+        int $tenantId,
+        ?int $brandId,
+        ?int $categoryId,
+        string $assetType
+    ): array {
+        // Validate asset_type
+        if (!in_array($assetType, ['image', 'video', 'document'], true)) {
+            throw new \InvalidArgumentException("Invalid asset_type: {$assetType}. Must be 'image', 'video', or 'document'.");
+        }
+
+        // Load all metadata fields that apply to this asset type
+        $fields = $this->loadApplicableFields($assetType);
+
+        // Load visibility overrides in inheritance order
+        $fieldVisibility = $this->loadFieldVisibility($tenantId, $brandId, $categoryId, array_keys($fields));
+        $optionVisibility = $this->loadOptionVisibility($tenantId, $brandId, $categoryId);
+
+        // Resolve each field
+        $resolvedFields = [];
+        foreach ($fields as $fieldId => $field) {
+            $resolved = $this->resolveField(
+                $field,
+                $fieldVisibility[$fieldId] ?? [],
+                $optionVisibility,
+                $assetType
+            );
+
+            // Only include fields that are visible (not hidden)
+            if ($resolved['is_visible']) {
+                $resolvedFields[] = $resolved;
+            }
+        }
+
+        return [
+            'fields' => $resolvedFields,
+        ];
+    }
+
+    /**
+     * Load all metadata fields that apply to the given asset type.
+     *
+     * @param string $assetType
+     * @return array Keyed by field ID
+     */
+    protected function loadApplicableFields(string $assetType): array
+    {
+        $fields = DB::table('metadata_fields')
+            ->where(function ($query) use ($assetType) {
+                $query->where('applies_to', $assetType)
+                    ->orWhere('applies_to', 'all');
+            })
+            ->whereNull('deprecated_at')
+            ->get()
+            ->keyBy('id');
+
+        return $fields->toArray();
+    }
+
+    /**
+     * Load field visibility overrides in inheritance order.
+     *
+     * Returns visibility flags keyed by field_id, with highest priority override winning.
+     *
+     * Inheritance order: tenant < brand < category (category wins)
+     *
+     * @param int $tenantId
+     * @param int|null $brandId
+     * @param int|null $categoryId
+     * @param array $fieldIds
+     * @return array Keyed by field_id, containing visibility flags
+     */
+    protected function loadFieldVisibility(
+        int $tenantId,
+        ?int $brandId,
+        ?int $categoryId,
+        array $fieldIds
+    ): array {
+        if (empty($fieldIds)) {
+            return [];
+        }
+
+        // Build OR conditions for all applicable scopes
+        $query = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->where(function ($q) use ($brandId, $categoryId) {
+                // Tenant-level: brand_id IS NULL AND category_id IS NULL
+                $q->where(function ($subQ) {
+                    $subQ->whereNull('brand_id')->whereNull('category_id');
+                });
+
+                // Brand-level: brand_id = $brandId AND category_id IS NULL
+                if ($brandId !== null) {
+                    $q->orWhere(function ($subQ) use ($brandId) {
+                        $subQ->where('brand_id', $brandId)->whereNull('category_id');
+                    });
+                }
+
+                // Category-level: brand_id = $brandId AND category_id = $categoryId
+                if ($categoryId !== null && $brandId !== null) {
+                    $q->orWhere(function ($subQ) use ($brandId, $categoryId) {
+                        $subQ->where('brand_id', $brandId)->where('category_id', $categoryId);
+                    });
+                }
+            })
+            ->orderByRaw('
+                CASE
+                    WHEN category_id IS NOT NULL THEN 3
+                    WHEN brand_id IS NOT NULL THEN 2
+                    ELSE 1
+                END DESC
+            ')
+            ->get();
+
+        // Group by field_id and take the first (highest priority) override
+        // Since we order DESC, highest priority (category=3) comes first
+        $results = [];
+        foreach ($query as $row) {
+            // Only set if not already set (first = highest priority wins)
+            if (!isset($results[$row->metadata_field_id])) {
+                $results[$row->metadata_field_id] = [
+                    'is_hidden' => (bool) $row->is_hidden,
+                    'is_upload_hidden' => (bool) $row->is_upload_hidden,
+                    'is_filter_hidden' => (bool) $row->is_filter_hidden,
+                ];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Load option visibility overrides in inheritance order.
+     *
+     * Inheritance order: tenant < brand < category (category wins)
+     *
+     * @param int $tenantId
+     * @param int|null $brandId
+     * @param int|null $categoryId
+     * @return array Keyed by option_id, containing is_hidden flag
+     */
+    protected function loadOptionVisibility(
+        int $tenantId,
+        ?int $brandId,
+        ?int $categoryId
+    ): array {
+        // Build OR conditions for all applicable scopes
+        $query = DB::table('metadata_option_visibility')
+            ->where('tenant_id', $tenantId)
+            ->where(function ($q) use ($brandId, $categoryId) {
+                // Tenant-level: brand_id IS NULL AND category_id IS NULL
+                $q->where(function ($subQ) {
+                    $subQ->whereNull('brand_id')->whereNull('category_id');
+                });
+
+                // Brand-level: brand_id = $brandId AND category_id IS NULL
+                if ($brandId !== null) {
+                    $q->orWhere(function ($subQ) use ($brandId) {
+                        $subQ->where('brand_id', $brandId)->whereNull('category_id');
+                    });
+                }
+
+                // Category-level: brand_id = $brandId AND category_id = $categoryId
+                if ($categoryId !== null && $brandId !== null) {
+                    $q->orWhere(function ($subQ) use ($brandId, $categoryId) {
+                        $subQ->where('brand_id', $brandId)->where('category_id', $categoryId);
+                    });
+                }
+            })
+            ->orderByRaw('
+                CASE
+                    WHEN category_id IS NOT NULL THEN 3
+                    WHEN brand_id IS NOT NULL THEN 2
+                    ELSE 1
+                END DESC
+            ')
+            ->get();
+
+        // Group by option_id and take the first (highest priority) override
+        // Since we order DESC, highest priority (category=3) comes first
+        $results = [];
+        foreach ($query as $row) {
+            // Only set if not already set (first = highest priority wins)
+            if (!isset($results[$row->metadata_option_id])) {
+                $results[$row->metadata_option_id] = (bool) $row->is_hidden;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Resolve a single metadata field with its options.
+     *
+     * @param object $field Raw field data from database
+     * @param array $visibilityOverrides Visibility flags from overrides
+     * @param array $optionVisibility Option visibility map
+     * @param string $assetType
+     * @return array Resolved field schema
+     */
+    protected function resolveField(
+        object $field,
+        array $visibilityOverrides,
+        array $optionVisibility,
+        string $assetType
+    ): array {
+        // Start with system defaults
+        $isHidden = false;
+        $isUploadHidden = !$field->is_upload_visible;
+        $isFilterHidden = !$field->is_filterable;
+
+        // Apply visibility overrides (last override wins)
+        if (isset($visibilityOverrides['is_hidden'])) {
+            $isHidden = $visibilityOverrides['is_hidden'];
+        }
+        if (isset($visibilityOverrides['is_upload_hidden'])) {
+            $isUploadHidden = $visibilityOverrides['is_upload_hidden'];
+        }
+        if (isset($visibilityOverrides['is_filter_hidden'])) {
+            $isFilterHidden = $visibilityOverrides['is_filter_hidden'];
+        }
+
+        // Resolve display label (stub for future label override table)
+        $displayLabel = $this->resolveDisplayLabel($field);
+
+        // Load and resolve options for select/multiselect fields
+        $options = [];
+        if (in_array($field->type, ['select', 'multiselect'], true)) {
+            $options = $this->resolveOptions($field->id, $optionVisibility);
+        }
+
+        return [
+            'field_id' => $field->id,
+            'key' => $field->key,
+            'display_label' => $displayLabel,
+            'type' => $field->type,
+            'group_key' => $field->group_key,
+            'applies_to' => $field->applies_to,
+            'is_visible' => !$isHidden,
+            'is_upload_visible' => !$isUploadHidden,
+            'is_filterable' => !$isFilterHidden,
+            'is_internal_only' => (bool) $field->is_internal_only,
+            'options' => $options,
+        ];
+    }
+
+    /**
+     * Resolve display label for a field.
+     *
+     * Currently returns system_label. Future: apply label overrides.
+     *
+     * @param object $field
+     * @return string
+     */
+    protected function resolveDisplayLabel(object $field): string
+    {
+        // TODO: Phase 1.5 Step 4+ will add label override table
+        // For now, return system_label as display_label
+        return $field->system_label;
+    }
+
+    /**
+     * Resolve options for a select/multiselect field.
+     *
+     * @param int $fieldId
+     * @param array $optionVisibility Map of option_id => is_hidden
+     * @return array Resolved options (only visible ones)
+     */
+    protected function resolveOptions(int $fieldId, array $optionVisibility): array
+    {
+        $options = DB::table('metadata_options')
+            ->where('metadata_field_id', $fieldId)
+            ->orderBy('system_label')
+            ->get();
+
+        $resolved = [];
+        foreach ($options as $option) {
+            // Check if option is hidden by visibility override
+            $isHidden = $optionVisibility[$option->id] ?? false;
+
+            if (!$isHidden) {
+                $resolved[] = [
+                    'option_id' => $option->id,
+                    'value' => $option->value,
+                    'display_label' => $option->system_label, // TODO: Apply label overrides in future step
+                ];
+            }
+        }
+
+        return $resolved;
+    }
+}

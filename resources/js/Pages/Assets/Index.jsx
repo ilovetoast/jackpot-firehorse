@@ -6,6 +6,7 @@ import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
+import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
@@ -17,7 +18,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [] }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [] }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     
@@ -65,6 +66,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
+    
+    // Phase 2 – Step 7: Bulk selection state
+    const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
+    const [isBulkMode, setIsBulkMode] = useState(false)
+    const [showBulkEditModal, setShowBulkEditModal] = useState(false)
     
     // Derive active asset from local assets array to prevent stale references
     // If asset no longer exists after reload, activeAsset will be null and drawer will close
@@ -498,14 +504,38 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Asset Grid Toolbar */}
                         {localAssets && localAssets.length > 0 && (
-                            <div className="mb-6">
+                            <div className="mb-6 space-y-4">
                                 <AssetGridToolbar
                                     showInfo={showInfo}
                                     onToggleInfo={() => setShowInfo(v => !v)}
                                     cardSize={cardSize}
                                     onCardSizeChange={setCardSize}
                                     primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                    bulkSelectedCount={bulkSelectedAssetIds.length}
+                                    onBulkEdit={() => {
+                                        if (bulkSelectedAssetIds.length > 0) {
+                                            setShowBulkEditModal(true)
+                                        }
+                                    }}
+                                    onToggleBulkMode={() => {
+                                        setIsBulkMode((prev) => !prev)
+                                        if (isBulkMode) {
+                                            setBulkSelectedAssetIds([])
+                                        }
+                                    }}
+                                    isBulkMode={isBulkMode}
                                 />
+                                
+                                {/* Phase 2 – Step 8: Metadata Filters */}
+                                {selectedCategoryId && (
+                                    <div className="flex items-center justify-end">
+                                        <AssetFilters
+                                            filterableSchema={filterable_schema}
+                                            categoryId={selectedCategoryId}
+                                            savedViews={saved_views}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         )}
                             
@@ -513,11 +543,23 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             {localAssets && localAssets.length > 0 ? (
                                 <AssetGrid 
                                     assets={localAssets} 
-                                    onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
+                                    onAssetClick={(asset) => {
+                                        if (!isBulkMode) {
+                                            setActiveAssetId(asset?.id || null)
+                                        }
+                                    }}
                                     cardSize={cardSize}
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}
                                     primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                    selectedAssetIds={isBulkMode ? bulkSelectedAssetIds : []}
+                                    onAssetSelect={isBulkMode ? ((assetId) => {
+                                        setBulkSelectedAssetIds((prev) =>
+                                            prev.includes(assetId)
+                                                ? prev.filter((id) => id !== assetId)
+                                                : [...prev, assetId]
+                                        )
+                                    }) : null}
                                 />
                             ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
@@ -571,6 +613,22 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 )}
             </div>
             
+            {/* Phase 2 – Step 7: Bulk Metadata Edit Modal */}
+            {showBulkEditModal && bulkSelectedAssetIds.length > 0 && (
+                <BulkMetadataEditModal
+                    assetIds={bulkSelectedAssetIds}
+                    onClose={() => {
+                        setShowBulkEditModal(false)
+                    }}
+                    onComplete={() => {
+                        // Refresh assets after bulk edit
+                        router.reload({ only: ['assets'] })
+                        setBulkSelectedAssetIds([])
+                        setIsBulkMode(false)
+                    }}
+                />
+            )}
+
             {/* Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
                 Do not convert back to prop-based visibility. */}
             {isUploadDialogOpen && (

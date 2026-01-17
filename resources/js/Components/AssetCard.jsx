@@ -15,7 +15,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1' }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null }) {
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
         // First try explicit file_extension field
@@ -206,6 +206,22 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     shouldAnimateThumbnail={shouldAnimateThumbnail}
                 />
                 
+                {/* Phase 2 – Step 7: Bulk selection checkbox */}
+                {onBulkSelect && (
+                    <div className="absolute top-2 left-2 z-10">
+                        <input
+                            type="checkbox"
+                            checked={isBulkSelected}
+                            onChange={(e) => {
+                                e.stopPropagation()
+                                onBulkSelect()
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm"
+                        />
+                    </div>
+                )}
+
                 {/* File type badge overlay - top right - Conditionally hidden based on showInfo prop */}
                 {showInfo && (
                     <div className="absolute top-2 right-2">

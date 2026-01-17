@@ -8,6 +8,8 @@ use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\AssetDeletionService;
+use App\Services\MetadataFilterService;
+use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +26,9 @@ class AssetController extends Controller
     public function __construct(
         protected SystemCategoryService $systemCategoryService,
         protected PlanService $planService,
-        protected AssetDeletionService $deletionService
+        protected AssetDeletionService $deletionService,
+        protected MetadataFilterService $metadataFilterService,
+        protected MetadataSchemaResolver $metadataSchemaResolver
     ) {
     }
 
@@ -233,6 +237,26 @@ class AssetController extends Controller
             // Cast categoryId to integer to ensure type matching with JSON integer values
             $assetsQuery->whereNotNull('metadata')
                 ->where('metadata->category_id', (int) $categoryId);
+        }
+
+        // Phase 2 – Step 8: Apply metadata filters
+        $filters = $request->get('filters', []);
+        if (!empty($filters) && is_array($filters)) {
+            // Resolve metadata schema for filtering
+            $assetType = 'image'; // Default, could be determined from category or request
+            if ($category) {
+                $assetType = $category->asset_type->value ?? 'image';
+            }
+
+            $schema = $this->metadataSchemaResolver->resolve(
+                $tenant->id,
+                $brand->id,
+                $categoryId,
+                $assetType
+            );
+
+            // Apply filters
+            $this->metadataFilterService->applyFilters($assetsQuery, $filters, $schema);
         }
 
         $assets = $assetsQuery->get();
@@ -491,6 +515,50 @@ class AssetController extends Controller
             })
             ->values();
 
+        // Phase 2 – Step 8: Get filterable schema for frontend
+        $filterableSchema = [];
+        if ($categoryId && $category) {
+            $assetType = $category->asset_type->value ?? 'image';
+            $schema = $this->metadataSchemaResolver->resolve(
+                $tenant->id,
+                $brand->id,
+                $categoryId,
+                $assetType
+            );
+            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema);
+        }
+
+        // Phase 2 – Step 8: Get saved views
+        $savedViews = [];
+        if ($user) {
+            $viewsQuery = DB::table('saved_views')
+                ->where('tenant_id', $tenant->id)
+                ->where(function ($q) use ($user) {
+                    $q->where('is_global', true)
+                        ->orWhere('user_id', $user->id);
+                });
+
+            if ($categoryId) {
+                $viewsQuery->where(function ($q) use ($categoryId) {
+                    $q->where('category_id', $categoryId)
+                        ->orWhereNull('category_id');
+                });
+            }
+
+            $savedViews = $viewsQuery->orderBy('name')
+                ->get()
+                ->map(function ($view) {
+                    return [
+                        'id' => $view->id,
+                        'name' => $view->name,
+                        'filters' => json_decode($view->filters, true),
+                        'category_id' => $view->category_id,
+                        'is_global' => (bool) $view->is_global,
+                    ];
+                })
+                ->toArray();
+        }
+
         return Inertia::render('Assets/Index', [
             'categories' => $allCategories,
             'categories_by_type' => [
@@ -500,6 +568,8 @@ class AssetController extends Controller
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'total_asset_count' => $totalAssetCount, // Total count for "All" button
+            'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
+            'saved_views' => $savedViews, // Phase 2 – Step 8: Saved filter views
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
         ]);
     }

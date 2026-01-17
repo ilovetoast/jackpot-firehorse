@@ -31,6 +31,8 @@ export default function AssetGrid({
     showInfo = true,
     selectedAssetId = null,
     primaryColor = '#6366f1',
+    selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
+    onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
 }) {
     // Console log assets when they change
     useEffect(() => {
@@ -57,6 +59,8 @@ export default function AssetGrid({
                     showInfo={showInfo}
                     isSelected={selectedAssetId === asset.id}
                     primaryColor={primaryColor}
+                    isBulkSelected={selectedAssetIds.includes(asset.id)} // Phase 2 – Step 7
+                    onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null} // Phase 2 – Step 7
                 />
             ))}
         </AssetGridContainer>

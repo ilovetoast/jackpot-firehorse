@@ -47,6 +47,9 @@ import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, Exclamatio
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
+import AiMetadataSuggestions from './AiMetadataSuggestions'
+import AssetMetadataDisplay from './AssetMetadataDisplay'
+import PendingMetadataList from './PendingMetadataList'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
@@ -1035,6 +1038,21 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         </div>
                     </div>
                 </div>
+
+                {/* Phase 2 – Step 5.5: AI Metadata Suggestions */}
+                {displayAsset?.id && (
+                    <AiMetadataSuggestions assetId={displayAsset.id} />
+                )}
+
+                {/* Phase 2 – Step 6: Manual Metadata Editing */}
+                {displayAsset?.id && (
+                    <AssetMetadataDisplay assetId={displayAsset.id} />
+                )}
+
+                {/* Phase 8: Pending Metadata Approval */}
+                {displayAsset?.id && (
+                    <PendingMetadataList assetId={displayAsset.id} />
+                )}
 
                 {/* Phase 3.1 — Minimal drawer download action.
                     This is a temporary test-only UI.

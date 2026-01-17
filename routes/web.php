@@ -187,10 +187,40 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Asset routes (tenant-scoped)
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
             Route::get('/assets/processing', [\App\Http\Controllers\AssetController::class, 'activeProcessingJobs'])->name('assets.processing');
+            
+            // Metadata Analytics (Phase 7)
+            Route::get('/analytics/metadata', [\App\Http\Controllers\MetadataAnalyticsController::class, 'index'])->name('analytics.metadata');
+            Route::get('/analytics/metadata/data', [\App\Http\Controllers\MetadataAnalyticsController::class, 'data'])->name('analytics.metadata.data');
             Route::get('/assets/thumbnail-status/batch', [\App\Http\Controllers\AssetController::class, 'batchThumbnailStatus'])->name('assets.thumbnail-status.batch');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
+            
+            // Asset metadata AI suggestions (Phase 2 – Step 5.5)
+            Route::get('/assets/{asset}/metadata/ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAiSuggestions'])->name('assets.metadata.ai-suggestions');
+            Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveSuggestion'])->name('assets.metadata.ai-suggestions.approve');
+            Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/edit-accept', [\App\Http\Controllers\AssetMetadataController::class, 'editAndAcceptSuggestion'])->name('assets.metadata.ai-suggestions.edit-accept');
+            Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectSuggestion'])->name('assets.metadata.ai-suggestions.reject');
+            
+            // Asset metadata manual editing (Phase 2 – Step 6)
+            Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
+            Route::post('/assets/{asset}/metadata/edit', [\App\Http\Controllers\AssetMetadataController::class, 'editMetadata'])->name('assets.metadata.edit');
+            
+            // Asset metadata bulk operations (Phase 2 – Step 7)
+            Route::post('/assets/metadata/bulk/preview', [\App\Http\Controllers\AssetMetadataController::class, 'previewBulk'])->name('assets.metadata.bulk.preview');
+            Route::post('/assets/metadata/bulk/execute', [\App\Http\Controllers\AssetMetadataController::class, 'executeBulk'])->name('assets.metadata.bulk.execute');
+            
+            // Asset metadata filtering and saved views (Phase 2 – Step 8)
+            Route::get('/assets/metadata/filterable-schema', [\App\Http\Controllers\AssetMetadataController::class, 'getFilterableSchema'])->name('assets.metadata.filterable-schema');
+            Route::get('/assets/metadata/saved-views', [\App\Http\Controllers\AssetMetadataController::class, 'getSavedViews'])->name('assets.metadata.saved-views');
+            Route::post('/assets/metadata/saved-views', [\App\Http\Controllers\AssetMetadataController::class, 'saveView'])->name('assets.metadata.saved-views.save');
+            Route::delete('/assets/metadata/saved-views/{viewId}', [\App\Http\Controllers\AssetMetadataController::class, 'deleteView'])->name('assets.metadata.saved-views.delete');
+            
+            // Asset metadata approval workflow (Phase 8)
+            Route::get('/assets/{asset}/metadata/pending', [\App\Http\Controllers\AssetMetadataController::class, 'getPendingMetadata'])->name('assets.metadata.pending');
+            Route::post('/metadata/{metadataId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveMetadata'])->name('metadata.approve');
+            Route::post('/metadata/{metadataId}/edit-approve', [\App\Http\Controllers\AssetMetadataController::class, 'editAndApproveMetadata'])->name('metadata.edit-approve');
+            Route::post('/metadata/{metadataId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectMetadata'])->name('metadata.reject');
             // Asset download endpoint with metric tracking
             Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
             
@@ -219,6 +249,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Upload routes (tenant-scoped)
             Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
             Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
+            Route::get('/uploads/metadata-schema', [\App\Http\Controllers\UploadController::class, 'getMetadataSchema'])->name('uploads.metadata-schema');
             Route::post('/uploads/diagnostics', [\App\Http\Controllers\UploadController::class, 'diagnostics'])->name('uploads.diagnostics');
             Route::get('/uploads/{uploadSession}/resume', [\App\Http\Controllers\UploadController::class, 'resume'])->name('uploads.resume');
             Route::post('/uploads/{uploadSession}/multipart-part-url', [\App\Http\Controllers\UploadController::class, 'getMultipartPartUrl'])->name('uploads.multipart-part-url');

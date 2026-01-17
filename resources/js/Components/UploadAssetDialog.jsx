@@ -27,6 +27,8 @@ import UploadTray from './UploadTray'
 import UploadManager from '../utils/UploadManager' // Phase 2 singleton - import directly
 import { normalizeUploadError } from '../utils/uploadErrorNormalizer' // Phase 2.5 Step 1: Error normalization
 import DevUploadDiagnostics from './DevUploadDiagnostics' // Phase 2.5 Step 3: Dev-only diagnostics panel
+import MetadataGroups from './Upload/MetadataGroups' // Phase 2 – Step 2: Dynamic metadata schema
+import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // Phase 2 – Step 3: Required field validation
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -131,6 +133,22 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Empty override on a file = inherits global value.
      */
     const [globalMetadataDraft, setGlobalMetadataDraft] = useState({})
+
+    /**
+     * Phase 2 – Step 2: Upload Metadata Schema
+     * 
+     * Schema fetched from UploadMetadataSchemaResolver.
+     * Fetched when category changes.
+     */
+    const [uploadMetadataSchema, setUploadMetadataSchema] = useState(null)
+    const [isLoadingMetadataSchema, setIsLoadingMetadataSchema] = useState(false)
+
+    /**
+     * Phase 2 – Step 3: Metadata Validation State
+     * 
+     * Tracks whether to show validation errors in the UI.
+     */
+    const [showMetadataErrors, setShowMetadataErrors] = useState(false)
 
     /**
      * ═══════════════════════════════════════════════════════════════
@@ -703,24 +721,32 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
 
         // Create clean file entries for v2Files state
-        const newV2FileEntries = fileArray.map((file) => ({
-            clientId: (window.crypto?.randomUUID || (() => {
+        const newV2FileEntries = fileArray.map((file) => {
+            // Generate UUID - crypto.randomUUID needs to be called with proper context
+            let clientId
+            if (window.crypto && window.crypto.randomUUID) {
+                clientId = window.crypto.randomUUID()
+            } else {
                 // Fallback UUID generation if crypto.randomUUID is not available
-                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+                clientId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
                     const r = Math.random() * 16 | 0
                     const v = c === 'x' ? r : (r & 0x3 | 0x8)
                     return v.toString(16)
                 })
-            }))(),
-            file,
-            status: 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
-            progress: 0, // 0-100
-            uploadKey: null, // Set when upload completes
-            title: null, // Will be derived from filename, can be edited
-            resolvedFilename: null, // Will be derived initially, can be edited directly
-            metadataDraft: {}, // Per-file metadata overrides (empty = inherit global)
-            error: null
-        }))
+            }
+
+            return {
+                clientId,
+                file,
+                status: 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
+                progress: 0, // 0-100
+                uploadKey: null, // Set when upload completes
+                title: null, // Will be derived from filename, can be edited
+                resolvedFilename: null, // Will be derived initially, can be edited directly
+                metadataDraft: {}, // Per-file metadata overrides (empty = inherit global)
+                error: null
+            }
+        })
 
         console.log('[FILE_SELECT] Created file entries', { count: newV2FileEntries.length, clientIds: newV2FileEntries.map(e => e.clientId) })
 
@@ -2350,14 +2376,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         const hasFinalizing = v2Files.some((f) => f.status === 'finalizing')
         const hasCategory = selectedCategoryId !== null
 
+        // Phase 2 – Step 3: Check if all required metadata fields are satisfied
+        const metadataSatisfied = uploadMetadataSchema
+            ? areAllRequiredFieldsSatisfied(uploadMetadataSchema.groups || [], globalMetadataDraft)
+            : true // If no schema, assume satisfied (no requirements)
+
         // Phase 3.0: Can finalize ONLY when:
         // - ALL uploads are completed (not just some)
         // - No active uploads (no uploading, no queued/selected)
         // - No failed uploads (failed blocks finalize)
         // - Not currently finalizing
         // - Category is selected
-        return allCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory
-    }, [v2Files, selectedCategoryId, uploadManagerStateVersion])
+        // - All required metadata fields are satisfied (Phase 2 – Step 3)
+        return allCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory && metadataSatisfied
+    }, [v2Files, selectedCategoryId, uploadManagerStateVersion, uploadMetadataSchema, globalMetadataDraft])
 
     /**
      * CLEAN UPLOADER V2 — Get warnings for missing required fields
@@ -2421,6 +2453,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Handles responses per file and updates batchStatus accordingly.
      */
     const handleFinalizeV2 = useCallback(async () => {
+        // Phase 2 – Step 3: Validate required metadata fields before finalizing
+        if (uploadMetadataSchema) {
+            const allSatisfied = areAllRequiredFieldsSatisfied(
+                uploadMetadataSchema.groups || [],
+                globalMetadataDraft
+            )
+
+            if (!allSatisfied) {
+                // Show validation errors and prevent finalize
+                setShowMetadataErrors(true)
+                return
+            }
+        }
+
         // Only allow finalize if button is enabled
         if (!canFinalizeV2) {
             return
@@ -2517,11 +2563,41 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // Use resolvedFilename from v2File if set (user edited), otherwise derive it
             const resolvedFilename = fileEntry.resolvedFilename || deriveResolvedFilename(normalizedTitle || baseName, extension)
             
+            // Phase 2 – Step 4: Prepare metadata payload
+            // Only include fields from upload schema, exclude empty values
+            const effectiveMetadata = getEffectiveMetadataV2(fileEntry.clientId)
+            const metadataPayload = {}
+            
+            if (uploadMetadataSchema && effectiveMetadata) {
+                // Build set of valid field keys from schema
+                const validFieldKeys = new Set()
+                uploadMetadataSchema.groups?.forEach(group => {
+                    group.fields?.forEach(field => {
+                        validFieldKeys.add(field.key)
+                    })
+                })
+                
+                // Filter metadata to only include valid fields with non-empty values
+                Object.keys(effectiveMetadata).forEach(fieldKey => {
+                    if (validFieldKeys.has(fieldKey)) {
+                        const value = effectiveMetadata[fieldKey]
+                        // Exclude empty values
+                        if (value !== null && value !== undefined && value !== '') {
+                            if (Array.isArray(value) && value.length > 0) {
+                                metadataPayload[fieldKey] = value
+                            } else if (!Array.isArray(value)) {
+                                metadataPayload[fieldKey] = value
+                            }
+                        }
+                    }
+                })
+            }
+            
             return {
                 upload_key: uploadKey,
                 expected_size: fileEntry.file.size,
                 category_id: selectedCategoryId,
-                metadata: getEffectiveMetadataV2(fileEntry.clientId),
+                metadata: metadataPayload, // Phase 2 – Step 4: Only valid fields, no empty values
                 title: normalizedTitle, // This now includes user-edited title if available
                 resolved_filename: resolvedFilename,
             }
@@ -3682,6 +3758,46 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     onCategoryChange={handleCategoryChangeV2}
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
+
+                                {/* Phase 2 – Step 2: Dynamic Metadata Fields */}
+                                {selectedCategoryId && (
+                                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+                                        <div className="px-4 py-3 border-b border-gray-200">
+                                            <h3 className="text-sm font-medium text-gray-900">
+                                                Metadata Fields
+                                            </h3>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Configure metadata for all files in this batch
+                                            </p>
+                                        </div>
+                                        <div className="px-4 py-4">
+                                            {isLoadingMetadataSchema ? (
+                                                <div className="text-center py-4">
+                                                    <ArrowPathIcon className="h-5 w-5 text-gray-400 animate-spin mx-auto" />
+                                                    <p className="text-xs text-gray-500 mt-2">Loading metadata fields...</p>
+                                                </div>
+                                            ) : uploadMetadataSchema ? (
+                                                <MetadataGroups
+                                                    groups={uploadMetadataSchema.groups || []}
+                                                    values={globalMetadataDraft}
+                                                    onChange={handleMetadataFieldChange}
+                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                    showErrors={showMetadataErrors}
+                                                    onValidationAttempt={() => {
+                                                        // Trigger scroll to first invalid group
+                                                        setShowMetadataErrors(true)
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
+                                                    <p className="text-sm text-gray-600 text-center">
+                                                        Unable to load metadata fields. Please try again.
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Upload Tray */}
                                 {/* CLEAN UPLOADER V2: UploadTray now uses v2Files state */}
