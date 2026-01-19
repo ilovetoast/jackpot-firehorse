@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { PencilIcon } from '@heroicons/react/24/outline'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 
 export default function AssetMetadataDisplay({ assetId }) {
@@ -13,6 +13,8 @@ export default function AssetMetadataDisplay({ assetId }) {
     const [loading, setLoading] = useState(true)
     const [editingFieldId, setEditingFieldId] = useState(null)
     const [editingField, setEditingField] = useState(null)
+    const [overridingFieldId, setOverridingFieldId] = useState(null)
+    const [revertingFieldId, setRevertingFieldId] = useState(null)
 
     // Fetch editable metadata
     const fetchMetadata = () => {
@@ -133,22 +135,35 @@ export default function AssetMetadataDisplay({ assetId }) {
                                                 Pending
                                             </span>
                                         )}
+                                        {/* Phase B2: Show readonly indicator for automatic fields */}
+                                        {(field.readonly || field.population_mode === 'automatic') && (
+                                            <span
+                                                className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500"
+                                                title="This field is automatically populated and cannot be edited"
+                                            >
+                                                <LockClosedIcon className="h-3 w-3" />
+                                                <span className="italic">Auto</span>
+                                            </span>
+                                        )}
                                     </dt>
                                     <dd className="text-sm text-gray-900">
                                         {formatValue(field, field.current_value)}
                                     </dd>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setEditingFieldId(field.metadata_field_id)
-                                        setEditingField(field)
-                                    }}
-                                    className="ml-4 flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                >
-                                    <PencilIcon className="h-3 w-3" />
-                                    Edit
-                                </button>
+                                {/* Phase B2: Hide edit button for readonly fields */}
+                                {!(field.readonly || field.population_mode === 'automatic') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEditingFieldId(field.metadata_field_id)
+                                            setEditingField(field)
+                                        }}
+                                        className="ml-4 flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                    >
+                                        <PencilIcon className="h-3 w-3" />
+                                        Edit
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </dl>

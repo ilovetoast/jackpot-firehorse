@@ -19,6 +19,12 @@ import { useState, useEffect } from 'react';
  * @param {boolean} [props.hasError] - Whether field has validation error
  */
 export default function MetadataFieldRenderer({ field, value, onChange, hasError = false, disabled = false }) {
+    // Guard: Ensure field exists and has required properties
+    if (!field || !field.key) {
+        console.error('[MetadataFieldRenderer] Invalid field prop:', field)
+        return null
+    }
+
     const [multiselectValues, setMultiselectValues] = useState(() => {
         // Initialize multiselect from value or empty array
         if (field.type === 'multiselect') {
@@ -109,11 +115,11 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
                         value={value || ''}
                         onChange={(e) => handleChange(e.target.value)}
                         disabled={disabled}
-                        className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm ${
+                        className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm text-gray-900 bg-white ${
                             hasError ? 'border-red-300' : ''
                         } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     >
-                        <option value="">Select {field.label.toLowerCase()}</option>
+                        <option value="">Select {field.label?.toLowerCase() || 'option'}</option>
                         {field.options?.map((option) => (
                             <option key={option.value} value={option.value}>
                                 {option.label}

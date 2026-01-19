@@ -66,18 +66,20 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
             {isExpanded && (
                 <div
                     id={`metadata-group-${group.key}`}
-                    className="px-4 py-4 space-y-4 border-t border-gray-200"
+                    className="px-4 py-4 border-t border-gray-200"
                 >
-                    {group.fields.map((field) => (
-                        <MetadataFieldInput
-                            key={field.key}
-                            field={field}
-                            value={values[field.key]}
-                            onChange={(value) => onChange(field.key, value)}
-                            disabled={disabled}
-                            showError={showErrors && !!groupErrors[field.key]}
-                        />
-                    ))}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {group.fields.map((field) => (
+                            <MetadataFieldInput
+                                key={field.key}
+                                field={field}
+                                value={values[field.key]}
+                                onChange={(value) => onChange(field.key, value)}
+                                disabled={disabled}
+                                showError={showErrors && !!groupErrors[field.key]}
+                            />
+                        ))}
+                    </div>
                 </div>
             )}
         </div>

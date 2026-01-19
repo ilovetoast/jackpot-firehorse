@@ -5,7 +5,10 @@ namespace App\Services;
 use App\Enums\EventType;
 use App\Mail\BillingTrialExpired;
 use App\Mail\BillingCompedExpired;
+use App\Mail\PlanChangedTenant;
+use App\Mail\PlanChangedAdmin;
 use App\Models\Tenant;
+use App\Models\User;
 use App\Services\ActivityRecorder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -391,6 +394,7 @@ class BillingExpirationService
      * @param int $months Number of months until expiration
      * @param float|null $equivalentPlanValue Equivalent plan value for comped accounts (sales insight only)
      * @param string|null $reason Reason for setting (for audit log)
+     * @param User|null $adminUser Admin user who initiated the change (for email notifications and audit trail)
      * @return void
      */
     public function setBillingStatusWithExpiration(
@@ -399,7 +403,8 @@ class BillingExpirationService
         string $planName,
         int $months,
         ?float $equivalentPlanValue = null,
-        ?string $reason = null
+        ?string $reason = null,
+        ?User $adminUser = null
     ): void {
         // Validate billing_status
         if (!in_array($billingStatus, ['trial', 'comped'])) {
@@ -443,23 +448,82 @@ class BillingExpirationService
         
         $tenant->save();
         
-        // Log activity
-        $this->activityRecorder->record(
+        // Log activity with admin info
+        $metadata = [
+            'previous_plan' => $oldPlan,
+            'new_plan' => $planName,
+            'previous_billing_status' => $oldBillingStatus,
+            'new_billing_status' => $billingStatus,
+            'previous_expiration' => $oldExpiration?->toIso8601String(),
+            'new_expiration' => $expirationDate->toIso8601String(),
+            'months' => $months,
+            'equivalent_plan_value' => $equivalentPlanValue,
+            'reason' => $reason ?? 'manual_assignment',
+            'description' => "Billing status set to {$billingStatus} with {$months}-month expiration",
+        ];
+        
+        // Add admin info if provided
+        if ($adminUser) {
+            $metadata['admin_id'] = $adminUser->id;
+            $metadata['admin_name'] = $adminUser->name ?? $adminUser->email;
+            $metadata['admin_email'] = $adminUser->email;
+        }
+        
+        ActivityRecorder::record(
             tenant: $tenant,
             eventType: EventType::PLAN_UPDATED,
             subject: $tenant,
-            description: "Billing status set to {$billingStatus} with {$months}-month expiration",
-            metadata: [
-                'previous_plan' => $oldPlan,
-                'new_plan' => $planName,
-                'previous_billing_status' => $oldBillingStatus,
-                'new_billing_status' => $billingStatus,
-                'previous_expiration' => $oldExpiration?->toIso8601String(),
-                'new_expiration' => $expirationDate->toIso8601String(),
-                'months' => $months,
-                'equivalent_plan_value' => $equivalentPlanValue,
-                'reason' => $reason ?? 'manual_assignment',
-            ]
+            actor: $adminUser, // Pass admin as actor for proper audit trail
+            brand: null,
+            metadata: $metadata
         );
+        
+        // Send email notifications if admin user provided
+        if ($adminUser) {
+            $adminName = $adminUser->name ?? $adminUser->email ?? 'System Administrator';
+            $owner = $tenant->owner();
+            
+            // Send to tenant owner
+            if ($owner && $owner->email) {
+                try {
+                    Mail::to($owner->email)->send(new PlanChangedTenant(
+                        $tenant,
+                        $owner,
+                        $oldPlan,
+                        $planName,
+                        $billingStatus,
+                        $expirationDate,
+                        $adminName
+                    ));
+                } catch (\Exception $e) {
+                    Log::error('Failed to send plan change email to tenant', [
+                        'tenant_id' => $tenant->id,
+                        'owner_email' => $owner->email,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+            
+            // Send to admin (site owner) if different from initiating admin
+            $siteOwner = User::find(1); // Site owner is user ID 1
+            if ($siteOwner && $siteOwner->email && $siteOwner->id !== $adminUser->id) {
+                try {
+                    Mail::to($siteOwner->email)->send(new PlanChangedAdmin(
+                        $tenant,
+                        $oldPlan,
+                        $planName,
+                        $billingStatus,
+                        $expirationDate,
+                        $adminName
+                    ));
+                } catch (\Exception $e) {
+                    Log::error('Failed to send plan change email to admin', [
+                        'tenant_id' => $tenant->id,
+                        'admin_email' => $siteOwner->email,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
     }
 }

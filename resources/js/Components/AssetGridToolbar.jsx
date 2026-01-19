@@ -1,15 +1,18 @@
 /**
  * AssetGridToolbar Component
  * 
- * Professional toolbar for asset grid controls.
- * This is a UI-only component — no backend filtering or logic.
+ * Professional toolbar for asset grid display controls.
+ * This component handles UI-only grid presentation settings.
  * 
  * Features:
- * - Search input (placeholder, non-functional)
- * - Filter chips (static placeholders)
+ * - Search input (coming soon - Phase 6.1)
  * - "Show Info" toggle (controls asset card metadata visibility)
- * - Grid scale slider (card size control)
+ * - Grid size controls (card size control)
+ * - Bulk selection toggle (if applicable)
  * - Responsive layout (mobile-first)
+ * 
+ * Note: Metadata filtering is handled separately via AssetFilters component,
+ * which appears below the toolbar when a specific category is selected.
  * 
  * @param {Object} props
  * @param {boolean} props.showInfo - Whether to show asset info (title, file type)
@@ -106,35 +109,25 @@ export default function AssetGridToolbar({
         <div className="bg-white border-b border-gray-200 px-4 py-4 sm:px-6">
             {/* Toolbar Row - Stacks on Mobile, Single Row on Desktop */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                {/* Search + Filter Chips - Scrollable on Mobile */}
-                <div className="flex-1 flex items-center gap-3 overflow-x-auto">
-                    {/* Search Input - Expandable */}
+                {/* Search Input - Coming Soon */}
+                <div className="flex-1 flex items-center gap-3">
                     <div className={`relative transition-all duration-200 ${isSearchFocused ? 'flex-1 min-w-[200px]' : 'w-48 sm:w-56'}`}>
                         <input
                             type="text"
-                            placeholder="Search assets…"
-                            className="block w-full px-4 py-2 bg-white rounded-xl border border-gray-200 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition-colors cursor-not-allowed"
+                            placeholder="Search assets… (Coming soon)"
+                            className="block w-full px-4 py-2 bg-gray-50 rounded-xl border border-gray-200 text-gray-400 placeholder-gray-400 focus:outline-none transition-colors cursor-not-allowed"
                             onFocus={() => setIsSearchFocused(true)}
                             onBlur={() => setIsSearchFocused(false)}
                             readOnly
+                            disabled
+                            title="Search functionality coming in Phase 6.1"
                         />
                         {/* TODO: Phase 6.1 — Wire search input to backend filtering */}
                     </div>
-                    
-                    {/* Filter Chips - Scrollable on Mobile */}
-                    <div className="flex gap-2 min-w-max sm:min-w-0">
-                        {filterChips.map((chip) => (
-                            <button
-                                key={chip}
-                                type="button"
-                                className="inline-flex items-center px-3 py-1.5 rounded-full bg-gray-100 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors whitespace-nowrap cursor-default"
-                                onClick={(e) => e.preventDefault()} // Prevent any action
-                            >
-                                {chip}
-                                {/* TODO: Phase 6.2 — Wire filter chips to backend query params */}
-                            </button>
-                        ))}
-                    </div>
+                    {/* Helper note for category-specific filters */}
+                    <span className="text-xs text-gray-500 hidden sm:inline">
+                        Advanced filters available when a category is selected
+                    </span>
                 </div>
 
                 {/* Controls - Right Side on Desktop */}

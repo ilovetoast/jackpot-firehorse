@@ -35,7 +35,8 @@ class MetadataFilterService
         // Build field map from schema
         $fieldMap = [];
         foreach ($schema['fields'] ?? [] as $field) {
-            if ($field['is_filterable'] ?? false) {
+            // Must be filterable and visible in filters (Phase B3: filter-only fields support)
+            if (($field['is_filterable'] ?? false) && ($field['show_in_filters'] ?? true)) {
                 $fieldMap[$field['key']] = $field;
             }
         }

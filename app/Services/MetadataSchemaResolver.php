@@ -92,6 +92,30 @@ class MetadataSchemaResolver
                     ->orWhere('applies_to', 'all');
             })
             ->whereNull('deprecated_at')
+            // Phase B2: Select new attributes with safe defaults
+            ->select([
+                'id',
+                'key',
+                'system_label',
+                'type',
+                'applies_to',
+                'scope',
+                'is_filterable',
+                'is_user_editable',
+                'is_ai_trainable',
+                'is_upload_visible',
+                'is_internal_only',
+                'group_key',
+                'plan_gate',
+                'deprecated_at',
+                'replacement_field_id',
+                // Phase B2: New attributes with safe defaults
+                DB::raw("COALESCE(population_mode, 'manual') as population_mode"),
+                DB::raw("COALESCE(show_on_upload, true) as show_on_upload"),
+                DB::raw("COALESCE(show_on_edit, true) as show_on_edit"),
+                DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
+                DB::raw("COALESCE(readonly, false) as readonly"),
+            ])
             ->get()
             ->keyBy('id');
 
@@ -282,6 +306,12 @@ class MetadataSchemaResolver
             'is_upload_visible' => !$isUploadHidden,
             'is_filterable' => !$isFilterHidden,
             'is_internal_only' => (bool) $field->is_internal_only,
+            // Phase B2: Add population and visibility attributes (safe defaults applied)
+            'population_mode' => $field->population_mode ?? 'manual',
+            'show_on_upload' => isset($field->show_on_upload) ? (bool) $field->show_on_upload : true,
+            'show_on_edit' => isset($field->show_on_edit) ? (bool) $field->show_on_edit : true,
+            'show_in_filters' => isset($field->show_in_filters) ? (bool) $field->show_in_filters : true,
+            'readonly' => isset($field->readonly) ? (bool) $field->readonly : false,
             'options' => $options,
         ];
     }

@@ -136,16 +136,20 @@ class ProcessAssetJob implements ShouldQueue
         // 2. GenerateThumbnailsJob - Generate thumbnail styles
         // 3. GeneratePreviewJob - Generate preview images
         // 4. ComputedMetadataJob - Compute technical metadata (Phase 5)
-        // 5. AITaggingJob - AI-powered tagging
-        // 6. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5)
-        // 7. FinalizeAssetJob - Mark asset as completed
-        // 8. PromoteAssetJob - Move from temp/ to canonical assets/ location
+        // 5. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
+        // 6. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
+        // 7. AITaggingJob - AI-powered tagging
+        // 8. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5)
+        // 9. FinalizeAssetJob - Mark asset as completed
+        // 10. PromoteAssetJob - Move from temp/ to canonical assets/ location
         //    (runs after thumbnail generation, requires COMPLETED status)
         Bus::chain([
             new ExtractMetadataJob($asset->id),
             new GenerateThumbnailsJob($asset->id),
             new GeneratePreviewJob($asset->id),
             new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
+            new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
+            new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
             new AITaggingJob($asset->id),
             new AiMetadataSuggestionJob($asset->id), // Phase 2 – Step 5: AI metadata suggestions
             new FinalizeAssetJob($asset->id),

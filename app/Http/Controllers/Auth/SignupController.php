@@ -50,8 +50,8 @@ class SignupController extends Controller
             'slug' => Str::slug($validated['company_name']),
         ]);
 
-        // Attach user to tenant
-        $user->tenants()->attach($tenant->id);
+        // Attach user to tenant as owner
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
 
         // Get the default brand (created automatically by Tenant boot method)
         $defaultBrand = $tenant->defaultBrand;
@@ -59,6 +59,11 @@ class SignupController extends Controller
         if (! $defaultBrand) {
             abort(500, 'Tenant must have at least one brand');
         }
+        
+        // Ensure owner is automatically connected to default brand
+        $defaultBrand->users()->syncWithoutDetaching([
+            $user->id => ['role' => 'admin'] // Owners have admin role on their default brand
+        ]);
 
         // Log the user in
         Auth::login($user);

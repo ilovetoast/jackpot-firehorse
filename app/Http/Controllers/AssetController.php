@@ -159,12 +159,15 @@ class AssetController extends Controller
         if (!empty($categoryIds)) {
             // Count assets per category using JSON path (single query with GROUP BY)
             // Use whereRaw for JSON extraction in WHERE clause
+            // Note: Only counts assets that have metadata with a valid category_id
+            // Assets without metadata or without category_id are excluded (consistent with grid filtering)
             $counts = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::ASSET)
                 ->where('status', AssetStatus::VISIBLE)
                 ->whereNull('deleted_at')
                 ->whereNotNull('metadata')
+                ->whereRaw('JSON_EXTRACT(metadata, "$.category_id") IS NOT NULL')
                 ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) IN (' . implode(',', array_map('intval', $categoryIds)) . ')')
                 ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
                 ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
@@ -243,10 +246,11 @@ class AssetController extends Controller
         $filters = $request->get('filters', []);
         if (!empty($filters) && is_array($filters)) {
             // Resolve metadata schema for filtering
-            $assetType = 'image'; // Default, could be determined from category or request
-            if ($category) {
-                $assetType = $category->asset_type->value ?? 'image';
-            }
+            // Note: asset_type in category is organizational (asset/marketing/ai_generated),
+            // but MetadataSchemaResolver expects file type (image/video/document)
+            // For now, default to 'image' as most assets are images
+            // TODO: Could infer from actual assets in category or add file_type to categories
+            $assetType = 'image'; // Default file type for metadata schema resolution
 
             $schema = $this->metadataSchemaResolver->resolve(
                 $tenant->id,
@@ -516,14 +520,21 @@ class AssetController extends Controller
             ->values();
 
         // Phase 2 – Step 8: Get filterable schema for frontend
+        // Note: asset_type in category is organizational (asset/marketing/ai_generated),
+        // but MetadataSchemaResolver expects file type (image/video/document)
+        // Default to 'image' for schema resolution when category context doesn't provide file type
+        // TODO: Could infer from actual assets in category or add file_type to categories
         $filterableSchema = [];
         if ($categoryId && $category) {
-            $assetType = $category->asset_type->value ?? 'image';
+            // Use 'image' as default file type for metadata schema resolution
+            // Category's asset_type is organizational, not a file type
+            $fileType = 'image'; // Default file type for metadata schema resolution
+            
             $schema = $this->metadataSchemaResolver->resolve(
                 $tenant->id,
                 $brand->id,
                 $categoryId,
-                $assetType
+                $fileType
             );
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema);
         }

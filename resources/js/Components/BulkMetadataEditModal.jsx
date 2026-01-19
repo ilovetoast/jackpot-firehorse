@@ -43,10 +43,14 @@ export default function BulkMetadataEditModal({
                 },
                 credentials: 'same-origin',
             })
-                .then((res) => res.json())
-                .then((data) => {
-                    setEditableFields(data.fields || [])
-                })
+            .then((res) => res.json())
+            .then((data) => {
+                // Phase B2: Filter out readonly fields from bulk edit
+                const editableOnly = (data.fields || []).filter(
+                    field => !(field.readonly || field.population_mode === 'automatic')
+                )
+                setEditableFields(editableOnly)
+            })
                 .catch((err) => {
                     console.error('[BulkMetadataEditModal] Failed to fetch fields', err)
                     setError('Failed to load editable fields')

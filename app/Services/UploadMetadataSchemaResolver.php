@@ -90,6 +90,8 @@ class UploadMetadataSchemaResolver
      * - Not upload-visible (is_upload_visible = false)
      * - Rating type
      * - Internal only
+     * - Phase B2: Automatically populated fields (population_mode = 'automatic')
+     * - Phase B2: Fields explicitly hidden from upload (show_on_upload = false)
      *
      * @param array $fields Resolved fields from MetadataSchemaResolver
      * @return array Filtered fields
@@ -116,6 +118,18 @@ class UploadMetadataSchemaResolver
 
             // Exclude internal-only fields
             if ($field['is_internal_only']) {
+                continue;
+            }
+
+            // Phase B2: Exclude automatically populated fields
+            $populationMode = $field['population_mode'] ?? 'manual';
+            if ($populationMode === 'automatic') {
+                continue;
+            }
+
+            // Phase B2: Exclude fields explicitly hidden from upload
+            $showOnUpload = $field['show_on_upload'] ?? true;
+            if (!$showOnUpload) {
                 continue;
             }
 

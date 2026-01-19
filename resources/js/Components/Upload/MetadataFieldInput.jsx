@@ -199,12 +199,12 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                         onChange={(e) => handleChange(e.target.value)}
                         disabled={isDisabled}
                         title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                        className={`block w-full rounded-md shadow-sm focus:ring-indigo-500 sm:text-sm ${
+                        className={`block w-full rounded-md shadow-sm focus:ring-indigo-500 sm:text-sm text-gray-900 bg-white ${
                             hasError
                                 ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
                                 : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
                         } ${
-                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
+                            isDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
                         }`}
                     >
                         <option value="">Select {field.display_label.toLowerCase()}</option>

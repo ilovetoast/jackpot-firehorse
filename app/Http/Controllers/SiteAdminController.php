@@ -6,6 +6,8 @@ use App\Enums\EventType;
 use App\Mail\AccountCanceled;
 use App\Mail\AccountDeleted;
 use App\Mail\AccountSuspended;
+use App\Mail\PlanChangedTenant;
+use App\Mail\PlanChangedAdmin;
 use App\Enums\TicketStatus;
 use App\Models\ActivityEvent;
 use App\Models\Brand;
@@ -16,6 +18,7 @@ use App\Services\ActivityRecorder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -41,7 +44,19 @@ class SiteAdminController extends Controller
         // MINIMAL INITIAL LOAD - Only load basic company info
         // Heavy data (users, costs, etc.) will be loaded via AJAX
         $perPage = (int) $request->get('per_page', 10);
-        $companies = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override'])
+        $searchQuery = $request->get('search', '');
+        
+        $companiesQuery = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override']);
+        
+        // Apply search filter if provided
+        if (!empty($searchQuery)) {
+            $companiesQuery->where(function ($query) use ($searchQuery) {
+                $query->where('name', 'like', "%{$searchQuery}%")
+                    ->orWhere('slug', 'like', "%{$searchQuery}%");
+            });
+        }
+        
+        $companies = $companiesQuery
             ->orderBy('created_at', 'desc')
             ->paginate($perPage)
             ->appends($request->except('page'));
@@ -54,13 +69,21 @@ class SiteAdminController extends Controller
                 // Quick plan lookup without heavy queries
                 $planName = $planService->getCurrentPlan($company);
                 
+                $stripeConnected = !empty($company->stripe_id);
                 return [
                     'id' => $company->id,
                     'name' => $company->name,
                     'slug' => $company->slug,
                     'created_at' => $company->created_at?->format('M d, Y'),
                     'plan_name' => $planName,
-                    'stripe_connected' => !empty($company->stripe_id),
+                    'stripe_connected' => $stripeConnected,
+                    'plan_management' => [
+                        'source' => $planService->getPlanManagementSource($company),
+                        'is_externally_managed' => $planService->isExternallyManaged($company),
+                    ],
+                    // Allow non-Stripe plans to be managed in all environments
+                    // Stripe-connected companies must use Stripe billing portal
+                    'can_manage_plan' => !$stripeConnected,
                     // All other data loaded via API on demand
                     'details_loaded' => false,
                 ];
@@ -117,9 +140,18 @@ class SiteAdminController extends Controller
         $planService = app(\App\Services\PlanService::class);
         
         // Load owner efficiently
-        $owner = $tenant->users()
-            ->wherePivot('role', 'owner')
-            ->first(['id', 'first_name', 'last_name', 'email']);
+        // Query pivot table directly to find owner
+        $ownerPivot = DB::table('tenant_user')
+            ->where('tenant_id', $tenant->id)
+            ->where('role', 'owner')
+            ->first();
+        
+        $owner = null;
+        if ($ownerPivot) {
+            $owner = User::where('id', $ownerPivot->user_id)
+                ->select('id', 'first_name', 'last_name', 'email')
+                ->first();
+        }
         
         $planName = $planService->getCurrentPlan($tenant);
         $limits = $planService->getPlanLimits($tenant);
@@ -138,7 +170,7 @@ class SiteAdminController extends Controller
             ? $latestSubscription->stripe_status 
             : ($stripeConnected ? 'inactive' : 'not_connected');
         
-        // Load brands
+        // Load brands - convert to array for JSON response
         $brands = $tenant->brands()
             ->orderBy('is_default', 'desc')
             ->orderBy('name')
@@ -148,7 +180,9 @@ class SiteAdminController extends Controller
                 'name' => $brand->name,
                 'slug' => $brand->slug,
                 'is_default' => $brand->is_default,
-            ]);
+            ])
+            ->values() // Reset keys for proper array serialization
+            ->toArray(); // Convert to array for JSON
         
         return response()->json([
             'id' => $tenant->id,
@@ -180,7 +214,9 @@ class SiteAdminController extends Controller
                 'is_externally_managed' => $planService->isExternallyManaged($tenant),
                 'manual_plan_override' => $tenant->manual_plan_override,
             ],
-            'can_manage_plan' => !app()->environment('production') && !$stripeConnected,
+            // Allow non-Stripe plans to be managed in all environments
+            // Stripe-connected companies must use Stripe billing portal
+            'can_manage_plan' => !$stripeConnected,
             'brands' => $brands,
             // Users loaded separately via companyUsers endpoint
             'costs' => null,
@@ -1249,14 +1285,6 @@ class SiteAdminController extends Controller
             abort(403, 'Only site owners can update plans.');
         }
 
-        // Prevent plan switching in production for safety
-        // Plan changes should go through proper billing flows in production
-        if (app()->environment('production')) {
-            return back()->withErrors([
-                'plan' => 'Plan changes are not allowed in production for safety. Please use the billing interface or update the plan through Stripe/Shopify directly.',
-            ]);
-        }
-
         $planService = app(\App\Services\PlanService::class);
         
         // Check if plan is externally managed
@@ -1301,13 +1329,17 @@ class SiteAdminController extends Controller
         if ($billingStatus && in_array($billingStatus, ['trial', 'comped']) && $expirationMonths) {
             try {
                 $expirationService = app(\App\Services\BillingExpirationService::class);
+                $admin = Auth::user();
+                $oldPlan = $planService->getCurrentPlan($tenant);
+                
                 $expirationService->setBillingStatusWithExpiration(
                     tenant: $tenant,
                     billingStatus: $billingStatus,
                     planName: $planName,
                     months: $expirationMonths,
                     equivalentPlanValue: $equivalentPlanValue,
-                    reason: 'admin_manual_assignment'
+                    reason: 'admin_manual_assignment',
+                    adminUser: $admin
                 );
                 
                 // Set management source if provided
@@ -1316,7 +1348,7 @@ class SiteAdminController extends Controller
                     $tenant->save();
                 }
                 
-                // Activity logging is handled by the service
+                // Email notifications and activity logging are handled by the service
                 return back()->with('success', "Plan set to {$planName} with {$billingStatus} status (expires in {$expirationMonths} months)");
             } catch (\Exception $e) {
                 return back()->withErrors([
@@ -1352,20 +1384,70 @@ class SiteAdminController extends Controller
         
         $tenant->save();
 
-        // Log activity
+        // Log activity with admin info
+        $admin = Auth::user();
         ActivityRecorder::record(
             tenant: $tenant,
             eventType: EventType::PLAN_UPDATED,
             subject: $tenant,
-            actor: Auth::user(),
+            actor: $admin,
             brand: null,
             metadata: [
                 'old_plan' => $oldPlan,
                 'new_plan' => $planName,
                 'management_source' => $tenant->plan_management_source,
-                'admin_id' => Auth::id(),
+                'billing_status' => $tenant->billing_status,
+                'admin_id' => $admin->id,
+                'admin_name' => $admin->name ?? $admin->email,
+                'admin_email' => $admin->email,
             ]
         );
+
+        // Send email notifications
+        $adminName = $admin->name ?? $admin->email ?? 'System Administrator';
+        $owner = $tenant->owner();
+        
+        // Send to tenant owner
+        if ($owner && $owner->email) {
+            try {
+                Mail::to($owner->email)->send(new PlanChangedTenant(
+                    $tenant,
+                    $owner,
+                    $oldPlan,
+                    $planName,
+                    $tenant->billing_status,
+                    $tenant->billing_status_expires_at,
+                    $adminName
+                ));
+            } catch (\Exception $e) {
+                Log::error('Failed to send plan change email to tenant', [
+                    'tenant_id' => $tenant->id,
+                    'owner_email' => $owner->email,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        
+        // Send to admin (site owner)
+        $siteOwner = User::find(1); // Site owner is user ID 1
+        if ($siteOwner && $siteOwner->email && $siteOwner->id !== $admin->id) {
+            try {
+                Mail::to($siteOwner->email)->send(new PlanChangedAdmin(
+                    $tenant,
+                    $oldPlan,
+                    $planName,
+                    $tenant->billing_status,
+                    $tenant->billing_status_expires_at,
+                    $adminName
+                ));
+            } catch (\Exception $e) {
+                Log::error('Failed to send plan change email to admin', [
+                    'tenant_id' => $tenant->id,
+                    'admin_email' => $siteOwner->email,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return back()->with('success', "Plan updated from {$oldPlan} to {$planName}.");
     }

@@ -286,13 +286,15 @@ class AssetMetadataController extends Controller
 
         DB::transaction(function () use ($asset, $suggestion, $normalizedValue, $user) {
             // Create new user-approved metadata row
+            // Phase B7: User-approved AI suggestions have confidence = 1.0 and producer = 'user'
             foreach ($normalizedValue as $value) {
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $suggestion->metadata_field_id,
                     'value_json' => json_encode($value),
                     'source' => 'user',
-                    'confidence' => null,
+                    'confidence' => 1.0, // Phase B7: User-approved values are certain
+                    'producer' => 'user', // Phase B7: User-approved values are from user
                     'approved_at' => now(),
                     'approved_by' => $user->id,
                     'created_at' => now(),
@@ -395,10 +397,47 @@ class AssetMetadataController extends Controller
      * @param Asset $asset
      * @return string
      */
+    /**
+     * Determine file type for metadata schema resolution.
+     * 
+     * Note: asset->type is organizational (asset/marketing/ai_generated),
+     * but MetadataSchemaResolver expects file type (image/video/document).
+     * 
+     * This method infers file type from asset's mime_type and filename.
+     *
+     * @param Asset $asset
+     * @return string One of: 'image', 'video', 'document'
+     */
     protected function determineAssetType(Asset $asset): string
     {
-        $type = $asset->type?->value ?? 'image';
-        return in_array($type, ['image', 'video', 'document'], true) ? $type : 'image';
+        $mimeType = $asset->mime_type ?? '';
+        $filename = $asset->original_filename ?? '';
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        
+        // Video types
+        if (str_starts_with($mimeType, 'video/') || in_array($extension, ['mp4', 'mov', 'avi', 'mkv', 'webm'])) {
+            return 'video';
+        }
+        
+        // Document types (PDF, office docs)
+        if ($mimeType === 'application/pdf' || $extension === 'pdf' ||
+            in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']) ||
+            str_starts_with($mimeType, 'application/msword') ||
+            str_starts_with($mimeType, 'application/vnd.ms-excel') ||
+            str_starts_with($mimeType, 'application/vnd.ms-powerpoint') ||
+            str_starts_with($mimeType, 'application/vnd.openxmlformats')) {
+            return 'document';
+        }
+        
+        // Image types (default)
+        // Includes: jpg, jpeg, png, gif, webp, bmp, svg, psd, ai, etc.
+        if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'psd', 'ai', 'tif', 'tiff'])) {
+            return 'image';
+        }
+        
+        // Default to 'image' if type cannot be determined
+        // Most assets in DAM systems are images
+        return 'image';
     }
 
     /**
@@ -522,26 +561,43 @@ class AssetMetadataController extends Controller
         );
 
         // Load current approved metadata values
+        // Phase B5: For hybrid fields, we need to check both automatic and manual_override sources
+        // Priority: manual_override > user > automatic/ai
         $currentMetadataRows = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
-            ->where('asset_metadata.source', 'user')
+            ->whereIn('asset_metadata.source', ['user', 'automatic', 'ai', 'manual_override'])
             ->whereNotNull('asset_metadata.approved_at')
             ->select(
                 'metadata_fields.id as metadata_field_id',
                 'metadata_fields.key',
                 'metadata_fields.type',
-                'asset_metadata.value_json'
+                'asset_metadata.value_json',
+                'asset_metadata.source',
+                'asset_metadata.overridden_at',
+                'asset_metadata.overridden_by'
             )
-            ->orderBy('asset_metadata.approved_at', 'desc') // Most recent first
+            ->orderByRaw("
+                CASE 
+                    WHEN asset_metadata.source = 'manual_override' THEN 1
+                    WHEN asset_metadata.source = 'user' THEN 2
+                    WHEN asset_metadata.source = 'automatic' THEN 3
+                    WHEN asset_metadata.source = 'ai' THEN 4
+                    ELSE 5
+                END
+            ")
+            ->orderBy('asset_metadata.approved_at', 'desc') // Most recent first within same source priority
             ->get()
             ->groupBy('metadata_field_id');
 
-        // Build map of field_id to current values
+        // Build map of field_id to current values and override state
         $fieldValues = [];
+        $fieldOverrideState = []; // Phase B5: Track override state for hybrid fields
         foreach ($currentMetadataRows as $fieldId => $rows) {
-            // Get field type from first row
-            $fieldType = $rows->first()->type ?? 'text';
+            // Get field type and most recent row (highest priority after ordering)
+            $mostRecent = $rows->first();
+            $fieldType = $mostRecent->type ?? 'text';
+            $source = $mostRecent->source ?? null;
 
             if ($fieldType === 'multiselect') {
                 // For multiselect, collect all unique values from all rows
@@ -556,10 +612,17 @@ class AssetMetadataController extends Controller
                 }
                 $fieldValues[$fieldId] = array_unique($allValues, SORT_REGULAR);
             } else {
-                // For single-value fields, use the most recent value
-                $mostRecent = $rows->first();
+                // For single-value fields, use the most recent value (highest priority)
                 $fieldValues[$fieldId] = json_decode($mostRecent->value_json, true);
             }
+
+            // Phase B5: Track override state
+            $fieldOverrideState[$fieldId] = [
+                'source' => $source,
+                'is_overridden' => $source === 'manual_override',
+                'overridden_at' => $mostRecent->overridden_at ?? null,
+                'overridden_by' => $mostRecent->overridden_by ?? null,
+            ];
         }
 
         // Phase 8: Check for pending metadata per field
@@ -589,6 +652,12 @@ class AssetMetadataController extends Controller
                 continue;
             }
 
+            // Phase B3: Exclude fields that should not appear in edit view
+            $showOnEdit = $field['show_on_edit'] ?? true;
+            if (!$showOnEdit) {
+                continue; // Filter-only fields: hidden from edit UI
+            }
+
             // Phase 4: Check edit permission
             $canEdit = $this->permissionResolver->canEdit(
                 $field['field_id'],
@@ -606,6 +675,10 @@ class AssetMetadataController extends Controller
             // Get current value(s) for this field
             $currentValue = $fieldValues[$field['field_id']] ?? null;
 
+            // Phase B2: Check if field is readonly (automatic or explicitly readonly)
+            $populationMode = $field['population_mode'] ?? 'manual';
+            $isReadonly = ($field['readonly'] ?? false) || ($populationMode === 'automatic');
+
             $editableFields[] = [
                 'metadata_field_id' => $field['field_id'],
                 'field_key' => $field['key'],
@@ -616,6 +689,9 @@ class AssetMetadataController extends Controller
                 'can_edit' => true, // Phase 4: Permission already checked
                 'current_value' => $currentValue,
                 'has_pending' => in_array($field['field_id'], $pendingFieldIds), // Phase 8
+                // Phase B2: Add readonly and population_mode flags
+                'readonly' => $isReadonly,
+                'population_mode' => $populationMode,
             ];
         }
 
@@ -732,6 +808,27 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Field is internal-only'], 422);
         }
 
+        // Phase B2: Check if field is readonly (automatic or explicitly readonly)
+        $populationMode = $fieldDef['population_mode'] ?? 'manual';
+        $isReadonly = ($fieldDef['readonly'] ?? false) || ($populationMode === 'automatic');
+        
+        // Phase B5: For hybrid fields, require explicit override intent
+        $isHybrid = $populationMode === 'hybrid';
+        $requiresOverride = $isHybrid && !$request->has('override_intent') && !$request->boolean('override_intent');
+        
+        if ($isReadonly) {
+            return response()->json([
+                'message' => 'This field is automatically populated and cannot be edited.',
+            ], 422);
+        }
+        
+        if ($requiresOverride) {
+            return response()->json([
+                'message' => 'This field requires explicit override intent. Use the override action to enable editing.',
+                'requires_override' => true,
+            ], 422);
+        }
+
         // Validate value
         if (!$this->validateValue($field, $newValue)) {
             return response()->json([
@@ -740,11 +837,19 @@ class AssetMetadataController extends Controller
         }
 
         // Get previous approved value for audit
+        // Phase B5: Check for manual_override or user sources
         $previousValue = DB::table('asset_metadata')
             ->where('asset_id', $asset->id)
             ->where('metadata_field_id', $fieldId)
-            ->where('source', 'user')
+            ->whereIn('source', ['user', 'manual_override'])
             ->whereNotNull('approved_at')
+            ->orderByRaw("
+                CASE 
+                    WHEN source = 'manual_override' THEN 1
+                    WHEN source = 'user' THEN 2
+                    ELSE 3
+                END ASC
+            ")
             ->orderBy('approved_at', 'desc')
             ->first();
 
@@ -756,18 +861,27 @@ class AssetMetadataController extends Controller
         // Phase 8: Check if approval is required
         $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant);
 
+        // Phase B5: Determine source based on override intent for hybrid fields
+        $isHybrid = $populationMode === 'hybrid';
+        $hasOverrideIntent = $validated['override_intent'] ?? false;
+        $source = ($isHybrid && $hasOverrideIntent) ? 'manual_override' : 'user';
+        $overriddenAt = ($isHybrid && $hasOverrideIntent) ? now() : null;
+        $overriddenBy = ($isHybrid && $hasOverrideIntent) ? $user->id : null;
+
         // Persist in transaction
-        DB::transaction(function () use ($asset, $fieldId, $normalizedValues, $user, $oldValueJson, $requiresApproval) {
+        DB::transaction(function () use ($asset, $fieldId, $normalizedValues, $user, $oldValueJson, $requiresApproval, $source, $overriddenAt, $overriddenBy) {
             foreach ($normalizedValues as $value) {
                 // Create new asset_metadata row (never update existing)
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $fieldId,
                     'value_json' => json_encode($value),
-                    'source' => 'user',
+                    'source' => $source,
                     'confidence' => null,
                     'approved_at' => $requiresApproval ? null : now(),
                     'approved_by' => $requiresApproval ? null : $user->id,
+                    'overridden_at' => $overriddenAt,
+                    'overridden_by' => $overriddenBy,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
@@ -791,6 +905,228 @@ class AssetMetadataController extends Controller
         ]);
 
         return response()->json(['message' => 'Metadata updated']);
+    }
+
+    /**
+     * Override a hybrid metadata field.
+     *
+     * POST /assets/{asset}/metadata/override
+     *
+     * Phase B5: Explicitly marks a hybrid field as overridden, enabling editing.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function overrideHybridField(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Validate request
+        $validated = $request->validate([
+            'metadata_field_id' => 'required|integer|exists:metadata_fields,id',
+        ]);
+
+        $fieldId = $validated['metadata_field_id'];
+
+        // Load category for schema resolution
+        $category = null;
+        if ($asset->metadata && isset($asset->metadata['category_id'])) {
+            $categoryId = $asset->metadata['category_id'];
+            $category = \App\Models\Category::where('id', $categoryId)
+                ->where('tenant_id', $asset->tenant_id)
+                ->first();
+        }
+
+        if (!$category) {
+            return response()->json(['message' => 'Category not found'], 404);
+        }
+
+        // Determine asset type
+        $assetType = $this->determineAssetType($asset);
+
+        // Resolve metadata schema to validate field
+        $schema = $this->metadataSchemaResolver->resolve(
+            $asset->tenant_id,
+            $asset->brand_id,
+            $category->id,
+            $assetType
+        );
+
+        // Find field in schema
+        $fieldDef = null;
+        foreach ($schema['fields'] ?? [] as $field) {
+            if ($field['field_id'] === $fieldId) {
+                $fieldDef = $field;
+                break;
+            }
+        }
+
+        if (!$fieldDef) {
+            return response()->json(['message' => 'Field not found in schema'], 404);
+        }
+
+        // Verify field is hybrid
+        $populationMode = $fieldDef['population_mode'] ?? 'manual';
+        if ($populationMode !== 'hybrid') {
+            return response()->json([
+                'message' => 'This field is not a hybrid field and does not require override.',
+            ], 422);
+        }
+
+        // Check if already overridden
+        $existingOverride = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $fieldId)
+            ->where('source', 'manual_override')
+            ->whereNotNull('approved_at')
+            ->first();
+
+        if ($existingOverride) {
+            return response()->json([
+                'message' => 'This field is already overridden.',
+                'overridden_at' => $existingOverride->overridden_at,
+                'overridden_by' => $existingOverride->overridden_by,
+            ], 200);
+        }
+
+        // Get current automatic value
+        $currentAutomatic = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $fieldId)
+            ->whereIn('source', ['automatic', 'ai'])
+            ->whereNotNull('approved_at')
+            ->orderBy('approved_at', 'desc')
+            ->first();
+
+        if (!$currentAutomatic) {
+            return response()->json([
+                'message' => 'No automatic value found for this field.',
+            ], 404);
+        }
+
+        // Create override record (same value, but marked as manual_override)
+        // This enables editing while preserving the automatic value
+        // Phase B7: Manual overrides have confidence = 1.0 and producer = 'user'
+        DB::table('asset_metadata')->insert([
+            'asset_id' => $asset->id,
+            'metadata_field_id' => $fieldId,
+            'value_json' => $currentAutomatic->value_json,
+            'source' => 'manual_override',
+            'confidence' => 1.0, // Phase B7: Manual overrides are certain
+            'producer' => 'user', // Phase B7: Manual overrides are from user
+            'approved_at' => now(),
+            'approved_by' => $user->id,
+            'overridden_at' => now(),
+            'overridden_by' => $user->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Log::info('[AssetMetadataController] Hybrid field overridden', [
+            'asset_id' => $asset->id,
+            'metadata_field_id' => $fieldId,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Field override enabled. You can now edit this field.',
+            'overridden_at' => now()->toIso8601String(),
+        ]);
+    }
+
+    /**
+     * Revert a hybrid field to automatic value.
+     *
+     * POST /assets/{asset}/metadata/revert
+     *
+     * Phase B5: Removes manual override, reverting to automatic value.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function revertToAutomatic(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Validate request
+        $validated = $request->validate([
+            'metadata_field_id' => 'required|integer|exists:metadata_fields,id',
+        ]);
+
+        $fieldId = $validated['metadata_field_id'];
+
+        // Find existing override
+        $existingOverride = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $fieldId)
+            ->where('source', 'manual_override')
+            ->whereNotNull('approved_at')
+            ->first();
+
+        if (!$existingOverride) {
+            return response()->json([
+                'message' => 'No override found for this field.',
+            ], 404);
+        }
+
+        // Get automatic value
+        $automaticValue = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $fieldId)
+            ->whereIn('source', ['automatic', 'ai'])
+            ->whereNotNull('approved_at')
+            ->orderBy('approved_at', 'desc')
+            ->first();
+
+        if (!$automaticValue) {
+            return response()->json([
+                'message' => 'No automatic value found to revert to.',
+            ], 404);
+        }
+
+        // Create new record with automatic value (effectively reverting)
+        // We don't delete the override - we create a new record with automatic source
+        // Phase B7: Restore automatic confidence and producer when reverting
+        DB::table('asset_metadata')->insert([
+            'asset_id' => $asset->id,
+            'metadata_field_id' => $fieldId,
+            'value_json' => $automaticValue->value_json,
+            'source' => 'automatic',
+            'confidence' => $automaticValue->confidence, // Phase B7: Restore automatic confidence
+            'producer' => $automaticValue->producer, // Phase B7: Restore automatic producer
+            'approved_at' => now(),
+            'approved_by' => $user->id,
+            'overridden_at' => null,
+            'overridden_by' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Log::info('[AssetMetadataController] Hybrid field reverted to automatic', [
+            'asset_id' => $asset->id,
+            'metadata_field_id' => $fieldId,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Field reverted to automatic value.',
+        ]);
     }
 
     /**
@@ -972,15 +1308,19 @@ class AssetMetadataController extends Controller
             return response()->json(['fields' => []]);
         }
 
-        // Determine asset type
-        $assetType = $category->asset_type->value ?? 'image';
+        // Determine file type for metadata schema resolution
+        // Note: category->asset_type is organizational (asset/marketing/ai_generated),
+        // but MetadataSchemaResolver expects file type (image/video/document)
+        // Default to 'image' when we don't have an asset object to infer from
+        // TODO: Could infer from actual assets in category or add file_type to categories
+        $fileType = 'image'; // Default file type for metadata schema resolution
 
         // Resolve metadata schema
         $schema = $this->metadataSchemaResolver->resolve(
             $tenant->id,
             $brand->id,
             $category->id,
-            $assetType
+            $fileType
         );
 
         // Get filterable fields
@@ -1377,13 +1717,15 @@ class AssetMetadataController extends Controller
 
         DB::transaction(function () use ($asset, $metadata, $normalizedValues, $user) {
             // Create new approved metadata row (leave proposal untouched)
+            // Phase B7: User-edited and approved values have confidence = 1.0 and producer = 'user'
             foreach ($normalizedValues as $value) {
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $metadata->metadata_field_id,
                     'value_json' => json_encode($value),
                     'source' => 'user',
-                    'confidence' => null,
+                    'confidence' => 1.0, // Phase B7: User-edited values are certain
+                    'producer' => 'user', // Phase B7: User-edited values are from user
                     'approved_at' => now(),
                     'approved_by' => $user->id,
                     'created_at' => now(),

@@ -67,8 +67,9 @@ export default function AppNav({ brand, tenant }) {
     const hasBrands = brands && brands.length > 0
     const hasBrandSettingsAccess = auth.permissions?.includes('brand_settings.manage') || false
     const hasMultipleBrands = brands && brands.length > 1
-    // Only show Brands section if user has at least one brand AND (has multiple brands OR has brand settings access)
-    const hasAnyBrandAccess = hasBrands && (hasMultipleBrands || hasBrandSettingsAccess)
+    // Show Brands section if user has at least one brand AND (is owner/admin OR has multiple brands OR has brand settings access)
+    // Owners/admins should always see brand management regardless of other conditions
+    const hasAnyBrandAccess = hasBrands && (hasAdminOrOwnerRole || hasMultipleBrands || hasBrandSettingsAccess)
 
     // Use default white background for nav (no brand color)
     const navColor = '#ffffff'

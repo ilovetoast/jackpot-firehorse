@@ -51,12 +51,21 @@ class Tenant extends Model
 
         static::created(function ($tenant) {
             // Automatically create a default brand when tenant is created
-            $tenant->brands()->create([
+            $defaultBrand = $tenant->brands()->create([
                 'name' => $tenant->name,
                 'slug' => $tenant->slug,
                 'is_default' => true,
                 'show_in_selector' => true, // Default to showing in selector
             ]);
+            
+            // If tenant already has an owner (e.g., created via seeder or admin), connect them to default brand
+            $owner = $tenant->owner();
+            if ($owner && $defaultBrand) {
+                // Connect owner to default brand with admin role (owners can't have brand roles)
+                $defaultBrand->users()->syncWithoutDetaching([
+                    $owner->id => ['role' => 'admin']
+                ]);
+            }
         });
     }
 

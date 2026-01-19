@@ -7,7 +7,9 @@
  * Handles empty state gracefully.
  */
 
+import { useRef } from 'react'
 import MetadataGroup from './MetadataGroup'
+import { validateMetadata } from '../../utils/metadataValidation'
 
 /**
  * MetadataGroups - Container for metadata field groups
@@ -17,8 +19,19 @@ import MetadataGroup from './MetadataGroup'
  * @param {Object} props.values - Current metadata values keyed by field key
  * @param {Function} props.onChange - Callback when any field value changes (fieldKey, value)
  * @param {boolean} [props.disabled] - Whether fields are disabled
+ * @param {boolean} [props.showErrors] - Whether to show validation errors
+ * @param {Function} [props.onValidationAttempt] - Callback when validation is attempted
  */
-export default function MetadataGroups({ groups = [], values = {}, onChange, disabled = false }) {
+export default function MetadataGroups({ 
+    groups = [], 
+    values = {}, 
+    onChange, 
+    disabled = false,
+    showErrors = false,
+    onValidationAttempt = null
+}) {
+    const groupRefs = useRef({})
+
     // Handle empty state
     if (!groups || groups.length === 0) {
         return (
@@ -35,6 +48,17 @@ export default function MetadataGroups({ groups = [], values = {}, onChange, dis
             {groups.map((group) => {
                 const groupErrors = validateMetadata([group], values)
                 const hasErrors = Object.keys(groupErrors).length > 0
+
+                // Scroll to first group with errors when validation is attempted
+                if (showErrors && hasErrors && onValidationAttempt) {
+                    // Call onValidationAttempt once when errors are shown
+                    setTimeout(() => {
+                        const firstErrorGroup = groupRefs.current[group.key]
+                        if (firstErrorGroup) {
+                            firstErrorGroup.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                        }
+                    }, 100)
+                }
 
                 return (
                     <div

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { usePage } from '@inertiajs/react'
 import {
     ArrowPathIcon,
     XCircleIcon,
@@ -27,6 +28,15 @@ import {
  * - Defensive logging for debugging
  */
 export default function AssetProcessingTray() {
+    const { auth } = usePage().props
+    
+    // Only run on authenticated routes
+    const isAuthenticated = auth?.user !== null && auth?.user !== undefined
+    
+    // Don't run on admin routes - check current URL
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
+    const isAdminRoute = currentPath.startsWith('/app/admin')
+    
     const [processingAssets, setProcessingAssets] = useState([])
     const [isExpanded, setIsExpanded] = useState(() => {
         // Restore minimized state from sessionStorage
@@ -131,8 +141,14 @@ export default function AssetProcessingTray() {
         }
     }
 
-    // Initial fetch and polling setup
+    // Initial fetch and polling setup (only when authenticated and not on admin routes)
     useEffect(() => {
+        // Don't poll if not authenticated or on admin routes
+        if (!isAuthenticated || isAdminRoute) {
+            setIsLoading(false)
+            return
+        }
+
         // Initial fetch immediately
         fetchActiveJobs()
 
@@ -149,7 +165,7 @@ export default function AssetProcessingTray() {
                 clearTimeout(autoDismissTimerRef.current)
             }
         }
-    }, []) // Empty deps - only run on mount/unmount
+    }, [isAuthenticated, isAdminRoute]) // Only run when authentication state or route changes
 
     // Cleanup timers on unmount
     useEffect(() => {
@@ -162,12 +178,6 @@ export default function AssetProcessingTray() {
             }
         }
     }, [])
-
-    // Don't render if dismissed or no processing assets
-    // CRITICAL: Only show if backend confirms active jobs exist
-    if (isDismissed || processingAssets.length === 0) {
-        return null
-    }
 
     const handleToggleExpand = () => {
         const newExpanded = !isExpanded
@@ -239,6 +249,17 @@ export default function AssetProcessingTray() {
     const truncateTitle = (title, maxLength = 40) => {
         if (!title || title.length <= maxLength) return title
         return title.substring(0, maxLength) + '...'
+    }
+
+    // Don't render on unauthenticated routes or admin routes
+    if (!isAuthenticated || isAdminRoute) {
+        return null
+    }
+
+    // Don't render if dismissed or no processing assets
+    // CRITICAL: Only show if backend confirms active jobs exist
+    if (isDismissed || processingAssets.length === 0) {
+        return null
     }
 
     return (

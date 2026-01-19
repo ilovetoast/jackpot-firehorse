@@ -386,6 +386,13 @@ class BulkMetadataService
                 continue; // Skip internal-only fields
             }
 
+            // Phase B2: Skip readonly fields (automatic or explicitly readonly)
+            $populationMode = $field['population_mode'] ?? 'manual';
+            $isReadonly = ($field['readonly'] ?? false) || ($populationMode === 'automatic');
+            if ($isReadonly) {
+                continue; // Skip readonly fields
+            }
+
             // Phase 4: Check edit permission
             if ($userRole !== null) {
                 $canEdit = $this->permissionResolver->canEdit(
@@ -432,12 +439,14 @@ class BulkMetadataService
                 $requiresApproval = $tenant && $this->approvalResolver->requiresApproval('user', $tenant);
 
                 // Create new asset_metadata row
+                // Phase B7: Bulk user edits have confidence = 1.0 and producer = 'user'
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field['field_id'],
                     'value_json' => json_encode($value),
                     'source' => 'user',
-                    'confidence' => null,
+                    'confidence' => 1.0, // Phase B7: User edits are certain
+                    'producer' => 'user', // Phase B7: User edits are from user
                     'approved_at' => $requiresApproval ? null : now(),
                     'approved_by' => $requiresApproval ? null : $userId,
                     'created_at' => now(),

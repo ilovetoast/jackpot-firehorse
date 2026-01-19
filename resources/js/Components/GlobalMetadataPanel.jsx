@@ -11,7 +11,6 @@
 
 import { useState, useEffect } from 'react';
 import { ExclamationTriangleIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
-import MetadataFieldRenderer from './MetadataFieldRenderer';
 import { filterActiveCategories } from '../utils/categoryUtils';
 
 /**
@@ -156,55 +155,7 @@ export default function GlobalMetadataPanel({
                     </div>
                 )}
 
-                {/* Metadata Fields */}
-                {context.categoryId ? (
-                    availableMetadataFields.length > 0 ? (
-                        <div className="space-y-4">
-                            <div className="border-t border-gray-200 pt-4">
-                                <h4 className="text-sm font-medium text-gray-700 mb-4">
-                                    Metadata Fields
-                                </h4>
-                                
-                                {availableMetadataFields.map((field) => {
-                                    const currentValue = globalMetadataDraft[field.key] ?? field.defaultValue ?? '';
-                                    const hasError = validationWarnings.some(
-                                        w => w.affectedFields?.includes(field.key)
-                                    );
-
-                                    return (
-                                        <div key={field.key} className="mb-4">
-                                            <MetadataFieldRenderer
-                                                field={field}
-                                                value={currentValue}
-                                                onChange={(value) => handleFieldChange(field.key, value)}
-                                                hasError={hasError}
-                                                disabled={disabled}
-                                            />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
-                            <div className="flex">
-                                <InformationCircleIcon className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                                <p className="ml-3 text-sm text-gray-600">
-                                    No metadata fields available for this category
-                                </p>
-                            </div>
-                        </div>
-                    )
-                ) : (
-                    <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
-                        <div className="flex">
-                            <InformationCircleIcon className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                            <p className="ml-3 text-sm text-gray-600">
-                                Select a category to configure metadata fields
-                            </p>
-                        </div>
-                    </div>
-                )}
+                {/* Metadata Fields - Removed: Now handled by MetadataGroups component (dynamic async) */}
 
                 {/* Validation Warnings */}
                 {validationWarnings.length > 0 && (

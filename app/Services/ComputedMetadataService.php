@@ -376,12 +376,14 @@ class ComputedMetadataService
                 }
 
                 // Create new asset_metadata row
+                // Phase B7: System-computed metadata has producer = 'system' and high confidence
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field->id,
                     'value_json' => json_encode($value),
                     'source' => 'system',
-                    'confidence' => null,
+                    'confidence' => 0.95, // Phase B7: System-computed values are highly confident
+                    'producer' => 'system', // Phase B7: System-computed values are from system
                     'approved_at' => now(), // System values are auto-approved
                     'approved_by' => null,
                     'created_at' => now(),

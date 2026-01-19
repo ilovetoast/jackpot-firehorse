@@ -121,12 +121,14 @@ class MetadataPersistenceService
                     $requiresApproval = $tenant && $this->approvalResolver->requiresApproval('user', $tenant);
 
                     // Insert asset_metadata row
+                    // Phase B7: User-uploaded metadata has confidence = 1.0 and producer = 'user'
                     $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                         'asset_id' => $asset->id,
                         'metadata_field_id' => $fieldId,
                         'value_json' => json_encode($normalizedValue),
                         'source' => 'user',
-                        'confidence' => null,
+                        'confidence' => 1.0, // Phase B7: User-provided values are certain
+                        'producer' => 'user', // Phase B7: User-provided values are from user
                         'approved_at' => $requiresApproval ? null : now(),
                         'approved_by' => $requiresApproval ? null : $userId,
                         'created_at' => now(),

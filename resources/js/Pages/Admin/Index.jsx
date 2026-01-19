@@ -29,9 +29,15 @@ import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 
-export default function AdminIndex({ companies, users: initialUsers, stats: initialStats, all_users, pagination }) {
-    const { auth } = usePage().props
+export default function AdminIndex({ companies: initialCompanies, users: initialUsers, stats: initialStats, all_users, pagination }) {
+    const { auth, url } = usePage().props
+    const [companies, setCompanies] = useState(initialCompanies || [])
     const [activeTab, setActiveTab] = useState('companies')
+
+    // Sync companies state when initialCompanies prop changes (e.g., after search or pagination)
+    useEffect(() => {
+        setCompanies(initialCompanies || [])
+    }, [initialCompanies])
     const [stats, setStats] = useState(initialStats || null)
     const [loadingStats, setLoadingStats] = useState(!initialStats)
     const [users, setUsers] = useState(initialUsers || [])
@@ -45,6 +51,11 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
     const [usersLoaded, setUsersLoaded] = useState(false)
     const [userSearchQuery, setUserSearchQuery] = useState('')
     const userSearchTimeoutRef = useRef(null)
+    // Initialize company search from URL query parameter if present
+    const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
+    const [companySearchQuery, setCompanySearchQuery] = useState(urlParams.get('search') || '')
+    const companySearchTimeoutRef = useRef(null)
+    const companySearchInitializedRef = useRef(false)
     const [expandedCompany, setExpandedCompany] = useState(null)
     const [expandedDetails, setExpandedDetails] = useState(null)
     const [showBrandRoles, setShowBrandRoles] = useState(false)
@@ -196,7 +207,100 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
         }
     }, [activeTab])
 
-    // Handle search with debouncing
+    // Handle company search with debouncing
+    useEffect(() => {
+        // Skip on initial mount - wait for user interaction
+        if (!companySearchInitializedRef.current) {
+            companySearchInitializedRef.current = true
+            return
+        }
+
+        // Don't run if not on companies tab
+        if (activeTab !== 'companies') {
+            return
+        }
+
+        // Check if query matches URL to avoid unnecessary requests
+        const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
+        const urlSearch = urlParams.get('search') || ''
+        
+        // Skip if query matches URL (no actual change needed)
+        if (companySearchQuery === urlSearch) {
+            return
+        }
+
+        if (companySearchTimeoutRef.current) {
+            clearTimeout(companySearchTimeoutRef.current)
+        }
+
+        companySearchTimeoutRef.current = setTimeout(() => {
+            router.get('/app/admin', {
+                search: companySearchQuery,
+                per_page: pagination?.per_page || 10,
+            }, {
+                preserveState: true,
+                preserveScroll: true,
+                only: ['companies', 'pagination'],
+            })
+        }, 300) // 300ms debounce
+
+        return () => {
+            if (companySearchTimeoutRef.current) {
+                clearTimeout(companySearchTimeoutRef.current)
+            }
+        }
+    }, [companySearchQuery, activeTab])
+
+    // Clear company search when switching away from companies tab
+    useEffect(() => {
+        if (activeTab !== 'companies') {
+            setCompanySearchQuery('')
+        }
+    }, [activeTab])
+
+    // Load company details when "Show Details" is clicked
+    useEffect(() => {
+        if (expandedDetails && activeTab === 'companies') {
+            const company = companies.find(c => c.id === expandedDetails)
+            // Only load if details haven't been loaded yet
+            if (company && !company.details_loaded) {
+                // Load company details (includes brands) - use correct API route
+                fetch(`/app/admin/api/companies/${expandedDetails}/details`)
+                    .then(res => res.json())
+                    .then(data => {
+                        // Also load users for this company
+                        fetch(`/app/admin/api/companies/${expandedDetails}/users`)
+                            .then(res => res.json())
+                            .then(users => {
+                                // Update the company in the companies array with loaded details and users
+                                setCompanies(prevCompanies => 
+                                    prevCompanies.map(c => 
+                                        c.id === expandedDetails 
+                                            ? { ...c, ...data, users: users, details_loaded: true }
+                                            : c
+                                    )
+                                )
+                            })
+                            .catch(err => {
+                                console.error('Failed to load company users:', err)
+                                // Still update with details even if users fail
+                                setCompanies(prevCompanies => 
+                                    prevCompanies.map(c => 
+                                        c.id === expandedDetails 
+                                            ? { ...c, ...data, details_loaded: true }
+                                            : c
+                                    )
+                                )
+                            })
+                    })
+                    .catch(err => {
+                        console.error('Failed to load company details:', err)
+                    })
+            }
+        }
+    }, [expandedDetails, activeTab, companies])
+
+    // Handle user search with debouncing
     useEffect(() => {
         if (activeTab !== 'users' || !usersLoaded) {
             return
@@ -218,12 +322,19 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
         }
     }, [userSearchQuery, activeTab, usersLoaded])
 
-    const summaryCards = [
-        { name: 'Total Companies', value: stats?.total_companies ?? 0, subtitle: `${stats?.total_companies ?? 0} with Stripe accounts`, icon: BuildingOfficeIcon },
-        { name: 'Total Users', value: stats?.total_users ?? 0, subtitle: 'Across all companies', icon: UsersIcon },
-        { name: 'Active Subscriptions', value: stats?.active_subscriptions || 0, subtitle: 'Currently active', icon: DocumentIcon },
-        { name: 'Stripe Accounts', value: stats?.stripe_accounts || 0, subtitle: 'Connected to Stripe', icon: ChartBarIcon },
-        { name: 'Support Tickets', value: stats?.support_tickets || 0, subtitle: `${stats?.waiting_on_support || 0} waiting on support`, icon: QuestionMarkCircleIcon },
+    // Compute summary cards safely - ensure stats is not null
+    const summaryCards = stats ? [
+        { name: 'Total Companies', value: stats.total_companies ?? 0, subtitle: `${stats.total_companies ?? 0} with Stripe accounts`, icon: BuildingOfficeIcon },
+        { name: 'Total Users', value: stats.total_users ?? 0, subtitle: 'Across all companies', icon: UsersIcon },
+        { name: 'Active Subscriptions', value: stats.active_subscriptions || 0, subtitle: 'Currently active', icon: DocumentIcon },
+        { name: 'Stripe Accounts', value: stats.stripe_accounts || 0, subtitle: 'Connected to Stripe', icon: ChartBarIcon },
+        { name: 'Support Tickets', value: stats.support_tickets || 0, subtitle: `${stats.waiting_on_support || 0} waiting on support`, icon: QuestionMarkCircleIcon },
+    ] : [
+        { name: 'Total Companies', value: 0, subtitle: 'Loading...', icon: BuildingOfficeIcon },
+        { name: 'Total Users', value: 0, subtitle: 'Loading...', icon: UsersIcon },
+        { name: 'Active Subscriptions', value: 0, subtitle: 'Loading...', icon: DocumentIcon },
+        { name: 'Stripe Accounts', value: 0, subtitle: 'Loading...', icon: ChartBarIcon },
+        { name: 'Support Tickets', value: 0, subtitle: 'Loading...', icon: QuestionMarkCircleIcon },
     ]
 
     return (
@@ -349,16 +460,26 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                     <div className="flex-1 max-w-md ml-4">
                                         <input
                                             type="text"
-                                            placeholder="Search companies..."
+                                            placeholder="Search companies by name or slug..."
+                                            value={companySearchQuery}
+                                            onChange={(e) => setCompanySearchQuery(e.target.value)}
                                             className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                         />
                                     </div>
                                 </div>
                             </div>
                             <div className="px-6 py-4">
+                                {companySearchQuery && (
+                                    <div className="mb-4 text-sm text-gray-600">
+                                        {pagination?.total || companies.length} company{pagination?.total !== 1 ? 'ies' : ''} found
+                                        {companySearchQuery && ` matching "${companySearchQuery}"`}
+                                    </div>
+                                )}
                                 <div className="space-y-4">
                                     {companies.length === 0 ? (
-                                        <p className="text-sm text-gray-500 text-center py-8">No companies found</p>
+                                        <p className="text-sm text-gray-500 text-center py-8">
+                                            {companySearchQuery ? `No companies found matching "${companySearchQuery}"` : 'No companies found'}
+                                        </p>
                                     ) : (
                                         companies.map((company) => {
                                             const isExpanded = expandedCompany === company.id
@@ -459,7 +580,7 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                                             {company.plan_management?.plan_prefix && (
                                                                                 <span className="mr-1 font-semibold">{company.plan_management.plan_prefix}:</span>
                                                                             )}
-                                                                            {company.plan}
+                                                                            {company.plan || (company.plan_name ? company.plan_name.charAt(0).toUpperCase() + company.plan_name.slice(1) : 'Free')}
                                                                         </span>
                                                                         {/* Plan Selector Dropdown */}
                                                                         {company.plan_management && !company.plan_management.is_externally_managed && company.can_manage_plan && (
@@ -584,14 +705,12 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                             >
                                                                 View
                                                             </Link>
-                                                            {company.stripe_connected && (
-                                                                <Link
-                                                                    href={`/app/admin/stripe-status?tenant_id=${company.id}`}
-                                                                    className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                                                                >
-                                                                    Manage Subscription
-                                                                </Link>
-                                                            )}
+                                                            <Link
+                                                                href={`/app/admin/stripe-status?tenant_id=${company.id}`}
+                                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                            >
+                                                                Manage Subscription
+                                                            </Link>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -870,6 +989,42 @@ export default function AdminIndex({ companies, users: initialUsers, stats: init
                                                                     })
                                                                 ) : (
                                                                     <p className="text-sm text-gray-500 py-4 text-center">No members found</p>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Brands Section */}
+                                                            <div className="mt-6 pt-6 border-t border-gray-200">
+                                                                <div className="flex items-center justify-between mb-4">
+                                                                    <h4 className="text-sm font-semibold text-gray-900">Brands</h4>
+                                                                    {company.brands_count > 0 && (
+                                                                        <span className="text-sm text-gray-500">{company.brands_count} total</span>
+                                                                    )}
+                                                                </div>
+                                                                {company.brands && company.brands.length > 0 ? (
+                                                                    <div className="space-y-2">
+                                                                        {company.brands.map((brand) => (
+                                                                            <div key={brand.id} className="flex items-center justify-between py-2 px-3 rounded-md bg-white border border-gray-200">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span className="text-sm font-medium text-gray-900">
+                                                                                        {brand.name}
+                                                                                    </span>
+                                                                                    {brand.is_default && (
+                                                                                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800">
+                                                                                            Default
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+                                                                                <Link
+                                                                                    href={`/app/admin/companies/${company.id}?tab=brands`}
+                                                                                    className="text-xs text-indigo-600 hover:text-indigo-900"
+                                                                                >
+                                                                                    View
+                                                                                </Link>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <p className="text-sm text-gray-500 py-4 text-center">No brands found</p>
                                                                 )}
                                                             </div>
                                                         </div>

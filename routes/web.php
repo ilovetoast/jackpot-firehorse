@@ -205,6 +205,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
             Route::post('/assets/{asset}/metadata/edit', [\App\Http\Controllers\AssetMetadataController::class, 'editMetadata'])->name('assets.metadata.edit');
+            Route::post('/assets/{asset}/metadata/override', [\App\Http\Controllers\AssetMetadataController::class, 'overrideHybridField'])->name('assets.metadata.override');
+            Route::post('/assets/{asset}/metadata/revert', [\App\Http\Controllers\AssetMetadataController::class, 'revertToAutomatic'])->name('assets.metadata.revert');
             
             // Asset metadata bulk operations (Phase 2 – Step 7)
             Route::post('/assets/metadata/bulk/preview', [\App\Http\Controllers\AssetMetadataController::class, 'previewBulk'])->name('assets.metadata.bulk.preview');

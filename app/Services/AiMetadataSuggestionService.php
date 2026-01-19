@@ -277,12 +277,14 @@ class AiMetadataSuggestionService
                 // Persist each value (one row per value for multi-value fields)
                 foreach ($normalizedValues as $normalizedValue) {
                     // Insert asset_metadata row (unapproved)
+                    // Phase B7: AI suggestions have producer = 'ai' and use AI confidence
                     $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                         'asset_id' => $asset->id,
                         'metadata_field_id' => $field['field_id'],
                         'value_json' => json_encode($normalizedValue),
                         'source' => 'ai',
-                        'confidence' => $confidence,
+                        'confidence' => $confidence, // AI-provided confidence
+                        'producer' => 'ai', // Phase B7: AI suggestions are from AI
                         'approved_at' => null, // Unapproved
                         'approved_by' => null,
                         'created_at' => now(),

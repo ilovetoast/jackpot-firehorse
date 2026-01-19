@@ -1308,6 +1308,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [])
 
     /**
+     * Phase 2 – Step 2: Handle metadata field changes from MetadataGroups
+     */
+    const handleMetadataFieldChange = useCallback((fieldKey, value) => {
+        setGlobalMetadataV2(fieldKey, value)
+    }, [setGlobalMetadataV2])
+
+    /**
      * CLEAN UPLOADER V2 — Get Effective Metadata for a File
      * 
      * Merges globalMetadataDraft with file.metadataDraft.
@@ -3206,6 +3213,49 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         setSelectedCategoryId(categoryId)
     }, [])
 
+    // Phase 2 – Step 2: Fetch metadata schema when category changes
+    useEffect(() => {
+        if (!selectedCategoryId) {
+            setUploadMetadataSchema(null)
+            setIsLoadingMetadataSchema(false)
+            return
+        }
+
+        // Fetch metadata schema from backend
+        setIsLoadingMetadataSchema(true)
+        const params = new URLSearchParams({
+            category_id: selectedCategoryId.toString(),
+            asset_type: 'image', // Default to 'image' for uploads (most assets are images)
+        })
+
+        fetch(`/app/uploads/metadata-schema?${params.toString()}`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata schema: ${response.status}`)
+                }
+                return response.json()
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.message || 'Failed to load metadata schema')
+                }
+                setUploadMetadataSchema(data)
+                setIsLoadingMetadataSchema(false)
+            })
+            .catch(error => {
+                console.error('[UploadAssetDialog] Failed to fetch metadata schema', error)
+                setUploadMetadataSchema(null)
+                setIsLoadingMetadataSchema(false)
+            })
+    }, [selectedCategoryId])
+
     /**
      * Handle category change callback (LEGACY - for Phase 3 manager)
      * Fetches metadata fields for the category (placeholder - should be implemented by parent)
@@ -3566,15 +3616,23 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             },
             changeCategory: (categoryId, metadataFields) => {
                 // Update selectedCategoryId when category changes via GlobalMetadataPanel
+                // This will trigger the useEffect to fetch metadata schema
                 setSelectedCategoryId(categoryId)
             },
             // Metadata state
             globalMetadataDraft: globalMetadataDraft,
-            availableMetadataFields: [], // TODO: Fetch from category config (for now empty)
+            // Extract availableMetadataFields from uploadMetadataSchema
+            // Map display_label to label for frontend compatibility
+            availableMetadataFields: uploadMetadataSchema?.groups?.flatMap(group => 
+                (group.fields || []).map(field => ({
+                    ...field,
+                    label: field.display_label || field.label || field.key, // Use display_label from backend, fallback to label or key
+                }))
+            ) || [],
             warnings: [], // No warnings for v2 (validation not implemented)
             validateMetadata: () => {}, // NO-OP - validation not implemented
         }
-    }, [v2Files, uploadManagerStateVersion, selectedCategoryId, globalMetadataDraft]) // FINAL FIX: Include uploadManagerStateVersion to react to UploadManager changes
+    }, [v2Files, uploadManagerStateVersion, selectedCategoryId, globalMetadataDraft, uploadMetadataSchema]) // Include uploadMetadataSchema to update availableMetadataFields
 
     // Phase 2.8: Sync completed multipart uploads to v2Files status
     // When a multipart upload completes in UploadManager, update v2File status to 'uploaded' for finalization
