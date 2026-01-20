@@ -8,8 +8,9 @@ use App\Models\Tenant;
 /**
  * Metadata Visibility Resolver
  *
- * Phase C2: Centralized visibility resolution for metadata fields.
- * Phase C4: Extended to respect tenant-level visibility overrides.
+ * Phase C2 + Phase C4 + Phase G: Centralized visibility resolution for metadata fields.
+ *
+ * ⚠️ PHASE LOCK: Phase G complete. This resolver is production-locked. Do not refactor.
  *
  * This service provides a single source of truth for filtering metadata fields
  * based on category suppression rules and tenant visibility overrides.

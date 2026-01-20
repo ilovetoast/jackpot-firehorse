@@ -9,6 +9,9 @@ import {
  * 
  * Phase G.5: Category-First Metadata Enablement UX with improved presentation
  * 
+ * ⚠️ PHASE LOCK: Phase G complete and paused. UI behavior verified and intentionally paused.
+ * Do not refactor structure or behavior. Future improvements will be in Phase H.
+ * 
  * Displays metadata fields organized by category, making it clear
  * which fields are enabled for each category.
  */

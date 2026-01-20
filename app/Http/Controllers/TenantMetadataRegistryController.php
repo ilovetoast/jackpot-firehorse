@@ -17,7 +17,9 @@ use Inertia\Response;
 /**
  * Tenant Metadata Registry Controller
  *
- * Phase C4: Tenant-level metadata registry and visibility management.
+ * Phase C4 + Phase G: Tenant-level metadata registry and visibility management.
+ *
+ * ⚠️ PHASE LOCK: Phase G complete. This controller is production-locked. Do not refactor.
  *
  * This controller provides:
  * - View of system and tenant metadata fields

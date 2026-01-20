@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Metadata Filter Service
  *
- * Phase 2 – Step 8: Applies metadata-based filters to asset queries.
+ * Phase 2 – Step 8 + Phase G: Applies metadata-based filters to asset queries.
+ *
+ * ⚠️ PHASE LOCK: Phase G complete. This service is production-locked. Do not refactor.
  *
  * Rules:
  * - Filters must be schema-driven

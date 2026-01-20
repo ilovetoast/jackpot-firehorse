@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\Log;
 /**
  * Tenant Metadata Visibility Service
  *
- * Phase C4: Manages tenant-level visibility overrides for metadata fields.
+ * Phase C4 + Phase G: Manages tenant-level visibility overrides for metadata fields.
+ *
+ * ⚠️ PHASE LOCK: Phase G complete. This service is production-locked. Do not refactor.
  *
  * This service handles tenant-scoped visibility overrides that allow tenants
  * to control where and how metadata fields appear in their UI.

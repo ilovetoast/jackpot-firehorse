@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Phase 1.5 – Step 3: Read-only resolver for metadata schema.
  *
+ * ⚠️ PHASE LOCK: This resolver is production-locked. Do not refactor behavior.
+ *
  * This service computes the effective metadata schema for a given context
  * by applying visibility overrides in the correct inheritance order.
  *

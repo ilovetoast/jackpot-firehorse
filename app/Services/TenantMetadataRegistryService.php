@@ -8,8 +8,10 @@ use Illuminate\Support\Facades\DB;
 /**
  * Tenant Metadata Registry Service
  *
- * Phase C4: Service for querying tenant metadata registry
+ * Phase C4 + Phase G: Service for querying tenant metadata registry
  * (system fields + tenant fields with visibility overrides).
+ *
+ * ⚠️ PHASE LOCK: Phase G complete. This service is production-locked. Do not refactor.
  *
  * This service provides a unified view of all metadata fields
  * available to a tenant, including system fields and tenant-created fields.
