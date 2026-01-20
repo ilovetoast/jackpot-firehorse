@@ -29,7 +29,8 @@ use Illuminate\Support\Facades\Log;
 class MetadataPersistenceService
 {
     public function __construct(
-        protected UploadMetadataSchemaResolver $uploadMetadataSchemaResolver
+        protected UploadMetadataSchemaResolver $uploadMetadataSchemaResolver,
+        protected MetadataApprovalResolver $approvalResolver
     ) {
     }
 
@@ -41,6 +42,7 @@ class MetadataPersistenceService
      * @param array $metadataValues Metadata values keyed by field key (from frontend)
      * @param int $userId User ID who created the metadata
      * @param string $assetType Asset type for schema resolution ('image', 'video', 'document')
+     * @param bool $autoApprove If true, auto-approve metadata (e.g., during upload). Default false.
      * @return void
      * @throws \InvalidArgumentException If validation fails
      */
@@ -49,7 +51,8 @@ class MetadataPersistenceService
         Category $category,
         array $metadataValues,
         int $userId,
-        string $assetType = 'image'
+        string $assetType = 'image',
+        bool $autoApprove = false
     ): void {
         // Skip if no metadata values provided
         if (empty($metadataValues)) {
@@ -84,7 +87,7 @@ class MetadataPersistenceService
         }
 
         // Persist metadata in a transaction
-        DB::transaction(function () use ($asset, $metadataValues, $fieldKeyToIdMap, $userId, $schema) {
+        DB::transaction(function () use ($asset, $metadataValues, $fieldKeyToIdMap, $userId, $schema, $autoApprove) {
             foreach ($metadataValues as $fieldKey => $value) {
                 // Skip empty values
                 if ($this->isEmptyValue($value)) {
@@ -117,8 +120,11 @@ class MetadataPersistenceService
                 // Persist each value (one row per value for multi-value fields)
                 foreach ($normalizedValues as $normalizedValue) {
                     // Check if approval is required
+                    // Upload-time metadata is auto-approved (user explicitly set it during upload)
+                    // Post-upload edits require approval if workflow is enabled (unless user has bypass_approval permission)
                     $tenant = \App\Models\Tenant::find($asset->tenant_id);
-                    $requiresApproval = $tenant && $this->approvalResolver->requiresApproval('user', $tenant);
+                    $user = $userId ? \App\Models\User::find($userId) : null;
+                    $requiresApproval = !$autoApprove && $tenant && $this->approvalResolver->requiresApproval('user', $tenant, $user);
 
                     // Insert asset_metadata row
                     // Phase B7: User-uploaded metadata has confidence = 1.0 and producer = 'user'
@@ -147,11 +153,6 @@ class MetadataPersistenceService
                 }
             }
         });
-
-        Log::info('[MetadataPersistence] Metadata persisted successfully', [
-            'asset_id' => $asset->id,
-            'fields_count' => count($metadataValues),
-        ]);
     }
 
     /**

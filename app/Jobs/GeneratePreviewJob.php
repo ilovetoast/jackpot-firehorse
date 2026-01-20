@@ -45,6 +45,10 @@ class GeneratePreviewJob implements ShouldQueue
      */
     public function handle(): void
     {
+        Log::info('[GeneratePreviewJob] Job started', [
+            'asset_id' => $this->assetId,
+        ]);
+        
         $asset = Asset::findOrFail($this->assetId);
 
         // Idempotency: Check if preview already generated
@@ -61,11 +65,19 @@ class GeneratePreviewJob implements ShouldQueue
         // Ensure thumbnails have been generated (check thumbnail_status, not asset status)
         // Asset.status remains UPLOADED throughout processing for visibility
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
-            Log::warning('Preview generation skipped - thumbnails have not completed', [
+            Log::warning('[GeneratePreviewJob] Preview generation skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
-            return;
+            // CRITICAL: Don't return early - let chain continue even if preview can't be generated
+            // The chain must continue to ComputedMetadataJob and other jobs
+            // Just mark as skipped and continue
+            $currentMetadata = $asset->metadata ?? [];
+            $currentMetadata['preview_generated'] = false;
+            $currentMetadata['preview_skipped'] = true;
+            $currentMetadata['preview_skipped_reason'] = 'thumbnails_not_completed';
+            $asset->update(['metadata' => $currentMetadata]);
+            return; // Chain will continue automatically
         }
 
         // Generate preview (stub implementation)

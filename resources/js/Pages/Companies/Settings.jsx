@@ -157,6 +157,19 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                             >
                                 Brands Settings
                             </button>
+                            {(Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage'))) && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSectionClick('metadata-settings')}
+                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                        activeSection === 'metadata-settings'
+                                            ? 'border-indigo-500 text-indigo-600'
+                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }`}
+                                >
+                                    Metadata
+                                </button>
+                            )}
                             {is_current_user_owner && (
                                 <button
                                     type="button"
@@ -380,6 +393,40 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                             </div>
                         </div>
                     </div>
+
+                    {/* Metadata Settings */}
+                    {(Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage'))) && (
+                        <div id="metadata-settings" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    {/* Left: Header */}
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">Metadata Management</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Manage metadata fields and visibility settings</p>
+                                    </div>
+                                    {/* Right: Content */}
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <div className="space-y-4">
+                                            <div>
+                                                <p className="text-sm text-gray-700 mb-4">
+                                                    Configure metadata fields for your company. View system metadata fields, create custom fields, and control where fields appear in upload, edit, and filter interfaces.
+                                                </p>
+                                                <Link
+                                                    href="/app/tenant/metadata/registry"
+                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                >
+                                                    Manage Metadata Fields
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                    </svg>
+                                                </Link>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Ownership Transfer */}
                     {is_current_user_owner && (

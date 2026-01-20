@@ -50,7 +50,9 @@ import AssetTimeline from './AssetTimeline'
 import AiMetadataSuggestions from './AiMetadataSuggestions'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
+import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
+import AssetDetailsModal from './AssetDetailsModal'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
@@ -76,6 +78,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [generateLoading, setGenerateLoading] = useState(false)
     const [generateError, setGenerateError] = useState(null)
     const [generateTimeoutId, setGenerateTimeoutId] = useState(null)
+    // Details modal state
+    const [showDetailsModal, setShowDetailsModal] = useState(false)
     
     // Phase 3.1: Get assets with thumbnail support for carousel (images and PDFs)
     const imageAssets = useMemo(() => {
@@ -1054,11 +1058,24 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     <PendingMetadataList assetId={displayAsset.id} />
                 )}
 
+                {/* Phase B9: Metadata Candidate Review */}
+                {displayAsset?.id && (
+                    <MetadataCandidateReview assetId={displayAsset.id} />
+                )}
+
                 {/* Phase 3.1 — Minimal drawer download action.
                     This is a temporary test-only UI.
                     Do not expand into full download UX here. */}
                 {displayAsset?.id && (
-                    <div className="border-t border-gray-200 pt-6">
+                    <div className="border-t border-gray-200 pt-6 space-y-3">
+                        <button
+                            type="button"
+                            onClick={() => setShowDetailsModal(true)}
+                            className="w-full inline-flex items-center justify-center rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                        >
+                            <EyeIcon className="h-5 w-5 mr-2" />
+                            Details
+                        </button>
                         <a
                             href={`/app/assets/${displayAsset.id}/download`}
                             target="_blank"
@@ -1422,6 +1439,15 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Asset Details Modal */}
+            {displayAsset && (
+                <AssetDetailsModal
+                    asset={displayAsset}
+                    isOpen={showDetailsModal}
+                    onClose={() => setShowDetailsModal(false)}
+                />
             )}
         </div>
     )

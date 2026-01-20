@@ -249,6 +249,8 @@ class HandleInertiaRequests extends Middleware
         $roles = [];
         $tenantRole = null;
         $rolePermissions = [];
+        $permissions = []; // Initialize as empty array
+        $roles = []; // Initialize as empty array
         
         if ($user && $currentTenantId && $tenant) {
             // Refresh the user's tenants relationship to ensure we have fresh pivot data
@@ -282,8 +284,27 @@ class HandleInertiaRequests extends Middleware
                 }
             }
             
+            // Add permissions from site roles (site_admin, site_owner, etc.)
+            // Site roles are Spatie roles, so their permissions should already be in getAllPermissions()
+            // But we also explicitly add them here to ensure they're included
+            foreach ($siteRoles as $siteRoleName) {
+                $siteRoleModel = \Spatie\Permission\Models\Role::where('name', $siteRoleName)->first();
+                if ($siteRoleModel) {
+                    $siteRolePermissions = $siteRoleModel->permissions->pluck('name')->toArray();
+                    $permissions = array_unique(array_merge($permissions, $siteRolePermissions));
+                }
+            }
+            
             if ($tenantRole) {
                 $roles[] = $tenantRole;
+                
+                // Add permissions from tenant role to the permissions array
+                // This ensures tenant role permissions (like metadata.registry.view) are available in frontend
+                $roleModel = \Spatie\Permission\Models\Role::where('name', $tenantRole)->first();
+                if ($roleModel) {
+                    $tenantRolePermissions = $roleModel->permissions->pluck('name')->toArray();
+                    $permissions = array_unique(array_merge($permissions, $tenantRolePermissions));
+                }
             }
             
             // Build role permissions mapping for frontend permission checking
@@ -294,6 +315,22 @@ class HandleInertiaRequests extends Middleware
                 $rolePermissions[$role->name] = $role->permissions->pluck('name')->toArray();
             }
         } else {
+            // No tenant selected - still get site role permissions if user has site roles
+            if ($user) {
+                $siteRoles = $user->getSiteRoles();
+                foreach ($siteRoles as $siteRoleName) {
+                    $siteRoleModel = \Spatie\Permission\Models\Role::where('name', $siteRoleName)->first();
+                    if ($siteRoleModel) {
+                        $siteRolePermissions = $siteRoleModel->permissions->pluck('name')->toArray();
+                        $permissions = array_unique(array_merge($permissions, $siteRolePermissions));
+                    }
+                }
+                
+                // Also get direct Spatie permissions (should already include site role permissions, but ensure they're there)
+                $spatiePermissions = $user->getAllPermissions()->pluck('name')->toArray();
+                $permissions = array_unique(array_merge($permissions, $spatiePermissions));
+            }
+            
             // Even if no tenant is selected, build role permissions mapping for consistency
             $allRoles = Role::all();
             foreach ($allRoles as $role) {
@@ -354,7 +391,7 @@ class HandleInertiaRequests extends Middleware
                 ] : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
-                'permissions' => $permissions,
+                'permissions' => array_values($permissions), // Ensure it's a proper array (not an object with numeric keys)
                 'roles' => $roles,
                 'tenant_role' => $tenantRole, // Current tenant-specific role
                 'role_permissions' => $rolePermissions, // Mapping of role names to permission arrays

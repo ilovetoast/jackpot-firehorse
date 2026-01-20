@@ -21,6 +21,7 @@ return [
             'max_upload_size_mb' => 10,
             'max_users' => 2,
             'max_downloads_per_month' => 50,
+            'max_custom_metadata_fields' => 0, // Phase C3: No custom fields on free plan
         ],
         'features' => [
             'basic_asset_types',
@@ -48,6 +49,7 @@ return [
             'max_upload_size_mb' => 50,
             'max_users' => 5,
             'max_downloads_per_month' => 200,
+            'max_custom_metadata_fields' => 5, // Phase C3: 5 custom fields on starter plan
         ],
         'features' => [
             'all_asset_types',
@@ -76,6 +78,7 @@ return [
             'max_upload_size_mb' => 999999,
             'max_users' => 20,
             'max_downloads_per_month' => 1000,
+            'max_custom_metadata_fields' => 20, // Phase C3: 20 custom fields on pro plan
         ],
         'features' => [
             'all_asset_types',
@@ -108,6 +111,7 @@ return [
             'max_upload_size_mb' => 999999, // Unlimited
             'max_users' => 200, // Unlimited
             'max_downloads_per_month' => 999999, // Unlimited
+            'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on enterprise plan
         ],
         'features' => [
             'all_asset_types',

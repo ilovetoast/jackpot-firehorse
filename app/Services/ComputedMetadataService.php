@@ -31,12 +31,14 @@ class ComputedMetadataService
      */
     public function computeMetadata(Asset $asset): void
     {
+        Log::info('[ComputedMetadataService] computeMetadata called', [
+            'asset_id' => $asset->id,
+            'original_filename' => $asset->original_filename,
+            'mime_type' => $asset->mime_type,
+        ]);
+        
         // Only process image assets
         if (!$this->isImageAsset($asset)) {
-            Log::info('[ComputedMetadataService] Skipping non-image asset', [
-                'asset_id' => $asset->id,
-                'mime_type' => $asset->mime_type,
-            ]);
             return;
         }
 
@@ -50,10 +52,14 @@ class ComputedMetadataService
         }
 
         // Compute values for each field
+        $orientation = $this->computeOrientation($imageData['width'], $imageData['height']);
+        $colorSpace = $this->computeColorSpace($imageData['exif'] ?? []);
+        $resolutionClass = $this->computeResolutionClass($imageData['width'], $imageData['height']);
+        
         $computedValues = [
-            'orientation' => $this->computeOrientation($imageData['width'], $imageData['height']),
-            'color_space' => $this->computeColorSpace($imageData['exif'] ?? []),
-            'resolution_class' => $this->computeResolutionClass($imageData['width'], $imageData['height']),
+            'orientation' => $orientation,
+            'color_space' => $colorSpace,
+            'resolution_class' => $resolutionClass,
         ];
 
         // Persist computed metadata
@@ -158,16 +164,62 @@ class ComputedMetadataService
      */
     protected function downloadFromS3($bucket, string $s3Path): string
     {
-        $s3Client = new \Aws\S3\S3Client([
+        // Use same S3 client creation pattern as ThumbnailGenerationService
+        // This ensures consistency and handles MinIO/local development
+        if (!class_exists(\Aws\S3\S3Client::class)) {
+            throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
+        }
+        
+        // Get credentials - prefer bucket, fall back to env
+        $accessKey = !empty($bucket->access_key_id) ? $bucket->access_key_id : env('AWS_ACCESS_KEY_ID');
+        $secretKey = !empty($bucket->secret_access_key) ? $bucket->secret_access_key : env('AWS_SECRET_ACCESS_KEY');
+        $region = $bucket->region ?? env('AWS_DEFAULT_REGION', 'us-east-1');
+        
+        // Validate credentials are present
+        if (empty($accessKey) || empty($secretKey)) {
+            Log::error('[ComputedMetadataService] S3 credentials missing', [
+                'bucket_id' => $bucket->id ?? 'unknown',
+                'bucket_name' => $bucket->name ?? 'unknown',
+                'has_bucket_key' => !empty($bucket->access_key_id),
+                'has_bucket_secret' => !empty($bucket->secret_access_key),
+                'has_env_key' => !empty(env('AWS_ACCESS_KEY_ID')),
+                'has_env_secret' => !empty(env('AWS_SECRET_ACCESS_KEY')),
+                'access_key_value' => $accessKey ? 'present' : 'missing',
+                'secret_key_value' => $secretKey ? 'present' : 'missing',
+            ]);
+            throw new \RuntimeException('S3 credentials not available - bucket credentials and AWS env vars are both missing');
+        }
+        
+        $config = [
             'version' => 'latest',
-            'region' => $bucket->region,
+            'region' => $region,
             'credentials' => [
-                'key' => $bucket->access_key_id,
-                'secret' => $bucket->secret_access_key,
+                'key' => $accessKey,
+                'secret' => $secretKey,
             ],
-            'endpoint' => $bucket->endpoint,
-            'use_path_style_endpoint' => $bucket->use_path_style_endpoint ?? false,
-        ]);
+        ];
+        
+        // Support MinIO for local development
+        if ($bucket->endpoint) {
+            $config['endpoint'] = $bucket->endpoint;
+            $config['use_path_style_endpoint'] = $bucket->use_path_style_endpoint ?? true;
+        } elseif (env('AWS_ENDPOINT')) {
+            $config['endpoint'] = env('AWS_ENDPOINT');
+            $config['use_path_style_endpoint'] = env('AWS_USE_PATH_STYLE_ENDPOINT', true);
+        }
+        
+        try {
+            $s3Client = new \Aws\S3\S3Client($config);
+        } catch (\Exception $e) {
+            Log::error('[ComputedMetadataService] Failed to create S3 client', [
+                'error' => $e->getMessage(),
+                'config_keys' => array_keys($config),
+                'credentials_keys' => array_keys($config['credentials']),
+                'access_key_present' => !empty($accessKey),
+                'secret_key_present' => !empty($secretKey),
+            ]);
+            throw $e;
+        }
 
         try {
             $result = $s3Client->getObject([
@@ -216,6 +268,10 @@ class ComputedMetadataService
             return null;
         }
 
+        // Orientation is based on display dimensions:
+        // - width > height = landscape (wider than tall)
+        // - height > width = portrait (taller than wide)
+        // - width == height = square
         if ($width > $height) {
             return 'landscape';
         } elseif ($height > $width) {
@@ -333,10 +389,6 @@ class ComputedMetadataService
                     ->exists();
 
                 if ($existingUserValue) {
-                    Log::info('[ComputedMetadataService] Skipping field - user value exists', [
-                        'asset_id' => $asset->id,
-                        'field_key' => $fieldKey,
-                    ]);
                     continue;
                 }
 
@@ -402,8 +454,10 @@ class ComputedMetadataService
 
                 Log::info('[ComputedMetadataService] Computed metadata persisted', [
                     'asset_id' => $asset->id,
+                    'field_id' => $field->id,
                     'field_key' => $fieldKey,
                     'value' => $value,
+                    'asset_metadata_id' => $assetMetadataId,
                 ]);
             }
         });

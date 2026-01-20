@@ -503,9 +503,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             )
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Asset Grid Toolbar */}
+                        {/* Asset Grid Toolbar - Always show when assets exist */}
                         {localAssets && localAssets.length > 0 && (
-                            <div className="mb-6 space-y-4">
+                            <div className="mb-6">
                                 <AssetGridToolbar
                                     showInfo={showInfo}
                                     onToggleInfo={() => setShowInfo(v => !v)}
@@ -526,36 +526,32 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     }}
                                     isBulkMode={isBulkMode}
                                 />
-                                
-                                {/* Phase 2 – Step 8: Metadata Filters */}
-                                {/* 
-                                    Only render AssetFilters when:
-                                    - A specific category is selected (not "All" / selectedCategoryId is truthy)
-                                    - filterable_schema exists and has fields
-                                    
-                                    When "All" is selected (selectedCategoryId is null/undefined), 
-                                    metadata schema cannot be resolved, so filters are not available.
-                                */}
-                                {selectedCategoryId ? (
-                                    filterable_schema && filterable_schema.length > 0 ? (
-                                        <div className="flex items-center justify-end">
-                                            <AssetFilters
-                                                filterableSchema={filterable_schema}
-                                                categoryId={selectedCategoryId}
-                                                savedViews={saved_views}
-                                            />
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center justify-end">
-                                            <span className="text-xs text-gray-500 italic">
-                                                No filterable metadata available for this category
-                                            </span>
-                                        </div>
-                                    )
+                            </div>
+                        )}
+                        
+                        {/* Phase 2 – Step 8: Metadata Filters - Always show when category is selected */}
+                        {/* 
+                            Only render AssetFilters when:
+                            - A specific category is selected (not "All" / selectedCategoryId is truthy)
+                            - filterable_schema exists and has fields
+                            
+                            When "All" is selected (selectedCategoryId is null/undefined), 
+                            metadata schema cannot be resolved, so filters are not available.
+                        */}
+                        {selectedCategoryId && (
+                            <div className={`${localAssets && localAssets.length > 0 ? 'mb-6' : 'mb-6'}`}>
+                                {filterable_schema && filterable_schema.length > 0 ? (
+                                    <div className="flex items-center justify-end">
+                                        <AssetFilters
+                                            filterableSchema={filterable_schema}
+                                            categoryId={selectedCategoryId}
+                                            savedViews={saved_views}
+                                        />
+                                    </div>
                                 ) : (
                                     <div className="flex items-center justify-end">
                                         <span className="text-xs text-gray-500 italic">
-                                            Select a category to filter by metadata
+                                            No filterable metadata available for this category
                                         </span>
                                     </div>
                                 )}

@@ -1369,6 +1369,15 @@ class UploadController extends Controller
             'manifest.*.resolved_filename' => 'nullable|string|max:255',
         ]);
 
+        // DEBUG: Log raw request to see what we're actually receiving
+        Log::info('[UploadController::finalize] Raw request received', [
+            'has_manifest' => isset($validated['manifest']),
+            'manifest_count' => count($validated['manifest'] ?? []),
+            'first_item_keys' => !empty($validated['manifest']) ? array_keys($validated['manifest'][0] ?? []) : [],
+            'first_item_metadata' => $validated['manifest'][0]['metadata'] ?? 'not_set',
+            'first_item_metadata_type' => gettype($validated['manifest'][0]['metadata'] ?? null),
+        ]);
+
         $manifest = $validated['manifest'];
         $results = [];
 
@@ -1377,9 +1386,15 @@ class UploadController extends Controller
             $uploadKey = $item['upload_key'];
             $expectedSize = $item['expected_size'];
             $categoryId = $item['category_id'];
+            // CRITICAL: Extract metadata - handle both array and object formats from JSON
             $metadata = $item['metadata'] ?? [];
+            // If metadata is an object (stdClass from JSON), convert to array
+            if (is_object($metadata)) {
+                $metadata = (array) $metadata;
+            }
             $title = $item['title'] ?? null;
             $resolvedFilename = $item['resolved_filename'] ?? null;
+            
 
             $uploadSession = null; // Initialize for use in catch blocks
             
@@ -1450,14 +1465,15 @@ class UploadController extends Controller
                         ]);
                         
                         // Extract filename from S3 metadata (same logic as UploadCompletionService)
-                        $metadata = $headResult->get('Metadata');
+                        // CRITICAL: Use different variable name to avoid overwriting $metadata (which contains photo_type)
+                        $s3Metadata = $headResult->get('Metadata');
                         $contentDisposition = $headResult->get('ContentDisposition');
                         
                         $originalFilename = null;
                         if ($contentDisposition && preg_match('/filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)/', $contentDisposition, $matches)) {
                             $originalFilename = trim($matches[1], '"\'');
-                        } elseif (isset($metadata['original-filename'])) {
-                            $originalFilename = $metadata['original-filename'];
+                        } elseif (isset($s3Metadata['original-filename'])) {
+                            $originalFilename = $s3Metadata['original-filename'];
                         }
                         
                         // If we have an original filename, validate extension
@@ -1492,17 +1508,23 @@ class UploadController extends Controller
                 // Phase 2 – Step 4: Extract and validate metadata fields BEFORE asset creation
                 // Frontend sends: { fieldKey: value } (only valid fields, no empty values)
                 $metadataFields = [];
-                if (is_array($metadata) && !empty($metadata)) {
-                    if (isset($metadata['fields']) && is_array($metadata['fields'])) {
-                        // Legacy format: { fields: {...} }
-                        $metadataFields = $metadata['fields'];
-                    } elseif (isset($metadata['category_id'])) {
-                        // Metadata has category_id mixed in - extract fields only
-                        $metadataFields = $metadata;
-                        unset($metadataFields['category_id']);
-                    } else {
-                        // Direct format: { fieldKey: value } (Phase 2 – Step 4 format)
-                        $metadataFields = $metadata;
+                // Handle both array and object formats
+                if (!empty($metadata)) {
+                    // Convert object to array if needed
+                    $metadataArray = is_object($metadata) ? (array)$metadata : $metadata;
+                    
+                    if (is_array($metadataArray)) {
+                        if (isset($metadataArray['fields']) && is_array($metadataArray['fields'])) {
+                            // Legacy format: { fields: {...} }
+                            $metadataFields = $metadataArray['fields'];
+                        } elseif (isset($metadataArray['category_id'])) {
+                            // Metadata has category_id mixed in - extract fields only
+                            $metadataFields = $metadataArray;
+                            unset($metadataFields['category_id']);
+                        } else {
+                            // Direct format: { fieldKey: value } (Phase 2 – Step 4 format)
+                            $metadataFields = $metadataArray;
+                        }
                     }
                 }
 
@@ -1554,6 +1576,11 @@ class UploadController extends Controller
                     }
                 }
 
+                // CRITICAL: Pass metadata in the format UploadCompletionService expects
+                // UploadCompletionService expects: { fields: { fieldKey: value } } or { fieldKey: value }
+                // We have metadataFields extracted, so wrap it in 'fields' key for consistency
+                $metadataForComplete = !empty($metadataFields) ? ['fields' => $metadataFields] : [];
+                
                 $asset = $this->completionService->complete(
                     $uploadSession,
                     $assetType,
@@ -1561,7 +1588,7 @@ class UploadController extends Controller
                     $title, // title - use title from frontend, fallback to filename if null
                     $uploadKey, // s3Key
                     $categoryId,
-                    $metadata, // Pass original metadata for asset.metadata JSON field (backward compatibility)
+                    $metadataForComplete, // Pass metadata in { fields: {...} } format
                     $user->id
                 );
 

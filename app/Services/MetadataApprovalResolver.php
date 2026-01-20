@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Tenant;
+use App\Models\User;
 use App\Services\PlanService;
 
 /**
@@ -14,7 +15,7 @@ use App\Services\PlanService;
  * - Deterministic and side-effect free
  * - Never mutates data
  * - Plan-gated (Pro plans or feature flag)
- * - Role-based (Manager/Admin can approve)
+ * - Permission-based (checks metadata.bypass_approval permission)
  * - Computed/system metadata NEVER requires approval
  */
 class MetadataApprovalResolver
@@ -49,9 +50,10 @@ class MetadataApprovalResolver
      *
      * @param string $source Metadata source ('user', 'ai', 'system', 'computed')
      * @param Tenant $tenant
+     * @param User|null $user Optional user to check for bypass_approval permission
      * @return bool True if approval is required, false otherwise
      */
-    public function requiresApproval(string $source, Tenant $tenant): bool
+    public function requiresApproval(string $source, Tenant $tenant, ?User $user = null): bool
     {
         // Approval must be enabled first
         if (!$this->isApprovalEnabled($tenant)) {
@@ -63,6 +65,11 @@ class MetadataApprovalResolver
             return false;
         }
 
+        // If user has bypass_approval permission, no approval required
+        if ($user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval')) {
+            return false;
+        }
+
         // User edits and AI suggestions require approval when enabled
         return in_array($source, ['user', 'ai']);
     }
@@ -70,33 +77,27 @@ class MetadataApprovalResolver
     /**
      * Check if a user can approve metadata.
      *
-     * @param string $role User's role (e.g., 'owner', 'admin', 'manager', 'editor', 'viewer')
+     * @param User $user User to check
+     * @param Tenant $tenant Tenant context
      * @return bool True if user can approve, false otherwise
      */
-    public function canApprove(string $role): bool
+    public function canApprove(User $user, Tenant $tenant): bool
     {
-        // Manager and Admin can approve
-        $approverRoles = ['owner', 'admin', 'manager'];
-
-        return in_array(strtolower($role), array_map('strtolower', $approverRoles));
+        // Check if user has bypass_approval permission (allows approving)
+        return $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval');
     }
 
     /**
      * Check if a user can propose metadata (create unapproved metadata).
      *
-     * This uses existing edit permission logic.
-     *
-     * @param string $role User's role
+     * @param User $user User to check
+     * @param Tenant $tenant Tenant context
      * @return bool True if user can propose, false otherwise
      */
-    public function canPropose(string $role): bool
+    public function canPropose(User $user, Tenant $tenant): bool
     {
-        // Viewers cannot propose
-        if (strtolower($role) === 'viewer') {
-            return false;
-        }
-
-        // All other roles can propose (they can edit, so they can propose)
-        return true;
+        // Check if user has metadata edit permissions
+        return $user->hasPermissionForTenant($tenant, 'metadata.set_on_upload') ||
+               $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload');
     }
 }

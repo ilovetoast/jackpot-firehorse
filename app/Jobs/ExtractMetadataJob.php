@@ -44,12 +44,16 @@ class ExtractMetadataJob implements ShouldQueue
      */
     public function handle(): void
     {
+        Log::info('[ExtractMetadataJob] Job started', [
+            'asset_id' => $this->assetId,
+        ]);
+        
         $asset = Asset::findOrFail($this->assetId);
 
         // Idempotency: Check if metadata already extracted
         $existingMetadata = $asset->metadata ?? [];
         if (isset($existingMetadata['metadata_extracted']) && $existingMetadata['metadata_extracted'] === true) {
-            Log::info('Metadata extraction skipped - already extracted', [
+            Log::info('[ExtractMetadataJob] Metadata extraction skipped - already extracted', [
                 'asset_id' => $asset->id,
             ]);
             // Job chaining is handled by Bus::chain() in ProcessAssetJob

@@ -39,7 +39,8 @@ export default function AppNav({ brand, tenant }) {
     }
 
     const activeCompany = auth.companies?.find((c) => c.is_active)
-    const isSiteOwner = auth.user?.id === 1 || auth.permissions?.includes('site admin') || auth.permissions?.includes('site owner')
+    const permissions = Array.isArray(auth.permissions) ? auth.permissions : []
+    const isSiteOwner = auth.user?.id === 1 || permissions.includes('site admin') || permissions.includes('site owner')
     const brands = auth.brands || []
     // Always use auth.activeBrand - this is the currently active brand from the session
     const activeBrand = auth.activeBrand
@@ -49,23 +50,23 @@ export default function AppNav({ brand, tenant }) {
     const tenantRole = auth.tenant_role || null
     const hasAdminOrOwnerRole = tenantRole && ['admin', 'owner'].includes(tenantRole.toLowerCase())
     const hasBrandManagerRole = tenantRole && tenantRole.toLowerCase() === 'brand_manager'
-    const hasManageUsersPermission = auth.permissions?.includes('manage users') || false
-    const hasManageBrandsPermission = auth.permissions?.includes('manage brands') || false
+    const hasManageUsersPermission = permissions.includes('manage users')
+    const hasManageBrandsPermission = permissions.includes('manage brands')
     // Team management and activity logs require admin/owner OR manage users permission OR manage brands permission
     const canAccessTeamManagement = hasAdminOrOwnerRole || hasManageUsersPermission || hasManageBrandsPermission
 
     // Check if user has access to any company menu items
     const hasCompanies = auth.companies && auth.companies.length > 0
-    const hasCompanySettingsAccess = auth.permissions?.includes('company_settings.view') || false
-    const hasTeamManageAccess = auth.permissions?.includes('team.manage') || false
-    const hasActivityLogsAccess = auth.permissions?.includes('activity_logs.view') || false
+    const hasCompanySettingsAccess = permissions.includes('company_settings.view')
+    const hasTeamManageAccess = permissions.includes('team.manage')
+    const hasActivityLogsAccess = permissions.includes('activity_logs.view')
     const hasMultipleCompanies = auth.companies && auth.companies.length > 1
     // Only show Company section if user has at least one company AND has access to at least one menu item
     const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess || hasTeamManageAccess || hasActivityLogsAccess || hasAdminOrOwnerRole)
 
     // Check if user has access to any brand menu items
     const hasBrands = brands && brands.length > 0
-    const hasBrandSettingsAccess = auth.permissions?.includes('brand_settings.manage') || false
+    const hasBrandSettingsAccess = permissions.includes('brand_settings.manage')
     const hasMultipleBrands = brands && brands.length > 1
     // Show Brands section if user has at least one brand AND (is owner/admin OR has multiple brands OR has brand settings access)
     // Owners/admins should always see brand management regardless of other conditions

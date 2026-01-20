@@ -55,19 +55,12 @@ class ComputedMetadataJob implements ShouldQueue
 
         // Skip if asset is not visible
         if ($asset->status !== AssetStatus::VISIBLE) {
-            Log::info('[ComputedMetadataJob] Skipping - asset not visible', [
-                'asset_id' => $asset->id,
-                'status' => $asset->status->value,
-            ]);
             return;
         }
 
         // Idempotency: Check if already computed
         $metadata = $asset->metadata ?? [];
         if (isset($metadata['computed_metadata_completed']) && $metadata['computed_metadata_completed'] === true) {
-            Log::info('[ComputedMetadataJob] Skipping - already computed', [
-                'asset_id' => $asset->id,
-            ]);
             return;
         }
 
@@ -79,10 +72,6 @@ class ComputedMetadataJob implements ShouldQueue
             $metadata['computed_metadata_completed'] = true;
             $metadata['computed_metadata_completed_at'] = now()->toIso8601String();
             $asset->update(['metadata' => $metadata]);
-
-            Log::info('[ComputedMetadataJob] Computed metadata completed', [
-                'asset_id' => $asset->id,
-            ]);
         } catch (\Throwable $e) {
             Log::error('[ComputedMetadataJob] Failed to compute metadata', [
                 'asset_id' => $asset->id,

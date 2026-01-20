@@ -1570,12 +1570,18 @@ class SiteAdminController extends Controller
             ['id' => 'compliance', 'name' => 'Compliance', 'icon' => ''],
         ];
 
-        // Get company roles
+        // Get company roles (all tenant-level roles from database)
+        // Ordered by hierarchy: Owner > Admin > Brand Manager > Manager > Contributor > Uploader > Viewer > Member
+        // Note: 'member' is deprecated but kept for backward compatibility
         $companyRoles = [
             ['id' => 'owner', 'name' => 'Owner', 'icon' => '👑'],
             ['id' => 'admin', 'name' => 'Admin', 'icon' => ''],
             ['id' => 'brand_manager', 'name' => 'Brand Manager', 'icon' => ''],
-            ['id' => 'member', 'name' => 'Member', 'icon' => ''],
+            ['id' => 'manager', 'name' => 'Manager', 'icon' => ''],
+            ['id' => 'contributor', 'name' => 'Contributor', 'icon' => ''],
+            ['id' => 'uploader', 'name' => 'Uploader', 'icon' => ''],
+            ['id' => 'viewer', 'name' => 'Viewer', 'icon' => ''],
+            ['id' => 'member', 'name' => 'Member', 'icon' => ''], // Deprecated
         ];
 
         // Get site permissions (company.manage, permissions.manage, ticket permissions, AI dashboard permissions, plus any custom site permissions)

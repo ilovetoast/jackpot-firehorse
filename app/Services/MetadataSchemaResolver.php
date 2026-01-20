@@ -51,7 +51,8 @@ class MetadataSchemaResolver
         }
 
         // Load all metadata fields that apply to this asset type
-        $fields = $this->loadApplicableFields($assetType);
+        // Phase C3: Pass tenant_id to filter tenant-scoped fields
+        $fields = $this->loadApplicableFields($assetType, $tenantId);
 
         // Load visibility overrides in inheritance order
         $fieldVisibility = $this->loadFieldVisibility($tenantId, $brandId, $categoryId, array_keys($fields));
@@ -81,10 +82,13 @@ class MetadataSchemaResolver
     /**
      * Load all metadata fields that apply to the given asset type.
      *
+     * Phase C3: Filters tenant fields by tenant_id to ensure proper isolation.
+     *
      * @param string $assetType
+     * @param int|null $tenantId Optional tenant ID for filtering tenant-scoped fields
      * @return array Keyed by field ID
      */
-    protected function loadApplicableFields(string $assetType): array
+    protected function loadApplicableFields(string $assetType, ?int $tenantId = null): array
     {
         $fields = DB::table('metadata_fields')
             ->where(function ($query) use ($assetType) {
@@ -92,6 +96,23 @@ class MetadataSchemaResolver
                     ->orWhere('applies_to', 'all');
             })
             ->whereNull('deprecated_at')
+            // Phase C3: Filter tenant fields by tenant_id, include all system fields
+            ->where(function ($query) use ($tenantId) {
+                // Include all system fields (scope='system', tenant_id IS NULL)
+                $query->where(function ($q) {
+                    $q->where('scope', 'system')
+                        ->whereNull('tenant_id');
+                });
+                
+                // Include tenant fields only for the specified tenant (if tenant_id provided)
+                if ($tenantId !== null) {
+                    $query->orWhere(function ($q) use ($tenantId) {
+                        $q->where('scope', 'tenant')
+                            ->where('tenant_id', $tenantId)
+                            ->where('is_active', true); // Only active tenant fields
+                    });
+                }
+            })
             // Phase B2: Select new attributes with safe defaults
             ->select([
                 'id',

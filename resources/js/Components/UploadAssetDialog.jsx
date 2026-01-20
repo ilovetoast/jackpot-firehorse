@@ -1311,8 +1311,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Phase 2 – Step 2: Handle metadata field changes from MetadataGroups
      */
     const handleMetadataFieldChange = useCallback((fieldKey, value) => {
-        setGlobalMetadataV2(fieldKey, value)
-    }, [setGlobalMetadataV2])
+        setGlobalMetadataDraft((prev) => ({
+            ...prev,
+            [fieldKey]: value,
+        }))
+    }, [])
 
     /**
      * CLEAN UPLOADER V2 — Get Effective Metadata for a File
@@ -2572,7 +2575,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             
             // Phase 2 – Step 4: Prepare metadata payload
             // Only include fields from upload schema, exclude empty values
-            const effectiveMetadata = getEffectiveMetadataV2(fileEntry.clientId)
+            // CRITICAL: Read current state directly instead of using callback to avoid stale closures
+            const file = v2Files.find((f) => f.clientId === fileEntry.clientId)
+            const effectiveMetadata = file ? {
+                ...globalMetadataDraft,
+                ...(file.metadataDraft || {}),
+            } : globalMetadataDraft
             const metadataPayload = {}
             
             if (uploadMetadataSchema && effectiveMetadata) {
@@ -2598,9 +2606,54 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         }
                     }
                 })
+            } else {
+                // CRITICAL FIX: If we have effectiveMetadata but no schema, still send the metadata
+                // This prevents data loss when schema loading fails or is delayed
+                if (effectiveMetadata && !uploadMetadataSchema && Object.keys(effectiveMetadata).length > 0) {
+                    Object.keys(effectiveMetadata).forEach(fieldKey => {
+                        const value = effectiveMetadata[fieldKey]
+                        if (value !== null && value !== undefined && value !== '') {
+                            if (Array.isArray(value) && value.length > 0) {
+                                metadataPayload[fieldKey] = value
+                            } else if (!Array.isArray(value)) {
+                                metadataPayload[fieldKey] = value
+                            }
+                        }
+                    })
+                }
             }
             
-            return {
+            // CRITICAL: If metadataPayload is empty but we have effectiveMetadata, use fallback
+            if (Object.keys(metadataPayload).length === 0 && Object.keys(effectiveMetadata).length > 0) {
+                // FALLBACK: Send metadata anyway to prevent data loss
+                Object.keys(effectiveMetadata).forEach(fieldKey => {
+                    const value = effectiveMetadata[fieldKey]
+                    if (value !== null && value !== undefined && value !== '') {
+                        if (Array.isArray(value) && value.length > 0) {
+                            metadataPayload[fieldKey] = value
+                        } else if (!Array.isArray(value)) {
+                            metadataPayload[fieldKey] = value
+                        }
+                    }
+                })
+            }
+            
+            // FINAL SAFETY CHECK: If we still have no metadata but globalMetadataDraft has values, use it directly
+            if (Object.keys(metadataPayload).length === 0 && Object.keys(globalMetadataDraft).length > 0) {
+                // LAST RESORT: Use globalMetadataDraft directly
+                Object.keys(globalMetadataDraft).forEach(fieldKey => {
+                    const value = globalMetadataDraft[fieldKey]
+                    if (value !== null && value !== undefined && value !== '') {
+                        if (Array.isArray(value) && value.length > 0) {
+                            metadataPayload[fieldKey] = value
+                        } else if (!Array.isArray(value)) {
+                            metadataPayload[fieldKey] = value
+                        }
+                    }
+                })
+            }
+            
+            const manifestItem = {
                 upload_key: uploadKey,
                 expected_size: fileEntry.file.size,
                 category_id: selectedCategoryId,
@@ -2608,9 +2661,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 title: normalizedTitle, // This now includes user-edited title if available
                 resolved_filename: resolvedFilename,
             }
+            
+            // CRITICAL: Log the actual manifest item being sent
+            console.log('[FINALIZE_V2] Manifest item for file', {
+                clientId: fileEntry.clientId,
+                upload_key: manifestItem.upload_key,
+                metadata: manifestItem.metadata,
+                metadataType: typeof manifestItem.metadata,
+                metadataIsArray: Array.isArray(manifestItem.metadata),
+                metadataKeys: Object.keys(manifestItem.metadata),
+                metadataValues: manifestItem.metadata
+            })
+            
+            return manifestItem
         })
 
-        console.log('[FINALIZE_V2] Built manifest', { manifestCount: manifest.length })
+        console.log('[FINALIZE_V2] Built manifest', { 
+            manifestCount: manifest.length,
+            manifest: manifest.map(m => ({
+                upload_key: m.upload_key,
+                category_id: m.category_id,
+                metadata: m.metadata,
+                metadataKeys: m.metadata ? Object.keys(m.metadata) : [],
+                title: m.title
+            }))
+        })
 
         // Set status to 'finalizing' for manifest files
         // Note: batchStatus is now computed from v2Files, no manual update needed
@@ -2853,7 +2928,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             )
             // Note: batchStatus is now computed from v2Files, no manual update needed
         }
-    }, [canFinalizeV2, v2Files, selectedCategoryId, getEffectiveMetadataV2])
+    }, [canFinalizeV2, v2Files, selectedCategoryId, getEffectiveMetadataV2, globalMetadataDraft, uploadMetadataSchema])
 
     /**
      * LEGACY — DO NOT USE: Finalize Assets
@@ -2926,7 +3001,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     uploadStatus: item.uploadStatus,
                     progress: item.progress,
                 })
-                console.log('[Finalize Payload] Effective metadata:', effectiveMetadata)
 
                 // Call backend endpoint
                 // Include title, resolvedFilename, category_id, and metadata for backend persistence
@@ -3250,7 +3324,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 setIsLoadingMetadataSchema(false)
             })
             .catch(error => {
-                console.error('[UploadAssetDialog] Failed to fetch metadata schema', error)
+                console.error('[UploadAssetDialog] Failed to fetch metadata schema', {
+                    error: error.message,
+                    categoryId: selectedCategoryId,
+                    stack: error.stack
+                })
                 setUploadMetadataSchema(null)
                 setIsLoadingMetadataSchema(false)
             })

@@ -53,5 +53,17 @@ class MetadataFieldPopulationSeeder extends Seeder
                 'readonly' => true,
                 'updated_at' => now(),
             ]);
+
+        // Update resolution_class field to be automatic (if it exists)
+        DB::table('metadata_fields')
+            ->where('key', 'resolution_class')
+            ->update([
+                'population_mode' => 'automatic',
+                'show_on_upload' => false,
+                'show_on_edit' => true,
+                'show_in_filters' => true,
+                'readonly' => true,
+                'updated_at' => now(),
+            ]);
     }
 }

@@ -26,11 +26,7 @@ class RoleSeeder extends Seeder
                 'guard_name' => 'web',
             ],
             [
-                'name' => 'brand_manager',
-                'guard_name' => 'web',
-            ],
-            [
-                'name' => 'member',
+                'name' => 'manager',
                 'guard_name' => 'web',
             ],
             [
@@ -38,7 +34,19 @@ class RoleSeeder extends Seeder
                 'guard_name' => 'web',
             ],
             [
+                'name' => 'uploader',
+                'guard_name' => 'web',
+            ],
+            [
                 'name' => 'viewer',
+                'guard_name' => 'web',
+            ],
+            [
+                'name' => 'brand_manager',
+                'guard_name' => 'web',
+            ],
+            [
+                'name' => 'member',
                 'guard_name' => 'web',
             ],
         ];

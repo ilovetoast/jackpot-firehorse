@@ -1,0 +1,681 @@
+import { useState, useMemo } from 'react'
+import { router } from '@inertiajs/react'
+import AppNav from '../../../Components/AppNav'
+import AppFooter from '../../../Components/AppFooter'
+import ByCategoryView from './ByCategory'
+import FilterView from './FilterView'
+import {
+    EyeIcon,
+    EyeSlashIcon,
+    XMarkIcon,
+    InformationCircleIcon,
+    ChevronDownIcon,
+    ChevronRightIcon,
+} from '@heroicons/react/24/outline'
+
+export default function TenantMetadataRegistryIndex({ registry, categories, canManageVisibility, canManageFields }) {
+    const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY
+    const [expandedField, setExpandedField] = useState(null)
+    const [categoryModal, setCategoryModal] = useState({ open: false, field: null, suppressedCategories: [] })
+    const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null) // Category Lens filter
+    const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
+
+    const { system_fields = [], tenant_fields = [] } = registry || {}
+    const allFields = [...system_fields, ...tenant_fields]
+
+    // Phase G.2: Filter out automated/AI fields (population_mode = automatic AND readonly = true)
+    // These fields continue to function but are not shown in tenant management UI
+    const manageableFields = useMemo(() => {
+        return allFields.filter(field => {
+            const isAutomated = (field.population_mode === 'automatic' && field.readonly === true)
+            return !isAutomated
+        })
+    }, [allFields])
+
+    const handleVisibilityToggle = async (fieldId, context, currentValue) => {
+        if (!canManageVisibility) return
+
+        const newValue = !currentValue
+        const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
+
+        try {
+            await router.post(`/api/tenant/metadata/fields/${fieldId}/visibility`, {
+                [visibilityKey]: newValue,
+            }, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    router.reload({ only: ['registry'] })
+                },
+            })
+        } catch (error) {
+            console.error('Failed to update visibility:', error)
+        }
+    }
+
+    const handleRemoveOverride = async (fieldId) => {
+        if (!canManageVisibility) return
+
+        try {
+            await router.delete(`/api/tenant/metadata/fields/${fieldId}/visibility`, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    router.reload({ only: ['registry'] })
+                },
+            })
+        } catch (error) {
+            console.error('Failed to remove override:', error)
+        }
+    }
+
+    const openCategoryModal = async (field) => {
+        try {
+            const response = await fetch(`/api/tenant/metadata/fields/${field.id}/categories`)
+            const data = await response.json()
+            const suppressedIds = data.suppressed_category_ids || []
+            
+            // Compute visible categories (all categories minus suppressed)
+            const visibleCategories = categories.filter(cat => !suppressedIds.includes(cat.id))
+            
+            // Cache category data for this field
+            setFieldCategoryData(prev => ({
+                ...prev,
+                [field.id]: {
+                    suppressed: suppressedIds,
+                    visible: visibleCategories.map(cat => cat.id),
+                }
+            }))
+            
+            setCategoryModal({
+                open: true,
+                field,
+                suppressedCategories: suppressedIds,
+            })
+        } catch (error) {
+            console.error('Failed to load suppressed categories:', error)
+        }
+    }
+
+    // Load category data for a field if not cached
+    const loadFieldCategoryData = async (field) => {
+        if (fieldCategoryData[field.id]) {
+            return fieldCategoryData[field.id]
+        }
+
+        try {
+            const response = await fetch(`/api/tenant/metadata/fields/${field.id}/categories`)
+            const data = await response.json()
+            const suppressedIds = data.suppressed_category_ids || []
+            const visibleCategories = categories.filter(cat => !suppressedIds.includes(cat.id))
+            
+            const categoryData = {
+                suppressed: suppressedIds,
+                visible: visibleCategories.map(cat => cat.id),
+            }
+            
+            setFieldCategoryData(prev => ({
+                ...prev,
+                [field.id]: categoryData,
+            }))
+            
+            return categoryData
+        } catch (error) {
+            console.error('Failed to load category data:', error)
+            return { suppressed: [], visible: categories.map(cat => cat.id) }
+        }
+    }
+
+    const toggleCategorySuppression = async (fieldId, categoryId, isSuppressed) => {
+        if (!canManageVisibility) return
+
+        try {
+            if (isSuppressed) {
+                await router.delete(`/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/suppress`, {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        const newSuppressed = categoryModal.suppressedCategories.filter(id => id !== categoryId)
+                        setCategoryModal(prev => ({
+                            ...prev,
+                            suppressedCategories: newSuppressed,
+                        }))
+                        
+                        // Update cached category data
+                        const visibleCategories = categories.filter(cat => !newSuppressed.includes(cat.id))
+                        setFieldCategoryData(prev => ({
+                            ...prev,
+                            [fieldId]: {
+                                suppressed: newSuppressed,
+                                visible: visibleCategories.map(cat => cat.id),
+                            }
+                        }))
+                    },
+                })
+            } else {
+                await router.post(`/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/suppress`, {}, {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        const newSuppressed = [...categoryModal.suppressedCategories, categoryId]
+                        setCategoryModal(prev => ({
+                            ...prev,
+                            suppressedCategories: newSuppressed,
+                        }))
+                        
+                        // Update cached category data
+                        const visibleCategories = categories.filter(cat => !newSuppressed.includes(cat.id))
+                        setFieldCategoryData(prev => ({
+                            ...prev,
+                            [fieldId]: {
+                                suppressed: newSuppressed,
+                                visible: visibleCategories.map(cat => cat.id),
+                            }
+                        }))
+                    },
+                })
+            }
+        } catch (error) {
+            console.error('Failed to toggle category suppression:', error)
+        }
+    }
+
+    // Get category data for a field (use cache or load)
+    const getFieldCategoryInfo = (field) => {
+        const cached = fieldCategoryData[field.id]
+        if (cached) {
+            return cached
+        }
+        
+        // If modal is open, use modal data
+        if (categoryModal.open && categoryModal.field?.id === field.id) {
+            const suppressedIds = categoryModal.suppressedCategories
+            return {
+                suppressed: suppressedIds,
+                visible: categories.filter(cat => !suppressedIds.includes(cat.id)).map(cat => cat.id),
+            }
+        }
+        
+        // Default: assume all categories visible (will be loaded on demand)
+        return {
+            suppressed: [],
+            visible: categories.map(cat => cat.id),
+        }
+    }
+
+    // Render category badges for a field
+    const renderCategoryBadges = (field) => {
+        const categoryInfo = getFieldCategoryInfo(field)
+        const visibleCategoryIds = categoryInfo.visible || []
+        const suppressedIds = categoryInfo.suppressed || []
+        
+        // Get visible category objects
+        const visibleCategories = categories.filter(cat => visibleCategoryIds.includes(cat.id))
+        const suppressedCategories = categories.filter(cat => suppressedIds.includes(cat.id))
+        
+        // Show up to 3 visible category badges
+        const visibleToShow = visibleCategories.slice(0, 3)
+        const remainingCount = visibleCategories.length - 3
+        
+        return (
+            <div className="flex flex-wrap items-center gap-2">
+                {visibleToShow.length > 0 ? (
+                    <>
+                        {visibleToShow.map(category => (
+                            <button
+                                key={category.id}
+                                onClick={() => openCategoryModal(field)}
+                                disabled={!canManageVisibility}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title={`${category.brand_name} / ${category.name}`}
+                            >
+                                {category.name}
+                            </button>
+                        ))}
+                        {remainingCount > 0 && (
+                            <button
+                                onClick={() => openCategoryModal(field)}
+                                disabled={!canManageVisibility}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title={`${remainingCount} more categories`}
+                            >
+                                +{remainingCount} more
+                            </button>
+                        )}
+                    </>
+                ) : (
+                    <span className="text-xs text-gray-400 italic">Not enabled for any categories</span>
+                )}
+                
+                {suppressedCategories.length > 0 && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <span className="text-gray-400">•</span>
+                        <span className="text-gray-500">Hidden in:</span>
+                        {suppressedCategories.slice(0, 2).map(category => (
+                            <button
+                                key={category.id}
+                                onClick={() => openCategoryModal(field)}
+                                disabled={!canManageVisibility}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title={`${category.brand_name} / ${category.name}`}
+                            >
+                                {category.name}
+                            </button>
+                        ))}
+                        {suppressedCategories.length > 2 && (
+                            <span className="text-gray-500">+{suppressedCategories.length - 2}</span>
+                        )}
+                    </div>
+                )}
+            </div>
+        )
+    }
+
+    // Check if field is visible in selected category
+    const isFieldVisibleInCategory = (field, categoryId) => {
+        if (!categoryId) return true // "All Categories" shows everything
+        
+        const categoryInfo = getFieldCategoryInfo(field)
+        const visibleCategoryIds = categoryInfo.visible || []
+        return visibleCategoryIds.includes(categoryId)
+    }
+
+    const getFieldStatus = (field) => {
+        const effectiveUpload = field.effective_show_on_upload ?? field.show_on_upload ?? true
+        const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? true
+        const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
+
+        // Field is "active" if visible in at least one context
+        const isActive = effectiveUpload || effectiveEdit || effectiveFilter
+        return isActive ? 'Active' : 'Hidden'
+    }
+
+    const renderAdvancedDetails = (field) => {
+        if (expandedField !== field.id) return null
+
+        const isSystem = system_fields.some(sf => sf.id === field.id)
+
+        return (
+            <tr>
+                <td colSpan="5" className="px-4 py-4 bg-gray-50">
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span className="font-medium text-gray-700">Type:</span>
+                                <span className="ml-2 text-gray-600">{field.field_type}</span>
+                            </div>
+                            <div>
+                                <span className="font-medium text-gray-700">Population Mode:</span>
+                                <span className="ml-2 text-gray-600">{field.population_mode || 'manual'}</span>
+                            </div>
+                            {field.is_ai_related && (
+                                <div>
+                                    <span className="font-medium text-gray-700">AI-Related:</span>
+                                    <span className="ml-2 text-gray-600">Yes</span>
+                                </div>
+                            )}
+                            {field.is_system_generated && (
+                                <div>
+                                    <span className="font-medium text-gray-700">Auto-Generated:</span>
+                                    <span className="ml-2 text-gray-600">Yes</span>
+                                </div>
+                            )}
+                            {field.readonly && (
+                                <div>
+                                    <span className="font-medium text-gray-700">Read-Only:</span>
+                                    <span className="ml-2 text-gray-600">Yes</span>
+                                </div>
+                            )}
+                            {field.has_tenant_override && canManageVisibility && (
+                                <div className="col-span-2">
+                                    <button
+                                        onClick={() => handleRemoveOverride(field.id)}
+                                        className="text-xs text-red-600 hover:text-red-700"
+                                    >
+                                        Remove all visibility overrides
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        {isSystem && (
+                            <div className="text-xs text-gray-500 italic">
+                                System fields cannot be edited. Only visibility can be controlled.
+                            </div>
+                        )}
+                    </div>
+                </td>
+            </tr>
+        )
+    }
+
+    // Apply tab filter (using manageableFields to exclude automated fields)
+    let filteredFields = activeTab === 'custom' 
+        ? tenant_fields.filter(f => {
+            const isAutomated = (f.population_mode === 'automatic' && f.readonly === true)
+            return !isAutomated
+        })
+        : manageableFields
+    
+    // Apply category lens filter (view-only, no state changes)
+    if (selectedCategoryFilter) {
+        filteredFields = filteredFields.filter(field => isFieldVisibleInCategory(field, selectedCategoryFilter))
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-50">
+            <AppNav />
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="bg-white rounded-lg shadow">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                        <h1 className="text-2xl font-bold text-gray-900">Metadata Management</h1>
+                        <p className="mt-1 text-sm text-gray-600">
+                            Control where metadata fields appear in your workflow
+                        </p>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="border-b border-gray-200">
+                        <nav className="-mb-px flex space-x-8 px-6" aria-label="Tabs">
+                            {/* Phase G.2: Category-first is PRIMARY */}
+                            <button
+                                onClick={() => setActiveTab('by-category')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
+                                    activeTab === 'by-category'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                By Category
+                            </button>
+                            {/* Phase G.2: All Metadata is now SECONDARY / advanced view */}
+                            <button
+                                onClick={() => setActiveTab('all')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
+                                    activeTab === 'all'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                All Metadata ({manageableFields.length})
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('filters')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
+                                    activeTab === 'filters'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Filters
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('custom')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
+                                    activeTab === 'custom'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Custom Fields ({tenant_fields.filter(f => {
+                                    const isAutomated = (f.population_mode === 'automatic' && f.readonly === true)
+                                    return !isAutomated
+                                }).length})
+                            </button>
+                        </nav>
+                    </div>
+
+                    {/* Phase G.2: Category-First View */}
+                    {activeTab === 'by-category' ? (
+                        <div className="px-6 py-4">
+                            <ByCategoryView
+                                registry={registry}
+                                categories={categories}
+                                canManageVisibility={canManageVisibility}
+                            />
+                        </div>
+                    ) : activeTab === 'filters' ? (
+                        <FilterView
+                            registry={registry}
+                            canManageVisibility={canManageVisibility}
+                        />
+                    ) : (
+                        <>
+                            {/* Category Lens Filter (for All Metadata view) */}
+                            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                                <div className="flex items-center gap-3">
+                                    <label className="text-sm font-medium text-gray-700">
+                                        Viewing metadata as used in:
+                                    </label>
+                                    <select
+                                        value={selectedCategoryFilter || ''}
+                                        onChange={(e) => setSelectedCategoryFilter(e.target.value ? parseInt(e.target.value) : null)}
+                                        className="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                    >
+                                        <option value="">All Categories</option>
+                                        {categories.map(category => (
+                                            <option key={category.id} value={category.id}>
+                                                {category.brand_name} / {category.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {selectedCategoryFilter && (
+                                        <button
+                                            onClick={() => setSelectedCategoryFilter(null)}
+                                            className="text-xs text-gray-500 hover:text-gray-700"
+                                        >
+                                            Clear filter
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Info Banner */}
+                            <div className="px-6 py-3 bg-blue-50 border-b border-blue-200">
+                                <div className="flex items-start gap-2">
+                                    <InformationCircleIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                                    <div className="text-sm text-blue-800">
+                                        <p>
+                                            Hiding a field does not delete existing data. Toggle fields on/off to control where they appear in upload, edit, and filter interfaces.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Table */}
+                            <div className="px-6 py-4">
+                                {filteredFields.length === 0 ? (
+                                    <div className="text-center py-12">
+                                        <p className="text-sm text-gray-500">
+                                            {selectedCategoryFilter
+                                                ? 'No metadata fields visible in the selected category.'
+                                                : activeTab === 'custom' 
+                                                    ? 'No custom fields created yet.' 
+                                                    : 'No metadata fields found.'}
+                                        </p>
+                                    </div>
+                                ) : (
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Field
+                                            </th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Appears On
+                                            </th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Category Scope
+                                            </th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Status
+                                            </th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Actions
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                        {filteredFields.map(field => {
+                                            const effectiveUpload = field.effective_show_on_upload ?? field.show_on_upload ?? true
+                                            const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? true
+                                            const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
+                                            const isSystem = system_fields.some(sf => sf.id === field.id)
+                                            const status = getFieldStatus(field)
+
+                                            return (
+                                                <>
+                                                    <tr key={field.id} className="hover:bg-gray-50">
+                                                        <td className="px-4 py-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-medium text-gray-900">{field.label}</span>
+                                                                {isSystem && (
+                                                                    <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                                                                        System
+                                                                    </span>
+                                                                )}
+                                                                {!isSystem && (
+                                                                    <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded">
+                                                                        Custom
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <div className="flex items-center gap-4">
+                                                                {/* Upload Toggle */}
+                                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={effectiveUpload}
+                                                                        onChange={() => handleVisibilityToggle(field.id, 'upload', effectiveUpload)}
+                                                                        disabled={!canManageVisibility}
+                                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    />
+                                                                    <span className="text-sm text-gray-700">Upload</span>
+                                                                </label>
+
+                                                                {/* Edit Toggle */}
+                                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={effectiveEdit}
+                                                                        onChange={() => handleVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                                                        disabled={!canManageVisibility}
+                                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    />
+                                                                    <span className="text-sm text-gray-700">Edit</span>
+                                                                </label>
+
+                                                                {/* Filter Toggle */}
+                                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={effectiveFilter}
+                                                                        onChange={() => handleVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                                                                        disabled={!canManageVisibility}
+                                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    />
+                                                                    <span className="text-sm text-gray-700">Filter</span>
+                                                                </label>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <div 
+                                                                onMouseEnter={() => loadFieldCategoryData(field)}
+                                                                className="min-w-[200px]"
+                                                            >
+                                                                {renderCategoryBadges(field)}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                                                status === 'Active' 
+                                                                    ? 'bg-green-100 text-green-800' 
+                                                                    : 'bg-gray-100 text-gray-800'
+                                                            }`}>
+                                                                {status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <button
+                                                                onClick={() => setExpandedField(expandedField === field.id ? null : field.id)}
+                                                                className="text-sm text-gray-600 hover:text-gray-900"
+                                                            >
+                                                                {expandedField === field.id ? (
+                                                                    <span className="flex items-center gap-1">
+                                                                        <ChevronDownIcon className="w-4 h-4" />
+                                                                        Hide Details
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="flex items-center gap-1">
+                                                                        <ChevronRightIcon className="w-4 h-4" />
+                                                                        Advanced
+                                                                    </span>
+                                                                )}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                    {renderAdvancedDetails(field)}
+                                                </>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* Category Suppression Modal */}
+            {categoryModal.open && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
+                        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-gray-900">
+                                Category Visibility: {categoryModal.field?.label}
+                            </h3>
+                            <button
+                                onClick={() => setCategoryModal({ open: false, field: null, suppressedCategories: [] })}
+                                className="text-gray-400 hover:text-gray-500"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="px-6 py-4 max-h-96 overflow-y-auto">
+                            <p className="text-sm text-gray-600 mb-4">
+                                Select categories where this field should be hidden:
+                            </p>
+                            <div className="space-y-2">
+                                {categories.map(category => {
+                                    const isSuppressed = categoryModal.suppressedCategories.includes(category.id)
+                                    return (
+                                        <label
+                                            key={category.id}
+                                            className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={isSuppressed}
+                                                onChange={() => toggleCategorySuppression(
+                                                    categoryModal.field.id,
+                                                    category.id,
+                                                    isSuppressed
+                                                )}
+                                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-sm text-gray-700">
+                                                {category.brand_name} / {category.name}
+                                            </span>
+                                        </label>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <AppFooter />
+        </div>
+    )
+}

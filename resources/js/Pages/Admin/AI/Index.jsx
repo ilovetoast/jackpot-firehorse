@@ -314,7 +314,7 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                                 <BudgetsTabContent 
                                     budgets={tabContent.budgets.budgets}
                                     environment={environment}
-                                    canManage={canManage && auth.permissions?.includes('ai.budgets.manage')}
+                                    canManage={canManage && Array.isArray(auth.permissions) && auth.permissions.includes('ai.budgets.manage')}
                                 />
                             ) : (
                                 <div className="rounded-lg bg-white p-8 shadow-sm ring-1 ring-gray-200 text-center">

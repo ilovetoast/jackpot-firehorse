@@ -84,6 +84,11 @@ class CompanyBrandSeeder extends Seeder
             ['name' => 'Velve Hammer Branding']
         );
 
+        // Set tenant 1 to enterprise plan from the beginning
+        $initialCompany->update([
+            'manual_plan_override' => 'enterprise',
+        ]);
+
         // Attach user 1 to the initial company as owner
         $initialUser->tenants()->syncWithoutDetaching([$initialCompany->id => ['role' => 'owner']]);
         // make Site Owner role
@@ -102,7 +107,7 @@ class CompanyBrandSeeder extends Seeder
             } else {
                 // Create a default brand for the tenant
                 $initialDefaultBrand = $initialCompany->brands()->create([
-                    'name' => $initialCompany->name,
+                    'name' => $initialCompany->name, // Brand name same as company name
                     'slug' => $initialCompany->slug,
                     'is_default' => true,
                     'show_in_selector' => true,
@@ -110,15 +115,20 @@ class CompanyBrandSeeder extends Seeder
             }
         }
         
-        // Update the brand with styling
+        // Update the brand with styling - brand name matches company name
         if ($initialDefaultBrand) {
             $initialDefaultBrand->update([
-                'name' => 'Example Company',
+                'name' => $initialCompany->name, // Brand name same as company name
                 'show_in_selector' => true,
                 'primary_color' => '#6366f1',
                 'secondary_color' => '#8b5cf6',
                 'accent_color' => '#ec4899',
             ]);
+        }
+
+        // Ensure user 1 is admin of the brand
+        if ($initialDefaultBrand) {
+            $initialUser->brands()->syncWithoutDetaching([$initialDefaultBrand->id => ['role' => 'admin']]);
         }
 
         // Create a secondary user for testing/development (will be user ID 2+ if user 1 exists)

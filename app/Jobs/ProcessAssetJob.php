@@ -84,17 +84,14 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
         
-        // Prevent re-processing: Skip if thumbnails are already in a terminal state
-        // Terminal states: COMPLETED, FAILED, SKIPPED
-        // Only PENDING and PROCESSING should trigger new processing
-        if ($asset->thumbnail_status && in_array($asset->thumbnail_status, [
-            \App\Enums\ThumbnailStatus::COMPLETED,
-            \App\Enums\ThumbnailStatus::FAILED,
-            \App\Enums\ThumbnailStatus::SKIPPED,
-        ])) {
-            Log::info('Asset processing skipped - thumbnail already in terminal state', [
+        // Check if processing has already been started
+        // If thumbnails are completed but other jobs haven't run, we should still run the chain
+        // Only skip if processing_started flag exists (prevents duplicate chains)
+        $existingMetadata = $asset->metadata ?? [];
+        if (isset($existingMetadata['processing_started']) && $existingMetadata['processing_started'] === true) {
+            Log::info('[ProcessAssetJob] Processing already started - skipping to prevent duplicate chain', [
                 'asset_id' => $asset->id,
-                'thumbnail_status' => $asset->thumbnail_status->value,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
             return;
         }

@@ -1,0 +1,288 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Category;
+use App\Models\Tenant;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+/**
+ * Tenant Metadata Visibility Service
+ *
+ * Phase C4: Manages tenant-level visibility overrides for metadata fields.
+ *
+ * This service handles tenant-scoped visibility overrides that allow tenants
+ * to control where and how metadata fields appear in their UI.
+ *
+ * Rules:
+ * - Tenant overrides never modify system field definitions
+ * - Overrides are additive and reversible
+ * - Category suppression is tenant-scoped
+ * - All changes are auditable
+ */
+class TenantMetadataVisibilityService
+{
+    /**
+     * Get visibility overrides for fields at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param array $fieldIds
+     * @return array Keyed by field_id
+     */
+    public function getFieldVisibilityOverrides(Tenant $tenant, array $fieldIds): array
+    {
+        if (empty($fieldIds)) {
+            return [];
+        }
+
+        $overrides = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->whereNull('category_id')
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->get()
+            ->keyBy('metadata_field_id');
+
+        $result = [];
+        foreach ($fieldIds as $fieldId) {
+            if (isset($overrides[$fieldId])) {
+                $result[$fieldId] = $overrides[$fieldId];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Set visibility override for a field at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param array $visibility Visibility flags:
+     *   - show_on_upload: bool|null (null = no override)
+     *   - show_on_edit: bool|null (null = no override)
+     *   - show_in_filters: bool|null (null = no override)
+     * @return void
+     */
+    public function setFieldVisibility(Tenant $tenant, int $fieldId, array $visibility): void
+    {
+        // Convert show_* flags to is_*_hidden flags
+        $isUploadHidden = isset($visibility['show_on_upload']) && !$visibility['show_on_upload'];
+        $isEditHidden = isset($visibility['show_on_edit']) && !$visibility['show_on_edit'];
+        $isFilterHidden = isset($visibility['show_in_filters']) && !$visibility['show_in_filters'];
+
+        // Check if override already exists
+        $existing = DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->whereNull('category_id')
+            ->first();
+
+        if ($existing) {
+            // Update existing override
+            DB::table('metadata_field_visibility')
+                ->where('id', $existing->id)
+                ->update([
+                    'is_upload_hidden' => $isUploadHidden,
+                    'is_hidden' => $isEditHidden,
+                    'is_filter_hidden' => $isFilterHidden,
+                    'updated_at' => now(),
+                ]);
+        } else {
+            // Create new override
+            DB::table('metadata_field_visibility')->insert([
+                'metadata_field_id' => $fieldId,
+                'tenant_id' => $tenant->id,
+                'brand_id' => null,
+                'category_id' => null,
+                'is_upload_hidden' => $isUploadHidden,
+                'is_hidden' => $isEditHidden,
+                'is_filter_hidden' => $isFilterHidden,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        Log::info('Tenant metadata visibility override set', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'visibility' => $visibility,
+        ]);
+    }
+
+    /**
+     * Remove visibility override for a field at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @return void
+     */
+    public function removeFieldVisibility(Tenant $tenant, int $fieldId): void
+    {
+        DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->whereNull('category_id')
+            ->delete();
+
+        Log::info('Tenant metadata visibility override removed', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+        ]);
+    }
+
+    /**
+     * Suppress a field for a category at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param Category $category
+     * @return void
+     */
+    public function suppressForCategory(Tenant $tenant, int $fieldId, Category $category): void
+    {
+        // Check if suppression already exists
+        $existing = DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->where('category_id', $category->id)
+            ->first();
+
+        if ($existing) {
+            // Update to ensure hidden
+            DB::table('metadata_field_visibility')
+                ->where('id', $existing->id)
+                ->update([
+                    'is_hidden' => true,
+                    'is_upload_hidden' => true,
+                    'is_filter_hidden' => true,
+                    'updated_at' => now(),
+                ]);
+        } else {
+            // Create new suppression
+            DB::table('metadata_field_visibility')->insert([
+                'metadata_field_id' => $fieldId,
+                'tenant_id' => $tenant->id,
+                'brand_id' => null,
+                'category_id' => $category->id,
+                'is_hidden' => true,
+                'is_upload_hidden' => true,
+                'is_filter_hidden' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        Log::info('Tenant metadata field suppressed for category', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'category_id' => $category->id,
+        ]);
+    }
+
+    /**
+     * Unsuppress a field for a category at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param Category $category
+     * @return void
+     */
+    public function unsuppressForCategory(Tenant $tenant, int $fieldId, Category $category): void
+    {
+        DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->where('category_id', $category->id)
+            ->delete();
+
+        Log::info('Tenant metadata field unsuppressed for category', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'category_id' => $category->id,
+        ]);
+    }
+
+    /**
+     * Get category suppressions for a field at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @return array Array of category IDs where field is suppressed
+     */
+    public function getSuppressedCategories(Tenant $tenant, int $fieldId): array
+    {
+        return DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->whereNotNull('category_id')
+            ->where('is_hidden', true)
+            ->pluck('category_id')
+            ->toArray();
+    }
+
+    /**
+     * Check if a field is visible for a category at tenant level.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param Category|null $category
+     * @return bool
+     */
+    public function isVisibleForCategory(Tenant $tenant, int $fieldId, ?Category $category): bool
+    {
+        if ($category === null) {
+            // Check tenant-level override (no category)
+            $override = DB::table('metadata_field_visibility')
+                ->where('metadata_field_id', $fieldId)
+                ->where('tenant_id', $tenant->id)
+                ->whereNull('brand_id')
+                ->whereNull('category_id')
+                ->first();
+
+            // If no override, field is visible
+            if (!$override) {
+                return true;
+            }
+
+            // Check if hidden at tenant level
+            return !$override->is_hidden;
+        }
+
+        // Check category-specific suppression
+        $suppression = DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->where('category_id', $category->id)
+            ->where('is_hidden', true)
+            ->exists();
+
+        // If suppressed for this category, not visible
+        if ($suppression) {
+            return false;
+        }
+
+        // Check tenant-level override
+        $override = DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNull('brand_id')
+            ->whereNull('category_id')
+            ->first();
+
+        // If no override, field is visible
+        if (!$override) {
+            return true;
+        }
+
+        // Check if hidden at tenant level
+        return !$override->is_hidden;
+    }
+}

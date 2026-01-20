@@ -434,9 +434,10 @@ class BulkMetadataService
 
             // Persist each value
             foreach ($normalizedValues as $value) {
-                // Check if approval is required
+                // Check if approval is required (unless user has bypass_approval permission)
                 $tenant = \App\Models\Tenant::find($asset->tenant_id);
-                $requiresApproval = $tenant && $this->approvalResolver->requiresApproval('user', $tenant);
+                $user = $userId ? \App\Models\User::find($userId) : null;
+                $requiresApproval = $tenant && $this->approvalResolver->requiresApproval('user', $tenant, $user);
 
                 // Create new asset_metadata row
                 // Phase B7: Bulk user edits have confidence = 1.0 and producer = 'user'

@@ -39,11 +39,16 @@ export default function AdminPermissions({
         { id: 'compliance', name: 'Compliance', icon: '' },
     ]
 
+    // Order roles by hierarchy: Owner > Admin > Brand Manager > Manager > Contributor > Uploader > Viewer > Member
     const defaultCompanyRoles = company_roles || [
         { id: 'owner', name: 'Owner', icon: '👑' },
         { id: 'admin', name: 'Admin', icon: '' },
         { id: 'brand_manager', name: 'Brand Manager', icon: '' },
-        { id: 'member', name: 'Member', icon: '' },
+        { id: 'manager', name: 'Manager', icon: '' },
+        { id: 'contributor', name: 'Contributor', icon: '' },
+        { id: 'uploader', name: 'Uploader', icon: '' },
+        { id: 'viewer', name: 'Viewer', icon: '' },
+        { id: 'member', name: 'Member', icon: '' }, // Deprecated
     ]
 
     // Default permission assignments (from PermissionSeeder)
@@ -127,6 +132,56 @@ export default function AdminPermissions({
             'tickets.reply',
             'tickets.view_tenant',
             'tickets.view_any',
+        ],
+        manager: [
+            'billing.view',
+            'billing.manage',
+            'company_settings.view',
+            'team.manage',
+            'activity_logs.view',
+            'brand_settings.manage',
+            'brand_categories.manage',
+            'view.restricted.categories',
+            'assets.retry_thumbnails',
+            'asset.view',
+            'asset.download',
+            'asset.upload',
+            'metadata.set_on_upload',
+            'metadata.edit_post_upload',
+            'metadata.bypass_approval',
+            'metadata.override_automatic',
+            'metadata.review_candidates',
+            'metadata.bulk_edit',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+        ],
+        contributor: [
+            'asset.view',
+            'asset.download',
+            'asset.upload',
+            'metadata.set_on_upload',
+            'metadata.edit_post_upload',
+            'metadata.review_candidates',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+        ],
+        uploader: [
+            'asset.view',
+            'asset.download',
+            'asset.upload',
+            'metadata.set_on_upload',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
+        ],
+        viewer: [
+            'asset.view',
+            'asset.download',
+            'tickets.create',
+            'tickets.reply',
+            'tickets.view_tenant',
         ],
         brand_manager: [
             'brand_settings.manage',

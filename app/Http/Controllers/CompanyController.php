@@ -784,12 +784,16 @@ class CompanyController extends Controller
             abort(403, 'Only administrators and owners can view permissions.');
         }
 
-        // Get company roles
+        // Get all company roles (tenant-level roles, ordered by hierarchy)
         $companyRoles = [
             ['id' => 'owner', 'name' => 'Owner', 'icon' => '👑'],
             ['id' => 'admin', 'name' => 'Admin', 'icon' => ''],
             ['id' => 'brand_manager', 'name' => 'Brand Manager', 'icon' => ''],
-            ['id' => 'member', 'name' => 'Member', 'icon' => ''],
+            ['id' => 'manager', 'name' => 'Manager', 'icon' => ''],
+            ['id' => 'contributor', 'name' => 'Contributor', 'icon' => ''],
+            ['id' => 'uploader', 'name' => 'Uploader', 'icon' => ''],
+            ['id' => 'viewer', 'name' => 'Viewer', 'icon' => ''],
+            ['id' => 'member', 'name' => 'Member', 'icon' => ''], // Deprecated
         ];
 
         // Get company permissions (all permissions that are NOT site permissions)

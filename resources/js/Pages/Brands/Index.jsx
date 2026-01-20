@@ -332,6 +332,32 @@ export default function BrandsIndex({ brands, limits }) {
                                                         )}
                                                     </div>
 
+                                                    {/* Metadata Section */}
+                                                    {Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage')) && (
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-4">
+                                                                <h3 className="text-base font-semibold leading-6 text-gray-900">
+                                                                    Metadata
+                                                                </h3>
+                                                            </div>
+                                                            <div className="bg-white rounded-lg border border-gray-200 p-4">
+                                                                <p className="text-sm text-gray-700 mb-4">
+                                                                    Manage metadata fields and visibility settings for this brand. Configure where fields appear in upload, edit, and filter interfaces.
+                                                                </p>
+                                                                <Link
+                                                                    href="/app/tenant/metadata/registry"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                                >
+                                                                    Manage Metadata Fields
+                                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                                    </svg>
+                                                                </Link>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
                                                     {/* Users Section */}
                                                     <div>
                                                         <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">

@@ -130,8 +130,17 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         // No need to reload - the dropdown is controlled by value prop, so it will show the current plan from props
     }
 
+    // Convert permissions to array if it's an object (Laravel sometimes serializes arrays as objects)
+    const permissionsArray = Array.isArray(auth.permissions) 
+        ? auth.permissions 
+        : auth.permissions 
+            ? Object.values(auth.permissions) 
+            : []
+    
     // Check if user has AI dashboard view permission
-    const canViewAIDashboard = auth.permissions?.includes('ai.dashboard.view') || false
+    const canViewAIDashboard = permissionsArray.includes('ai.dashboard.view')
+    // Check if user has metadata registry view permission
+    const canViewMetadataRegistry = permissionsArray.includes('metadata.registry.view')
 
     const adminTools = [
         { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
@@ -140,6 +149,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
         { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
         ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
+        ...(canViewMetadataRegistry ? [{ name: 'Metadata Registry', icon: TagIcon, description: 'Inspect system metadata fields and their behavior', href: '/app/admin/metadata/registry' }] : []),
         { name: 'Billing Overview', icon: ChartBarIcon, description: 'View income, expenses, and financial reports', href: '/app/admin/billing' },
         { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
         { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },

@@ -1609,6 +1609,34 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         </div>
                     </div>
 
+                    {/* Metadata Fields */}
+                    <div id="metadata" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">
+                                Metadata
+                            </h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Manage metadata fields and visibility settings for this brand.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="bg-white rounded-lg border border-gray-200 p-4">
+                                <p className="text-sm text-gray-700 mb-4">
+                                    Manage metadata fields and visibility settings for this brand. Configure where fields appear in upload, edit, and filter interfaces.
+                                </p>
+                                <Link
+                                    href="/app/tenant/metadata/registry"
+                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                >
+                                    Manage Metadata Fields
+                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                    </svg>
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+
                     {errors.error && (
                         <div className="rounded-md bg-red-50 p-4">
                             <p className="text-sm text-red-800">{errors.error}</p>

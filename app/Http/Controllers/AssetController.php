@@ -440,6 +440,28 @@ class AssetController extends Controller
                 // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
                 
                 $metadata = $asset->metadata ?? [];
+                
+                // Phase G.4: Merge asset_metadata table rows into metadata.fields structure
+                // This ensures automated fields (orientation, resolution_class, etc.) appear in the UI
+                $assetMetadataRows = \DB::table('asset_metadata')
+                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                    ->where('asset_metadata.asset_id', $asset->id)
+                    ->whereNotNull('asset_metadata.approved_at') // Only approved values
+                    ->select('metadata_fields.key', 'asset_metadata.value_json')
+                    ->get();
+                
+                // Initialize fields structure if it doesn't exist
+                if (!isset($metadata['fields'])) {
+                    $metadata['fields'] = [];
+                }
+                
+                // Merge asset_metadata rows into fields (automated fields will be added here)
+                foreach ($assetMetadataRows as $row) {
+                    $value = json_decode($row->value_json, true);
+                    // Use the most recent value if multiple exist (last one wins)
+                    $metadata['fields'][$row->key] = $value;
+                }
+                
                 $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
                     ? $asset->thumbnail_status->value 
                     : ($asset->thumbnail_status ?? 'pending');
@@ -498,7 +520,7 @@ class AssetController extends Controller
                     'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status, // AssetStatus enum value
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
-                    'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
+                    'metadata' => $metadata, // Full metadata object (includes category_id and fields, with asset_metadata merged)
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
@@ -536,7 +558,9 @@ class AssetController extends Controller
                 $categoryId,
                 $fileType
             );
-            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema);
+            
+            // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
+            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
         }
 
         // Phase 2 – Step 8: Get saved views

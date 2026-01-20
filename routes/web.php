@@ -53,6 +53,21 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
         
+        // Phase C3: Tenant metadata field management
+        Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');
+        Route::post('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'store'])->name('tenant.metadata.fields.store');
+        Route::post('/tenant/metadata/fields/{field}/disable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'disable'])->name('tenant.metadata.fields.disable');
+        Route::post('/tenant/metadata/fields/{field}/enable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'enable'])->name('tenant.metadata.fields.enable');
+        
+        // Phase C4: Tenant metadata registry and visibility management
+        Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
+        Route::get('/api/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getRegistry'])->name('tenant.metadata.registry.api');
+        Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
+        Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
+        Route::post('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'suppressForCategory'])->name('tenant.metadata.category.suppress');
+        Route::delete('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'unsuppressForCategory'])->name('tenant.metadata.category.unsuppress');
+        Route::get('/api/tenant/metadata/fields/{field}/categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getSuppressedCategories'])->name('tenant.metadata.category.list');
+        
         // Ownership transfer management routes
         Route::post('/companies/{tenant}/ownership-transfer/initiate', [\App\Http\Controllers\OwnershipTransferController::class, 'initiate'])
             ->name('ownership-transfer.initiate');
@@ -147,6 +162,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::get('/admin/ai/budgets', [\App\Http\Controllers\Admin\AIDashboardController::class, 'budgets'])->name('admin.ai.budgets');
         Route::post('/admin/ai/models/{modelKey}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateModelOverride'])->name('admin.ai.models.override');
         Route::post('/admin/ai/agents/{agentId}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateAgentOverride'])->name('admin.ai.agents.override');
+    
+    // Metadata Registry routes (no tenant middleware - system-level only)
+    Route::get('/admin/metadata/registry', [\App\Http\Controllers\Admin\MetadataRegistryController::class, 'index'])->name('admin.metadata.registry.index');
+    
+    // Metadata Field Category Visibility routes (no tenant middleware - system-level only)
+    Route::get('/admin/metadata/fields/{field}/categories', [\App\Http\Controllers\Admin\MetadataFieldCategoryVisibilityController::class, 'getCategories'])->name('admin.metadata.fields.categories');
+    Route::post('/admin/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\Admin\MetadataFieldCategoryVisibilityController::class, 'suppress'])->name('admin.metadata.fields.categories.suppress');
+    Route::delete('/admin/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\Admin\MetadataFieldCategoryVisibilityController::class, 'unsuppress'])->name('admin.metadata.fields.categories.unsuppress');
         Route::post('/admin/ai/automations/{triggerKey}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateAutomationOverride'])->name('admin.ai.automations.override');
         Route::post('/admin/ai/budgets/{budgetId}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateBudgetOverride'])->name('admin.ai.budgets.override');
         Route::post('/admin/ai/queue/retry/{uuid}', [\App\Http\Controllers\Admin\AIDashboardController::class, 'retryFailedJob'])->name('admin.ai.queue.retry');
@@ -204,6 +227,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
+            Route::get('/assets/{asset}/metadata/all', [\App\Http\Controllers\AssetMetadataController::class, 'getAllMetadata'])->name('assets.metadata.all');
             Route::post('/assets/{asset}/metadata/edit', [\App\Http\Controllers\AssetMetadataController::class, 'editMetadata'])->name('assets.metadata.edit');
             Route::post('/assets/{asset}/metadata/override', [\App\Http\Controllers\AssetMetadataController::class, 'overrideHybridField'])->name('assets.metadata.override');
             Route::post('/assets/{asset}/metadata/revert', [\App\Http\Controllers\AssetMetadataController::class, 'revertToAutomatic'])->name('assets.metadata.revert');
@@ -223,6 +247,12 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/metadata/{metadataId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveMetadata'])->name('metadata.approve');
             Route::post('/metadata/{metadataId}/edit-approve', [\App\Http\Controllers\AssetMetadataController::class, 'editAndApproveMetadata'])->name('metadata.edit-approve');
             Route::post('/metadata/{metadataId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectMetadata'])->name('metadata.reject');
+            
+            // Asset metadata candidate review workflow (Phase B9)
+            Route::get('/assets/{asset}/metadata/review', [\App\Http\Controllers\AssetMetadataController::class, 'getReview'])->name('assets.metadata.review');
+            Route::post('/metadata/candidates/{candidateId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveCandidate'])->name('metadata.candidates.approve');
+            Route::post('/metadata/candidates/{candidateId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectCandidate'])->name('metadata.candidates.reject');
+            Route::post('/metadata/candidates/{candidateId}/defer', [\App\Http\Controllers\AssetMetadataController::class, 'deferCandidate'])->name('metadata.candidates.defer');
             // Asset download endpoint with metric tracking
             Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
             

@@ -1020,7 +1020,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket Status</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">First Detected</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Detected</th>
-                                {auth.permissions?.includes('ai.dashboard.view') && (
+                                {Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') && (
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 )}
                             </tr>
@@ -1084,7 +1084,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                     {new Date(alert.last_detected_at).toLocaleString()}
                                                 </td>
-                                                {auth.permissions?.includes('ai.dashboard.view') && (
+                                                {Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') && (
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                                         <div className="flex items-center space-x-2">
                                                             {alert.status === 'open' && (
@@ -1120,7 +1120,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                             </tr>
                                             {isExpanded && (
                                                 <tr key={`${alert.id}-detail`} className="bg-gray-50">
-                                                    <td colSpan={auth.permissions?.includes('ai.dashboard.view') ? "10" : "9"} className="px-6 py-4">
+                                                    <td colSpan={Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') ? "10" : "9"} className="px-6 py-4">
                                                         <div className="space-y-4">
                                                             {/* AI Summary */}
                                                             {alert.has_summary && alert.summary && (
@@ -1203,7 +1203,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                 })
                             ) : (
                                 <tr>
-                                    <td colSpan={auth.permissions?.includes('ai.dashboard.view') ? "10" : "9"} className="px-6 py-8 text-center text-sm text-gray-500">
+                                    <td colSpan={Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') ? "10" : "9"} className="px-6 py-8 text-center text-sm text-gray-500">
                                         No alerts found
                                     </td>
                                 </tr>

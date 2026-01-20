@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Services\MetadataPermissionResolver;
+use App\Services\MetadataVisibilityResolver;
 
 /**
  * Upload Metadata Schema Resolver
@@ -24,6 +25,7 @@ use App\Services\MetadataPermissionResolver;
  * - Fields where is_upload_visible = false
  * - Fields where type = rating
  * - Fields where is_internal_only = true
+ * - Phase C2: Fields suppressed for the category (via MetadataVisibilityResolver)
  *
  * @see docs/PHASE_1_5_METADATA_SCHEMA.md
  * @see MetadataSchemaResolver
@@ -32,7 +34,8 @@ class UploadMetadataSchemaResolver
 {
     public function __construct(
         protected MetadataSchemaResolver $metadataSchemaResolver,
-        protected MetadataPermissionResolver $permissionResolver
+        protected MetadataPermissionResolver $permissionResolver,
+        protected MetadataVisibilityResolver $visibilityResolver
     ) {
     }
 
@@ -61,8 +64,14 @@ class UploadMetadataSchemaResolver
             $assetType
         );
 
-        // Filter fields for upload-specific rules
-        $uploadFields = $this->filterForUpload($resolvedSchema['fields']);
+        // Load category for visibility filtering (Phase C2)
+        $category = \App\Models\Category::find($categoryId);
+        
+        // Load tenant for tenant-level visibility overrides (Phase C4)
+        $tenant = \App\Models\Tenant::find($tenantId);
+
+        // Filter fields for upload-specific rules (includes category suppression via MetadataVisibilityResolver)
+        $uploadFields = $this->filterForUpload($resolvedSchema['fields'], $category, $tenant);
 
         // Add permission flags if user role provided
         if ($userRole !== null) {
@@ -92,11 +101,15 @@ class UploadMetadataSchemaResolver
      * - Internal only
      * - Phase B2: Automatically populated fields (population_mode = 'automatic')
      * - Phase B2: Fields explicitly hidden from upload (show_on_upload = false)
+     * - Phase C2: Fields suppressed for the category (via MetadataVisibilityResolver)
+     * - Phase C4: Fields suppressed by tenant overrides (via MetadataVisibilityResolver)
      *
      * @param array $fields Resolved fields from MetadataSchemaResolver
+     * @param \App\Models\Category|null $category Category model for suppression check
+     * @param \App\Models\Tenant|null $tenant Tenant model for tenant-level overrides
      * @return array Filtered fields
      */
-    protected function filterForUpload(array $fields): array
+    protected function filterForUpload(array $fields, ?\App\Models\Category $category = null, ?\App\Models\Tenant $tenant = null): array
     {
         $uploadFields = [];
 
@@ -136,7 +149,8 @@ class UploadMetadataSchemaResolver
             $uploadFields[] = $field;
         }
 
-        return $uploadFields;
+        // Phase C2: Apply category suppression filtering via centralized resolver
+        return $this->visibilityResolver->filterVisibleFields($uploadFields, $category, $tenant);
     }
 
     /**

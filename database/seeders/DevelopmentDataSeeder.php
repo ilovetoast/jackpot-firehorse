@@ -18,6 +18,7 @@ use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Services\MetadataPersistenceService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -341,7 +342,7 @@ class DevelopmentDataSeeder extends Seeder
         
         $company->users()->attach($owner->id, ['role' => 'owner']);
         
-        // Attach owner to default brand
+        // Attach owner to default brand as admin (owner is tenant-level only)
         $brands[0]->users()->attach($owner->id, ['role' => 'admin']);
         
         // Create additional users
@@ -360,14 +361,22 @@ class DevelopmentDataSeeder extends Seeder
                 'avatar_url' => 'dev-seeder/avatars/' . Str::uuid() . '.jpg', // Placeholder path
             ]);
             
-            // Assign role
-            $role = fake()->randomElement(['member', 'member', 'member', 'admin']); // 75% member, 25% admin
+            // Assign role using new role system
+            // Distribution: 30% viewer, 25% uploader, 25% contributor, 10% manager, 10% admin
+            $role = fake()->randomElement([
+                'viewer', 'viewer', 'viewer', // 30%
+                'uploader', 'uploader', 'uploader', // 30%
+                'contributor', 'contributor', 'contributor', // 30%
+                'manager', // 5%
+                'admin', // 5%
+            ]);
             $company->users()->attach($user->id, ['role' => $role]);
             
-            // Assign to random brands
+            // Assign to random brands with appropriate roles
             $brandsToAssign = fake()->randomElements($brands, fake()->numberBetween(1, min(count($brands), 3)));
             foreach ($brandsToAssign as $brand) {
-                $brandRole = fake()->randomElement(['member', 'admin']);
+                // Brand roles: viewer, uploader, contributor, manager, admin (no owner at brand level)
+                $brandRole = fake()->randomElement(['viewer', 'uploader', 'contributor', 'manager', 'admin']);
                 $brand->users()->attach($user->id, ['role' => $brandRole]);
             }
             
@@ -416,14 +425,16 @@ class DevelopmentDataSeeder extends Seeder
             }
         }
         
-        // Create assets
+        // Create assets with proper metadata fields
         $assetCount = fake()->numberBetween($this->getMinAssetsPerCompany(), $this->getMaxAssetsPerCompany());
         $categories = Category::where('tenant_id', $company->id)->get();
         $companyUsers = $company->users()->get();
         
-        // Batch insert assets for performance
-        $assetsToInsert = [];
-        $batchSize = 100;
+        // Get metadata fields for generating realistic metadata
+        $metadataFields = DB::table('metadata_fields')
+            ->where('is_user_editable', true)
+            ->where('show_on_upload', true)
+            ->get(['id', 'key', 'type']);
         
         for ($a = 0; $a < $assetCount; $a++) {
             $brand = fake()->randomElement($brands);
@@ -452,8 +463,11 @@ class DevelopmentDataSeeder extends Seeder
                 'last_activity_at' => now(),
             ]);
             
-            $assetsToInsert[] = [
-                'id' => Str::uuid(),
+            // Generate realistic metadata fields
+            $metadataFieldsData = $this->generateRealisticMetadataFields($metadataFields);
+            
+            // Create asset
+            $asset = Asset::create([
                 'tenant_id' => $company->id,
                 'brand_id' => $brand->id,
                 'user_id' => $user->id,
@@ -466,29 +480,37 @@ class DevelopmentDataSeeder extends Seeder
                 'mime_type' => $mimeType,
                 'size_bytes' => $sizeBytes,
                 'storage_root_path' => 'dev-seeder/assets/' . Str::uuid() . '.' . $extension, // Placeholder path
-                'metadata' => json_encode([
+                'metadata' => [
                     'category_id' => $category ? $category->id : null,
-                    'fields' => $this->generateRandomFields(),
-                ]),
+                    'fields' => $metadataFieldsData,
+                ],
                 'thumbnail_status' => fake()->randomElement([
                     ThumbnailStatus::PENDING,
                     ThumbnailStatus::PROCESSING,
                     ThumbnailStatus::COMPLETED,
                 ]),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
+            ]);
             
-            // Batch insert
-            if (count($assetsToInsert) >= $batchSize) {
-                Asset::insert($assetsToInsert);
-                $assetsToInsert = [];
+            // Persist metadata fields to asset_metadata table if category and fields exist
+            if ($category && !empty($metadataFieldsData)) {
+                try {
+                    $persistenceService = app(MetadataPersistenceService::class);
+                    $persistenceService->persistMetadata(
+                        $asset,
+                        $category,
+                        $metadataFieldsData,
+                        $user->id,
+                        'image', // Default to image for metadata schema resolution
+                        true // Auto-approve seeder metadata
+                    );
+                } catch (\Exception $e) {
+                    // Log but don't fail - metadata in JSON is still valid
+                    \Log::warning('[DevelopmentDataSeeder] Failed to persist metadata', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
-        }
-        
-        // Insert remaining assets
-        if (!empty($assetsToInsert)) {
-            Asset::insert($assetsToInsert);
         }
     }
     
@@ -595,23 +617,61 @@ class DevelopmentDataSeeder extends Seeder
     }
     
     /**
-     * Generate random metadata fields.
+     * Generate realistic metadata fields based on actual metadata field definitions.
      */
-    private function generateRandomFields(): array
+    private function generateRealisticMetadataFields($metadataFields): array
     {
         $fields = [];
-        $fieldCount = fake()->numberBetween(0, 5);
         
-        for ($i = 0; $i < $fieldCount; $i++) {
-            $fieldName = fake()->word();
-            $fields[$fieldName] = fake()->randomElement([
-                fake()->word(),
-                fake()->sentence(),
-                fake()->numberBetween(1, 100),
-                fake()->boolean(),
-            ]);
+        // Only populate a subset of fields (30-70% chance per field)
+        foreach ($metadataFields as $field) {
+            if (!fake()->boolean(50)) {
+                continue; // Skip 50% of fields randomly
+            }
+            
+            $value = match ($field->type) {
+                'select' => $this->getSelectFieldValue($field->key),
+                'multiselect' => $this->getMultiselectFieldValue($field->key),
+                'text' => fake()->sentence(3),
+                'date' => fake()->dateTimeBetween('-1 year', '+1 year')->format('Y-m-d'),
+                'number' => fake()->numberBetween(1, 1000),
+                'boolean' => fake()->boolean(),
+                default => fake()->word(),
+            };
+            
+            if ($value !== null) {
+                $fields[$field->key] = $value;
+            }
         }
         
         return $fields;
+    }
+    
+    /**
+     * Get a realistic value for a select field based on common field keys.
+     */
+    private function getSelectFieldValue(string $fieldKey): ?string
+    {
+        return match ($fieldKey) {
+            'photo_type' => fake()->randomElement(['action', 'portrait', 'landscape', 'product', 'lifestyle', 'event']),
+            'usage_rights' => fake()->randomElement(['internal', 'external', 'social', 'print', 'web']),
+            'orientation' => fake()->randomElement(['landscape', 'portrait', 'square']),
+            'color_space' => fake()->randomElement(['RGB', 'CMYK', 'sRGB']),
+            'resolution_class' => fake()->randomElement(['low', 'medium', 'high', 'ultra']),
+            'scene_classification' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'natural']),
+            default => fake()->word(),
+        };
+    }
+    
+    /**
+     * Get a realistic value for a multiselect field.
+     */
+    private function getMultiselectFieldValue(string $fieldKey): ?array
+    {
+        return match ($fieldKey) {
+            'ai_detected_objects' => fake()->randomElements(['person', 'car', 'building', 'animal', 'food', 'nature'], fake()->numberBetween(1, 3)),
+            'ai_color_palette' => fake()->randomElements(['red', 'blue', 'green', 'yellow', 'orange', 'purple'], fake()->numberBetween(2, 4)),
+            default => [fake()->word(), fake()->word()],
+        };
     }
 }

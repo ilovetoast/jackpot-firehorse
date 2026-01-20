@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\EventType;
 use App\Models\Asset;
+use App\Services\ActivityRecorder;
 use App\Services\BulkMetadataService;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
@@ -266,9 +268,8 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Field not found'], 404);
         }
 
-        // Phase 8: Check if user can approve
-        $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
-        if (!$this->approvalResolver->canApprove($userRole)) {
+        // Phase 8: Check if user can approve (permission-based)
+        if (!$this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to approve metadata',
             ], 403);
@@ -284,7 +285,12 @@ class AssetMetadataController extends Controller
         // Normalize value
         $normalizedValue = $this->normalizeValue($field, $editedValue);
 
-        DB::transaction(function () use ($asset, $suggestion, $normalizedValue, $user) {
+        // Get field info for activity logging
+        $fieldKey = $field->key ?? 'unknown';
+        $fieldLabel = $field->system_label ?? $fieldKey;
+        $brand = app('brand');
+
+        DB::transaction(function () use ($asset, $suggestion, $normalizedValue, $user, $fieldKey, $fieldLabel, $tenant, $brand) {
             // Create new user-approved metadata row
             // Phase B7: User-approved AI suggestions have confidence = 1.0 and producer = 'user'
             foreach ($normalizedValue as $value) {
@@ -309,6 +315,32 @@ class AssetMetadataController extends Controller
                     'source' => 'user',
                     'changed_by' => $user->id,
                     'created_at' => now(),
+                ]);
+            }
+
+            // Log activity: User approved AI suggestion
+            try {
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: EventType::ASSET_METADATA_UPDATED,
+                    subject: $asset,
+                    actor: $user,
+                    brand: $brand,
+                    metadata: [
+                        'field_key' => $fieldKey,
+                        'field_label' => $fieldLabel,
+                        'field_id' => $suggestion->metadata_field_id,
+                        'action' => 'ai_suggestion_approved',
+                        'value' => json_encode($normalizedValue),
+                        'suggestion_id' => $suggestion->id,
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break processing
+                Log::error('Failed to log AI suggestion approval activity', [
+                    'asset_id' => $asset->id,
+                    'suggestion_id' => $suggestion->id,
+                    'error' => $e->getMessage(),
                 ]);
             }
         });
@@ -634,13 +666,29 @@ class AssetMetadataController extends Controller
             ->toArray();
         $pendingFieldIds = array_unique($pendingMetadata);
 
+        // Phase C2/C4: Get visibility resolver for category suppression and tenant override filtering
+        $visibilityResolver = app(\App\Services\MetadataVisibilityResolver::class);
+        
+        // Get tenant for tenant-level overrides
+        $tenant = $asset->tenant;
+
         // Filter to editable fields only
-        $editableFields = [];
+        $candidateFields = [];
         foreach ($schema['fields'] ?? [] as $field) {
             // Exclude internal-only fields
             if ($field['is_internal_only'] ?? false) {
                 continue;
             }
+
+            $candidateFields[] = $field;
+        }
+
+        // Phase C2/C4: Apply category suppression and tenant override filtering via centralized resolver
+        $visibleFields = $visibilityResolver->filterVisibleFields($candidateFields, $category, $tenant);
+
+        // Continue with permission and other checks on visible fields
+        $editableFields = [];
+        foreach ($visibleFields as $field) {
 
             // Exclude non-editable fields
             // Load is_user_editable from database (not in resolved schema)
@@ -697,6 +745,152 @@ class AssetMetadataController extends Controller
 
         return response()->json([
             'fields' => $editableFields,
+        ]);
+    }
+
+    /**
+     * Get all metadata fields for an asset (including read-only and automatic fields).
+     * Used for testing/verification purposes.
+     *
+     * GET /assets/{asset}/metadata/all
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function getAllMetadata(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Load category for schema resolution
+        $category = null;
+        if ($asset->metadata && isset($asset->metadata['category_id'])) {
+            $categoryId = $asset->metadata['category_id'];
+            $category = \App\Models\Category::where('id', $categoryId)
+                ->where('tenant_id', $asset->tenant_id)
+                ->first();
+        }
+
+        if (!$category) {
+            return response()->json([
+                'category' => null,
+                'fields' => [],
+            ]);
+        }
+
+        // Determine asset type
+        $assetType = $this->determineAssetType($asset);
+
+        // Resolve metadata schema (all fields, not just editable)
+        $schema = $this->metadataSchemaResolver->resolve(
+            $asset->tenant_id,
+            $asset->brand_id,
+            $category->id,
+            $assetType
+        );
+
+        // Load all current metadata values from asset_metadata table
+        $currentMetadataRows = DB::table('asset_metadata')
+            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+            ->where('asset_metadata.asset_id', $asset->id)
+            ->whereNotNull('asset_metadata.approved_at')
+            ->select(
+                'metadata_fields.id as metadata_field_id',
+                'metadata_fields.key',
+                'metadata_fields.type',
+                'asset_metadata.value_json',
+                'asset_metadata.source',
+                'asset_metadata.producer',
+                'asset_metadata.confidence',
+                'asset_metadata.overridden_at',
+                'asset_metadata.overridden_by',
+                'asset_metadata.approved_at',
+                'asset_metadata.approved_by'
+            )
+            ->orderByRaw("
+                CASE 
+                    WHEN asset_metadata.source = 'manual_override' THEN 1
+                    WHEN asset_metadata.source = 'user' THEN 2
+                    WHEN asset_metadata.source = 'automatic' THEN 3
+                    WHEN asset_metadata.source = 'system' THEN 4
+                    WHEN asset_metadata.source = 'ai' THEN 5
+                    ELSE 6
+                END
+            ")
+            ->orderBy('asset_metadata.approved_at', 'desc')
+            ->get()
+            ->groupBy('metadata_field_id');
+
+        // Build map of field_id to current values and metadata
+        $fieldValues = [];
+        $fieldMetadata = [];
+        foreach ($currentMetadataRows as $fieldId => $rows) {
+            $mostRecent = $rows->first();
+            $fieldType = $mostRecent->type ?? 'text';
+
+            if ($fieldType === 'multiselect') {
+                // For multiselect, collect all unique values
+                $allValues = [];
+                foreach ($rows as $row) {
+                    $value = json_decode($row->value_json, true);
+                    if (is_array($value)) {
+                        $allValues = array_merge($allValues, $value);
+                    } else {
+                        $allValues[] = $value;
+                    }
+                }
+                $fieldValues[$fieldId] = array_unique($allValues, SORT_REGULAR);
+            } else {
+                // For single-value fields, use the most recent value
+                $fieldValues[$fieldId] = json_decode($mostRecent->value_json, true);
+            }
+
+            $fieldMetadata[$fieldId] = [
+                'source' => $mostRecent->source,
+                'producer' => $mostRecent->producer,
+                'confidence' => $mostRecent->confidence,
+                'is_overridden' => $mostRecent->source === 'manual_override',
+                'overridden_at' => $mostRecent->overridden_at,
+                'overridden_by' => $mostRecent->overridden_by,
+                'approved_at' => $mostRecent->approved_at,
+                'approved_by' => $mostRecent->approved_by,
+            ];
+        }
+
+        // Build response with all fields from schema
+        $allFields = [];
+        foreach ($schema['fields'] ?? [] as $field) {
+            $fieldId = $field['field_id'];
+            $currentValue = $fieldValues[$fieldId] ?? null;
+            $metadata = $fieldMetadata[$fieldId] ?? null;
+
+            $allFields[] = [
+                'metadata_field_id' => $fieldId,
+                'field_key' => $field['key'],
+                'display_label' => $field['display_label'] ?? $field['key'],
+                'type' => $field['type'],
+                'options' => $field['options'] ?? [],
+                'population_mode' => $field['population_mode'] ?? 'manual',
+                'readonly' => $field['readonly'] ?? false,
+                'is_ai_related' => $field['is_ai_related'] ?? false,
+                'is_system_generated' => ($field['population_mode'] ?? 'manual') === 'automatic',
+                'current_value' => $currentValue,
+                'has_value' => $currentValue !== null,
+                'metadata' => $metadata,
+            ];
+        }
+
+        return response()->json([
+            'category' => [
+                'id' => $category->id,
+                'name' => $category->name,
+            ],
+            'fields' => $allFields,
         ]);
     }
 
@@ -858,8 +1052,8 @@ class AssetMetadataController extends Controller
         // Normalize value
         $normalizedValues = $this->normalizeValue($field, $newValue);
 
-        // Phase 8: Check if approval is required
-        $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant);
+        // Phase 8: Check if approval is required (unless user has bypass_approval permission)
+        $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant, $user);
 
         // Phase B5: Determine source based on override intent for hybrid fields
         $isHybrid = $populationMode === 'hybrid';
@@ -1323,9 +1517,10 @@ class AssetMetadataController extends Controller
             $fileType
         );
 
-        // Get filterable fields
+        // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
+        $tenant = app('tenant');
         $filterService = app(\App\Services\MetadataFilterService::class);
-        $filterableFields = $filterService->getFilterableFields($schema);
+        $filterableFields = $filterService->getFilterableFields($schema, $category, $tenant);
 
         return response()->json([
             'fields' => $filterableFields,
@@ -1544,8 +1739,7 @@ class AssetMetadataController extends Controller
 
         // Group by field_id
         $groupedPending = [];
-        $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
-        $canApprove = $this->approvalResolver->canApprove($userRole);
+        $canApprove = $this->approvalResolver->canApprove($user, $tenant);
 
         foreach ($pendingMetadata as $pending) {
             $fieldId = $pending->metadata_field_id;
@@ -1615,14 +1809,21 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can approve
-        $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
-        if (!$this->approvalResolver->canApprove($userRole)) {
+        if (!$this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to approve metadata',
             ], 403);
         }
 
-        DB::transaction(function () use ($metadata, $metadataId, $user) {
+        // Get asset and field info for activity logging
+        $asset = Asset::findOrFail($metadata->asset_id);
+        $field = DB::table('metadata_fields')->where('id', $metadata->metadata_field_id)->first();
+        $fieldKey = $field->key ?? 'unknown';
+        $fieldLabel = $field->system_label ?? $fieldKey;
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        DB::transaction(function () use ($metadata, $metadataId, $user, $asset, $fieldKey, $fieldLabel, $tenant, $brand) {
             // Update metadata to approved
             DB::table('asset_metadata')
                 ->where('id', $metadataId)
@@ -1641,6 +1842,32 @@ class AssetMetadataController extends Controller
                 'changed_by' => $user->id,
                 'created_at' => now(),
             ]);
+
+            // Log activity: User approved metadata
+            try {
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: EventType::ASSET_METADATA_UPDATED,
+                    subject: $asset,
+                    actor: $user,
+                    brand: $brand,
+                    metadata: [
+                        'field_key' => $fieldKey,
+                        'field_label' => $fieldLabel,
+                        'field_id' => $metadata->metadata_field_id,
+                        'action' => 'approved',
+                        'value' => $metadata->value_json,
+                        'previous_source' => $metadata->source,
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break processing
+                Log::error('Failed to log metadata approval activity', [
+                    'asset_id' => $asset->id,
+                    'metadata_id' => $metadataId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         });
 
         return response()->json(['message' => 'Metadata approved']);
@@ -1687,8 +1914,7 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can approve
-        $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
-        if (!$this->approvalResolver->canApprove($userRole)) {
+        if (!$this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to approve metadata',
             ], 403);
@@ -1782,14 +2008,18 @@ class AssetMetadataController extends Controller
         }
 
         // Check if user can approve (rejection requires same permission)
-        $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
-        if (!$this->approvalResolver->canApprove($userRole)) {
+        if (!$this->approvalResolver->canApprove($user, $tenant)) {
             return response()->json([
                 'message' => 'You do not have permission to reject metadata',
             ], 403);
         }
 
-        DB::transaction(function () use ($metadata, $metadataId, $user) {
+        // Get field info for activity logging
+        $field = DB::table('metadata_fields')->where('id', $metadata->metadata_field_id)->first();
+        $fieldKey = $field->key ?? 'unknown';
+        $fieldLabel = $field->system_label ?? $fieldKey;
+
+        DB::transaction(function () use ($metadata, $metadataId, $user, $asset, $fieldKey, $fieldLabel, $tenant, $brand) {
             // Mark as rejected by updating source
             $rejectedSource = $metadata->source === 'ai' ? 'ai_rejected' : 'user_rejected';
             DB::table('asset_metadata')
@@ -1808,8 +2038,321 @@ class AssetMetadataController extends Controller
                 'changed_by' => $user->id,
                 'created_at' => now(),
             ]);
+
+            // Log activity: User rejected metadata
+            try {
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: EventType::ASSET_METADATA_UPDATED,
+                    subject: $asset,
+                    actor: $user,
+                    brand: $brand,
+                    metadata: [
+                        'field_key' => $fieldKey,
+                        'field_label' => $fieldLabel,
+                        'field_id' => $metadata->metadata_field_id,
+                        'action' => 'rejected',
+                        'rejected_value' => $metadata->value_json,
+                        'previous_source' => $metadata->source,
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break processing
+                Log::error('Failed to log metadata rejection activity', [
+                    'asset_id' => $asset->id,
+                    'metadata_id' => $metadataId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         });
 
         return response()->json(['message' => 'Metadata rejected']);
+    }
+
+    /**
+     * Get reviewable metadata candidates for an asset.
+     *
+     * GET /assets/{asset}/metadata/review
+     *
+     * Phase B9: Returns reviewable candidates that need human review.
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function getReview(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $reviewService = app(\App\Services\MetadataReviewService::class);
+        $reviewItems = $reviewService->getReviewableCandidates($asset);
+
+        return response()->json([
+            'asset_id' => $asset->id,
+            'asset_title' => $asset->title,
+            'review_items' => $reviewItems,
+        ]);
+    }
+
+    /**
+     * Approve a metadata candidate (creates manual_override).
+     *
+     * POST /metadata/candidates/{candidateId}/approve
+     *
+     * Phase B9: Approves a candidate by creating a manual_override in asset_metadata.
+     * Sets source = manual_override, confidence = 1.0, producer = 'user'.
+     *
+     * @param int $candidateId
+     * @return JsonResponse
+     */
+    public function approveCandidate(int $candidateId): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Load candidate
+        $candidate = DB::table('asset_metadata_candidates')
+            ->where('id', $candidateId)
+            ->first();
+
+        if (!$candidate) {
+            return response()->json(['message' => 'Candidate not found'], 404);
+        }
+
+        // Load asset to verify tenant/brand
+        $asset = Asset::find($candidate->asset_id);
+        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Verify candidate is not already resolved or dismissed
+        if ($candidate->resolved_at) {
+            return response()->json(['message' => 'Candidate is already resolved'], 422);
+        }
+
+        if ($candidate->dismissed_at) {
+            return response()->json(['message' => 'Candidate is already dismissed'], 422);
+        }
+
+        // Check if manual override already exists
+        $existingOverride = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $candidate->metadata_field_id)
+            ->where('source', 'manual_override')
+            ->whereNotNull('approved_at')
+            ->first();
+
+        if ($existingOverride) {
+            return response()->json(['message' => 'Manual override already exists for this field'], 422);
+        }
+
+        // Get field info for activity logging
+        $field = DB::table('metadata_fields')->where('id', $candidate->metadata_field_id)->first();
+        $fieldKey = $field->key ?? 'unknown';
+        $fieldLabel = $field->system_label ?? $fieldKey;
+
+        DB::transaction(function () use ($asset, $candidate, $user, $candidateId, $fieldKey, $fieldLabel, $tenant, $brand) {
+            // Create manual_override in asset_metadata
+            DB::table('asset_metadata')->insert([
+                'asset_id' => $asset->id,
+                'metadata_field_id' => $candidate->metadata_field_id,
+                'value_json' => $candidate->value_json,
+                'source' => 'manual_override',
+                'confidence' => 1.0, // Phase B9: Approvals are certain
+                'producer' => 'user', // Phase B9: Approvals are from user
+                'approved_at' => now(),
+                'approved_by' => $user->id,
+                'overridden_at' => now(),
+                'overridden_by' => $user->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Mark candidate as resolved
+            DB::table('asset_metadata_candidates')
+                ->where('id', $candidateId)
+                ->update(['resolved_at' => now()]);
+
+            // Log activity: User approved metadata candidate
+            try {
+                ActivityRecorder::record(
+                    tenant: $tenant,
+                    eventType: EventType::ASSET_METADATA_UPDATED,
+                    subject: $asset,
+                    actor: $user,
+                    brand: $brand,
+                    metadata: [
+                        'field_key' => $fieldKey,
+                        'field_label' => $fieldLabel,
+                        'field_id' => $candidate->metadata_field_id,
+                        'action' => 'candidate_approved',
+                        'value' => $candidate->value_json,
+                        'candidate_id' => $candidateId,
+                        'candidate_producer' => $candidate->producer,
+                        'candidate_confidence' => $candidate->confidence,
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break processing
+                Log::error('Failed to log candidate approval activity', [
+                    'asset_id' => $asset->id,
+                    'candidate_id' => $candidateId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
+
+        Log::info('[AssetMetadataController] Candidate approved', [
+            'asset_id' => $asset->id,
+            'candidate_id' => $candidateId,
+            'metadata_field_id' => $candidate->metadata_field_id,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Candidate approved and created as manual override',
+        ]);
+    }
+
+    /**
+     * Reject a metadata candidate (marks as dismissed).
+     *
+     * POST /metadata/candidates/{candidateId}/reject
+     *
+     * Phase B9: Rejects a candidate by marking it as dismissed.
+     * Preserves candidate for audit history but excludes it from future resolution.
+     *
+     * @param int $candidateId
+     * @return JsonResponse
+     */
+    public function rejectCandidate(int $candidateId): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Load candidate
+        $candidate = DB::table('asset_metadata_candidates')
+            ->where('id', $candidateId)
+            ->first();
+
+        if (!$candidate) {
+            return response()->json(['message' => 'Candidate not found'], 404);
+        }
+
+        // Load asset to verify tenant/brand
+        $asset = Asset::find($candidate->asset_id);
+        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Verify candidate is not already resolved or dismissed
+        if ($candidate->resolved_at) {
+            return response()->json(['message' => 'Candidate is already resolved'], 422);
+        }
+
+        if ($candidate->dismissed_at) {
+            return response()->json(['message' => 'Candidate is already dismissed'], 422);
+        }
+
+        // Get field info for activity logging
+        $field = DB::table('metadata_fields')->where('id', $candidate->metadata_field_id)->first();
+        $fieldKey = $field->key ?? 'unknown';
+        $fieldLabel = $field->system_label ?? $fieldKey;
+
+        // Mark candidate as dismissed
+        DB::table('asset_metadata_candidates')
+            ->where('id', $candidateId)
+            ->update(['dismissed_at' => now()]);
+
+        // Log activity: User rejected metadata candidate
+        try {
+            ActivityRecorder::record(
+                tenant: $tenant,
+                eventType: EventType::ASSET_METADATA_UPDATED,
+                subject: $asset,
+                actor: $user,
+                brand: $brand,
+                metadata: [
+                    'field_key' => $fieldKey,
+                    'field_label' => $fieldLabel,
+                    'field_id' => $candidate->metadata_field_id,
+                    'action' => 'candidate_rejected',
+                    'rejected_value' => $candidate->value_json,
+                    'candidate_id' => $candidateId,
+                    'candidate_producer' => $candidate->producer,
+                    'candidate_confidence' => $candidate->confidence,
+                ]
+            );
+        } catch (\Exception $e) {
+            // Activity logging must never break processing
+            Log::error('Failed to log candidate rejection activity', [
+                'asset_id' => $asset->id,
+                'candidate_id' => $candidateId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        Log::info('[AssetMetadataController] Candidate rejected', [
+            'asset_id' => $asset->id,
+            'candidate_id' => $candidateId,
+            'metadata_field_id' => $candidate->metadata_field_id,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Candidate rejected and dismissed',
+        ]);
+    }
+
+    /**
+     * Defer a metadata candidate (no change).
+     *
+     * POST /metadata/candidates/{candidateId}/defer
+     *
+     * Phase B9: Defers review of a candidate without making any changes.
+     * This is a no-op action for tracking purposes only.
+     *
+     * @param int $candidateId
+     * @return JsonResponse
+     */
+    public function deferCandidate(int $candidateId): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Load candidate
+        $candidate = DB::table('asset_metadata_candidates')
+            ->where('id', $candidateId)
+            ->first();
+
+        if (!$candidate) {
+            return response()->json(['message' => 'Candidate not found'], 404);
+        }
+
+        // Load asset to verify tenant/brand
+        $asset = Asset::find($candidate->asset_id);
+        if (!$asset || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Log deferral (no database changes)
+        Log::info('[AssetMetadataController] Candidate deferred', [
+            'asset_id' => $asset->id,
+            'candidate_id' => $candidateId,
+            'metadata_field_id' => $candidate->metadata_field_id,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Candidate review deferred',
+        ]);
     }
 }

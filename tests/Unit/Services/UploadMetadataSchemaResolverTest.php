@@ -5,7 +5,10 @@ namespace Tests\Unit\Services;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Tenant;
+use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
+use App\Services\MetadataVisibilityResolver;
+use App\Services\SystemMetadataVisibilityService;
 use App\Services\UploadMetadataSchemaResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +36,14 @@ class UploadMetadataSchemaResolverTest extends TestCase
     {
         parent::setUp();
         $this->metadataSchemaResolver = new MetadataSchemaResolver();
-        $this->resolver = new UploadMetadataSchemaResolver($this->metadataSchemaResolver);
+        $permissionResolver = new MetadataPermissionResolver();
+        $visibilityService = new SystemMetadataVisibilityService();
+        $visibilityResolver = new MetadataVisibilityResolver($visibilityService);
+        $this->resolver = new UploadMetadataSchemaResolver(
+            $this->metadataSchemaResolver,
+            $permissionResolver,
+            $visibilityResolver
+        );
     }
 
     /**

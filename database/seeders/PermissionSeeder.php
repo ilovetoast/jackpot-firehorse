@@ -26,6 +26,35 @@ class PermissionSeeder extends Seeder
             'assets.retry_thumbnails',
         ];
 
+        // DAM Asset permissions (tenant-scoped)
+        $assetPermissions = [
+            'asset.view',
+            'asset.download',
+            'asset.upload',
+        ];
+
+        // DAM Metadata permissions (tenant-scoped)
+        $metadataPermissions = [
+            'metadata.set_on_upload',
+            'metadata.edit_post_upload',
+            'metadata.bypass_approval',
+            'metadata.override_automatic',
+            'metadata.review_candidates',
+            'metadata.bulk_edit',
+        ];
+
+        // DAM Governance permissions (tenant-scoped)
+        $governancePermissions = [
+            'tenant.manage_settings',
+            'user.manage_roles',
+            // Phase C: Metadata governance permissions
+            'metadata.registry.view',
+            // Note: metadata.system.visibility.manage is site-level, not tenant-level
+            'metadata.tenant.visibility.manage',
+            'metadata.tenant.field.create',
+            'metadata.tenant.field.manage',
+        ];
+
         // Site permissions (global) - for site roles only
         $sitePermissions = [
             'company.manage',
@@ -50,12 +79,24 @@ class PermissionSeeder extends Seeder
             // AI Budget permissions
             'ai.budgets.view',
             'ai.budgets.manage',
+            // Metadata Registry permissions (site-level only - tenant version is in governancePermissions)
+            // Note: metadata.registry.view exists in both site and governance for different contexts
+            // Phase C1: System metadata registry view (site-level for admin dashboard)
+            'metadata.registry.view',
+            // Phase C1 Step 2: System-level metadata visibility management
+            'metadata.system.visibility.manage',
             // Admin thumbnail regeneration (site roles only)
             'assets.regenerate_thumbnails_admin',
         ];
 
         // Create all permissions
-        foreach (array_merge($companyPermissions, $sitePermissions) as $permission) {
+        $allCompanyPermissions = array_merge(
+            $companyPermissions,
+            $assetPermissions,
+            $metadataPermissions,
+            $governancePermissions
+        );
+        foreach (array_merge($allCompanyPermissions, $sitePermissions) as $permission) {
             Permission::firstOrCreate([
                 'name' => $permission,
                 'guard_name' => 'web',
@@ -63,28 +104,94 @@ class PermissionSeeder extends Seeder
         }
 
         // Create and assign permissions to company roles
+        // Note: 'member' role is deprecated - will be migrated to 'contributor'
         $owner = Role::firstOrCreate(['name' => 'owner', 'guard_name' => 'web']);
         $admin = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
+        $manager = Role::firstOrCreate(['name' => 'manager', 'guard_name' => 'web']);
+        $contributor = Role::firstOrCreate(['name' => 'contributor', 'guard_name' => 'web']);
+        $uploader = Role::firstOrCreate(['name' => 'uploader', 'guard_name' => 'web']);
+        $viewer = Role::firstOrCreate(['name' => 'viewer', 'guard_name' => 'web']);
         $brandManager = Role::firstOrCreate(['name' => 'brand_manager', 'guard_name' => 'web']);
-        $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']);
+        $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']); // Deprecated - kept for migration
 
-        // Owner has all company permissions + tenant-facing ticket permissions
-        $owner->syncPermissions(array_merge($companyPermissions, [
-            'tickets.create',
-            'tickets.reply',
-            'tickets.view_tenant',
-            'tickets.view_any',
-        ]));
+        // Owner: ALL permissions (full access)
+        // Includes all company, asset, metadata, and governance permissions
+        $owner->syncPermissions(array_merge(
+            $companyPermissions,
+            $assetPermissions,
+            $metadataPermissions,
+            $governancePermissions,
+            [
+                'tickets.create',
+                'tickets.reply',
+                'tickets.view_tenant',
+                'tickets.view_any',
+            ]
+        ));
 
-        // Admin has all company permissions + tenant-facing ticket permissions
-        $admin->syncPermissions(array_merge($companyPermissions, [
-            'tickets.create',
-            'tickets.reply',
-            'tickets.view_tenant',
-            'tickets.view_any',
-        ]));
+        // Admin: All Manager permissions + governance permissions
+        // Includes metadata governance: registry.view, system.visibility.manage, tenant.visibility.manage, tenant.field.create, tenant.field.manage
+        $admin->syncPermissions(array_merge(
+            $companyPermissions,
+            $assetPermissions,
+            $metadataPermissions,
+            $governancePermissions,
+            [
+                'tickets.create',
+                'tickets.reply',
+                'tickets.view_tenant',
+                'tickets.view_any',
+            ]
+        ));
 
-        // Brand Manager has brand-related permissions, billing view, basic ticket permissions, and thumbnail retry
+        // Manager: All Contributor permissions + bypass approval + override automatic + bulk edit
+        $manager->syncPermissions(array_merge(
+            $companyPermissions,
+            $assetPermissions,
+            [
+                'metadata.set_on_upload',
+                'metadata.edit_post_upload',
+                'metadata.bypass_approval',
+                'metadata.override_automatic',
+                'metadata.review_candidates',
+                'metadata.bulk_edit',
+            ]
+            // Note: Tickets permissions removed per standard DAM role definition
+            // Tickets can be added separately if needed for specific tenants
+        ));
+
+        // Contributor: View, download, upload + set on upload + edit post upload + review candidates
+        // Upload metadata is auto-approved for contributors
+        $contributor->syncPermissions(array_merge(
+            $assetPermissions,
+            [
+                'metadata.set_on_upload',
+                'metadata.edit_post_upload',
+                'metadata.review_candidates',
+            ]
+            // Note: Tickets permissions removed per standard DAM role definition
+            // Tickets can be added separately if needed for specific tenants
+        ));
+
+        // Uploader: View, download, upload + set metadata on upload
+        $uploader->syncPermissions(array_merge(
+            $assetPermissions,
+            [
+                'metadata.set_on_upload',
+            ]
+            // Note: Tickets permissions removed per standard DAM role definition
+            // Tickets can be added separately if needed for specific tenants
+        ));
+
+        // Viewer: View and download only (minimal permissions)
+        $viewer->syncPermissions([
+            'asset.view',
+            'asset.download',
+            // Note: Tickets permissions removed per standard DAM role definition
+            // Tickets can be added separately if needed for specific tenants
+        ]);
+
+        // Brand Manager: Legacy role - keep existing permissions
         $brandManager->syncPermissions([
             'brand_settings.manage',
             'brand_categories.manage',
@@ -95,12 +202,21 @@ class PermissionSeeder extends Seeder
             'tickets.view_tenant',
         ]);
 
-        // Member has basic ticket permissions (create, reply, view own tenant tickets)
-        $member->syncPermissions([
-            'tickets.create',
-            'tickets.reply',
-            'tickets.view_tenant',
-        ]);
+        // Member: Deprecated - map to Contributor permissions for backward compatibility
+        // This will be migrated to 'contributor' role in a migration
+        $member->syncPermissions(array_merge(
+            $assetPermissions,
+            [
+                'metadata.set_on_upload',
+                'metadata.edit_post_upload',
+                'metadata.review_candidates',
+            ],
+            [
+                'tickets.create',
+                'tickets.reply',
+                'tickets.view_tenant',
+            ]
+        ));
 
         // Create and assign permissions to site roles
         $siteOwner = Role::firstOrCreate(['name' => 'site_owner', 'guard_name' => 'web']);
@@ -112,8 +228,10 @@ class PermissionSeeder extends Seeder
         // Site Owner has all site permissions by default
         $siteOwner->syncPermissions($sitePermissions);
         
+        // Note: metadata.registry.view is included in $sitePermissions, so site_owner gets it automatically
+        
         // Assign default ticket permissions to other roles based on their typical access
-        // Site Admin: Full ticket access + AI Dashboard manage + AI Budgets manage + thumbnail regeneration
+        // Site Admin: Full ticket access + AI Dashboard manage + AI Budgets manage + thumbnail regeneration + metadata registry + metadata visibility management
         $siteAdmin->syncPermissions([
             'tickets.view_staff',
             'tickets.assign',
@@ -127,6 +245,8 @@ class PermissionSeeder extends Seeder
             'ai.dashboard.manage',
             'ai.budgets.view',
             'ai.budgets.manage',
+            'metadata.registry.view',
+            'metadata.system.visibility.manage',
             'assets.regenerate_thumbnails_admin',
         ]);
         
@@ -150,13 +270,14 @@ class PermissionSeeder extends Seeder
             'assets.regenerate_thumbnails_admin',
         ]);
         
-        // Compliance: View-only access (including AI Dashboard and AI Budgets view-only)
+        // Compliance: View-only access (including AI Dashboard, AI Budgets, and Metadata Registry view-only)
         $compliance->syncPermissions([
             'tickets.view_staff',
             'tickets.view_engineering',
             'tickets.view_audit_log',
             'ai.dashboard.view',
             'ai.budgets.view',
+            'metadata.registry.view',
         ]);
     }
 }

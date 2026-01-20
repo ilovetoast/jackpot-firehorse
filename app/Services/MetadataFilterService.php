@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Models\Category;
+use App\Services\TenantMetadataVisibilityService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -15,9 +17,14 @@ use Illuminate\Support\Facades\DB;
  * - Only filterable fields may be used
  * - Respects active metadata resolution (approved user values win)
  * - Latest approved value per field is used
+ * - Phase C2: Respects category suppression rules via MetadataVisibilityResolver
  */
 class MetadataFilterService
 {
+    public function __construct(
+        protected MetadataVisibilityResolver $visibilityResolver
+    ) {
+    }
     /**
      * Apply metadata filters to asset query.
      *
@@ -34,11 +41,35 @@ class MetadataFilterService
 
         // Build field map from schema
         $fieldMap = [];
+        $tenant = app('tenant');
+        $tenantVisibilityService = app(TenantMetadataVisibilityService::class);
+        
         foreach ($schema['fields'] ?? [] as $field) {
-            // Must be filterable and visible in filters (Phase B3: filter-only fields support)
-            if (($field['is_filterable'] ?? false) && ($field['show_in_filters'] ?? true)) {
-                $fieldMap[$field['key']] = $field;
+            // Must be filterable
+            if (!($field['is_filterable'] ?? false)) {
+                continue;
             }
+            
+            // Phase G.3: Check tenant filter visibility override (presentation-layer logic)
+            // NOTE: This is NOT schema logic - it's UI presentation control
+            $systemShowInFilters = $field['show_in_filters'] ?? true;
+            $effectiveShowInFilters = $systemShowInFilters;
+            
+            if ($tenant !== null && isset($field['field_id'])) {
+                $overrides = $tenantVisibilityService->getFieldVisibilityOverrides($tenant, [$field['field_id']]);
+                $override = $overrides[$field['field_id']] ?? null;
+                
+                if ($override && isset($override->is_filter_hidden)) {
+                    // Tenant override exists - effective = system default AND NOT hidden
+                    $effectiveShowInFilters = $systemShowInFilters && !$override->is_filter_hidden;
+                }
+            }
+            
+            if (!$effectiveShowInFilters) {
+                continue;
+            }
+            
+            $fieldMap[$field['key']] = $field;
         }
 
         // Apply each filter
@@ -172,12 +203,17 @@ class MetadataFilterService
     /**
      * Get filterable fields from schema.
      *
+     * Phase C2: Respects category suppression rules via MetadataVisibilityResolver.
+     * Phase C4: Respects tenant-level visibility overrides.
+     *
      * @param array $schema Resolved metadata schema
+     * @param Category|null $category Optional category model for suppression check
+     * @param \App\Models\Tenant|null $tenant Optional tenant model for tenant-level overrides
      * @return array Filterable fields with operators
      */
-    public function getFilterableFields(array $schema): array
+    public function getFilterableFields(array $schema, ?Category $category = null, ?\App\Models\Tenant $tenant = null): array
     {
-        $filterable = [];
+        $candidateFields = [];
 
         foreach ($schema['fields'] ?? [] as $field) {
             if (!($field['is_filterable'] ?? false)) {
@@ -195,7 +231,46 @@ class MetadataFilterService
                 continue;
             }
 
-            // Get available operators for this field type
+            $candidateFields[] = $field;
+        }
+
+        // Phase C2/C4: Apply category suppression and tenant override filtering via centralized resolver
+        $visibleFields = $this->visibilityResolver->filterVisibleFields($candidateFields, $category, $tenant);
+
+        // Phase G.3: Additional filter for tenant filter visibility overrides
+        // This ensures fields hidden via filter visibility toggle are excluded
+        // NOTE: This is presentation-layer logic, NOT schema logic
+        $filterableFields = [];
+        $tenantVisibilityService = app(TenantMetadataVisibilityService::class);
+        
+        foreach ($visibleFields as $field) {
+            // Get system default
+            $systemShowInFilters = $field['show_in_filters'] ?? true;
+            
+            // Phase G.3: Check tenant-level filter visibility override
+            $effectiveShowInFilters = $systemShowInFilters;
+            if ($tenant !== null && isset($field['field_id'])) {
+                $overrides = $tenantVisibilityService->getFieldVisibilityOverrides($tenant, [$field['field_id']]);
+                $override = $overrides[$field['field_id']] ?? null;
+                
+                if ($override && isset($override->is_filter_hidden)) {
+                    // Tenant override exists - effective = system default AND NOT hidden
+                    $effectiveShowInFilters = $systemShowInFilters && !$override->is_filter_hidden;
+                }
+            }
+            
+            // Skip fields that are hidden from filters via tenant override
+            if (!$effectiveShowInFilters) {
+                continue;
+            }
+            
+            $filterableFields[] = $field;
+        }
+
+        // Build filterable fields array
+        $filterable = [];
+        foreach ($filterableFields as $field) {
+            $fieldType = $field['type'] ?? 'text';
             $operators = $this->getOperatorsForType($fieldType);
 
             $filterable[] = [

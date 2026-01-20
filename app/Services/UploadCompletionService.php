@@ -9,10 +9,11 @@ use App\Enums\UploadType;
 use App\Events\AssetProcessingCompleteEvent;
 use App\Events\AssetUploaded;
 use App\Jobs\ExtractMetadataJob;
-use App\Jobs\GenerateThumbnailsJob;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Models\UploadSession;
+use App\Services\MetadataPersistenceService;
+use App\Services\UploadMetadataSchemaResolver;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
@@ -610,66 +611,182 @@ class UploadCompletionService
                 'size_bytes' => $asset->size_bytes,
             ]);
 
+            // Persist upload metadata fields to asset_metadata table
+            // This ensures metadata entered during upload appears in the display UI
+            // CRITICAL: Metadata persistence must succeed - this is user-entered data during upload
+            if (isset($metadataArray['fields']) && !empty($metadataArray['fields'])) {
+                if ($categoryId === null) {
+                    // Log warning - metadata persistence requires a category
+                    Log::warning('[UploadCompletionService] Metadata fields provided but category_id is null', [
+                        'asset_id' => $asset->id,
+                        'fields' => array_keys($metadataArray['fields']),
+                        'note' => 'Metadata persistence requires a category. Fields will be stored in JSON only.',
+                    ]);
+                } else {
+                    try {
+                        $category = Category::find($categoryId);
+                        if (!$category) {
+                            Log::error('[UploadCompletionService] Category not found for metadata persistence', [
+                                'asset_id' => $asset->id,
+                                'category_id' => $categoryId,
+                                'fields' => array_keys($metadataArray['fields']),
+                            ]);
+                        } else {
+                            // Pre-validate: Check if fields are in the upload schema before attempting persistence
+                            // This prevents silent failures and provides better error messages
+                            $uploadSchemaResolver = app(UploadMetadataSchemaResolver::class);
+                            // Get user role for permission checks (same as during upload)
+                            $user = $userId ? \App\Models\User::find($userId) : null;
+                            $tenant = \App\Models\Tenant::find($asset->tenant_id);
+                            $brand = \App\Models\Brand::find($asset->brand_id);
+                            $userRole = $user && $brand ? ($user->getRoleForBrand($brand) ?? ($user && $tenant ? $user->getRoleForTenant($tenant) : null) ?? 'member') : 'member';
+                            $schema = $uploadSchemaResolver->resolve(
+                                $asset->tenant_id,
+                                $asset->brand_id,
+                                $category->id,
+                                'image', // Default to 'image' for metadata schema resolution
+                                $userRole // Pass user role for permission checks
+                            );
+                            
+                            // Build allowlist of valid field keys and map to field IDs
+                            $allowedFieldKeys = [];
+                            $fieldKeyToIdMap = [];
+                            foreach ($schema['groups'] ?? [] as $group) {
+                                foreach ($group['fields'] ?? [] as $field) {
+                                    $allowedFieldKeys[] = $field['key'];
+                                    $fieldKeyToIdMap[$field['key']] = $field['field_id'];
+                                }
+                            }
+                            
+                            // Filter out invalid fields and log warnings
+                            $invalidFields = array_diff(array_keys($metadataArray['fields']), $allowedFieldKeys);
+                            if (!empty($invalidFields)) {
+                                Log::warning('[UploadCompletionService] Some metadata fields are not in upload schema', [
+                                    'asset_id' => $asset->id,
+                                    'category_id' => $categoryId,
+                                    'invalid_fields' => $invalidFields,
+                                    'allowed_fields' => $allowedFieldKeys,
+                                    'note' => 'These fields will be skipped during persistence but stored in JSON.',
+                                ]);
+                            }
+                            
+                            // Only persist valid fields
+                            $validFields = array_intersect_key($metadataArray['fields'], array_flip($allowedFieldKeys));
+                            
+                            if (!empty($validFields)) {
+                                $persistenceService = app(MetadataPersistenceService::class);
+                                $persistenceService->persistMetadata(
+                                    $asset,
+                                    $category,
+                                    $validFields,
+                                    $userId ?? 0,
+                                    'image', // Default to 'image' for metadata schema resolution
+                                    true // Auto-approve upload-time metadata (user explicitly set it during upload)
+                                );
+                                // CRITICAL: Verify metadata was actually persisted
+                                $expectedFieldIds = array_map(function($key) use ($fieldKeyToIdMap) {
+                                    return $fieldKeyToIdMap[$key] ?? null;
+                                }, array_keys($validFields));
+                                $expectedFieldIds = array_filter($expectedFieldIds); // Remove nulls
+                                
+                                $persistedCount = DB::table('asset_metadata')
+                                    ->where('asset_id', $asset->id)
+                                    ->whereIn('metadata_field_id', $expectedFieldIds)
+                                    ->whereNotNull('approved_at') // Must be approved (auto-approved for upload)
+                                    ->count();
+                                
+                                if ($persistedCount < count($validFields)) {
+                                    Log::error('[UploadCompletionService] CRITICAL: Metadata persistence verification failed', [
+                                        'asset_id' => $asset->id,
+                                        'expected_count' => count($validFields),
+                                        'actual_count' => $persistedCount,
+                                        'field_keys' => array_keys($validFields),
+                                        'field_ids' => $expectedFieldIds,
+                                    ]);
+                                    throw new \RuntimeException(
+                                        "CRITICAL: Metadata persistence verification failed. Expected " . count($validFields) . " rows, got {$persistedCount}. " .
+                                        "User-entered metadata may not have been persisted correctly."
+                                    );
+                                }
+                                
+                                Log::info('[UploadCompletionService] Upload metadata persisted to asset_metadata table', [
+                                    'asset_id' => $asset->id,
+                                    'category_id' => $categoryId,
+                                    'fields_persisted' => count($validFields),
+                                    'fields_skipped' => count($invalidFields),
+                                    'field_keys' => array_keys($validFields),
+                                    'verification_passed' => true,
+                                ]);
+                            } else {
+                                // CRITICAL: If fields were provided but none were valid, this is a failure
+                                // This should never happen in normal operation - user selected fields that should be valid
+                                Log::error('[UploadCompletionService] CRITICAL: All metadata fields were filtered out', [
+                                    'asset_id' => $asset->id,
+                                    'category_id' => $categoryId,
+                                    'fields_provided' => array_keys($metadataArray['fields']),
+                                    'allowed_fields' => $allowedFieldKeys,
+                                    'note' => 'All provided fields were filtered out. This indicates a schema/visibility mismatch. User-entered data was lost.',
+                                ]);
+                                
+                                // Throw exception to surface this critical failure
+                                throw new \RuntimeException(
+                                    'CRITICAL: All metadata fields were filtered out during persistence. ' .
+                                    'Fields provided: ' . implode(', ', array_keys($metadataArray['fields'])) . '. ' .
+                                    'Allowed fields: ' . implode(', ', $allowedFieldKeys) . '. ' .
+                                    'This is a critical failure - user-entered metadata was not persisted.'
+                                );
+                            }
+                        }
+                    } catch (\RuntimeException $e) {
+                        // Re-throw RuntimeExceptions (our critical failures)
+                        throw $e;
+                    } catch (\Exception $e) {
+                        // Log error with full context - this is a critical failure
+                        Log::error('[UploadCompletionService] CRITICAL: Failed to persist upload metadata', [
+                            'asset_id' => $asset->id,
+                            'category_id' => $categoryId,
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
+                            'fields_provided' => array_keys($metadataArray['fields']),
+                            'note' => 'User-entered metadata was not persisted. This is a critical failure that must be investigated.',
+                        ]);
+                        
+                        // Throw exception to surface this critical failure
+                        throw new \RuntimeException(
+                            'CRITICAL: Failed to persist upload metadata: ' . $e->getMessage() . '. ' .
+                            'User-entered data was not persisted. This must be fixed immediately.',
+                            0,
+                            $e
+                        );
+                    }
+                }
+            } else {
+                // Log when metadata fields are expected but not provided
+                if ($categoryId !== null) {
+                    Log::info('[UploadCompletionService] No metadata fields provided for upload', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $categoryId,
+                        'has_fields_key' => isset($metadataArray['fields']),
+                    ]);
+                }
+            }
+
             // Emit AssetUploaded event (only emit once, even if called multiple times)
             // The event system should handle duplicate events gracefully
             event(new AssetUploaded($asset));
 
-            // Dispatch post-finalize processing jobs (async, non-blocking)
-            // Jobs are dispatched immediately after asset creation to ensure processing happens eventually
-            // Order: ThumbnailGenerationJob -> MetadataExtractionJob (if applicable) -> AssetProcessingCompleteEvent
+            // NOTE: Processing jobs are now handled by ProcessAssetJob chain via AssetUploaded event
+            // Do NOT dispatch GenerateThumbnailsJob separately - it breaks the processing chain
+            // The ProcessAssetJob chain handles: ExtractMetadata -> GenerateThumbnails -> GeneratePreview -> ComputedMetadata -> etc.
+            // If thumbnails are generated separately, ProcessAssetJob sees completed status and skips the entire chain
+            // This prevents ComputedMetadataJob and other automated metadata jobs from running
+            // 
+            // For unsupported formats, ProcessAssetJob will handle marking as skipped
+            // No need to dispatch jobs here - let the chain handle everything
             
-            // Check if thumbnail generation is supported for this file type
-            // Skip job dispatch for unsupported formats (e.g., AVIF) to prevent false "started" events
-            if ($this->supportsThumbnailGeneration($asset)) {
-                GenerateThumbnailsJob::dispatch($asset->id);
-            } else {
-                // Step 5: Mark as skipped immediately - no job dispatched, no work attempted
-                // Determine skip reason based on file type
-                $mimeType = strtolower($asset->mime_type ?? '');
-                $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-                $skipReason = $this->determineSkipReason($mimeType, $extension);
-                
-                // Store skip reason in metadata for UI display
-                $metadata = $asset->metadata ?? [];
-                $metadata['thumbnail_skip_reason'] = $skipReason;
-                
-                // Mark as skipped with clear error message
-                $asset->update([
-                    'thumbnail_status' => \App\Enums\ThumbnailStatus::SKIPPED,
-                    'thumbnail_error' => "Thumbnail generation skipped: {$skipReason}",
-                    'metadata' => $metadata,
-                ]);
-                
-                // Log skipped event (truthful - work never happened)
-                try {
-                    \App\Services\ActivityRecorder::logAsset(
-                        $asset,
-                        \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
-                        [
-                            'reason' => $skipReason,
-                            'mime_type' => $asset->mime_type,
-                            'file_extension' => $extension,
-                        ]
-                    );
-                } catch (\Exception $e) {
-                    Log::error('Failed to log thumbnail skipped event', [
-                        'asset_id' => $asset->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-                
-                Log::info('Thumbnail generation skipped - unsupported file type', [
-                    'asset_id' => $asset->id,
-                    'mime_type' => $asset->mime_type,
-                    'extension' => $extension,
-                    'skip_reason' => $skipReason,
-                ]);
-            }
-
-            // Dispatch metadata extraction job if applicable (images and other extractable file types)
-            // For now, dispatch for all assets - future refinement can add file type checks
-            ExtractMetadataJob::dispatch($asset->id);
-
+            // NOTE: ExtractMetadataJob is also part of the ProcessAssetJob chain
+            // Do NOT dispatch it separately - it will run as part of the chain
+            
             // Emit AssetProcessingCompleteEvent
             event(new AssetProcessingCompleteEvent($asset));
 

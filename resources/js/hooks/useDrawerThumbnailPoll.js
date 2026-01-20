@@ -107,12 +107,26 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
 
         // Poll backend for this single asset
         try {
-            const response = await window.axios.post('/app/assets/thumbnail-status/batch', {
-                asset_ids: [currentAsset.id],
+            const response = await window.axios.get('/app/assets/thumbnail-status/batch', {
+                params: {
+                    asset_ids: [currentAsset.id].join(','),
+                },
             })
 
-            if (response.data && response.data.length > 0) {
-                const updatedAssetData = response.data[0]
+            // Response format: { assets: [...] }
+            // Each asset has asset_id, not id
+            const assets = response.data?.assets || []
+            if (assets.length > 0) {
+                const updatedAssetData = assets[0]
+                
+                // Verify this is the correct asset (safety check)
+                if (updatedAssetData.asset_id !== currentAsset.id) {
+                    console.warn('[useDrawerThumbnailPoll] Asset ID mismatch', {
+                        expected: currentAsset.id,
+                        received: updatedAssetData.asset_id,
+                    })
+                    return
+                }
 
                 // Check if anything meaningful changed
                 const versionChanged = updatedAssetData.thumbnail_version !== currentAsset.thumbnail_version
@@ -123,9 +137,9 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
 
                 if (versionChanged || finalNowAvailable || previewNowAvailable || statusChanged || errorChanged) {
                     // Merge updated data into current asset
+                    // Note: updatedAssetData has asset_id, but we keep id from currentAsset
                     const updatedAsset = {
                         ...currentAsset,
-                        ...updatedAssetData,
                         preview_thumbnail_url: updatedAssetData.preview_thumbnail_url ?? currentAsset.preview_thumbnail_url,
                         final_thumbnail_url: updatedAssetData.final_thumbnail_url ?? currentAsset.final_thumbnail_url,
                         thumbnail_status: updatedAssetData.thumbnail_status ?? currentAsset.thumbnail_status,
