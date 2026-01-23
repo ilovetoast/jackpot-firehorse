@@ -53,6 +53,7 @@ import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
 import AssetDetailsModal from './AssetDetailsModal'
+import DominantColorsSwatches from './DominantColorsSwatches'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
@@ -1046,6 +1047,16 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 {/* Phase 2 – Step 5.5: AI Metadata Suggestions */}
                 {displayAsset?.id && (
                     <AiMetadataSuggestions assetId={displayAsset.id} />
+                )}
+
+                {/* Dominant Colors Display (read-only) */}
+                {displayAsset?.metadata?.dominant_colors && Array.isArray(displayAsset.metadata.dominant_colors) && displayAsset.metadata.dominant_colors.length > 0 && (
+                    <div className="px-6 py-4 border-t border-gray-200">
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-gray-700">Dominant Colors</span>
+                            <DominantColorsSwatches dominantColors={displayAsset.metadata.dominant_colors} />
+                        </div>
+                    </div>
                 )}
 
                 {/* Phase 2 – Step 6: Manual Metadata Editing */}

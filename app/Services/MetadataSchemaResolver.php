@@ -138,6 +138,7 @@ class MetadataSchemaResolver
                 DB::raw("COALESCE(show_on_edit, true) as show_on_edit"),
                 DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
                 DB::raw("COALESCE(readonly, false) as readonly"),
+                DB::raw("COALESCE(is_primary, false) as is_primary"),
             ])
             ->get()
             ->keyBy('id');
@@ -172,6 +173,13 @@ class MetadataSchemaResolver
         $query = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenantId)
             ->whereIn('metadata_field_id', $fieldIds)
+            ->select([
+                'metadata_field_id',
+                'is_hidden',
+                'is_upload_hidden',
+                'is_filter_hidden',
+                'is_primary', // Category-scoped primary filter placement
+            ])
             ->where(function ($q) use ($brandId, $categoryId) {
                 // Tenant-level: brand_id IS NULL AND category_id IS NULL
                 $q->where(function ($subQ) {
@@ -211,6 +219,7 @@ class MetadataSchemaResolver
                     'is_hidden' => (bool) $row->is_hidden,
                     'is_upload_hidden' => (bool) $row->is_upload_hidden,
                     'is_filter_hidden' => (bool) $row->is_filter_hidden,
+                    'is_primary' => isset($row->is_primary) ? ($row->is_primary === 1 || $row->is_primary === true) : null,
                 ];
             }
         }
@@ -309,6 +318,27 @@ class MetadataSchemaResolver
             $isFilterHidden = $visibilityOverrides['is_filter_hidden'];
         }
 
+        // Resolve effective_is_primary from category override
+        // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+        // A field may be primary in Photography but secondary in Logos.
+        // 
+        // Resolution order:
+        // 1. Category override (metadata_field_visibility.is_primary where category_id is set) - highest priority
+        // 2. Fallback to global metadata_fields.is_primary (backward compatibility, deprecated)
+        // 3. Default to false if neither exists
+        // 
+        // This ensures that filter placement is category-specific, not global.
+        // Never use global is_primary directly - always resolve through category context.
+        $effectiveIsPrimary = false;
+        if (isset($visibilityOverrides['is_primary']) && $visibilityOverrides['is_primary'] !== null) {
+            // Category override exists (highest priority)
+            $effectiveIsPrimary = (bool) $visibilityOverrides['is_primary'];
+        } elseif (isset($field->is_primary)) {
+            // Fallback to global is_primary (backward compatibility)
+            // TODO: Deprecate metadata_fields.is_primary - migrate all fields to category overrides
+            $effectiveIsPrimary = (bool) $field->is_primary;
+        }
+
         // Resolve display label (stub for future label override table)
         $displayLabel = $this->resolveDisplayLabel($field);
 
@@ -335,6 +365,10 @@ class MetadataSchemaResolver
             'show_on_edit' => isset($field->show_on_edit) ? (bool) $field->show_on_edit : true,
             'show_in_filters' => isset($field->show_in_filters) ? (bool) $field->show_in_filters : true,
             'readonly' => isset($field->readonly) ? (bool) $field->readonly : false,
+            // Category-scoped primary filter placement
+            // effective_is_primary: true = primary for this category, false = secondary for this category
+            // Resolution: category override > global is_primary (deprecated) > false
+            'is_primary' => $effectiveIsPrimary,
             'options' => $options,
         ];
     }

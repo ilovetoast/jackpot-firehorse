@@ -229,9 +229,16 @@ class AutomaticMetadataWriter
      */
     protected function computeConfidence(object $field): ?float
     {
+        $fieldKey = $field->key ?? '';
+        
+        // Color analysis has high confidence (deterministic algorithm)
+        if ($fieldKey === 'ai_color_palette') {
+            return 0.90; // High confidence for deterministic color analysis
+        }
+        
         // Stub: Deterministic confidence based on field key hash
         // Returns values between 0.7 and 0.9 for automatic values
-        $hash = crc32($field->key ?? '');
+        $hash = crc32($fieldKey);
         $confidence = 0.7 + (($hash % 20) / 100); // 0.70 to 0.89
         
         return round($confidence, 2);
@@ -248,6 +255,11 @@ class AutomaticMetadataWriter
     protected function determineProducer(object $field): ?string
     {
         $fieldKey = $field->key ?? '';
+        
+        // Color analysis uses 'color_analysis' producer
+        if ($fieldKey === 'ai_color_palette') {
+            return 'color_analysis';
+        }
         
         // Stub: For now, all automatic values are from 'system'
         // Future: Return 'exif' for EXIF-extracted fields, 'ai' for AI-generated, etc.

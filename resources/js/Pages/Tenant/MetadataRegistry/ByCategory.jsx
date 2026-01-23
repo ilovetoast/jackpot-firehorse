@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { router } from '@inertiajs/react'
 import {
     Bars3Icon,
+    CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 
 /**
@@ -11,6 +12,17 @@ import {
  * 
  * ⚠️ PHASE LOCK: Phase G complete and paused. UI behavior verified and intentionally paused.
  * Do not refactor structure or behavior. Future improvements will be in Phase H.
+ * 
+ * 🎯 CANONICAL CONTROL SURFACE FOR ASSET GRID FILTERS
+ * 
+ * This is the ONLY place where filter visibility and primary/secondary placement
+ * can be configured. All other tabs (All Metadata, Custom Fields, Filters) are
+ * read-only or overview-only and must never reintroduce filter controls.
+ * 
+ * Ownership:
+ * - Filter visibility (show_in_filters) → configured here per category
+ * - Primary vs Secondary placement (is_primary) → configured here per category
+ * - Category enablement → configured here
  * 
  * Displays metadata fields organized by category, making it clear
  * which fields are enabled for each category.
@@ -25,6 +37,7 @@ export default function ByCategoryView({
     const [loadingFields, setLoadingFields] = useState(new Set())
     const [draggedFieldId, setDraggedFieldId] = useState(null)
     const [fieldOrder, setFieldOrder] = useState({}) // Store order per category: { categoryId: [fieldId, ...] }
+    const [successMessage, setSuccessMessage] = useState(null) // Success message state
 
     const { system_fields: systemFields = [], tenant_fields = [] } = registry || {}
     const allFields = [...systemFields, ...tenant_fields]
@@ -71,10 +84,12 @@ export default function ByCategoryView({
             const response = await fetch(`/app/api/tenant/metadata/fields/${field.id}/categories`)
             const data = await response.json()
             const suppressedIds = data.suppressed_category_ids || []
+            const categoryOverrides = data.category_overrides || {} // Keyed by category_id, includes is_primary
             
             const categoryData = {
                 suppressed: suppressedIds,
                 visible: categories.filter(cat => !suppressedIds.includes(cat.id)).map(cat => cat.id),
+                overrides: categoryOverrides, // Category-specific overrides including is_primary
             }
             
             setFieldCategoryData(prev => ({
@@ -188,6 +203,7 @@ export default function ByCategoryView({
 
         const newValue = !currentValue
         const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
+        const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Edit' : 'Filter'
 
         try {
             const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
@@ -204,11 +220,61 @@ export default function ByCategoryView({
             })
             
             if (response.ok) {
-                // Reload registry to get updated visibility values
-                router.reload({ only: ['registry'] })
+                // Show success message
+                setSuccessMessage(`${contextLabel} visibility ${newValue ? 'enabled' : 'disabled'}`)
+                setTimeout(() => setSuccessMessage(null), 3000)
+                
+                // Silently reload registry in background without page refresh
+                router.reload({ 
+                    only: ['registry'],
+                    preserveState: true,
+                    preserveScroll: true,
+                })
             }
         } catch (error) {
             console.error('Failed to update visibility:', error)
+            setSuccessMessage(null)
+        }
+    }
+
+    // Toggle primary filter placement for category
+    // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+    // A field may be primary in Photography but secondary in Logos.
+    const togglePrimary = async (fieldId, categoryId, currentValue) => {
+        if (!canManageVisibility || !categoryId) return
+
+        const newValue = !currentValue
+
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    is_primary: newValue,
+                    category_id: categoryId, // Category-scoped primary placement
+                }),
+            })
+            
+            if (response.ok) {
+                // Show success message
+                setSuccessMessage(`Primary filter ${newValue ? 'enabled' : 'disabled'} for this category`)
+                setTimeout(() => setSuccessMessage(null), 3000)
+                
+                // Silently reload registry in background without page refresh
+                router.reload({ 
+                    only: ['registry'],
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            }
+        } catch (error) {
+            console.error('Failed to update primary filter placement:', error)
+            setSuccessMessage(null)
         }
     }
 
@@ -289,7 +355,36 @@ export default function ByCategoryView({
     const selectedCategory = categories.find(cat => cat.id === selectedCategoryId)
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="space-y-6">
+            {/* Success Message Toast */}
+            {successMessage && (
+                <div className="fixed top-4 right-4 z-50 max-w-md w-full animate-in slide-in-from-top-5">
+                    <div className="bg-green-50 border border-green-200 rounded-lg shadow-lg p-4">
+                        <div className="flex items-start">
+                            <div className="flex-shrink-0">
+                                <CheckCircleIcon className="h-5 w-5 text-green-400" />
+                            </div>
+                            <div className="ml-3 flex-1">
+                                <p className="text-sm font-medium text-green-800">{successMessage}</p>
+                            </div>
+                            <div className="ml-4 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setSuccessMessage(null)}
+                                    className="inline-flex text-green-400 hover:text-green-500"
+                                >
+                                    <span className="sr-only">Close</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Category List (Left Sidebar) */}
             <div className="lg:col-span-1">
                 <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -366,7 +461,7 @@ export default function ByCategoryView({
                                 Metadata for: {selectedCategory.name}
                             </h2>
                             <p className="mt-2 text-sm text-gray-600">
-                                Enable which metadata fields appear for assets in this category.
+                                Enable which metadata fields appear for assets in this category. Configure filter visibility and primary placement to control how fields appear in the asset grid.
                             </p>
                         </div>
 
@@ -390,8 +485,10 @@ export default function ByCategoryView({
                                             isEnabled={true}
                                             onToggle={toggleCategoryField}
                                             onVisibilityToggle={toggleVisibility}
+                                            onPrimaryToggle={togglePrimary}
                                             canManage={canManageVisibility}
                                             systemFields={systemFields}
+                                            fieldCategoryData={fieldCategoryData[field.id]}
                                             isDraggable={true}
                                             onDragStart={handleDragStart}
                                             onDragOver={handleDragOver}
@@ -428,8 +525,10 @@ export default function ByCategoryView({
                                             isEnabled={false}
                                             onToggle={toggleCategoryField}
                                             onVisibilityToggle={toggleVisibility}
+                                            onPrimaryToggle={togglePrimary}
                                             canManage={canManageVisibility}
                                             systemFields={systemFields}
+                                            fieldCategoryData={fieldCategoryData[field.id]}
                                             isDraggable={false}
                                         />
                                     ))
@@ -449,6 +548,7 @@ export default function ByCategoryView({
                     </div>
                 )}
             </div>
+            </div>
         </div>
     )
 }
@@ -464,8 +564,10 @@ function FieldRow({
     isEnabled, 
     onToggle, 
     onVisibilityToggle,
+    onPrimaryToggle,
     canManage, 
     systemFields,
+    fieldCategoryData,
     isDraggable = false,
     onDragStart,
     onDragOver,
@@ -477,6 +579,30 @@ function FieldRow({
     const effectiveUpload = field.effective_show_on_upload ?? field.show_on_upload ?? true
     const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? true
     const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
+    
+    // Resolve effective_is_primary for this category
+    // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+    // A field may be primary in Photography but secondary in Logos.
+    // Resolution order: category override > global is_primary (deprecated) > false
+    const resolvePrimaryPlacement = (field, categoryId, categoryData) => {
+        if (!categoryId || !categoryData) {
+            return field.is_primary ?? false // Fallback to global (backward compatibility)
+        }
+        
+        const categoryOverride = categoryData.overrides?.[categoryId]
+        if (categoryOverride && categoryOverride.is_primary !== null && categoryOverride.is_primary !== undefined) {
+            return categoryOverride.is_primary // Category override (highest priority)
+        }
+        
+        return field.is_primary ?? false // Fallback to global is_primary (deprecated)
+    }
+    
+    // Compute effective_is_primary for the selected category
+    // Note: For Asset Grid, MetadataSchemaResolver already computes effective_is_primary
+    // and includes it in field.is_primary. This local resolution is for UI display only.
+    const effectiveIsPrimary = categoryId && fieldCategoryData
+        ? resolvePrimaryPlacement(field, categoryId, fieldCategoryData)
+        : field.is_primary ?? false
 
     return (
         <div 
@@ -545,6 +671,26 @@ function FieldRow({
                                 />
                                 <span>Filter</span>
                             </label>
+                            {/* Primary filter toggle - only visible when field is enabled for filtering */}
+                            {effectiveFilter && (
+                                <div className="flex flex-col gap-1">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={effectiveIsPrimary}
+                                            onChange={() => onPrimaryToggle(field.id, categoryId, effectiveIsPrimary)}
+                                            disabled={!canManage}
+                                            className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        />
+                                        <span className="text-xs text-gray-600">Primary (for this category)</span>
+                                    </label>
+                                    {effectiveIsPrimary && (
+                                        <p className="text-xs text-gray-500 ml-5 italic">
+                                            Primary filters appear inline in the asset grid; others appear under "More filters".
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

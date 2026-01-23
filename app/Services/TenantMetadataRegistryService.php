@@ -76,6 +76,7 @@ class TenantMetadataRegistryService
                 'is_user_editable',
                 'is_ai_trainable',
                 'is_internal_only',
+                'is_primary',
             ])
             ->orderBy('key')
             ->get();
@@ -133,6 +134,7 @@ class TenantMetadataRegistryService
                 'is_user_editable' => (bool) $field->is_user_editable,
                 'is_ai_trainable' => (bool) $field->is_ai_trainable,
                 'is_internal_only' => (bool) $field->is_internal_only,
+                'is_primary' => (bool) ($field->is_primary ?? false),
                 // Effective visibility (after tenant overrides)
                 'effective_show_on_upload' => $effectiveUpload,
                 'effective_show_on_edit' => $effectiveEdit,
@@ -182,6 +184,8 @@ class TenantMetadataRegistryService
                 $field['show_in_filters'] ?? true,
                 $overrides?->is_filter_hidden ?? false
             );
+            // is_primary is stored directly on the field, not in visibility overrides
+            $field['is_primary'] = (bool) ($field['is_primary'] ?? false);
             $field['has_tenant_override'] = $overrides !== null;
         }
 

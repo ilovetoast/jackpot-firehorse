@@ -287,4 +287,43 @@ class TenantMetadataVisibilityService
         // Check if hidden at tenant level
         return !$override->is_hidden;
     }
+
+    /**
+     * Get category-specific overrides for a field (including is_primary).
+     * 
+     * Returns category-level visibility overrides including primary filter placement.
+     * 
+     * ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+     * A field may be primary in Photography but secondary in Logos.
+     * 
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param int|null $brandId
+     * @return array Keyed by category_id, containing override data including is_primary
+     */
+    public function getCategoryOverrides(Tenant $tenant, int $fieldId, ?int $brandId = null): array
+    {
+        $query = DB::table('metadata_field_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->whereNotNull('category_id');
+        
+        if ($brandId !== null) {
+            $query->where('brand_id', $brandId);
+        }
+        
+        $overrides = $query->get();
+        
+        $result = [];
+        foreach ($overrides as $override) {
+            $result[$override->category_id] = [
+                'is_hidden' => (bool) $override->is_hidden,
+                'is_upload_hidden' => (bool) $override->is_upload_hidden,
+                'is_filter_hidden' => (bool) $override->is_filter_hidden,
+                'is_primary' => isset($override->is_primary) ? ($override->is_primary === 1 || $override->is_primary === true) : null,
+            ];
+        }
+        
+        return $result;
+    }
 }

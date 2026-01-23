@@ -7,6 +7,7 @@
 import { useState, useEffect } from 'react'
 import { PencilIcon, LockClosedIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
+import DominantColorsSwatches from './DominantColorsSwatches'
 
 export default function AssetMetadataDisplay({ assetId }) {
     const [fields, setFields] = useState([])

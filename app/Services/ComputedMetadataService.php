@@ -125,8 +125,8 @@ class ComputedMetadataService
                 return null;
             }
 
-            $width = $imageInfo[0];
-            $height = $imageInfo[1];
+            $storedWidth = $imageInfo[0];
+            $storedHeight = $imageInfo[1];
 
             // Extract EXIF data (if available)
             $exif = [];
@@ -136,6 +136,10 @@ class ComputedMetadataService
                     $exif = $exifData;
                 }
             }
+
+            // Normalize dimensions based on EXIF orientation
+            // EXIF orientation tells us how the image should be displayed, not how it's stored
+            [$width, $height] = $this->normalizeDimensionsFromExif($storedWidth, $storedHeight, $exif);
 
             // Clean up temp file
             @unlink($tempPath);
@@ -256,10 +260,55 @@ class ComputedMetadataService
     }
 
     /**
-     * Compute orientation from dimensions.
+     * Normalize dimensions based on EXIF orientation.
      *
-     * @param int $width
-     * @param int $height
+     * EXIF orientation values:
+     * 1 = Normal (0°)
+     * 3 = 180° rotation
+     * 6 = 90° CW rotation (swap width/height)
+     * 8 = 90° CCW rotation (swap width/height)
+     *
+     * @param int $storedWidth Width from getimagesize()
+     * @param int $storedHeight Height from getimagesize()
+     * @param array $exif EXIF data array
+     * @return array{0: int, 1: int} [width, height] after orientation normalization
+     */
+    protected function normalizeDimensionsFromExif(int $storedWidth, int $storedHeight, array $exif): array
+    {
+        // Get EXIF orientation (if available)
+        $orientation = null;
+        if (isset($exif['Orientation'])) {
+            $orientation = (int) $exif['Orientation'];
+        } elseif (isset($exif['IFD0']['Orientation'])) {
+            $orientation = (int) $exif['IFD0']['Orientation'];
+        }
+
+        // If no EXIF orientation or orientation is 1 (normal), return stored dimensions
+        if ($orientation === null || $orientation === 1) {
+            return [$storedWidth, $storedHeight];
+        }
+
+        // Orientations 6 and 8 require swapping width/height
+        // These represent 90° rotations where the image is stored rotated
+        if ($orientation === 6 || $orientation === 8) {
+            return [$storedHeight, $storedWidth];
+        }
+
+        // Orientations 2, 3, 4, 5, 7 don't require dimension swap
+        // (they're flips or 180° rotations)
+        return [$storedWidth, $storedHeight];
+    }
+
+    /**
+     * Compute orientation from dimensions using ratio-based classification.
+     *
+     * Uses aspect ratio to determine orientation, allowing for near-square images:
+     * - ratio >= 0.95 AND ratio <= 1.05 → square
+     * - ratio > 1.05 → landscape
+     * - ratio < 0.95 → portrait
+     *
+     * @param int $width Visual width after EXIF normalization
+     * @param int $height Visual height after EXIF normalization
      * @return string|null 'landscape', 'portrait', 'square', or null if cannot determine
      */
     protected function computeOrientation(int $width, int $height): ?string
@@ -268,16 +317,17 @@ class ComputedMetadataService
             return null;
         }
 
-        // Orientation is based on display dimensions:
-        // - width > height = landscape (wider than tall)
-        // - height > width = portrait (taller than wide)
-        // - width == height = square
-        if ($width > $height) {
-            return 'landscape';
-        } elseif ($height > $width) {
-            return 'portrait';
-        } else {
+        // Calculate aspect ratio
+        $ratio = $width / $height;
+
+        // Ratio-based classification (allows for near-square images)
+        // 0.95-1.05 range accounts for rounding and slight aspect variations
+        if ($ratio >= 0.95 && $ratio <= 1.05) {
             return 'square';
+        } elseif ($ratio > 1.05) {
+            return 'landscape';
+        } else {
+            return 'portrait';
         }
     }
 

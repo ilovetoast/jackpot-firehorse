@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
+import DominantColorsSwatches from './DominantColorsSwatches'
 
 export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [metadata, setMetadata] = useState(null)
@@ -184,6 +185,16 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                     <div>
                                         <h4 className="text-sm font-medium text-gray-900 mb-2">Category</h4>
                                         <p className="text-sm text-gray-700">{metadata.category.name}</p>
+                                    </div>
+                                )}
+
+                                {/* Dominant Colors */}
+                                {asset?.metadata?.dominant_colors && Array.isArray(asset.metadata.dominant_colors) && asset.metadata.dominant_colors.length > 0 && (
+                                    <div>
+                                        <h4 className="text-sm font-medium text-gray-900 mb-2">Dominant Colors</h4>
+                                        <div className="text-sm text-gray-700">
+                                            <DominantColorsSwatches dominantColors={asset.metadata.dominant_colors} />
+                                        </div>
                                     </div>
                                 )}
 

@@ -3,15 +3,20 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\EventType;
 use App\Models\Asset;
+use App\Services\ActivityRecorder;
 use App\Services\AssetProcessingFailureService;
 use App\Services\AutomaticMetadataWriter;
+use App\Services\Automation\ColorAnalysisService;
+use App\Services\Automation\DominantColorsExtractor;
 use App\Services\MetadataSchemaResolver;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -59,7 +64,9 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
      */
     public function handle(
         AutomaticMetadataWriter $writer,
-        MetadataSchemaResolver $schemaResolver
+        MetadataSchemaResolver $schemaResolver,
+        ColorAnalysisService $colorService,
+        DominantColorsExtractor $dominantColorsExtractor
     ): void {
         $asset = Asset::findOrFail($this->assetId);
 
@@ -115,8 +122,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             return;
         }
 
-        // Compute metadata values (stub implementation)
-        $metadataValues = $this->computeMetadataValues($asset, $fieldsToPopulate);
+        // Compute metadata values
+        $computationResult = $this->computeMetadataValues($asset, $fieldsToPopulate, $colorService);
+        $metadataValues = $computationResult['values'];
+        $colorAnalysisResult = $computationResult['color_analysis'] ?? null;
 
         if (empty($metadataValues)) {
             Log::info('[PopulateAutomaticMetadataJob] No metadata values computed', [
@@ -125,8 +134,34 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             return;
         }
 
+        // Persist internal color analysis data (if ai_color_palette was computed)
+        if ($colorAnalysisResult !== null) {
+            $this->persistColorAnalysisData($asset, $colorAnalysisResult);
+            
+            // Refresh asset to get updated metadata before extracting dominant colors
+            $asset->refresh();
+            
+            // Extract and persist dominant colors from cluster data
+            $dominantColorsExtractor->extractAndPersist($asset);
+            
+            // Log color analysis completion to activity timeline
+            ActivityRecorder::logAsset($asset, EventType::ASSET_COLOR_ANALYSIS_COMPLETED, [
+                'buckets' => $colorAnalysisResult['buckets'],
+                'buckets_count' => count($colorAnalysisResult['buckets']),
+                'clusters_count' => count($colorAnalysisResult['internal']['clusters'] ?? []),
+            ]);
+        }
+
         // Write metadata values (respects manual overrides)
         $results = $writer->writeMetadata($asset, $metadataValues);
+        
+        // Log metadata population completion
+        if (!empty($metadataValues)) {
+            ActivityRecorder::logAsset($asset, EventType::ASSET_METADATA_POPULATED, [
+                'fields_populated' => array_keys($metadataValues),
+                'fields_count' => count($metadataValues),
+            ]);
+        }
 
         Log::info('[PopulateAutomaticMetadataJob] Completed', [
             'asset_id' => $asset->id,
@@ -139,16 +174,15 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
     /**
      * Compute metadata values for automatic/hybrid fields.
      *
-     * Phase B6: Stub implementation - returns deterministic placeholder values.
-     * Future: Replace with actual EXIF extraction, AI analysis, etc.
-     *
      * @param Asset $asset
      * @param array $fields Keyed by field_id
-     * @return array Keyed by field_id => value
+     * @param ColorAnalysisService $colorService
+     * @return array{values: array, color_analysis: array|null} Metadata values and optional color analysis result
      */
-    protected function computeMetadataValues(Asset $asset, array $fields): array
+    protected function computeMetadataValues(Asset $asset, array $fields, ColorAnalysisService $colorService): array
     {
         $values = [];
+        $colorAnalysisResult = null;
 
         foreach ($fields as $fieldId => $field) {
             $fieldKey = $field['key'] ?? null;
@@ -156,14 +190,49 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 continue;
             }
 
-            // Stub: Deterministic placeholder values based on field key
+            // Handle ai_color_palette with deterministic color analysis
+            if ($fieldKey === 'ai_color_palette') {
+                $result = $colorService->analyze($asset);
+                if ($result !== null && !empty($result['buckets'])) {
+                    $values[$fieldId] = $result['buckets'];
+                    $colorAnalysisResult = $result; // Store for internal data persistence
+                }
+                continue;
+            }
+
+            // Stub: Deterministic placeholder values for other fields
             $value = $this->computeStubValue($asset, $fieldKey, $field);
             if ($value !== null) {
                 $values[$fieldId] = $value;
             }
         }
 
-        return $values;
+        return [
+            'values' => $values,
+            'color_analysis' => $colorAnalysisResult,
+        ];
+    }
+
+    /**
+     * Persist internal color analysis data to asset.metadata.
+     * Stores cluster data for future use (non-filter, non-UI).
+     *
+     * @param Asset $asset
+     * @param array $colorAnalysisResult Result from ColorAnalysisService::analyze()
+     * @return void
+     */
+    protected function persistColorAnalysisData(Asset $asset, array $colorAnalysisResult): void
+    {
+        // Merge internal data into asset.metadata (preserve existing metadata)
+        $metadata = $asset->metadata ?? [];
+        $metadata['_color_analysis'] = $colorAnalysisResult['internal'];
+        $asset->update(['metadata' => $metadata]);
+
+        Log::info('[PopulateAutomaticMetadataJob] Persisted color analysis data', [
+            'asset_id' => $asset->id,
+            'clusters_count' => count($colorAnalysisResult['internal']['clusters']),
+            'ignored_pixels' => $colorAnalysisResult['internal']['ignored_pixels'],
+        ]);
     }
 
     /**

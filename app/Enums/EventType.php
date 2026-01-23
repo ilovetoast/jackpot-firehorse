@@ -62,6 +62,8 @@ class EventType
     public const ASSET_VERSION_ADDED = 'asset.version_added';
     public const ASSET_PREVIEWED = 'asset.previewed';
     public const ASSET_METADATA_UPDATED = 'asset.metadata_updated';
+    public const ASSET_METADATA_POPULATED = 'asset.metadata.populated';
+    public const ASSET_COLOR_ANALYSIS_COMPLETED = 'asset.color_analysis.completed';
     
     /**
      * Asset lifecycle events (processing pipeline)
@@ -203,6 +205,8 @@ class EventType
             self::ASSET_VERSION_ADDED,
             self::ASSET_PREVIEWED,
             self::ASSET_METADATA_UPDATED,
+            self::ASSET_METADATA_POPULATED,
+            self::ASSET_COLOR_ANALYSIS_COMPLETED,
             self::ASSET_UPLOAD_FINALIZED,
             self::ASSET_THUMBNAIL_STARTED,
             self::ASSET_THUMBNAIL_COMPLETED,

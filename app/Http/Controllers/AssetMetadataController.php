@@ -701,31 +701,36 @@ class AssetMetadataController extends Controller
             }
 
             // Phase B3: Exclude fields that should not appear in edit view
+            // BUT: Include readonly/automatic fields even if show_on_edit is false (for display purposes)
             $showOnEdit = $field['show_on_edit'] ?? true;
-            if (!$showOnEdit) {
-                continue; // Filter-only fields: hidden from edit UI
+            $populationMode = $field['population_mode'] ?? 'manual';
+            $isReadonly = ($field['readonly'] ?? false) || ($populationMode === 'automatic');
+            
+            // Skip filter-only fields UNLESS they are readonly/automatic (show them as read-only)
+            if (!$showOnEdit && !$isReadonly) {
+                continue; // Filter-only fields that are not readonly: hidden from edit UI
             }
 
             // Phase 4: Check edit permission
-            $canEdit = $this->permissionResolver->canEdit(
-                $field['field_id'],
-                $userRole,
-                $tenant->id,
-                $brand->id,
-                $category->id
-            );
+            // For readonly/automatic fields, we still want to show them (read-only display)
+            // So we only check permission for non-readonly fields
+            if (!$isReadonly) {
+                $canEdit = $this->permissionResolver->canEdit(
+                    $field['field_id'],
+                    $userRole,
+                    $tenant->id,
+                    $brand->id,
+                    $category->id
+                );
 
-            // Skip fields user cannot edit
-            if (!$canEdit) {
-                continue;
+                // Skip fields user cannot edit (only for non-readonly fields)
+                if (!$canEdit) {
+                    continue;
+                }
             }
 
             // Get current value(s) for this field
             $currentValue = $fieldValues[$field['field_id']] ?? null;
-
-            // Phase B2: Check if field is readonly (automatic or explicitly readonly)
-            $populationMode = $field['population_mode'] ?? 'manual';
-            $isReadonly = ($field['readonly'] ?? false) || ($populationMode === 'automatic');
 
             $editableFields[] = [
                 'metadata_field_id' => $field['field_id'],
@@ -733,8 +738,8 @@ class AssetMetadataController extends Controller
                 'display_label' => $field['display_label'] ?? $field['key'],
                 'type' => $field['type'],
                 'options' => $field['options'] ?? [],
-                'is_user_editable' => true,
-                'can_edit' => true, // Phase 4: Permission already checked
+                'is_user_editable' => !$isReadonly, // Only editable if not readonly
+                'can_edit' => !$isReadonly, // Only editable if not readonly
                 'current_value' => $currentValue,
                 'has_pending' => in_array($field['field_id'], $pendingFieldIds), // Phase 8
                 // Phase B2: Add readonly and population_mode flags

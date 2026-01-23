@@ -333,6 +333,7 @@ class TenantMetadataFieldService
                 'show_on_upload' => (bool) ($field->show_on_upload ?? true),
                 'show_on_edit' => (bool) ($field->show_on_edit ?? true),
                 'show_in_filters' => (bool) ($field->show_in_filters ?? true),
+                'is_primary' => (bool) ($field->is_primary ?? false),
                 'group_key' => $field->group_key,
                 'is_active' => (bool) ($field->is_active ?? true),
                 'options' => $options[$field->id] ?? [],

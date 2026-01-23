@@ -243,7 +243,32 @@ class AssetController extends Controller
         }
 
         // Phase 2 – Step 8: Apply metadata filters
-        $filters = $request->get('filters', []);
+        // Filters can come as JSON string (from URL query param) or array (from Inertia)
+        $filtersParam = $request->get('filters', []);
+        $filters = [];
+        
+        // Parse filters if it's a JSON string
+        if (is_string($filtersParam)) {
+            $decoded = json_decode($filtersParam, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $filters = $decoded;
+            } else {
+                \Log::warning('[AssetController] DEBUG - Failed to parse filters JSON', [
+                    'filtersParam' => $filtersParam,
+                    'json_error' => json_last_error_msg(),
+                ]);
+            }
+        } elseif (is_array($filtersParam)) {
+            $filters = $filtersParam;
+        }
+        
+        \Log::info('[AssetController] DEBUG - Filters parsing', [
+            'filtersParam_type' => gettype($filtersParam),
+            'filtersParam' => $filtersParam,
+            'parsed_filters' => $filters,
+            'filters_count' => count($filters),
+        ]);
+        
         if (!empty($filters) && is_array($filters)) {
             // Resolve metadata schema for filtering
             // Note: asset_type in category is organizational (asset/marketing/ai_generated),
@@ -562,6 +587,110 @@ class AssetController extends Controller
             // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
         }
+        
+        // available_values is required by Phase H filter visibility rules
+        // Do not remove without updating Phase H contract
+        // Compute distinct metadata values for the current asset grid result set
+        $availableValues = [];
+        
+        if (!empty($filterableSchema) && $assets->count() > 0) {
+            // Get asset IDs from the current grid result set
+            $assetIds = $assets->pluck('id')->toArray();
+            
+            // Build map of filterable field keys for quick lookup
+            // Note: filterableSchema from getFilterableFields() already contains only filterable fields,
+            // so we don't need to check is_filterable - all fields in the array are filterable
+            $filterableFieldKeys = [];
+            foreach ($filterableSchema as $field) {
+                $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+                if ($fieldKey) {
+                    $filterableFieldKeys[$fieldKey] = true;
+                }
+            }
+            
+            if (!empty($filterableFieldKeys)) {
+                // Source 1: Query asset_metadata table (Phase G.4 structure)
+                // This is the authoritative source for approved metadata values
+                $assetMetadataValues = \DB::table('asset_metadata')
+                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                    ->whereIn('asset_metadata.asset_id', $assetIds)
+                    ->whereNotNull('asset_metadata.approved_at') // Only approved values
+                    ->whereIn('metadata_fields.key', array_keys($filterableFieldKeys))
+                    ->whereNotNull('asset_metadata.value_json')
+                    ->select('metadata_fields.key', 'asset_metadata.value_json')
+                    ->distinct()
+                    ->get();
+                
+                // Group values by field key
+                foreach ($assetMetadataValues as $row) {
+                    $fieldKey = $row->key;
+                    $value = json_decode($row->value_json, true);
+                    
+                    // Skip null values
+                    if ($value !== null) {
+                        if (!isset($availableValues[$fieldKey])) {
+                            $availableValues[$fieldKey] = [];
+                        }
+                        
+                        // Handle arrays (multiselect fields) and scalar values
+                        if (is_array($value)) {
+                            foreach ($value as $item) {
+                                if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                    $availableValues[$fieldKey][] = $item;
+                                }
+                            }
+                        } else {
+                            if (!in_array($value, $availableValues[$fieldKey], true)) {
+                                $availableValues[$fieldKey][] = $value;
+                            }
+                        }
+                    }
+                }
+                
+                // Source 2: Query metadata JSON column (legacy/fallback)
+                // Extract values from metadata->fields structure for assets not in asset_metadata
+                $assetsWithMetadata = $assets->filter(function ($asset) {
+                    return !empty($asset->metadata) && isset($asset->metadata['fields']);
+                });
+                
+                foreach ($assetsWithMetadata as $asset) {
+                    $fields = $asset->metadata['fields'] ?? [];
+                    foreach ($fields as $fieldKey => $value) {
+                        // Only include if field is filterable
+                        if (isset($filterableFieldKeys[$fieldKey]) && $value !== null) {
+                            // Initialize array if field doesn't exist yet
+                            if (!isset($availableValues[$fieldKey])) {
+                                $availableValues[$fieldKey] = [];
+                            }
+                            
+                            // Handle arrays (multiselect fields) and scalar values
+                            // Deduplicate values (values from asset_metadata are authoritative)
+                            if (is_array($value)) {
+                                foreach ($value as $item) {
+                                    if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                        $availableValues[$fieldKey][] = $item;
+                                    }
+                                }
+                            } else {
+                                if (!in_array($value, $availableValues[$fieldKey], true)) {
+                                    $availableValues[$fieldKey][] = $value;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Remove empty arrays (filters with no values should not appear)
+                $availableValues = array_filter($availableValues, function ($values) {
+                    return !empty($values);
+                });
+                
+                // Sort values for consistent output
+                foreach ($availableValues as $fieldKey => $values) {
+                    sort($availableValues[$fieldKey]);
+                }
+            }
+        }
 
         // Phase 2 – Step 8: Get saved views
         $savedViews = [];
@@ -594,6 +723,25 @@ class AssetController extends Controller
                 ->toArray();
         }
 
+        // DEBUG: Log filterable_schema and available_values for debugging
+        $photoTypeInSchema = collect($filterableSchema)->first(function ($field) {
+            return ($field['field_key'] ?? $field['key'] ?? '') === 'photo_type';
+        });
+        \Log::info('[AssetController] DEBUG - filterable_schema', [
+            'count' => count($filterableSchema),
+            'photo_type' => $photoTypeInSchema ? [
+                'field_key' => $photoTypeInSchema['field_key'] ?? $photoTypeInSchema['key'] ?? 'unknown',
+                'is_primary' => $photoTypeInSchema['is_primary'] ?? 'NOT_SET',
+                'is_primary_type' => isset($photoTypeInSchema['is_primary']) ? gettype($photoTypeInSchema['is_primary']) : 'NOT_SET',
+            ] : 'NOT_FOUND',
+            'category_id' => $categoryId,
+        ]);
+        \Log::info('[AssetController] DEBUG - available_values', [
+            'keys' => array_keys($availableValues),
+            'photo_type' => $availableValues['photo_type'] ?? 'NOT_SET',
+            'photo_type_count' => isset($availableValues['photo_type']) ? count($availableValues['photo_type']) : 0,
+        ]);
+        
         return Inertia::render('Assets/Index', [
             'categories' => $allCategories,
             'categories_by_type' => [
@@ -606,6 +754,7 @@ class AssetController extends Controller
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'saved_views' => $savedViews, // Phase 2 – Step 8: Saved filter views
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
+            'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
         ]);
     }
 

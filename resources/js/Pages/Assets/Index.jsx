@@ -5,13 +5,16 @@ import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
-import AssetFilters from '../../Components/AssetFilters'
+import AssetGridMetadataPrimaryFilters from '../../Components/AssetGridMetadataPrimaryFilters'
+import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
+import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
+import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import {
     FolderIcon,
     TagIcon,
@@ -19,9 +22,14 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [] }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [], available_values = {} }) {
     const pageProps = usePage().props
     const { auth } = pageProps
+    
+    // Use prop directly (now in function signature) or fallback to pageProps
+    const availableValues = available_values || pageProps.available_values || {}
+    const category_id = selected_category ? parseInt(selected_category) : null
+    const asset_type = 'image' // Default for asset grid (most assets are images)
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
@@ -88,6 +96,129 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
     useEffect(() => {
         setActiveAssetId(null)
+    }, [selectedCategoryId])
+    
+    // Category-switch filter cleanup (query pruning)
+    // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
+    // This ensures incompatible filters are removed when switching categories
+    // 
+    // References:
+    // - filterQueryOwnership.shouldPurgeOnCategoryChange(): Determines which params to purge
+    // - filterScopeRules.isCategoryCompatible(): Checks filter compatibility with category
+    const prevCategoryIdRef = useRef(selectedCategoryId)
+    useEffect(() => {
+        const prevCategoryId = prevCategoryIdRef.current
+        const nextCategoryId = selectedCategoryId
+        
+        // Only run cleanup if category actually changed
+        if (prevCategoryId === nextCategoryId) {
+            prevCategoryIdRef.current = nextCategoryId
+            return
+        }
+        
+        // Update ref for next comparison
+        prevCategoryIdRef.current = nextCategoryId
+        
+        // Parse current URL query params
+        const urlParams = new URLSearchParams(window.location.search)
+        let hasChanges = false
+        
+        // Step 1: Clean up individual query params using filterQueryOwnership
+        // Remove params that should be purged on category change
+        // This handles params like 'orientation', 'dimensions', etc.
+        const paramsToRemove = []
+        for (const [param, value] of urlParams.entries()) {
+            // Skip 'category' param (it's the category selector itself)
+            if (param === 'category') {
+                continue
+            }
+            
+            // Use filterQueryOwnership to determine if param should be purged
+            if (shouldPurgeOnCategoryChange(param)) {
+                paramsToRemove.push(param)
+                hasChanges = true
+            }
+        }
+        
+        // Remove params that should be purged
+        paramsToRemove.forEach(param => {
+            urlParams.delete(param)
+        })
+        
+        // Step 2: Clean up 'filters' param (metadata filters) using filterScopeRules
+        // The 'filters' param contains metadata field filters that need category compatibility checks
+        // Use filterScopeRules.isCategoryCompatible() to check each filter against the new category
+        const filtersParam = urlParams.get('filters')
+        if (filtersParam) {
+            try {
+                const filters = JSON.parse(decodeURIComponent(filtersParam))
+                const compatibleFilters = {}
+                
+                // If switching to "All Categories" (nextCategoryId === null),
+                // remove all filters - only global filters are compatible with "All Categories"
+                // filterScopeRules.isCategoryCompatible() returns false for non-global filters when category_id is null
+                if (nextCategoryId === null) {
+                    // Remove all filters - category-scoped metadata filters are incompatible with "All Categories"
+                    urlParams.delete('filters')
+                    hasChanges = true
+                } else if (prevCategoryId !== null && prevCategoryId !== nextCategoryId && filterable_schema.length > 0) {
+                    // Switching between specific categories
+                    // Check each filter for category compatibility using filterScopeRules.isCategoryCompatible()
+                    // We need filterable_schema to get full filter descriptors for compatibility checking
+                    Object.entries(filters).forEach(([fieldKey, filterDef]) => {
+                        // Find the filter descriptor in filterable_schema
+                        const filterDescriptor = filterable_schema.find(
+                            field => (field.field_key || field.key) === fieldKey
+                        )
+                        
+                        if (filterDescriptor) {
+                            // Check category compatibility using filterScopeRules.isCategoryCompatible()
+                            // This uses the filter's category_ids to determine compatibility
+                            if (isCategoryCompatible(filterDescriptor, nextCategoryId)) {
+                                // Filter is compatible with new category - keep it
+                                compatibleFilters[fieldKey] = filterDef
+                            } else {
+                                // Filter is incompatible with new category - remove it
+                                hasChanges = true
+                            }
+                        } else {
+                            // Filter descriptor not found in schema - remove it (likely invalid)
+                            hasChanges = true
+                        }
+                    })
+                    
+                    // Update filters param if we removed any
+                    if (Object.keys(compatibleFilters).length === 0) {
+                        urlParams.delete('filters')
+                    } else if (Object.keys(compatibleFilters).length < Object.keys(filters).length) {
+                        urlParams.set('filters', JSON.stringify(compatibleFilters))
+                    }
+                } else if (prevCategoryId !== null && prevCategoryId !== nextCategoryId) {
+                    // Switching between categories but no filterable_schema available
+                    // Conservative approach: remove all filters when switching categories
+                    // (metadata fields are category-scoped by definition)
+                    urlParams.delete('filters')
+                    hasChanges = true
+                }
+                // If switching from "All Categories" to a specific category, keep filters
+                // (they'll be validated by filterScopeRules in the UI)
+            } catch (e) {
+                // If filters param is malformed, remove it
+                console.error('[Assets/Index] Failed to parse filters param during category cleanup', e)
+                urlParams.delete('filters')
+                hasChanges = true
+            }
+        }
+        
+        // Apply cleanup to URL if we made changes
+        // Only update once (no loops) - this is a single cleanup pass
+        if (hasChanges) {
+            router.get(window.location.pathname, Object.fromEntries(urlParams), {
+                preserveState: true,
+                preserveScroll: true,
+                only: ['assets'], // Only reload assets
+            })
+        }
     }, [selectedCategoryId])
     
     // HARD STABILIZATION: Background reconciliation disabled
@@ -187,7 +318,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     }, [showInfo])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
-    const handleCategorySelect = (category) => {
+    const handleCategorySelect = useCallback((category) => {
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
         
@@ -200,12 +331,16 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         router.get('/app/assets', 
             categorySlug ? { category: categorySlug } : {},
             { 
-                preserveState: true, 
+                preserveState: true,
                 preserveScroll: true,
-                only: ['assets', 'selected_category', 'selected_category_slug'] // Only reload assets and category props
+                // Explicitly reload filterable_schema when category changes
+                // This ensures category-specific is_primary values are correctly applied
+                // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+                // The filterable_schema contains effective_is_primary computed for the selected category.
+                only: ['filterable_schema', 'available_values', 'assets', 'selected_category', 'selected_category_slug']
             }
         )
-    }
+    }, [])
 
     // Handle finalize complete - refresh asset grid after successful upload finalize
     const handleFinalizeComplete = useCallback(() => {
@@ -337,44 +472,45 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     </div>
                                 )}
                                 
-                                {/* Categories */}
-                                <div className="px-3 py-2">
-                                    <h3 className="px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
-                                        Categories
-                                    </h3>
-                                    <div className="mt-2 space-y-1">
-                                        {/* "All" button - only shown for non-free plans */}
-                                        {show_all_button && (
-                                            <button
-                                                onClick={() => handleCategorySelect(null)}
-                                                className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
-                                                style={{
-                                                    backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
-                                                    color: textColor,
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
-                                                        e.currentTarget.style.backgroundColor = hoverBgColor
-                                                    }
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
-                                                        e.currentTarget.style.backgroundColor = 'transparent'
-                                                    }
-                                                }}
-                                            >
-                                                <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} />
-                                                <span className="flex-1">All</span>
-                                                {total_asset_count > 0 && (
-                                                    <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
-                                                        {total_asset_count}
-                                                    </span>
-                                                )}
-                                            </button>
-                                        )}
-                                        {/* Show all categories (both basic and marketing) in a single list */}
-                                        {categories && categories.length > 0 ? (
-                                            filterActiveCategories(categories)
+                                {/* IMPORTANT: Sidebar category navigation is independent of filter state */}
+                                {/* Categories - Always visible when categories exist */}
+                                {categories && categories.length > 0 && (
+                                    <div className="px-3 py-2">
+                                        <h3 className="px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
+                                            Categories
+                                        </h3>
+                                        <div className="mt-2 space-y-1">
+                                            {/* "All" button - only shown for non-free plans */}
+                                            {show_all_button && (
+                                                <button
+                                                    onClick={() => handleCategorySelect(null)}
+                                                    className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
+                                                    style={{
+                                                        backgroundColor: selectedCategoryId === null || selectedCategoryId === undefined ? activeBgColor : 'transparent',
+                                                        color: textColor,
+                                                    }}
+                                                    onMouseEnter={(e) => {
+                                                        if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
+                                                            e.currentTarget.style.backgroundColor = hoverBgColor
+                                                        }
+                                                    }}
+                                                    onMouseLeave={(e) => {
+                                                        if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
+                                                            e.currentTarget.style.backgroundColor = 'transparent'
+                                                        }
+                                                    }}
+                                                >
+                                                    <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} />
+                                                    <span className="flex-1">All</span>
+                                                    {total_asset_count > 0 && (
+                                                        <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                            {total_asset_count}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            )}
+                                            {/* Show all categories */}
+                                            {filterActiveCategories(categories)
                                                 .map((category) => {
                                                     const isSelected = selectedCategoryId === category.id && selectedCategoryId !== null && selectedCategoryId !== undefined
                                                     return (
@@ -448,13 +584,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     </button>
                                                     )
                                                 })
-                                        ) : (
-                                            <div className="px-3 py-2 text-sm" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
-                                                No categories yet
-                                            </div>
-                                        )}
+                                            }
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </nav>
                         </div>
                     </div>
@@ -503,60 +636,70 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             )
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Asset Grid Toolbar - Always show when assets exist */}
-                        {localAssets && localAssets.length > 0 && (
-                            <div className="mb-6">
-                                <AssetGridToolbar
-                                    showInfo={showInfo}
-                                    onToggleInfo={() => setShowInfo(v => !v)}
-                                    cardSize={cardSize}
-                                    onCardSizeChange={setCardSize}
-                                    primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
-                                    bulkSelectedCount={bulkSelectedAssetIds.length}
-                                    onBulkEdit={() => {
-                                        if (bulkSelectedAssetIds.length > 0) {
-                                            setShowBulkEditModal(true)
-                                        }
-                                    }}
-                                    onToggleBulkMode={() => {
-                                        setIsBulkMode((prev) => !prev)
-                                        if (isBulkMode) {
-                                            setBulkSelectedAssetIds([])
-                                        }
-                                    }}
-                                    isBulkMode={isBulkMode}
-                                />
-                            </div>
-                        )}
+                        {/* Asset Grid Toolbar - Always visible (persists across categories) */}
+                        {/* Primary metadata filters are now integrated into the toolbar (between search and controls) */}
+                        <div className="mb-6">
+                            <AssetGridToolbar
+                                showInfo={showInfo}
+                                onToggleInfo={() => setShowInfo(v => !v)}
+                                cardSize={cardSize}
+                                onCardSizeChange={setCardSize}
+                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                bulkSelectedCount={bulkSelectedAssetIds.length}
+                                onBulkEdit={() => {
+                                    if (bulkSelectedAssetIds.length > 0) {
+                                        setShowBulkEditModal(true)
+                                    }
+                                }}
+                                onToggleBulkMode={() => {
+                                    setIsBulkMode((prev) => !prev)
+                                    if (isBulkMode) {
+                                        setBulkSelectedAssetIds([])
+                                    }
+                                }}
+                                isBulkMode={isBulkMode}
+                                filterable_schema={filterable_schema}
+                                selectedCategoryId={selectedCategoryId}
+                                available_values={availableValues}
+                            />
+                        </div>
                         
-                        {/* Phase 2 – Step 8: Metadata Filters - Always show when category is selected */}
+                        {/* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */}
                         {/* 
-                            Only render AssetFilters when:
-                            - A specific category is selected (not "All" / selectedCategoryId is truthy)
-                            - filterable_schema exists and has fields
+                            Secondary metadata filters are metadata fields NOT marked as primary.
+                            These filters render in the "More filters" expandable section.
                             
-                            When "All" is selected (selectedCategoryId is null/undefined), 
-                            metadata schema cannot be resolved, so filters are not available.
+                            Visibility rules (enforced by Phase H helpers):
+                            - Field does NOT have is_primary === true (excluded from primary)
+                            - Field is ENABLED for the current category (filterScopeRules.isFilterCompatible)
+                            - Field has Filter = true (is_filterable) - enforced by backend filterable_schema
+                            - Field has ≥1 value in current asset grid (filterVisibilityRules.hasAvailableValues)
+                            
+                            Phase H helpers used:
+                            - normalizeFilterConfig: Normalizes Inertia props
+                            - filterTierResolver.getSecondaryFilters: Gets metadata fields from schema (excludes is_primary === true)
+                            - filterVisibilityRules.getVisibleFilters: Filters to visible only
+                            
+                            UI behavior:
+                            - Bar always persists (content changes based on category)
+                            - Shows "More filters" button always (disabled if no filters)
+                            - Updates URL query params immediately on change
+                            - Triggers grid refresh (only: ['assets'])
+                            - Shows empty state if no filters available for current category
+                            
+                            Explicitly does NOT render:
+                            - Category selectors (sidebar handles this)
+                            - Asset type selectors (route/nav handles this)
+                            - Brand selectors (never selectable)
+                            - Primary metadata filters (is_primary === true) - handled by AssetGridMetadataPrimaryFilters
                         */}
-                        {selectedCategoryId && (
-                            <div className={`${localAssets && localAssets.length > 0 ? 'mb-6' : 'mb-6'}`}>
-                                {filterable_schema && filterable_schema.length > 0 ? (
-                                    <div className="flex items-center justify-end">
-                                        <AssetFilters
-                                            filterableSchema={filterable_schema}
-                                            categoryId={selectedCategoryId}
-                                            savedViews={saved_views}
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center justify-end">
-                                        <span className="text-xs text-gray-500 italic">
-                                            No filterable metadata available for this category
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                        <AssetGridSecondaryFilters
+                            filterable_schema={filterable_schema}
+                            selectedCategoryId={selectedCategoryId}
+                            available_values={availableValues}
+                            canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
+                            assetType="image"
+                        />
                             
                             {/* Assets Grid or Empty State */}
                             {localAssets && localAssets.length > 0 ? (

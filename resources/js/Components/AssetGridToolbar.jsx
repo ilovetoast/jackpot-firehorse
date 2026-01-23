@@ -6,13 +6,11 @@
  * 
  * Features:
  * - Search input (coming soon - Phase 6.1)
+ * - Primary metadata filters (between search and controls)
  * - "Show Info" toggle (controls asset card metadata visibility)
  * - Grid size controls (card size control)
  * - Bulk selection toggle (if applicable)
  * - Responsive layout (mobile-first)
- * 
- * Note: Metadata filtering is handled separately via AssetFilters component,
- * which appears below the toolbar when a specific category is selected.
  * 
  * @param {Object} props
  * @param {boolean} props.showInfo - Whether to show asset info (title, file type)
@@ -20,8 +18,12 @@
  * @param {number} props.cardSize - Current card size in pixels (160-360, default 220)
  * @param {Function} props.onCardSizeChange - Callback when card size changes
  * @param {string} props.primaryColor - Brand primary color for slider styling
+ * @param {Array} props.filterable_schema - Filterable metadata schema from backend
+ * @param {number|null} props.selectedCategoryId - Currently selected category ID
+ * @param {Object} props.available_values - Map of field_key to available values
  */
 import { useState } from 'react'
+import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -33,6 +35,9 @@ export default function AssetGridToolbar({
     onBulkEdit = null, // Phase 2 – Step 7
     onToggleBulkMode = null, // Phase 2 – Step 7
     isBulkMode = false, // Phase 2 – Step 7
+    filterable_schema = [], // Primary metadata filters
+    selectedCategoryId = null, // Current category
+    available_values = {}, // Available filter values
 }) {
     // Static filter chip placeholders (non-functional)
     const filterChips = ['Nature', 'Space', 'Color-grading', 'Amsterdam', 'Summer']
@@ -124,10 +129,17 @@ export default function AssetGridToolbar({
                         />
                         {/* TODO: Phase 6.1 — Wire search input to backend filtering */}
                     </div>
-                    {/* Helper note for category-specific filters */}
-                    <span className="text-xs text-gray-500 hidden sm:inline">
-                        Advanced filters available when a category is selected
-                    </span>
+                    
+                    {/* Primary Metadata Filters - Between search and controls */}
+                    <div className="flex items-center gap-2 min-w-[100px]">
+                        <AssetGridMetadataPrimaryFilters
+                            filterable_schema={filterable_schema}
+                            selectedCategoryId={selectedCategoryId}
+                            available_values={available_values}
+                            assetType="image"
+                            compact={true}
+                        />
+                    </div>
                 </div>
 
                 {/* Controls - Right Side on Desktop */}

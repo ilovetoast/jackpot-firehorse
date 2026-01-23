@@ -135,7 +135,53 @@ This document is the **SINGLE SOURCE OF TRUTH** for understanding phase structur
 
 ---
 
-### 5. Metadata UX (Tenant)
+### 5. Asset Grid Filter UX
+
+**Status:** ✅ LOCKED
+
+**Phase Documents:**
+- *No dedicated phase doc (consolidated in this index)*
+
+**Key Components:**
+- FilterDescriptor contract (JS-only type definition)
+- normalizeFilterConfig (canonical config normalization)
+- filterTierResolver (primary / secondary / hidden classification)
+- filterScopeRules (scope compatibility rules)
+- filterQueryOwnership (URL query parameter ownership map)
+- filterVisibilityRules (visibility semantics)
+- AssetGridPrimaryFilters (primary filter bar UI)
+- AssetGridSecondaryFilters (secondary filter UI with expansion)
+- Category-switch filter cleanup (query pruning)
+
+**What's Locked:**
+- FilterDescriptor contract structure
+- Filter tier classification logic
+- Scope compatibility rules
+- URL query ownership definitions
+- Visibility semantics (hidden vs visible, no disabled state)
+- Primary and secondary filter UI structure
+- Category-switch cleanup behavior
+- All filter helper functions and utilities
+
+**Current State:** ✅ COMPLETE and verified. Filter architecture is production-ready.
+
+**Lock Declaration:**
+Phase H is **COMPLETE and LOCKED**. No further changes to filter behavior, persistence, or UX are allowed in this phase. Any future filter improvements must occur in a new phase.
+
+**UI Configuration Ownership (Metadata Management):**
+- **Filter visibility** and **primary vs secondary placement** are configured **only** in Metadata Management → By Category tab
+- All Metadata and Custom Fields tabs are **overview-only** and must never reintroduce filter controls
+- Filters tab is **read-only explainer** and must never gain interactive controls
+- This is a UI consolidation clarification only; Phase H filter logic remains unchanged
+
+**Saved Filters Status:**
+- **PAUSED** — Saved Filters (Phase I/J) are intentionally paused until admin configuration UX is locked and stable
+- No code scaffolding, no TODO lists beyond documentation
+- Will consume resolved metadata from Phase H when resumed
+
+---
+
+### 6. Metadata UX (Tenant)
 
 **Status:** ✅ COMPLETE + PAUSED (Phase G)
 
@@ -198,7 +244,7 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 
 ---
 
-### 7. Support & Ticketing System
+### 8. Support & Ticketing System
 
 **Status:** 🔨 IN PROGRESS
 
@@ -218,7 +264,7 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 
 ---
 
-### 8. Future Design Specifications
+### 9. Future Design Specifications
 
 **Status:** 📋 FUTURE (Design Only)
 
@@ -283,17 +329,9 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 **Immediate Next Work:**
 - Complete Phase 4, 5A, and 5B before starting new major work
 
-**Future Phase H (Metadata UX - Filter Improvements):**
-- Filter UX (primary vs secondary filters)
-- Contextual filter visibility
-- Grid filter expansion patterns
-- **Phase H MUST NOT modify:**
-  - MetadataSchemaResolver
-  - MetadataVisibilityResolver
-  - TenantMetadataVisibilityService
-  - TenantMetadataRegistryService
-  - MetadataFilterService
-  - Existing metadata UX wiring (Phase G)
+**Phase H (Asset Grid Filter UX):**
+- ✅ COMPLETE and LOCKED
+- See Phase H section below for details
 
 ---
 
@@ -335,6 +373,14 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 - Filter Surface tab behavior
 - Automated field exclusion from tenant category UI
 - Existing API wiring for enable/disable per category, upload/edit/filter visibility, filter surface toggles
+
+**Asset Grid Filter UX (Phase H):**
+- Primary and secondary filter UI structure
+- Filter tier classification behavior
+- Scope compatibility rules
+- URL query ownership definitions
+- Visibility semantics (hidden vs visible)
+- Category-switch cleanup behavior
 
 ### Architecture (LOCKED)
 

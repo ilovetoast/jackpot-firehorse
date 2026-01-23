@@ -1,197 +1,128 @@
 /**
  * Filter View Component
  * 
- * Phase G.3: Tenant Filter Surface Control
+ * ⚠️ READ-ONLY EXPLAINER (No Controls)
  * 
- * Displays all metadata fields (including automated) with filter visibility toggles.
- * This view is independent from category enablement and upload/edit visibility.
+ * This tab is intentionally read-only and must never gain interactive controls.
+ * Filter visibility and primary placement are configured per category in the By Category tab.
+ * 
+ * Purpose:
+ * - Explain what asset grid filters are
+ * - Describe primary vs secondary filter behavior
+ * - Provide guidance on how to configure filters
+ * - Link to By Category tab for actual configuration
+ * 
+ * What this tab CANNOT do:
+ * - Toggle filter visibility
+ * - Configure primary/secondary placement
+ * - Display interactive tables or toggles
+ * - Persist any filter-related state
+ * 
+ * ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+ * A field may be primary in Photography but secondary in Logos.
  */
 
-import { useState } from 'react'
-import { router } from '@inertiajs/react'
 import {
     FunnelIcon,
     InformationCircleIcon,
+    ArrowRightIcon,
 } from '@heroicons/react/24/outline'
 
 export default function FilterView({ 
-    registry, 
-    canManageVisibility 
+    onSwitchToByCategory 
 }) {
-    const { system_fields: systemFields = [], tenant_fields = [] } = registry || {}
-    const allFields = [...systemFields, ...tenant_fields]
-    
-    // Phase G.3: Include ALL fields for filter control, including automated ones
-    // Filter out only fields where show_in_filters is false at system level
-    const filterableFields = allFields.filter(field => {
-        // Exclude fields that are explicitly marked as not filterable at system level
-        return field.show_in_filters !== false
-    })
-    
-    const handleFilterVisibilityToggle = async (fieldId, currentValue) => {
-        if (!canManageVisibility) return
-
-        const newValue = !currentValue
-
-        try {
-            await router.post(`/api/tenant/metadata/fields/${fieldId}/visibility`, {
-                show_in_filters: newValue,
-            }, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    router.reload({ only: ['registry'] })
-                },
-            })
-        } catch (error) {
-            console.error('Failed to update filter visibility:', error)
-        }
-    }
-
-    const getPopulationModeBadge = (field) => {
-        const mode = field.population_mode || 'manual'
-        const isReadonly = field.readonly === true
-        
-        if (mode === 'automatic' && isReadonly) {
-            return (
-                <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded">
-                    Auto
-                </span>
-            )
-        } else if (mode === 'hybrid') {
-            return (
-                <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-600 rounded">
-                    Hybrid
-                </span>
-            )
-        } else {
-            return (
-                <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-600 rounded">
-                    Manual
-                </span>
-            )
-        }
-    }
-
     return (
         <div className="px-6 py-4 space-y-6">
             {/* Header */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
                 <div className="flex items-start gap-3">
-                    <FunnelIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <FunnelIcon className="w-6 h-6 text-blue-600 mt-0.5 flex-shrink-0" />
                     <div className="flex-1">
-                        <h3 className="text-sm font-semibold text-blue-900 mb-1">
-                            Filter Surface Control
+                        <h3 className="text-lg font-semibold text-blue-900 mb-2">
+                            Asset Grid Filters
                         </h3>
-                        <p className="text-sm text-blue-800">
-                            Control which metadata fields appear as filter options in the asset grid.
-                            This does not affect how metadata is populated or displayed elsewhere.
+                        <p className="text-sm text-blue-800 mb-4">
+                            Metadata fields can appear as filters in the asset grid, helping users find assets by their metadata values.
                         </p>
+                        <button
+                            onClick={onSwitchToByCategory}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                        >
+                            Configure in By Category
+                            <ArrowRightIcon className="w-4 h-4" />
+                        </button>
                     </div>
                 </div>
             </div>
 
-            {/* Helper Text */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <div className="flex items-start gap-2">
-                    <InformationCircleIcon className="w-5 h-5 text-gray-600 mt-0.5 flex-shrink-0" />
-                    <div className="text-sm text-gray-700">
-                        <p className="mb-2">
-                            <strong>What this controls:</strong> Which fields appear as filter options when browsing assets.
-                        </p>
-                        <p className="mb-2">
-                            <strong>What this does NOT affect:</strong>
-                        </p>
-                        <ul className="list-disc list-inside space-y-1 ml-4">
-                            <li>How metadata is populated (automated fields remain automated)</li>
-                            <li>Upload and edit forms (controlled separately)</li>
-                            <li>Asset detail displays</li>
-                            <li>Category enablement</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-
-            {/* Fields List */}
-            {filterableFields.length === 0 ? (
-                <div className="text-center py-12">
-                    <p className="text-sm text-gray-500">
-                        No filterable fields found.
+            {/* Explainer Content */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-6">
+                <div>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                        What are Asset Grid Filters?
+                    </h4>
+                    <p className="text-sm text-gray-700">
+                        Filters appear in the asset grid interface, allowing users to narrow down assets by metadata values. 
+                        For example, if you have a "Photo Type" field, users can filter assets to show only "Action" photos.
                     </p>
                 </div>
-            ) : (
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Field
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Type
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Population
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Available in Filters
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {filterableFields.map(field => {
-                                    const isSystem = systemFields.some(sf => sf.id === field.id)
-                                    const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
-                                    
-                                    return (
-                                        <tr key={field.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-medium text-gray-900">
-                                                        {field.label}
-                                                    </span>
-                                                    {isSystem && (
-                                                        <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
-                                                            System
-                                                        </span>
-                                                    )}
-                                                    {!isSystem && (
-                                                        <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded">
-                                                            Custom
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className="text-sm text-gray-600">
-                                                    {field.field_type || 'text'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                {getPopulationModeBadge(field)}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={effectiveFilter}
-                                                        onChange={() => handleFilterVisibilityToggle(field.id, effectiveFilter)}
-                                                        disabled={!canManageVisibility}
-                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    />
-                                                    <span className="text-sm text-gray-700">
-                                                        {effectiveFilter ? 'Shown' : 'Hidden'}
-                                                    </span>
-                                                </label>
-                                            </td>
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
+
+                <div>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                        Primary vs Secondary Filters
+                    </h4>
+                    <div className="space-y-2 text-sm text-gray-700">
+                        <p>
+                            <strong>Primary filters</strong> appear inline in the asset grid filter bar (always visible). 
+                            These are the most important filters for a category and are immediately accessible.
+                        </p>
+                        <p>
+                            <strong>Secondary filters</strong> appear in the "More filters" expandable section. 
+                            These are still accessible but require one click to reveal.
+                        </p>
+                        <p className="text-xs text-gray-500 italic mt-2">
+                            Note: Filter placement is category-scoped. A field can be primary in one category and secondary in another.
+                        </p>
                     </div>
                 </div>
-            )}
+
+                <div>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                        How to Configure Filters
+                    </h4>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-start gap-2">
+                            <InformationCircleIcon className="w-5 h-5 text-gray-600 mt-0.5 flex-shrink-0" />
+                            <div className="text-sm text-gray-700 space-y-2">
+                                <p>
+                                    Filter visibility and primary placement are configured per category in the <strong>By Category</strong> tab:
+                                </p>
+                                <ol className="list-decimal list-inside space-y-1 ml-2">
+                                    <li>Select a category from the list</li>
+                                    <li>Enable the field for that category (toggle switch)</li>
+                                    <li>Check the "Filter" checkbox to make it available as a filter</li>
+                                    <li>Optionally check "Primary (for this category)" to show it inline in the filter bar</li>
+                                </ol>
+                                <p className="text-xs text-gray-500 italic mt-2">
+                                    This category-scoped approach allows different filter configurations for different categories.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                        What Filters Don't Control
+                    </h4>
+                    <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 ml-2">
+                        <li>How metadata is populated (automated fields remain automated)</li>
+                        <li>Upload and edit forms (controlled separately in the same interface)</li>
+                        <li>Asset detail displays</li>
+                        <li>Category enablement (whether a field is available for a category)</li>
+                    </ul>
+                </div>
+            </div>
         </div>
     )
 }

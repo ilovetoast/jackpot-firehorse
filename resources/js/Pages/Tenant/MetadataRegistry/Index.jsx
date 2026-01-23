@@ -11,14 +11,36 @@ import {
     InformationCircleIcon,
     ChevronDownIcon,
     ChevronRightIcon,
+    CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 
+/**
+ * Metadata Management Index Component
+ * 
+ * ⚠️ OVERVIEW-ONLY TABS (All Metadata, Custom Fields)
+ * 
+ * The "All Metadata" and "Custom Fields" tabs are overview-only and must never
+ * reintroduce filter controls. Filter visibility and primary/secondary placement
+ * are configured exclusively in the "By Category" tab.
+ * 
+ * What these tabs CAN do:
+ * - Display system-wide field overview
+ * - Toggle Upload/Edit visibility (global)
+ * - Show category scope information
+ * - Provide advanced drill-down details
+ * 
+ * What these tabs CANNOT do:
+ * - Configure filter visibility (show_in_filters)
+ * - Configure primary/secondary placement (is_primary)
+ * - Add filter-related toggles or controls
+ */
 export default function TenantMetadataRegistryIndex({ registry, categories, canManageVisibility, canManageFields }) {
     const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY
     const [expandedField, setExpandedField] = useState(null)
     const [categoryModal, setCategoryModal] = useState({ open: false, field: null, suppressedCategories: [] })
     const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null) // Category Lens filter
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
+    const [successMessage, setSuccessMessage] = useState(null) // Success message state
 
     const { system_fields = [], tenant_fields = [] } = registry || {}
     const allFields = [...system_fields, ...tenant_fields]
@@ -37,18 +59,30 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
 
         const newValue = !currentValue
         const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
+        const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Edit' : 'Filter'
 
         try {
             await router.post(`/api/tenant/metadata/fields/${fieldId}/visibility`, {
                 [visibilityKey]: newValue,
             }, {
                 preserveScroll: true,
+                preserveState: true,
                 onSuccess: () => {
-                    router.reload({ only: ['registry'] })
+                    // Show success message
+                    setSuccessMessage(`${contextLabel} visibility ${newValue ? 'enabled' : 'disabled'}`)
+                    setTimeout(() => setSuccessMessage(null), 3000)
+                    
+                    // Silently reload registry in background without page refresh
+                    router.reload({ 
+                        only: ['registry'],
+                        preserveState: true,
+                        preserveScroll: true,
+                    })
                 },
             })
         } catch (error) {
             console.error('Failed to update visibility:', error)
+            setSuccessMessage(null)
         }
     }
 
@@ -360,6 +394,34 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
     return (
         <div className="min-h-screen bg-gray-50">
             <AppNav />
+            
+            {/* Success Message Toast */}
+            {successMessage && (
+                <div className="fixed top-4 right-4 z-50 max-w-md w-full">
+                    <div className="bg-green-50 border border-green-200 rounded-lg shadow-lg p-4">
+                        <div className="flex items-start">
+                            <div className="flex-shrink-0">
+                                <CheckCircleIcon className="h-5 w-5 text-green-400" />
+                            </div>
+                            <div className="ml-3 flex-1">
+                                <p className="text-sm font-medium text-green-800">{successMessage}</p>
+                            </div>
+                            <div className="ml-4 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setSuccessMessage(null)}
+                                    className="inline-flex text-green-400 hover:text-green-500"
+                                >
+                                    <span className="sr-only">Close</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 <div className="bg-white rounded-lg shadow">
                     <div className="px-6 py-4 border-b border-gray-200">
@@ -431,8 +493,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                         </div>
                     ) : activeTab === 'filters' ? (
                         <FilterView
-                            registry={registry}
-                            canManageVisibility={canManageVisibility}
+                            onSwitchToByCategory={() => setActiveTab('by-category')}
                         />
                     ) : (
                         <>
@@ -470,8 +531,11 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                 <div className="flex items-start gap-2">
                                     <InformationCircleIcon className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
                                     <div className="text-sm text-blue-800">
-                                        <p>
-                                            Hiding a field does not delete existing data. Toggle fields on/off to control where they appear in upload, edit, and filter interfaces.
+                                        <p className="mb-1">
+                                            Hiding a field does not delete existing data. Toggle fields on/off to control where they appear in upload and edit interfaces.
+                                        </p>
+                                        <p className="font-medium">
+                                            Filter visibility and primary placement are configured per category in the <button onClick={() => setActiveTab('by-category')} className="underline hover:text-blue-900">By Category</button> tab.
                                         </p>
                                     </div>
                                 </div>
@@ -563,17 +627,12 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                                                     <span className="text-sm text-gray-700">Edit</span>
                                                                 </label>
 
-                                                                {/* Filter Toggle */}
-                                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={effectiveFilter}
-                                                                        onChange={() => handleVisibilityToggle(field.id, 'filter', effectiveFilter)}
-                                                                        disabled={!canManageVisibility}
-                                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                    />
-                                                                    <span className="text-sm text-gray-700">Filter</span>
-                                                                </label>
+                                                                {/* Filter - Read-only */}
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-sm text-gray-500 italic">
+                                                                        Filter → configured in <button onClick={() => setActiveTab('by-category')} className="text-indigo-600 hover:text-indigo-700 underline">By Category</button>
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-3">

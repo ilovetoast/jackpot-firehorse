@@ -92,6 +92,13 @@ class MetadataFilterService
             }
 
             // Apply filter based on field type
+            \Log::info('[MetadataFilterService] DEBUG - Applying filter', [
+                'fieldKey' => $fieldKey,
+                'fieldId' => $fieldId,
+                'fieldType' => $field['type'],
+                'operator' => $operator,
+                'value' => $value,
+            ]);
             $this->applyFieldFilter($query, $fieldId, $field['type'], $operator, $value);
         }
     }
@@ -108,27 +115,86 @@ class MetadataFilterService
      */
     protected function applyFieldFilter($query, int $fieldId, string $fieldType, string $operator, $value): void
     {
-        // Use whereExists with correlated subquery to get latest approved value per asset
-        // This ensures we only match against the most recent approved value for each field
-        $query->whereExists(function ($q) use ($fieldId, $fieldType, $operator, $value) {
-            $q->select(DB::raw(1))
-                ->from('asset_metadata as am')
-                ->whereColumn('am.asset_id', 'assets.id')
-                ->where('am.metadata_field_id', $fieldId)
-                ->where('am.source', 'user')
-                ->whereNotNull('am.approved_at')
-                ->whereRaw("am.approved_at = (
-                    SELECT MAX(approved_at)
-                    FROM asset_metadata
-                    WHERE asset_id = am.asset_id
-                    AND metadata_field_id = ?
-                    AND source = 'user'
-                    AND approved_at IS NOT NULL
-                )", [$fieldId]);
-
-            // Apply operator-specific filtering on the value_json
-            $this->applyOperatorFilter($q, $fieldType, $operator, $value);
+        // Get field key for JSON column lookup
+        $field = DB::table('metadata_fields')->where('id', $fieldId)->first();
+        $fieldKey = $field->key ?? null;
+        
+        if (!$fieldKey) {
+            \Log::warning('[MetadataFilterService] Field key not found for field_id', ['fieldId' => $fieldId]);
+            return;
+        }
+        
+        // Apply filter using OR condition to check both asset_metadata table AND metadata JSON column
+        // This ensures compatibility with both storage methods
+        $query->where(function ($q) use ($fieldId, $fieldKey, $fieldType, $operator, $value) {
+            // Option 1: Check asset_metadata table (preferred - normalized storage)
+            $q->whereExists(function ($subQ) use ($fieldId, $fieldType, $operator, $value) {
+                $subQ->select(DB::raw(1))
+                    ->from('asset_metadata as am')
+                    ->whereColumn('am.asset_id', 'assets.id')
+                    ->where('am.metadata_field_id', $fieldId)
+                    ->whereIn('am.source', ['user', 'system'])
+                    ->whereNotNull('am.approved_at')
+                    ->whereRaw("am.approved_at = (
+                        SELECT MAX(approved_at)
+                        FROM asset_metadata
+                        WHERE asset_id = am.asset_id
+                        AND metadata_field_id = ?
+                        AND source IN ('user', 'system')
+                        AND approved_at IS NOT NULL
+                    )", [$fieldId]);
+                
+                // Apply operator-specific filtering on the value_json
+                $this->applyOperatorFilter($subQ, $fieldType, $operator, $value);
+            });
+            
+            // Option 2: Check metadata JSON column (legacy/fallback)
+            // Look in metadata->fields->{fieldKey}
+            $this->applyOperatorFilterToJsonColumn($q, $fieldKey, $fieldType, $operator, $value);
         });
+        
+        // DEBUG: Log the filter application
+        \Log::info('[MetadataFilterService] DEBUG - Filter applied', [
+            'fieldId' => $fieldId,
+            'fieldKey' => $fieldKey,
+            'fieldType' => $fieldType,
+            'operator' => $operator,
+            'value' => $value,
+        ]);
+    }
+    
+    /**
+     * Apply operator filter to metadata JSON column (legacy/fallback).
+     * 
+     * Checks metadata->fields->{fieldKey} in the assets.metadata JSON column.
+     */
+    protected function applyOperatorFilterToJsonColumn($query, string $fieldKey, string $fieldType, string $operator, $value): void
+    {
+        $jsonPath = "JSON_EXTRACT(metadata, '$.fields.{$fieldKey}')";
+        
+        switch ($fieldType) {
+            case 'select':
+                // For select, match exact value
+                $encodedValue = json_encode($value);
+                $query->orWhereRaw("{$jsonPath} = ?", [$encodedValue]);
+                break;
+                
+            case 'text':
+                if ($operator === 'contains') {
+                    $query->orWhereRaw("LOWER({$jsonPath}) LIKE ?", ['%' . strtolower($value) . '%']);
+                } elseif ($operator === 'equals') {
+                    $encodedValue = json_encode($value);
+                    $query->orWhereRaw("{$jsonPath} = ?", [$encodedValue]);
+                }
+                break;
+                
+            case 'multiselect':
+                // For multiselect, check if value is in array
+                $query->orWhereRaw("JSON_CONTAINS({$jsonPath}, ?)", [json_encode($value)]);
+                break;
+                
+            // Add other field types as needed
+        }
     }
 
     /**
@@ -170,7 +236,19 @@ class MetadataFilterService
                 break;
 
             case 'select':
-                $query->where('am.value_json', json_encode($value));
+                // For select fields, value_json is stored as JSON-encoded string
+                // e.g., "studio" is stored as "\"studio\"" (JSON string)
+                // Use JSON_UNQUOTE to compare the unquoted values for reliability
+                $encodedValue = json_encode($value);
+                \Log::info('[MetadataFilterService] DEBUG - select filter comparison', [
+                    'value' => $value,
+                    'value_type' => gettype($value),
+                    'encodedValue' => $encodedValue,
+                    'encodedValue_length' => strlen($encodedValue),
+                ]);
+                // Compare using JSON_UNQUOTE to handle any encoding differences
+                // This compares the actual unquoted string values
+                $query->whereRaw('JSON_UNQUOTE(am.value_json) = ?', [$value]);
                 break;
 
             case 'multiselect':
@@ -275,6 +353,27 @@ class MetadataFilterService
             $fieldType = $field['type'] ?? 'text';
             $operators = $this->getOperatorsForType($fieldType);
 
+            // Determine scope properties for Phase H filter visibility rules
+            // Check applies_to field (from metadata_fields table)
+            $appliesTo = $field['applies_to'] ?? 'all';
+            
+            // Metadata fields are never global filters (they're category-specific)
+            // Global filters persist across category switches (Search, Category, Asset Type, Brand)
+            // Metadata fields are scoped to categories and are filtered by visibility resolver
+            $isGlobal = false;
+            
+            // Map applies_to to asset_types array for Phase H compatibility
+            // 'all' means applies to all asset types (null = all asset types in Phase H)
+            // Otherwise, map to array of asset types (e.g., ['image'], ['video'])
+            // Phase H expects: null = all asset types, array = specific asset types
+            $assetTypes = ($appliesTo === 'all') ? null : [$appliesTo];
+            
+            // category_ids is null for all metadata fields
+            // Metadata fields are category-scoped via visibility resolver, not explicit category_ids
+            // Phase H will check compatibility based on current category context
+            // null means "applies to all categories" (category-scoped filters work with any category)
+            $categoryIds = null;
+
             $filterable[] = [
                 'field_id' => $field['field_id'],
                 'field_key' => $field['key'],
@@ -283,6 +382,17 @@ class MetadataFilterService
                 'operators' => $operators,
                 'options' => $field['options'] ?? [],
                 'group_key' => $field['group_key'],
+                // Phase H scope properties required for filter visibility rules
+                'is_global' => $isGlobal,
+                'category_ids' => $categoryIds,
+                'asset_types' => $assetTypes,
+                // Primary metadata filters: effective_is_primary (category-scoped) determines placement
+                // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
+                // A field may be primary in Photography but secondary in Logos.
+                // The field['is_primary'] value is already effective_is_primary from MetadataSchemaResolver:
+                // Resolution order: category override > global is_primary (deprecated) > false
+                // If is_primary is missing → defaults to false (rendered as secondary)
+                'is_primary' => $field['is_primary'] ?? false,
             ];
         }
 
