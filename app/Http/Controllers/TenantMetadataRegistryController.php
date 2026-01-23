@@ -85,11 +85,35 @@ class TenantMetadataRegistryController extends Controller
             ])
             ->values();
 
+        // Get plan limits for custom metadata fields
+        $planService = app(\App\Services\PlanService::class);
+        $limits = $planService->getPlanLimits($tenant);
+        $maxCustomFields = $limits['max_custom_metadata_fields'] ?? 0;
+        
+        // Count current custom fields
+        $currentCustomFieldsCount = \Illuminate\Support\Facades\DB::table('metadata_fields')
+            ->where('tenant_id', $tenant->id)
+            ->where('scope', 'tenant')
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->count();
+        
+        $canCreateCustomField = $maxCustomFields === 0 || $currentCustomFieldsCount < $maxCustomFields;
+
+        // Owners and admins should have full access to manage fields
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        
         return Inertia::render('Tenant/MetadataRegistry/Index', [
             'registry' => $registry,
             'categories' => $categories,
-            'canManageVisibility' => $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage'),
-            'canManageFields' => $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage'),
+            'canManageVisibility' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage'),
+            'canManageFields' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage'),
+            'customFieldsLimit' => [
+                'max' => $maxCustomFields,
+                'current' => $currentCustomFieldsCount,
+                'can_create' => $canCreateCustomField,
+            ],
         ]);
     }
 

@@ -26,6 +26,17 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             'asset.thumbnail.retry_requested': 'Thumbnail generation retry requested',
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
+            'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,
+            'asset.system_tagging.completed': `System tagging completed${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
+            'asset.ai_suggestions.generated': `AI suggestions generated${metadata?.suggestions_count ? ` (${metadata.suggestions_count} suggestions)` : ''}`,
+            'asset.ai_suggestion.accepted': metadata?.field_label 
+                ? `AI suggestion accepted: ${metadata.field_label}`
+                : 'AI suggestion accepted',
+            'asset.ai_suggestion.dismissed': metadata?.field_label
+                ? `AI suggestion dismissed: ${metadata.field_label}`
+                : 'AI suggestion dismissed',
+            'asset.metadata.populated': `Metadata populated${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
+            'asset.color_analysis.completed': `Color analysis completed${metadata?.buckets_count ? ` (${metadata.buckets_count} colors)` : ''}`,
         }
         
         return eventMap[eventType] || eventType
@@ -66,11 +77,20 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             }
         }
         
-        if (eventType.includes('completed') || eventType.includes('promoted') || eventType.includes('ready') || eventType.includes('finalized')) {
+        if (eventType.includes('completed') || eventType.includes('promoted') || eventType.includes('ready') || eventType.includes('finalized') || eventType.includes('generated') || eventType.includes('accepted') || eventType.includes('populated')) {
             return {
                 icon: CheckCircleIcon,
                 color: 'text-green-500',
                 bgColor: 'bg-green-50',
+            }
+        }
+        
+        // Dismissed events are informational (not error, not success)
+        if (eventType.includes('dismissed')) {
+            return {
+                icon: CheckCircleIcon,
+                color: 'text-gray-500',
+                bgColor: 'bg-gray-50',
             }
         }
         

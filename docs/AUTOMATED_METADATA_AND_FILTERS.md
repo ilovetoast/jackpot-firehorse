@@ -344,6 +344,30 @@ Automated fields can be marked as primary/secondary **per category**:
 - [ ] Test available_values computation
 - [ ] Test primary/secondary placement
 
+### Phase 4.5: System Field Configuration (Completed: January 2025)
+
+**Automatic Field Seeder:**
+- `MetadataFieldPopulationSeeder` configures system fields that are automatically populated
+- Fields configured: `orientation`, `color_space`, `resolution_class`, `dimensions`
+- Configuration:
+  - `population_mode = 'automatic'`
+  - `show_on_upload = false` (hidden from upload form)
+  - `show_on_edit = true` (visible in edit, but readonly)
+  - `show_in_filters = true` (available in grid filters)
+  - `readonly = true` (users cannot edit, system can populate)
+- Seeder is included in `DatabaseSeeder` to run automatically
+
+**Upload Form Behavior:**
+- Fields with `population_mode = 'automatic'` are automatically excluded from upload form
+- Fields with `show_on_upload = false` are also excluded
+- These fields are populated automatically by the system during asset processing
+- Users can view these fields in the edit drawer (readonly) and use them in filters
+
+**Permission System:**
+- Owners and admins have full access to manage metadata fields (except system-locked fields)
+- System-locked fields (`automatic` + `readonly`) are never editable, even by owners/admins
+- Permission resolver automatically grants access to owners/admins for all other fields
+
 ---
 
 ## Hard Rules (Do Not Break)

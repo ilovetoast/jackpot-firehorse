@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Tenant;
+use App\Services\AiUsageService;
 use App\Services\BillingService;
 use App\Traits\HandlesFlashMessages;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -16,7 +18,8 @@ class CompanyController extends Controller
 {
     use HandlesFlashMessages;
     public function __construct(
-        protected BillingService $billingService
+        protected BillingService $billingService,
+        protected AiUsageService $aiUsageService
     ) {
     }
 
@@ -825,5 +828,59 @@ class CompanyController extends Controller
             'company_permissions' => $companyPermissions,
             'company_role_permissions' => $companyRolePermissions,
         ]);
+    }
+
+    /**
+     * Get AI usage status for the current tenant.
+     *
+     * GET /api/companies/ai-usage
+     *
+     * Admin-only endpoint to view AI usage and caps.
+     *
+     * @return JsonResponse
+     */
+    public function getAiUsage(): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (!$tenant) {
+                return response()->json(['error' => 'Tenant not found'], 404);
+            }
+
+            // Check permission (admin only)
+            if (!$user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
+                return response()->json(['error' => 'You do not have permission to view AI usage.'], 403);
+            }
+
+            $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
+
+            // Get breakdown for each feature
+            $breakdown = [];
+            foreach (['tagging', 'suggestions'] as $feature) {
+                $breakdown[$feature] = $this->aiUsageService->getUsageBreakdown($tenant, $feature);
+            }
+
+            return response()->json([
+                'status' => $usageStatus,
+                'breakdown' => $breakdown,
+                'current_month' => now()->format('Y-m'),
+                'month_start' => now()->startOfMonth()->toDateString(),
+                'month_end' => now()->endOfMonth()->toDateString(),
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching AI usage data', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to load AI usage data. Please try again later.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
 }

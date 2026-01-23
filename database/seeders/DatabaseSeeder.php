@@ -25,6 +25,9 @@ class DatabaseSeeder extends Seeder
             CompanyBrandSeeder::class, // This creates the site owner and companies/brands
             EnsureDefaultBrandsSeeder::class, // Ensure all tenants have default brands
             CategorySeeder::class,
+            MetadataFieldPermissionSeeder::class, // Seed metadata field permissions (owner/admin can edit all fields)
+            MetadataFieldPopulationSeeder::class, // Configure automatic population fields (orientation, color_space, resolution_class, etc.)
+            MetadataFieldAiEligibleSeeder::class, // Enable AI suggestions for fields like photo_type
         ]);
     }
 }

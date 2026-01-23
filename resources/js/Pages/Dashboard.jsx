@@ -5,13 +5,14 @@ import {
     ServerIcon,
     ArrowUpIcon,
     ArrowDownIcon,
-    EyeIcon
+    EyeIcon,
+    SparklesIcon
 } from '@heroicons/react/24/outline'
 import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [] }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
@@ -252,6 +253,124 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     </div>
+
+                    {/* AI Tagging Card - Only show if user has permission and data is available */}
+                    {ai_usage && (
+                        <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                    <SparklesIcon className="h-6 w-6 text-purple-400" aria-hidden="true" />
+                                </div>
+                                <div className="ml-5 w-0 flex-1">
+                                    <dt className="text-sm font-medium text-gray-500 truncate">AI Tagging</dt>
+                                    <dd className="mt-1">
+                                        <div className="flex items-baseline">
+                                            <span className="text-2xl font-semibold tracking-tight text-gray-900">
+                                                {ai_usage.tagging.usage.toLocaleString()}
+                                            </span>
+                                            {!ai_usage.tagging.is_unlimited && (
+                                                <span className="ml-2 text-sm text-gray-500">
+                                                    of {ai_usage.tagging.cap.toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {ai_usage.tagging.is_unlimited ? (
+                                            <p className="mt-1 text-xs text-gray-500">Unlimited</p>
+                                        ) : ai_usage.tagging.is_disabled ? (
+                                            <p className="mt-1 text-xs text-gray-500">Disabled</p>
+                                        ) : (
+                                            <>
+                                                <p className="mt-1 text-xs text-gray-500">
+                                                    {ai_usage.tagging.remaining !== null 
+                                                        ? `${ai_usage.tagging.remaining.toLocaleString()} remaining this month`
+                                                        : 'N/A'}
+                                                </p>
+                                                <div className="mt-2">
+                                                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                                                        <span>Usage</span>
+                                                        <span>{ai_usage.tagging.percentage.toFixed(1)}%</span>
+                                                    </div>
+                                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                                        <div
+                                                            className={`h-2 rounded-full transition-all ${
+                                                                ai_usage.tagging.is_exceeded
+                                                                    ? 'bg-red-500'
+                                                                    : ai_usage.tagging.percentage >= 80
+                                                                    ? 'bg-yellow-500'
+                                                                    : 'bg-purple-500'
+                                                            }`}
+                                                            style={{
+                                                                width: `${Math.min(100, ai_usage.tagging.percentage)}%`
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </dd>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AI Suggestions Card - Only show if user has permission and data is available */}
+                    {ai_usage && (
+                        <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                    <SparklesIcon className="h-6 w-6 text-indigo-400" aria-hidden="true" />
+                                </div>
+                                <div className="ml-5 w-0 flex-1">
+                                    <dt className="text-sm font-medium text-gray-500 truncate">AI Suggestions</dt>
+                                    <dd className="mt-1">
+                                        <div className="flex items-baseline">
+                                            <span className="text-2xl font-semibold tracking-tight text-gray-900">
+                                                {ai_usage.suggestions.usage.toLocaleString()}
+                                            </span>
+                                            {!ai_usage.suggestions.is_unlimited && (
+                                                <span className="ml-2 text-sm text-gray-500">
+                                                    of {ai_usage.suggestions.cap.toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {ai_usage.suggestions.is_unlimited ? (
+                                            <p className="mt-1 text-xs text-gray-500">Unlimited</p>
+                                        ) : ai_usage.suggestions.is_disabled ? (
+                                            <p className="mt-1 text-xs text-gray-500">Disabled</p>
+                                        ) : (
+                                            <>
+                                                <p className="mt-1 text-xs text-gray-500">
+                                                    {ai_usage.suggestions.remaining !== null 
+                                                        ? `${ai_usage.suggestions.remaining.toLocaleString()} remaining this month`
+                                                        : 'N/A'}
+                                                </p>
+                                                <div className="mt-2">
+                                                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                                                        <span>Usage</span>
+                                                        <span>{ai_usage.suggestions.percentage.toFixed(1)}%</span>
+                                                    </div>
+                                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                                        <div
+                                                            className={`h-2 rounded-full transition-all ${
+                                                                ai_usage.suggestions.is_exceeded
+                                                                    ? 'bg-red-500'
+                                                                    : ai_usage.suggestions.percentage >= 80
+                                                                    ? 'bg-yellow-500'
+                                                                    : 'bg-indigo-500'
+                                                            }`}
+                                                            style={{
+                                                                width: `${Math.min(100, ai_usage.suggestions.percentage)}%`
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </dd>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Most Viewed and Most Downloaded Blocks */}

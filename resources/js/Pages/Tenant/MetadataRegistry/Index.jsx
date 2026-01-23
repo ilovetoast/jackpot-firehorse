@@ -4,6 +4,7 @@ import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import ByCategoryView from './ByCategory'
 import FilterView from './FilterView'
+import MetadataFieldModal from '../../../Components/MetadataFieldModal'
 import {
     EyeIcon,
     EyeSlashIcon,
@@ -12,6 +13,7 @@ import {
     ChevronDownIcon,
     ChevronRightIcon,
     CheckCircleIcon,
+    PlusIcon,
 } from '@heroicons/react/24/outline'
 
 /**
@@ -34,13 +36,15 @@ import {
  * - Configure primary/secondary placement (is_primary)
  * - Add filter-related toggles or controls
  */
-export default function TenantMetadataRegistryIndex({ registry, categories, canManageVisibility, canManageFields }) {
+export default function TenantMetadataRegistryIndex({ registry, categories, canManageVisibility, canManageFields, customFieldsLimit = null }) {
     const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY
     const [expandedField, setExpandedField] = useState(null)
     const [categoryModal, setCategoryModal] = useState({ open: false, field: null, suppressedCategories: [] })
     const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null) // Category Lens filter
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
+    const [modalOpen, setModalOpen] = useState(false)
+    const [editingField, setEditingField] = useState(null)
 
     const { system_fields = [], tenant_fields = [] } = registry || {}
     const allFields = [...system_fields, ...tenant_fields]
@@ -489,6 +493,8 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                 registry={registry}
                                 categories={categories}
                                 canManageVisibility={canManageVisibility}
+                                canManageFields={canManageFields}
+                                customFieldsLimit={customFieldsLimit}
                             />
                         </div>
                     ) : activeTab === 'filters' ? (
@@ -497,7 +503,35 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                         />
                     ) : (
                         <>
+                            {/* Header with New Field Button for Custom Fields tab */}
+                            {activeTab === 'custom' && canManageFields && (
+                                <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">Custom Fields</h2>
+                                        <p className="mt-1 text-sm text-gray-600">
+                                            Manage your custom metadata fields
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEditingField(null)
+                                            setModalOpen(true)
+                                        }}
+                                        disabled={customFieldsLimit && !customFieldsLimit.can_create}
+                                        className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title={customFieldsLimit && !customFieldsLimit.can_create 
+                                            ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
+                                            : 'Create new custom metadata field'}
+                                    >
+                                        <PlusIcon className="h-4 w-4" />
+                                        New Field
+                                    </button>
+                                </div>
+                            )}
+
                             {/* Category Lens Filter (for All Metadata view) */}
+                            {activeTab !== 'custom' && (
                             <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                                 <div className="flex items-center gap-3">
                                     <label className="text-sm font-medium text-gray-700">
@@ -525,6 +559,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                     )}
                                 </div>
                             </div>
+                            )}
 
                             {/* Info Banner */}
                             <div className="px-6 py-3 bg-blue-50 border-b border-blue-200">
@@ -586,9 +621,11 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                             return (
                                                 <>
                                                     <tr key={field.id} className="hover:bg-gray-50">
-                                                        <td className="px-4 py-3">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-sm font-medium text-gray-900">{field.label}</span>
+                                                        <td className="px-4 py-3 align-top">
+                                                            <div className="flex items-start gap-2">
+                                                                <span className="text-sm font-medium text-gray-900">
+                                                                    {field.label || field.system_label || field.key || 'Unnamed Field'}
+                                                                </span>
                                                                 {isSystem && (
                                                                     <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
                                                                         System
@@ -601,7 +638,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-4 py-3 align-top">
                                                             <div className="flex items-center gap-4">
                                                                 {/* Upload Toggle */}
                                                                 <label className="flex items-center gap-2 cursor-pointer">
@@ -635,7 +672,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                                                 </div>
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-4 py-3 align-top">
                                                             <div 
                                                                 onMouseEnter={() => loadFieldCategoryData(field)}
                                                                 className="min-w-[200px]"
@@ -643,7 +680,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                                                 {renderCategoryBadges(field)}
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-4 py-3 align-top">
                                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                                                                 status === 'Active' 
                                                                     ? 'bg-green-100 text-green-800' 
@@ -652,7 +689,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                                                 {status}
                                                             </span>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-4 py-3 align-top">
                                                             <button
                                                                 onClick={() => setExpandedField(expandedField === field.id ? null : field.id)}
                                                                 className="text-sm text-gray-600 hover:text-gray-900"
@@ -733,6 +770,26 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                     </div>
                 </div>
             )}
+
+            {/* Metadata Field Modal */}
+            <MetadataFieldModal
+                isOpen={modalOpen}
+                onClose={() => {
+                    setModalOpen(false)
+                    setEditingField(null)
+                }}
+                field={editingField}
+                categories={categories}
+                canManageFields={canManageFields}
+                customFieldsLimit={customFieldsLimit}
+                onSuccess={() => {
+                    router.reload({ 
+                        only: ['registry'],
+                        preserveState: true,
+                        preserveScroll: true,
+                    })
+                }}
+            />
 
             <AppFooter />
         </div>

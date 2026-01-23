@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\PlanLimitExceededException;
 use App\Models\Tenant;
 use App\Services\PlanService;
 use Illuminate\Support\Facades\DB;
@@ -145,17 +146,27 @@ class TenantMetadataFieldService
             ]);
         }
 
+        // Determine ai_eligible based on field type and options
+        // AI suggestions are only allowed for select/multiselect fields with options
+        $aiEligible = false;
+        if (in_array($data['type'], ['select', 'multiselect'], true)) {
+            // Only enable AI if options are provided
+            // If no options exist, AI suggestions are disabled to prevent free-text hallucinations
+            $aiEligible = !empty($data['options']) && ($data['ai_eligible'] ?? false);
+        }
+
         // Build field data
         $fieldData = [
             'key' => $data['key'],
             'system_label' => $data['system_label'] ?? $data['key'],
             'type' => $data['type'],
-            'applies_to' => $data['applies_to'],
+            'applies_to' => 'all', // Default to all asset types (category selection handles visibility)
             'scope' => 'tenant',
             'tenant_id' => $tenant->id,
             'is_filterable' => $data['is_filterable'] ?? false,
             'is_user_editable' => true, // Tenant fields are always user-editable
             'is_ai_trainable' => false, // Tenant fields cannot be AI-trained (Phase C3)
+            'ai_eligible' => $aiEligible, // AI suggestions enabled only if select/multiselect with options
             'is_upload_visible' => $data['show_on_upload'] ?? true,
             'is_internal_only' => false, // Tenant fields are never internal-only
             'group_key' => $data['group_key'] ?? 'custom',
@@ -189,15 +200,183 @@ class TenantMetadataFieldService
             }
         }
 
+        // Enable field for selected categories
+        if (!empty($data['selectedCategories']) && is_array($data['selectedCategories'])) {
+            $visibilityService = app(\App\Services\MetadataVisibilityService::class);
+            foreach ($data['selectedCategories'] as $categoryId) {
+                try {
+                    $category = \App\Models\Category::find($categoryId);
+                    if ($category && $category->tenant_id === $tenant->id) {
+                        // Unsuppress the field for this category (enable it)
+                        $visibilityService->unsuppressForCategory($tenant, $fieldId, $category);
+                    }
+                } catch (\Exception $e) {
+                    // Log but don't fail field creation if category enablement fails
+                    Log::warning('Failed to enable field for category', [
+                        'field_id' => $fieldId,
+                        'category_id' => $categoryId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
         // Audit log
         Log::info('Tenant metadata field created', [
             'tenant_id' => $tenant->id,
             'field_id' => $fieldId,
             'field_key' => $data['key'],
             'field_type' => $data['type'],
+            'categories' => $data['selectedCategories'] ?? [],
         ]);
 
         return $fieldId;
+    }
+
+    /**
+     * Update a tenant metadata field.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param array $data Update data (key and type cannot be changed)
+     * @return bool
+     * @throws ValidationException
+     * @throws \Exception
+     */
+    public function updateField(Tenant $tenant, int $fieldId, array $data): bool
+    {
+        // Verify field belongs to tenant
+        $field = DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->where('scope', 'tenant')
+            ->first();
+
+        if (!$field) {
+            throw new \InvalidArgumentException("Field {$fieldId} does not exist or does not belong to tenant {$tenant->id}.");
+        }
+
+        // Check if field has values (immutability check)
+        $hasValues = DB::table('asset_metadata')
+            ->where('metadata_field_id', $fieldId)
+            ->exists();
+
+        // Key and type cannot be changed if field has values
+        if ($hasValues && (isset($data['key']) || isset($data['type']))) {
+            throw ValidationException::withMessages([
+                'key' => ['Field key and type cannot be changed after the field has been used.'],
+            ]);
+        }
+
+        // Update allowed fields
+        $updateData = [];
+        if (isset($data['system_label'])) {
+            $updateData['system_label'] = $data['system_label'];
+        }
+        if (isset($data['applies_to'])) {
+            $updateData['applies_to'] = $data['applies_to'];
+        }
+        if (isset($data['is_filterable'])) {
+            $updateData['is_filterable'] = $data['is_filterable'];
+        }
+        if (isset($data['show_on_upload'])) {
+            $updateData['show_on_upload'] = $data['show_on_upload'];
+        }
+        if (isset($data['show_on_edit'])) {
+            $updateData['show_on_edit'] = $data['show_on_edit'];
+        }
+        if (isset($data['show_in_filters'])) {
+            $updateData['show_in_filters'] = $data['show_in_filters'];
+        }
+        if (isset($data['group_key'])) {
+            $updateData['group_key'] = $data['group_key'];
+        }
+        if (isset($data['ai_eligible'])) {
+            $updateData['ai_eligible'] = $data['ai_eligible'];
+        }
+
+        $updateData['updated_at'] = now();
+
+        // Update options if provided
+        if (isset($data['options']) && is_array($data['options'])) {
+            // Delete existing options
+            DB::table('metadata_options')
+                ->where('metadata_field_id', $fieldId)
+                ->delete();
+
+            // Insert new options
+            foreach ($data['options'] as $option) {
+                DB::table('metadata_options')->insert([
+                    'metadata_field_id' => $fieldId,
+                    'value' => $option['value'],
+                    'system_label' => $option['label'],
+                    'is_system' => false,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
+        DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->update($updateData);
+
+        Log::info('Tenant metadata field updated', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'field_key' => $field->key,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Get a single tenant metadata field.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @return array|null
+     */
+    public function getField(Tenant $tenant, int $fieldId): ?array
+    {
+        $field = DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->where('tenant_id', $tenant->id)
+            ->where('scope', 'tenant')
+            ->first();
+
+        if (!$field) {
+            return null;
+        }
+
+        // Load options
+        $options = DB::table('metadata_options')
+            ->where('metadata_field_id', $fieldId)
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($opt) => [
+                'value' => $opt->value,
+                'label' => $opt->system_label,
+            ])
+            ->toArray();
+
+        return [
+            'id' => $field->id,
+            'key' => $field->key,
+            'label' => $field->system_label ?: $field->key, // Use system_label as label, fallback to key
+            'system_label' => $field->system_label,
+            'type' => $field->type,
+            'applies_to' => $field->applies_to,
+            'options' => $options,
+            'ai_eligible' => (bool) $field->ai_eligible,
+            'is_filterable' => (bool) $field->is_filterable,
+            'show_on_upload' => (bool) $field->show_on_upload,
+            'show_on_edit' => (bool) $field->show_on_edit,
+            'show_in_filters' => (bool) $field->show_in_filters,
+            'group_key' => $field->group_key,
+            'is_active' => (bool) $field->is_active,
+            'scope' => 'tenant',
+        ];
     }
 
     /**
@@ -368,6 +547,7 @@ class TenantMetadataFieldService
      *
      * @param Tenant $tenant
      * @return void
+     * @throws PlanLimitExceededException
      * @throws \Exception
      */
     protected function checkPlanLimit(Tenant $tenant): void
@@ -376,7 +556,12 @@ class TenantMetadataFieldService
         $maxFields = $limits['max_custom_metadata_fields'] ?? 0;
 
         if ($maxFields === 0) {
-            throw new \Exception('Your plan does not allow custom metadata fields.');
+            throw new PlanLimitExceededException(
+                'custom_metadata_fields',
+                0,
+                0,
+                'Your plan does not allow custom metadata fields. Please upgrade your plan.'
+            );
         }
 
         // Count active tenant fields
@@ -388,7 +573,12 @@ class TenantMetadataFieldService
             ->count();
 
         if ($currentCount >= $maxFields) {
-            throw new \Exception("Plan limit exceeded. Maximum {$maxFields} custom metadata fields allowed.");
+            throw new PlanLimitExceededException(
+                'custom_metadata_fields',
+                $currentCount,
+                $maxFields,
+                "Plan limit exceeded. You have {$currentCount} of {$maxFields} custom metadata fields. Please upgrade your plan to create more fields."
+            );
         }
     }
 }

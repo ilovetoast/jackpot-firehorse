@@ -15,6 +15,9 @@ use Tests\TestCase;
  * Dominant Colors Extractor Test
  *
  * Tests extraction and persistence of top 3 dominant colors from color cluster data.
+ * 
+ * @runInSeparateProcess
+ * @preserveGlobalState disabled
  */
 class DominantColorsExtractorTest extends TestCase
 {
@@ -26,6 +29,14 @@ class DominantColorsExtractorTest extends TestCase
     {
         parent::setUp();
         $this->extractor = new DominantColorsExtractor();
+    }
+
+    protected function tearDown(): void
+    {
+        // Reset any config mutations to prevent cross-test contamination
+        // This ensures tests don't affect each other through shared config state
+        config(['color.max_colors' => null]);
+        parent::tearDown();
     }
 
     /**

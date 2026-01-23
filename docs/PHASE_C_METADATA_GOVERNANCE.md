@@ -87,6 +87,37 @@ Goals:
 
 ---
 
+## Implementation Notes
+
+### Permission System (Updated: January 2025)
+
+**Owner/Admin Bypass:**
+- Owners and admins automatically have full access to manage all metadata fields
+- Permission checks in `TenantMetadataRegistryController` and `TenantMetadataFieldController` bypass for owner/admin roles
+- `MetadataPermissionResolver` returns `true` for owners/admins by default (except system-locked fields)
+- System-locked fields (`population_mode = 'automatic'` AND `readonly = true`) remain non-editable even for owners/admins
+
+**System-Locked Fields:**
+- Fields with `population_mode = 'automatic'` AND `readonly = true` are never editable by users
+- These fields are automatically populated by the system and cannot be manually overridden
+- Examples: `orientation`, `color_space`, `resolution_class`, `dimensions`
+
+### Automatic Field Configuration
+
+**Seeder: `MetadataFieldPopulationSeeder`**
+- Configures system fields that are automatically populated
+- Sets `population_mode = 'automatic'` for fields like orientation, color_space, resolution_class, dimensions
+- Configures visibility: `show_on_upload = false`, `show_on_edit = true`, `show_in_filters = true`
+- Sets `readonly = true` to prevent manual editing
+- Included in `DatabaseSeeder` to run automatically on fresh installs
+
+**Upload Form Exclusion:**
+- `UploadMetadataSchemaResolver` automatically excludes fields with `population_mode = 'automatic'`
+- Also excludes fields with `show_on_upload = false`
+- These fields never appear in the upload form UI
+
+---
+
 ## Exit Criteria
 
 Phase C is complete when:

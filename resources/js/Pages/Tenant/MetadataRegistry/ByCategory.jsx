@@ -3,7 +3,11 @@ import { router } from '@inertiajs/react'
 import {
     Bars3Icon,
     CheckCircleIcon,
+    PencilIcon,
+    PlusIcon,
 } from '@heroicons/react/24/outline'
+import MetadataFieldModal from '../../../Components/MetadataFieldModal'
+import PlanLimitIndicator from '../../../Components/PlanLimitIndicator'
 
 /**
  * By Category View Component
@@ -30,7 +34,9 @@ import {
 export default function ByCategoryView({ 
     registry, 
     categories, 
-    canManageVisibility 
+    canManageVisibility,
+    canManageFields = false,
+    customFieldsLimit = null
 }) {
     const [selectedCategoryId, setSelectedCategoryId] = useState(null)
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
@@ -38,16 +44,28 @@ export default function ByCategoryView({
     const [draggedFieldId, setDraggedFieldId] = useState(null)
     const [fieldOrder, setFieldOrder] = useState({}) // Store order per category: { categoryId: [fieldId, ...] }
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
+    const [modalOpen, setModalOpen] = useState(false)
+    const [editingField, setEditingField] = useState(null)
+    const [loadingFieldData, setLoadingFieldData] = useState(false)
 
     const { system_fields: systemFields = [], tenant_fields = [] } = registry || {}
     const allFields = [...systemFields, ...tenant_fields]
 
-    // Filter out automated/AI fields (population_mode = automatic AND readonly = true)
-    const manageableFields = useMemo(() => {
-        return allFields.filter(field => {
+    // Separate automated fields (population_mode = automatic AND readonly = true) from manageable fields
+    const { manageableFields, automatedFields } = useMemo(() => {
+        const manageable = []
+        const automated = []
+        
+        allFields.forEach(field => {
             const isAutomated = (field.population_mode === 'automatic' && field.readonly === true)
-            return !isAutomated
+            if (isAutomated) {
+                automated.push(field)
+            } else {
+                manageable.push(field)
+            }
         })
+        
+        return { manageableFields: manageable, automatedFields: automated }
     }, [allFields])
 
     // Group categories by asset_type
@@ -113,11 +131,11 @@ export default function ByCategoryView({
     // Load category data for all fields when category is selected
     useEffect(() => {
         if (selectedCategoryId) {
-            manageableFields.forEach(field => {
+            [...manageableFields, ...automatedFields].forEach(field => {
                 loadFieldCategoryData(field)
             })
         }
-    }, [selectedCategoryId, manageableFields.length])
+    }, [selectedCategoryId, manageableFields.length, automatedFields.length])
 
     // Get CSRF token helper
     const getCsrfToken = () => {
@@ -281,11 +299,13 @@ export default function ByCategoryView({
     // Get fields for selected category with ordering
     const getFieldsForCategory = useMemo(() => {
         if (!selectedCategoryId) {
-            return { enabled: [], available: [] }
+            return { enabled: [], available: [], enabledAutomated: [], availableAutomated: [] }
         }
 
         const enabled = []
         const available = []
+        const enabledAutomated = []
+        const availableAutomated = []
 
         manageableFields.forEach(field => {
             const categoryData = fieldCategoryData[field.id] || { suppressed: [], visible: [] }
@@ -298,6 +318,18 @@ export default function ByCategoryView({
             }
         })
 
+        // Separate automated fields
+        automatedFields.forEach(field => {
+            const categoryData = fieldCategoryData[field.id] || { suppressed: [], visible: [] }
+            const isEnabled = !categoryData.suppressed.includes(selectedCategoryId)
+            
+            if (isEnabled) {
+                enabledAutomated.push(field)
+            } else {
+                availableAutomated.push(field)
+            }
+        })
+
         // Apply ordering to enabled fields
         const order = fieldOrder[selectedCategoryId] || []
         if (order.length > 0) {
@@ -306,11 +338,11 @@ export default function ByCategoryView({
                 .map(id => enabled.find(f => f.id === id))
                 .filter(Boolean)
             const unordered = enabled.filter(f => !order.includes(f.id))
-            return { enabled: [...ordered, ...unordered], available }
+            return { enabled: [...ordered, ...unordered], available, enabledAutomated, availableAutomated }
         }
 
-        return { enabled, available }
-    }, [selectedCategoryId, manageableFields, fieldCategoryData, fieldOrder])
+        return { enabled, available, enabledAutomated, availableAutomated }
+    }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData, fieldOrder])
 
     // Drag handlers
     const handleDragStart = (e, fieldId) => {
@@ -353,6 +385,71 @@ export default function ByCategoryView({
     }
 
     const selectedCategory = categories.find(cat => cat.id === selectedCategoryId)
+
+    const handleEditField = async (field) => {
+        setLoadingFieldData(true)
+        
+        try {
+            // Check if it's a custom field (tenant field)
+            const isCustom = !systemFields.some(sf => sf.id === field.id)
+            
+            if (isCustom && field.id) {
+                // Load field data from API for custom fields
+                const response = await fetch(`/app/tenant/metadata/fields/${field.id}`)
+                const data = await response.json()
+                if (data.field) {
+                    setEditingField(data.field)
+                    setModalOpen(true)
+                } else {
+                    console.error('Field not found')
+                }
+            } else {
+                // For system fields, fetch full field data including options and ai_eligible
+                // Use the system metadata registry API or fetch from metadata_fields table
+                try {
+                    // Fetch field details including options
+                    const fieldResponse = await fetch(`/app/api/admin/metadata/fields/${field.id}`)
+                    if (fieldResponse.ok) {
+                        const fieldData = await fieldResponse.json()
+                        setEditingField({
+                            ...field,
+                            ...fieldData.field,
+                            scope: 'system',
+                            is_system: true,
+                        })
+                    } else {
+                        // Fallback to basic field data
+                        setEditingField({
+                            ...field,
+                            scope: 'system',
+                            is_system: true,
+                        })
+                    }
+                } catch (err) {
+                    // Fallback to basic field data
+                    setEditingField({
+                        ...field,
+                        scope: 'system',
+                        is_system: true,
+                    })
+                }
+                setModalOpen(true)
+            }
+        } catch (error) {
+            console.error('Failed to load field data:', error)
+        } finally {
+            setLoadingFieldData(false)
+        }
+    }
+
+    const handleModalSuccess = () => {
+        // Reload registry data
+        router.reload({ 
+            only: ['registry'],
+            preserveState: true,
+            preserveScroll: true,
+        })
+    }
 
     return (
         <div className="space-y-6">
@@ -465,15 +562,44 @@ export default function ByCategoryView({
                             </p>
                         </div>
 
+                        {/* Plan Limit Indicator */}
+                        {customFieldsLimit && customFieldsLimit.max > 0 && (
+                            <PlanLimitIndicator
+                                current={customFieldsLimit.current}
+                                max={customFieldsLimit.max}
+                                label="Custom Metadata Fields"
+                                className="mb-6"
+                            />
+                        )}
+
                         {/* Enabled Fields */}
                         <div className="bg-white rounded-lg border border-gray-200">
-                            <div className="px-6 py-4 border-b border-gray-200">
-                                <h3 className="text-sm font-semibold text-gray-900">
-                                    Enabled for this category ({getFieldsForCategory.enabled.length})
-                                </h3>
-                                <p className="mt-1 text-xs text-gray-500">
-                                    These fields are visible for assets in this category
-                                </p>
+                            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-gray-900">
+                                        Enabled for this category ({getFieldsForCategory.enabled.length})
+                                    </h3>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        These fields are visible for assets in this category
+                                    </p>
+                                </div>
+                                {canManageFields && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEditingField(null)
+                                            setModalOpen(true)
+                                        }}
+                                        disabled={customFieldsLimit && !customFieldsLimit.can_create}
+                                        className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title={customFieldsLimit && !customFieldsLimit.can_create 
+                                            ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
+                                            : 'Add custom metadata field'}
+                                    >
+                                        <PlusIcon className="h-4 w-4" />
+                                        Add Field
+                                    </button>
+                                )}
                             </div>
                             <div className="divide-y divide-gray-200">
                                 {getFieldsForCategory.enabled.length > 0 ? (
@@ -486,7 +612,9 @@ export default function ByCategoryView({
                                             onToggle={toggleCategoryField}
                                             onVisibilityToggle={toggleVisibility}
                                             onPrimaryToggle={togglePrimary}
+                                            onEdit={canManageFields ? handleEditField : null}
                                             canManage={canManageVisibility}
+                                            canManageFields={canManageFields}
                                             systemFields={systemFields}
                                             fieldCategoryData={fieldCategoryData[field.id]}
                                             isDraggable={true}
@@ -505,19 +633,77 @@ export default function ByCategoryView({
                             </div>
                         </div>
 
-                        {/* Available Fields */}
-                        <div className="bg-white rounded-lg border border-gray-200">
-                            <div className="px-6 py-4 border-b border-gray-200">
-                                <h3 className="text-sm font-semibold text-gray-900">
-                                    Available for this category ({getFieldsForCategory.available.length})
-                                </h3>
-                                <p className="mt-1 text-xs text-gray-500">
-                                    Enable these fields to make them visible for this category
-                                </p>
+                        {/* System Automated Fields (Subtle Display) */}
+                        {(getFieldsForCategory.enabledAutomated.length > 0 || getFieldsForCategory.availableAutomated.length > 0) && (
+                            <div className="bg-gray-50 rounded-lg border border-gray-200">
+                                <div className="px-6 py-3 border-b border-gray-200">
+                                    <h3 className="text-xs font-medium text-gray-600">
+                                        System Automated Fields
+                                    </h3>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        These fields are automatically filled by the system. Upload is disabled, but you can control filter visibility and disable them per category.
+                                    </p>
+                                </div>
+                                <div className="divide-y divide-gray-200">
+                                    {/* Enabled Automated Fields */}
+                                    {getFieldsForCategory.enabledAutomated.length > 0 && (
+                                        <div className="px-6 py-2 bg-white/50">
+                                            <div className="text-xs font-medium text-gray-500 mb-2">Enabled ({getFieldsForCategory.enabledAutomated.length})</div>
+                                            <div className="space-y-1">
+                                                {getFieldsForCategory.enabledAutomated.map(field => (
+                                                    <AutomatedFieldRow
+                                                        key={field.id}
+                                                        field={field}
+                                                        categoryId={selectedCategoryId}
+                                                        isEnabled={true}
+                                                        onToggle={toggleCategoryField}
+                                                        onVisibilityToggle={toggleVisibility}
+                                                        canManage={canManageVisibility}
+                                                        systemFields={systemFields}
+                                                        fieldCategoryData={fieldCategoryData[field.id]}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* Available Automated Fields */}
+                                    {getFieldsForCategory.availableAutomated.length > 0 && (
+                                        <div className="px-6 py-2 bg-white/50">
+                                            <div className="text-xs font-medium text-gray-500 mb-2">Available ({getFieldsForCategory.availableAutomated.length})</div>
+                                            <div className="space-y-1">
+                                                {getFieldsForCategory.availableAutomated.map(field => (
+                                                    <AutomatedFieldRow
+                                                        key={field.id}
+                                                        field={field}
+                                                        categoryId={selectedCategoryId}
+                                                        isEnabled={false}
+                                                        onToggle={toggleCategoryField}
+                                                        onVisibilityToggle={toggleVisibility}
+                                                        canManage={canManageVisibility}
+                                                        systemFields={systemFields}
+                                                        fieldCategoryData={fieldCategoryData[field.id]}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <div className="divide-y divide-gray-200">
-                                {getFieldsForCategory.available.length > 0 ? (
-                                    getFieldsForCategory.available.map(field => (
+                        )}
+
+                        {/* Available Fields */}
+                        {getFieldsForCategory.available.length > 0 && (
+                            <div className="bg-white rounded-lg border border-gray-200">
+                                <div className="px-6 py-4 border-b border-gray-200">
+                                    <h3 className="text-sm font-semibold text-gray-900">
+                                        Available for this category ({getFieldsForCategory.available.length})
+                                    </h3>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        Enable these fields to make them visible for this category
+                                    </p>
+                                </div>
+                                <div className="divide-y divide-gray-200">
+                                    {getFieldsForCategory.available.map(field => (
                                         <FieldRow
                                             key={field.id}
                                             field={field}
@@ -531,14 +717,10 @@ export default function ByCategoryView({
                                             fieldCategoryData={fieldCategoryData[field.id]}
                                             isDraggable={false}
                                         />
-                                    ))
-                                ) : (
-                                    <div className="px-6 py-8 text-center text-sm text-gray-500">
-                                        All available fields are enabled for this category.
-                                    </div>
-                                )}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 ) : (
                     <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
@@ -549,6 +731,21 @@ export default function ByCategoryView({
                 )}
             </div>
             </div>
+
+            {/* Metadata Field Modal */}
+            <MetadataFieldModal
+                isOpen={modalOpen}
+                onClose={() => {
+                    setModalOpen(false)
+                    setEditingField(null)
+                }}
+                field={editingField}
+                preselectedCategoryId={selectedCategoryId}
+                categories={categories}
+                canManageFields={canManageFields}
+                customFieldsLimit={customFieldsLimit}
+                onSuccess={handleModalSuccess}
+            />
         </div>
     )
 }
@@ -565,7 +762,9 @@ function FieldRow({
     onToggle, 
     onVisibilityToggle,
     onPrimaryToggle,
+    onEdit,
     canManage, 
+    canManageFields = false,
     systemFields,
     fieldCategoryData,
     isDraggable = false,
@@ -575,7 +774,9 @@ function FieldRow({
     onDragEnd,
     isDragging = false
 }) {
-    const isSystem = !field.scope || field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
+    // Determine if field is system or custom
+    // Custom fields have scope === 'tenant', system fields have scope === 'system' or are in systemFields array
+    const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
     const effectiveUpload = field.effective_show_on_upload ?? field.show_on_upload ?? true
     const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? true
     const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
@@ -626,7 +827,9 @@ function FieldRow({
                 <div className="flex-1 min-w-0">
                     {/* Field Name and Badge */}
                     <div className="flex items-center gap-2 mb-2">
-                        <span className="text-sm font-medium text-gray-900">{field.label}</span>
+                        <span className="text-sm font-medium text-gray-900">
+                            {field.label || field.system_label || field.key || 'Unnamed Field'}
+                        </span>
                         {isSystem ? (
                             <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
                                 System
@@ -695,8 +898,19 @@ function FieldRow({
                     )}
                 </div>
 
-                {/* Toggle Switch */}
-                <div className="flex-shrink-0">
+                {/* Actions */}
+                <div className="flex-shrink-0 flex items-center gap-2">
+                    {/* Edit Button (for custom fields or if can manage system overrides) */}
+                    {onEdit && (canManageFields || !isSystem) && (
+                        <button
+                            onClick={() => onEdit(field)}
+                            className="text-gray-400 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-md p-1"
+                            title="Edit field"
+                        >
+                            <PencilIcon className="h-4 w-4" />
+                        </button>
+                    )}
+                    {/* Toggle Switch */}
                     <label className="relative inline-flex items-center cursor-pointer">
                         <input
                             type="checkbox"
@@ -709,6 +923,82 @@ function FieldRow({
                     </label>
                 </div>
             </div>
+        </div>
+    )
+}
+
+/**
+ * Automated Field Row Component
+ * 
+ * Subtle display for system automated fields (population_mode = automatic AND readonly = true).
+ * These fields are automatically filled by the system, so Upload is greyed out.
+ * Filter visibility and category enablement can still be controlled.
+ */
+function AutomatedFieldRow({ 
+    field, 
+    categoryId, 
+    isEnabled, 
+    onToggle, 
+    onVisibilityToggle,
+    canManage, 
+    systemFields,
+    fieldCategoryData
+}) {
+    const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
+    const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
+
+    return (
+        <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-100/50 transition-colors">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+                {/* Field Name - Subtle */}
+                <span className="text-xs text-gray-600 truncate">
+                    {field.label || field.system_label || field.key || 'Unnamed Field'}
+                </span>
+                {isSystem && (
+                    <span className="px-1.5 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded flex-shrink-0">
+                        Auto
+                    </span>
+                )}
+                
+                {/* Upload/Filter Checkboxes - Only visible when enabled */}
+                {isEnabled && (
+                    <div className="flex items-center gap-3 ml-auto">
+                        {/* Upload - Always disabled/greyed out for automated fields */}
+                        <label className="flex items-center gap-1.5 cursor-not-allowed opacity-50">
+                            <input
+                                type="checkbox"
+                                checked={false}
+                                disabled={true}
+                                className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-not-allowed"
+                            />
+                            <span className="text-xs text-gray-400">Upload</span>
+                        </label>
+                        {/* Filter - Functional */}
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={effectiveFilter}
+                                onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                                disabled={!canManage}
+                                className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            />
+                            <span className="text-xs text-gray-500">Filter</span>
+                        </label>
+                    </div>
+                )}
+            </div>
+
+            {/* Toggle Switch - Compact */}
+            <label className="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
+                <input
+                    type="checkbox"
+                    checked={isEnabled}
+                    onChange={() => onToggle(field.id, categoryId, !isEnabled)}
+                    disabled={!canManage}
+                    className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"></div>
+            </label>
         </div>
     )
 }

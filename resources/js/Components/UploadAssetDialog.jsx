@@ -419,13 +419,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     */
 
     // Filter categories by asset type and exclude deleted system categories
+    // Note: Backend already filters by permissions (private/hidden), so we trust those categories are accessible
     const filteredCategories = (categories || []).filter(cat => {
+        // Must have an ID to be selectable (exclude templates without IDs)
+        if (!cat.id) {
+            console.log('[UploadDialog] Filtered out category (no ID):', cat.name, cat)
+            return false
+        }
+        
         // Filter by asset type
         const matchesAssetType = defaultAssetType === 'asset' 
             ? (cat.asset_type === 'asset' || cat.asset_type === 'basic')
             : cat.asset_type === 'marketing'
         
         if (!matchesAssetType) {
+            console.log('[UploadDialog] Filtered out category (wrong asset type):', cat.name, 'asset_type:', cat.asset_type, 'expected:', defaultAssetType)
             return false
         }
         
@@ -434,16 +442,41 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         if (cat.is_system === true) {
             // If template_exists is explicitly false, exclude it
             if (cat.template_exists === false) {
+                console.log('[UploadDialog] Filtered out category (deleted template):', cat.name)
                 return false
             }
             // Also check deletion_available flag if present
             if (cat.deletion_available === true) {
+                console.log('[UploadDialog] Filtered out category (deletion available):', cat.name)
                 return false
             }
         }
         
+        // Debug: Log category properties to help diagnose permission issues
+        if (cat.is_private || cat.is_hidden) {
+            console.log('[UploadDialog] Category with restricted visibility:', cat.name, {
+                is_private: cat.is_private,
+                is_hidden: cat.is_hidden,
+                is_system: cat.is_system,
+                id: cat.id
+            })
+        }
+        
+        // Backend already filters by is_private and is_hidden based on user permissions
+        // If a category is passed here, the user has permission to view it
+        // So we don't need to filter by is_private or is_hidden on the frontend
+        
         return true
     })
+    
+    // Debug: Log all categories received vs filtered
+    if (categories && categories.length > 0) {
+        console.log('[UploadDialog] Categories received:', categories.length, 'Filtered:', filteredCategories.length)
+        const filteredOut = categories.filter(cat => !filteredCategories.find(fc => fc.id === cat.id))
+        if (filteredOut.length > 0) {
+            console.log('[UploadDialog] Categories filtered out:', filteredOut.map(c => ({ name: c.name, id: c.id, asset_type: c.asset_type, is_private: c.is_private, is_hidden: c.is_hidden })))
+        }
+    }
 
     /**
      * ═══════════════════════════════════════════════════════════════

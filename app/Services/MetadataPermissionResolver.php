@@ -45,6 +45,27 @@ class MetadataPermissionResolver
         ?int $brandId = null,
         ?int $categoryId = null
     ): bool {
+        // Owners and admins have full access to edit all fields (except system-locked automatic fields)
+        // Check if field is system-locked (automatic + readonly)
+        $field = \Illuminate\Support\Facades\DB::table('metadata_fields')
+            ->where('id', $metadataFieldId)
+            ->first();
+        
+        if ($field) {
+            // System-locked fields: automatic population AND readonly (users cannot edit, system fills these)
+            $isSystemLocked = ($field->population_mode === 'automatic' && $field->readonly === true);
+            
+            // Owners/admins can edit everything except system-locked fields
+            if (in_array($role, ['owner', 'admin']) && !$isSystemLocked) {
+                return true;
+            }
+        } else {
+            // Field doesn't exist, but owners/admins should still have access
+            if (in_array($role, ['owner', 'admin'])) {
+                return true;
+            }
+        }
+        
         // Load permission overrides in inheritance order
         $permission = $this->loadPermission(
             $metadataFieldId,
@@ -54,7 +75,7 @@ class MetadataPermissionResolver
             $categoryId
         );
 
-        // Default is false if no permission row exists
+        // Default is false if no permission row exists (for non-owner/admin roles)
         return $permission['can_edit'] ?? false;
     }
 
@@ -143,6 +164,15 @@ class MetadataPermissionResolver
             return [];
         }
 
+        // Owners and admins have full access (except system-locked fields)
+        $isOwnerOrAdmin = in_array($role, ['owner', 'admin']);
+        
+        // Load field data to check for system-locked fields
+        $fields = DB::table('metadata_fields')
+            ->whereIn('id', $metadataFieldIds)
+            ->get()
+            ->keyBy('id');
+
         // Load all permissions in one query
         $query = DB::table('metadata_field_permissions')
             ->whereIn('metadata_field_id', $metadataFieldIds)
@@ -186,10 +216,18 @@ class MetadataPermissionResolver
             }
         }
 
-        // Fill in false for fields with no permission override
+        // Fill in defaults for fields with no permission override
         foreach ($metadataFieldIds as $fieldId) {
             if (!isset($results[$fieldId])) {
-                $results[$fieldId] = false;
+                if ($isOwnerOrAdmin) {
+                    // Owners/admins can edit all fields except system-locked ones
+                    $field = $fields[$fieldId] ?? null;
+                    $isSystemLocked = $field && ($field->population_mode === 'automatic' && $field->readonly === true);
+                    $results[$fieldId] = !$isSystemLocked;
+                } else {
+                    // Non-owner/admin: default to false if no permission row exists
+                    $results[$fieldId] = false;
+                }
             }
         }
 

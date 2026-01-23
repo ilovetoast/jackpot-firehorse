@@ -2,13 +2,28 @@ import { Link, useForm, usePage, router } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import { usePermission } from '../../hooks/usePermission'
 
 export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null }) {
     const { auth } = usePage().props
+    const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
     const [activeSection, setActiveSection] = useState('company-information')
+    
+    // Debug permission check
+    useEffect(() => {
+        console.log('[AI Usage] Permission check:', {
+            canViewAiUsage,
+            tenantRole: auth?.tenant_role,
+            rolePermissions: auth?.role_permissions,
+            directPermissions: auth?.permissions
+        })
+    }, [canViewAiUsage, auth])
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
     const [selectedNewOwner, setSelectedNewOwner] = useState(null)
     const [initiatingTransfer, setInitiatingTransfer] = useState(false)
+    const [aiUsageData, setAiUsageData] = useState(null)
+    const [loadingAiUsage, setLoadingAiUsage] = useState(false)
+    const [aiUsageError, setAiUsageError] = useState(null)
     const { data, setData, put, processing, errors } = useForm({
         name: tenant.name || '',
         timezone: tenant.timezone || 'UTC',
@@ -37,7 +52,69 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         return () => window.removeEventListener('hashchange', handleHashChange)
     }, [])
 
+    // Fetch AI usage data when AI Usage section is active
+    useEffect(() => {
+        console.log('[AI Usage] useEffect triggered', {
+            activeSection,
+            canViewAiUsage,
+            hasData: !!aiUsageData,
+            isLoading: loadingAiUsage
+        })
+        
+        // Only fetch if:
+        // 1. AI Usage section is active
+        // 2. User has permission
+        // 3. Data hasn't been loaded yet
+        // 4. Not currently loading
+        if (activeSection === 'ai-usage' && canViewAiUsage) {
+            if (!aiUsageData && !loadingAiUsage) {
+                console.log('[AI Usage] Starting fetch...')
+                setLoadingAiUsage(true)
+                setAiUsageError(null) // Clear any previous errors
+                
+                // Use axios to fetch AI usage data
+                window.axios.get('/app/api/companies/ai-usage')
+                    .then(response => {
+                        console.log('[AI Usage] Response received:', response.data)
+                        const data = response.data
+                        // Validate data structure
+                        if (data && data.status) {
+                            setAiUsageData(data)
+                            setAiUsageError(null)
+                        } else {
+                            const errorMsg = 'Invalid data structure received from server'
+                            console.error('[AI Usage] Invalid data structure:', data)
+                            setAiUsageError(errorMsg)
+                        }
+                        setLoadingAiUsage(false)
+                    })
+                    .catch(err => {
+                        console.error('[AI Usage] Error fetching:', err)
+                        console.error('[AI Usage] Error response:', err.response)
+                        // Extract error message from axios error response
+                        const errorMsg = err.response?.data?.message 
+                            || err.response?.data?.error 
+                            || err.message 
+                            || `Failed to fetch AI usage data: ${err.response?.status || 'Unknown error'}`
+                        console.error('[AI Usage] Setting error:', errorMsg)
+                        setAiUsageError(errorMsg)
+                        setLoadingAiUsage(false)
+                    })
+            } else {
+                console.log('[AI Usage] Skipping fetch - already have data or loading:', {
+                    hasData: !!aiUsageData,
+                    isLoading: loadingAiUsage
+                })
+            }
+        }
+    }, [activeSection, canViewAiUsage, aiUsageData, loadingAiUsage])
+
     const handleSectionClick = (sectionId) => {
+        console.log('[AI Usage] Section clicked:', sectionId, {
+            canViewAiUsage,
+            hasData: !!aiUsageData,
+            isLoading: loadingAiUsage
+        })
         setActiveSection(sectionId)
         window.location.hash = sectionId
         const element = document.getElementById(sectionId)
@@ -45,6 +122,45 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
             setTimeout(() => {
                 element.scrollIntoView({ behavior: 'smooth', block: 'start' })
             }, 100)
+        }
+        // If clicking AI Usage, trigger fetch immediately
+        if (sectionId === 'ai-usage' && canViewAiUsage) {
+            if (!aiUsageData && !loadingAiUsage) {
+                console.log('[AI Usage] Triggering fetch from click handler...')
+                setLoadingAiUsage(true)
+                setAiUsageError(null)
+                
+                window.axios.get('/app/api/companies/ai-usage')
+                    .then(response => {
+                        console.log('[AI Usage] Response received (from click):', response.data)
+                        const data = response.data
+                        if (data && data.status) {
+                            setAiUsageData(data)
+                            setAiUsageError(null)
+                        } else {
+                            const errorMsg = 'Invalid data structure received from server'
+                            console.error('[AI Usage] Invalid data structure:', data)
+                            setAiUsageError(errorMsg)
+                        }
+                        setLoadingAiUsage(false)
+                    })
+                    .catch(err => {
+                        console.error('[AI Usage] Error fetching (from click):', err)
+                        console.error('[AI Usage] Error response:', err.response)
+                        const errorMsg = err.response?.data?.message 
+                            || err.response?.data?.error 
+                            || err.message 
+                            || `Failed to fetch AI usage data: ${err.response?.status || 'Unknown error'}`
+                        console.error('[AI Usage] Setting error:', errorMsg)
+                        setAiUsageError(errorMsg)
+                        setLoadingAiUsage(false)
+                    })
+            } else {
+                console.log('[AI Usage] Click handler skipping fetch:', {
+                    hasData: !!aiUsageData,
+                    isLoading: loadingAiUsage
+                })
+            }
         }
     }
 
@@ -168,6 +284,19 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     }`}
                                 >
                                     Metadata
+                                </button>
+                            )}
+                            {canViewAiUsage && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSectionClick('ai-usage')}
+                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                        activeSection === 'ai-usage'
+                                            ? 'border-indigo-500 text-indigo-600'
+                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }`}
+                                >
+                                    AI Usage
                                 </button>
                             )}
                             {is_current_user_owner && (
@@ -600,6 +729,177 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AI Usage */}
+                    {canViewAiUsage && (
+                        <div id="ai-usage" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    {/* Left: Header */}
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">AI Usage</h2>
+                                        <p className="mt-1 text-sm text-gray-500">View current month's AI feature usage and caps</p>
+                                    </div>
+                                    {/* Right: Content */}
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        {loadingAiUsage ? (
+                                            <div className="flex items-center justify-center py-8">
+                                                <div className="text-sm text-gray-500">Loading usage data...</div>
+                                            </div>
+                                        ) : aiUsageData ? (
+                                            <div className="space-y-6">
+                                                {/* Current Month Info */}
+                                                <div className="rounded-md bg-gray-50 p-4">
+                                                    <p className="text-sm text-gray-600">
+                                                        <span className="font-medium">Current Period:</span> {aiUsageData.current_month} 
+                                                        {' '}({new Date(aiUsageData.month_start).toLocaleDateString()} - {new Date(aiUsageData.month_end).toLocaleDateString()})
+                                                    </p>
+                                                </div>
+
+                                                {/* Usage Stats */}
+                                                <div className="space-y-4">
+                                                    {['tagging', 'suggestions'].map((feature) => {
+                                                        const featureData = aiUsageData.status[feature]
+                                                        if (!featureData) return null
+
+                                                        const isUnlimited = featureData.is_unlimited
+                                                        const isDisabled = featureData.is_disabled
+                                                        const isExceeded = featureData.is_exceeded
+                                                        const usage = featureData.usage || 0
+                                                        const cap = featureData.cap || 0
+                                                        const remaining = featureData.remaining
+                                                        const percentage = featureData.percentage || 0
+
+                                                        const featureLabel = feature === 'tagging' ? 'AI Tagging' : 'AI Suggestions'
+
+                                                        return (
+                                                            <div key={feature} className="border border-gray-200 rounded-lg p-4">
+                                                                <div className="flex items-center justify-between mb-3">
+                                                                    <h3 className="text-sm font-semibold text-gray-900">{featureLabel}</h3>
+                                                                    {isExceeded && (
+                                                                        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20">
+                                                                            Cap Exceeded
+                                                                        </span>
+                                                                    )}
+                                                                    {isDisabled && (
+                                                                        <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                                                            Disabled
+                                                                        </span>
+                                                                    )}
+                                                                    {isUnlimited && (
+                                                                        <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                                                                            Unlimited
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="space-y-2">
+                                                                    <div className="flex items-center justify-between text-sm">
+                                                                        <span className="text-gray-600">Usage</span>
+                                                                        <span className="font-medium text-gray-900">
+                                                                            {usage.toLocaleString()} {isUnlimited ? '' : `of ${cap.toLocaleString()}`}
+                                                                        </span>
+                                                                    </div>
+
+                                                                    {!isUnlimited && !isDisabled && (
+                                                                        <>
+                                                                            <div className="flex items-center justify-between text-sm">
+                                                                                <span className="text-gray-600">Remaining</span>
+                                                                                <span className={`font-medium ${remaining === 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                                                                                    {remaining !== null ? remaining.toLocaleString() : 'N/A'}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="w-full bg-gray-200 rounded-full h-2">
+                                                                                <div
+                                                                                    className={`h-2 rounded-full transition-all ${
+                                                                                        isExceeded
+                                                                                            ? 'bg-red-600'
+                                                                                            : percentage >= 80
+                                                                                            ? 'bg-yellow-500'
+                                                                                            : 'bg-indigo-600'
+                                                                                    }`}
+                                                                                    style={{ width: `${Math.min(100, percentage)}%` }}
+                                                                                ></div>
+                                                                            </div>
+                                                                            <div className="text-xs text-gray-500 text-right">
+                                                                                {percentage.toFixed(1)}% used
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : aiUsageError ? (
+                                            <div className="rounded-md bg-red-50 border border-red-200 p-4">
+                                                <div className="flex">
+                                                    <div className="flex-shrink-0">
+                                                        <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                                        </svg>
+                                                    </div>
+                                                    <div className="ml-3">
+                                                        <h3 className="text-sm font-medium text-red-800">Error Loading AI Usage</h3>
+                                                        <div className="mt-2 text-sm text-red-700">
+                                                            <p>{aiUsageError}</p>
+                                                        </div>
+                                                        <div className="mt-4">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAiUsageData(null)
+                                                                    setAiUsageError(null)
+                                                                    setLoadingAiUsage(false)
+                                                                }}
+                                                                className="text-sm font-medium text-red-800 hover:text-red-900 underline"
+                                                            >
+                                                                Try again
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-md bg-yellow-50 p-4">
+                                                <div className="flex items-start">
+                                                    <div className="flex-shrink-0">
+                                                        <svg className="h-5 w-5 text-yellow-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                                        </svg>
+                                                    </div>
+                                                    <div className="ml-3 flex-1">
+                                                        <h3 className="text-sm font-medium text-yellow-800">Unable to load AI usage data</h3>
+                                                        <p className="mt-2 text-sm text-yellow-700">
+                                                            The AI usage data could not be loaded. Please check your browser console for errors or try again.
+                                                        </p>
+                                                        <div className="mt-4">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAiUsageData(null)
+                                                                    setAiUsageError(null)
+                                                                    setLoadingAiUsage(false)
+                                                                    // Force a re-fetch by triggering the effect
+                                                                    const currentSection = activeSection
+                                                                    setActiveSection('')
+                                                                    setTimeout(() => setActiveSection(currentSection), 10)
+                                                                }}
+                                                                className="text-sm font-medium text-yellow-800 hover:text-yellow-900 underline"
+                                                            >
+                                                                Try again
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

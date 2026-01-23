@@ -15,55 +15,35 @@ class MetadataFieldPopulationSeeder extends Seeder
 {
     /**
      * Run the database seeds.
+     * 
+     * Configures system fields that are automatically populated:
+     * - Hidden from upload form (show_on_upload = false)
+     * - Visible in edit but readonly (show_on_edit = true, readonly = true)
+     * - Available in grid filters (show_in_filters = true)
+     * - Automatically populated by system (population_mode = 'automatic')
      */
     public function run(): void
     {
-        // Update orientation field to be automatic (if it exists)
-        DB::table('metadata_fields')
-            ->where('key', 'orientation')
-            ->update([
-                'population_mode' => 'automatic',
-                'show_on_upload' => false,
-                'show_on_edit' => true, // Still visible in edit view
-                'show_in_filters' => true, // Still filterable
-                'readonly' => true, // Read-only since it's automatic
-                'updated_at' => now(),
-            ]);
+        // Fields that should be auto-populated, hidden from upload, readonly, but filterable
+        $automaticFields = [
+            'orientation',
+            'dimensions',
+            'color_mode',
+            'color_space',
+            'resolution_class',
+        ];
 
-        // Update dimensions field to be automatic (if it exists)
-        DB::table('metadata_fields')
-            ->where('key', 'dimensions')
-            ->update([
-                'population_mode' => 'automatic',
-                'show_on_upload' => false,
-                'show_on_edit' => true,
-                'show_in_filters' => true,
-                'readonly' => true,
-                'updated_at' => now(),
-            ]);
-
-        // Update color_mode/color_space field to be automatic (if it exists)
-        DB::table('metadata_fields')
-            ->whereIn('key', ['color_mode', 'color_space'])
-            ->update([
-                'population_mode' => 'automatic',
-                'show_on_upload' => false,
-                'show_on_edit' => true,
-                'show_in_filters' => true,
-                'readonly' => true,
-                'updated_at' => now(),
-            ]);
-
-        // Update resolution_class field to be automatic (if it exists)
-        DB::table('metadata_fields')
-            ->where('key', 'resolution_class')
-            ->update([
-                'population_mode' => 'automatic',
-                'show_on_upload' => false,
-                'show_on_edit' => true,
-                'show_in_filters' => true,
-                'readonly' => true,
-                'updated_at' => now(),
-            ]);
+        foreach ($automaticFields as $fieldKey) {
+            DB::table('metadata_fields')
+                ->where('key', $fieldKey)
+                ->update([
+                    'population_mode' => 'automatic',
+                    'show_on_upload' => false, // Hidden from upload form
+                    'show_on_edit' => true, // Visible in edit (readonly)
+                    'show_in_filters' => true, // Available in grid filters
+                    'readonly' => true, // Read-only for users (system can populate)
+                    'updated_at' => now(),
+                ]);
+        }
     }
 }

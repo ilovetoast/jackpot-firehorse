@@ -267,22 +267,34 @@ class UploadMetadataSchemaResolver
             $categoryId
         );
 
-        // Load is_user_editable flags from database
-        $fieldEditableFlags = \Illuminate\Support\Facades\DB::table('metadata_fields')
+        // Load field properties from database
+        $fieldData = \Illuminate\Support\Facades\DB::table('metadata_fields')
             ->whereIn('id', $fieldIds)
-            ->pluck('is_user_editable', 'id')
-            ->toArray();
+            ->select('id', 'is_user_editable', 'population_mode', 'readonly')
+            ->get()
+            ->keyBy('id');
 
         // Add can_edit flag to each field
         // Field is editable only if:
-        // 1. Permission resolver says user can edit (Phase 4)
+        // 1. Permission resolver says user can edit (Phase 4) - owners/admins bypass this
         // 2. Field is marked as user-editable in database (Phase 5)
+        // Exception: System-locked fields (automatic + readonly) are never editable by users
         foreach ($fields as &$field) {
-            $hasPermission = $permissions[$field['field_id']] ?? false;
-            $isUserEditable = $fieldEditableFlags[$field['field_id']] ?? true;
+            $fieldId = $field['field_id'];
+            $fieldInfo = $fieldData[$fieldId] ?? null;
             
-            // Field is editable only if both conditions are met
-            $field['can_edit'] = $hasPermission && $isUserEditable;
+            $hasPermission = $permissions[$fieldId] ?? false;
+            $isUserEditable = $fieldInfo ? ($fieldInfo->is_user_editable ?? true) : true;
+            
+            // Check if field is system-locked (automatic + readonly)
+            // These fields are automatically populated by the system and users cannot edit them
+            $isSystemLocked = $fieldInfo 
+                && ($fieldInfo->population_mode ?? null) === 'automatic' 
+                && ($fieldInfo->readonly ?? false) === true;
+            
+            // Field is editable if:
+            // - Has permission AND is user-editable AND not system-locked
+            $field['can_edit'] = ($hasPermission && $isUserEditable && !$isSystemLocked);
         }
 
         return $fields;

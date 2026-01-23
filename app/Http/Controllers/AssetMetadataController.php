@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Enums\EventType;
 use App\Models\Asset;
 use App\Services\ActivityRecorder;
+use App\Services\AiMetadataConfidenceService;
+use App\Services\AiMetadataSuggestionService;
 use App\Services\BulkMetadataService;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
@@ -28,7 +30,9 @@ class AssetMetadataController extends Controller
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected BulkMetadataService $bulkMetadataService,
         protected MetadataPermissionResolver $permissionResolver,
-        protected MetadataApprovalResolver $approvalResolver
+        protected MetadataApprovalResolver $approvalResolver,
+        protected AiMetadataConfidenceService $confidenceService,
+        protected AiMetadataSuggestionService $suggestionService
     ) {
     }
 
@@ -414,6 +418,44 @@ class AssetMetadataController extends Controller
                 ]);
         });
 
+        // Record rejection activity event (same as dismissed)
+        try {
+            // Get field info for better timeline display
+            $fieldKey = null;
+            $fieldLabel = null;
+            $fieldId = $suggestion->metadata_field_id ?? null;
+            if ($fieldId) {
+                $field = DB::table('metadata_fields')
+                    ->where('id', $fieldId)
+                    ->where('tenant_id', $tenant->id)
+                    ->first();
+                if ($field) {
+                    $fieldKey = $field->key;
+                    $fieldLabel = $field->label ?? $field->name ?? $fieldKey;
+                }
+            }
+
+            ActivityRecorder::record(
+                tenant: $tenant,
+                eventType: EventType::ASSET_AI_SUGGESTION_DISMISSED,
+                subject: $asset,
+                actor: $user,
+                brand: $brand,
+                metadata: [
+                    'field_key' => $fieldKey,
+                    'field_label' => $fieldLabel,
+                    'suggestion_id' => $suggestionId,
+                ]
+            );
+        } catch (\Exception $e) {
+            // Activity logging must never break processing
+            Log::error('Failed to log AI suggestion rejection activity', [
+                'asset_id' => $asset->id,
+                'suggestion_id' => $suggestionId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         Log::info('[AssetMetadataController] AI suggestion rejected', [
             'asset_id' => $asset->id,
             'suggestion_id' => $suggestionId,
@@ -606,6 +648,7 @@ class AssetMetadataController extends Controller
                 'metadata_fields.type',
                 'asset_metadata.value_json',
                 'asset_metadata.source',
+                'asset_metadata.confidence',
                 'asset_metadata.overridden_at',
                 'asset_metadata.overridden_by'
             )
@@ -623,18 +666,36 @@ class AssetMetadataController extends Controller
             ->groupBy('metadata_field_id');
 
         // Build map of field_id to current values and override state
+        // Suppress low-confidence AI metadata values at read time
         $fieldValues = [];
         $fieldOverrideState = []; // Phase B5: Track override state for hybrid fields
         foreach ($currentMetadataRows as $fieldId => $rows) {
             // Get field type and most recent row (highest priority after ordering)
             $mostRecent = $rows->first();
+            $fieldKey = $mostRecent->key ?? null;
             $fieldType = $mostRecent->type ?? 'text';
             $source = $mostRecent->source ?? null;
+            $confidence = $mostRecent->confidence !== null ? (float) $mostRecent->confidence : null;
+
+            // Suppress low-confidence AI metadata values (PRESENTATION LAYER ONLY)
+            if ($fieldKey && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
+                // Treat as if value doesn't exist - skip this field entirely
+                continue;
+            }
 
             if ($fieldType === 'multiselect') {
                 // For multiselect, collect all unique values from all rows
+                // Filter out low-confidence values for each row
                 $allValues = [];
                 foreach ($rows as $row) {
+                    $rowConfidence = $row->confidence !== null ? (float) $row->confidence : null;
+                    $rowFieldKey = $row->key ?? $fieldKey;
+                    
+                    // Skip low-confidence values in multiselect arrays
+                    if ($rowFieldKey && $this->confidenceService->shouldSuppress($rowFieldKey, $rowConfidence)) {
+                        continue;
+                    }
+                    
                     $value = json_decode($row->value_json, true);
                     if (is_array($value)) {
                         $allValues = array_merge($allValues, $value);
@@ -2359,5 +2420,372 @@ class AssetMetadataController extends Controller
         return response()->json([
             'message' => 'Candidate review deferred',
         ]);
+    }
+
+    /**
+     * Get AI metadata suggestions from asset.metadata['_ai_suggestions'].
+     *
+     * GET /assets/{asset}/metadata/suggestions
+     *
+     * Returns suggestions stored in the new ephemeral format.
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function getSuggestions(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get suggestions from asset.metadata['_ai_suggestions']
+        $suggestions = $this->suggestionService->getSuggestions($asset);
+
+        if (empty($suggestions)) {
+            return response()->json(['suggestions' => []]);
+        }
+
+        // Load category for schema resolution
+        $category = null;
+        if ($asset->metadata && isset($asset->metadata['category_id'])) {
+            $categoryId = $asset->metadata['category_id'];
+            $category = \App\Models\Category::where('id', $categoryId)
+                ->where('tenant_id', $asset->tenant_id)
+                ->first();
+        }
+
+        if (!$category) {
+            return response()->json(['suggestions' => []]);
+        }
+
+        // Determine asset type
+        $assetType = $this->determineAssetType($asset);
+
+        // Resolve metadata schema
+        $schema = $this->metadataSchemaResolver->resolve(
+            $asset->tenant_id,
+            $asset->brand_id,
+            $category->id,
+            $assetType
+        );
+
+        // Build map of field_key to field definition
+        $fieldMap = [];
+        foreach ($schema['fields'] ?? [] as $field) {
+            $fieldKey = DB::table('metadata_fields')
+                ->where('id', $field['field_id'])
+                ->value('key');
+            if ($fieldKey) {
+                $fieldMap[$fieldKey] = $field;
+            }
+        }
+
+        // Format suggestions with field metadata
+        $formattedSuggestions = [];
+        foreach ($suggestions as $fieldKey => $suggestion) {
+            $fieldDef = $fieldMap[$fieldKey] ?? null;
+            if (!$fieldDef) {
+                continue; // Skip if field not in schema
+            }
+
+            // Check edit permission
+            $userRole = $user ? ($user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member') : 'member';
+            $canEdit = $this->permissionResolver->canEdit(
+                $fieldDef['field_id'],
+                $userRole,
+                $tenant->id,
+                $brand->id,
+                $category->id
+            );
+
+            // Check apply permission
+            $canApply = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply');
+            $canDismiss = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss');
+
+            $formattedSuggestions[] = [
+                'field_key' => $fieldKey,
+                'field_id' => $fieldDef['field_id'],
+                'display_label' => $fieldDef['display_label'] ?? $fieldKey,
+                'type' => $fieldDef['type'] ?? 'text',
+                'options' => $fieldDef['options'] ?? [],
+                'value' => $suggestion['value'],
+                'confidence' => $suggestion['confidence'] ?? null,
+                'source' => $suggestion['source'] ?? 'ai',
+                'generated_at' => $suggestion['generated_at'] ?? null,
+                'can_edit' => $canEdit,
+                'can_apply' => $canApply && $canEdit,
+                'can_dismiss' => $canDismiss,
+            ];
+        }
+
+        return response()->json([
+            'suggestions' => $formattedSuggestions,
+        ]);
+    }
+
+    /**
+     * Accept an AI metadata suggestion (write to metadata).
+     *
+     * POST /assets/{asset}/metadata/suggestions/{fieldKey}/accept
+     *
+     * @param Asset $asset
+     * @param string $fieldKey
+     * @return JsonResponse
+     */
+    public function acceptSuggestion(Asset $asset, string $fieldKey): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get suggestions
+        $suggestions = $this->suggestionService->getSuggestions($asset);
+        if (!isset($suggestions[$fieldKey])) {
+            return response()->json(['message' => 'Suggestion not found'], 404);
+        }
+
+        $suggestion = $suggestions[$fieldKey];
+
+        // Get field ID
+        $field = DB::table('metadata_fields')
+            ->where('key', $fieldKey)
+            ->where('tenant_id', $asset->tenant_id)
+            ->first();
+
+        if (!$field) {
+            return response()->json(['message' => 'Field not found'], 404);
+        }
+
+        // Load category for schema resolution
+        $category = null;
+        if ($asset->metadata && isset($asset->metadata['category_id'])) {
+            $categoryId = $asset->metadata['category_id'];
+            $category = \App\Models\Category::where('id', $categoryId)
+                ->where('tenant_id', $asset->tenant_id)
+                ->first();
+        }
+
+        if (!$category) {
+            return response()->json(['message' => 'Category not found'], 404);
+        }
+
+        // Determine asset type
+        $assetType = $this->determineAssetType($asset);
+
+        // Resolve metadata schema
+        $schema = $this->metadataSchemaResolver->resolve(
+            $asset->tenant_id,
+            $asset->brand_id,
+            $category->id,
+            $assetType
+        );
+
+        // Find field in schema
+        $fieldDef = null;
+        foreach ($schema['fields'] ?? [] as $f) {
+            if ($f['field_id'] === $field->id) {
+                $fieldDef = $f;
+                break;
+            }
+        }
+
+        if (!$fieldDef) {
+            return response()->json(['message' => 'Field not found in schema'], 404);
+        }
+
+        // Check edit permission
+        $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
+        $canEdit = $this->permissionResolver->canEdit(
+            $field->id,
+            $userRole,
+            $tenant->id,
+            $brand->id,
+            $category->id
+        );
+
+        if (!$canEdit) {
+            return response()->json(['message' => 'You do not have permission to edit this field'], 403);
+        }
+
+        // Check if approval is required
+        $requiresApproval = $this->approvalResolver->requiresApproval(
+            $field->id,
+            $userRole,
+            $tenant->id,
+            $brand->id,
+            $category->id
+        );
+
+        // Write to asset_metadata
+        DB::transaction(function () use ($asset, $field, $suggestion, $user, $requiresApproval) {
+            // Get old value for history
+            $oldValue = DB::table('asset_metadata')
+                ->where('asset_id', $asset->id)
+                ->where('metadata_field_id', $field->id)
+                ->whereNotNull('approved_at')
+                ->value('value_json');
+            $oldValueJson = $oldValue ?: null;
+
+            // Delete existing unapproved values for this field
+            DB::table('asset_metadata')
+                ->where('asset_id', $asset->id)
+                ->where('metadata_field_id', $field->id)
+                ->whereNull('approved_at')
+                ->delete();
+
+            // Insert new value
+            $assetMetadataId = DB::table('asset_metadata')->insertGetId([
+                'asset_id' => $asset->id,
+                'metadata_field_id' => $field->id,
+                'value_json' => json_encode($suggestion['value']),
+                'source' => 'user', // User accepted the suggestion
+                'confidence' => $suggestion['confidence'] ?? null,
+                'approved_at' => $requiresApproval ? null : now(),
+                'approved_by' => $requiresApproval ? null : $user->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Create audit history entry
+            DB::table('asset_metadata_history')->insert([
+                'asset_metadata_id' => $assetMetadataId,
+                'old_value_json' => $oldValueJson,
+                'new_value_json' => json_encode($suggestion['value']),
+                'source' => 'user',
+                'changed_by' => $user->id,
+                'created_at' => now(),
+            ]);
+        });
+
+        // Remove suggestion from asset.metadata['_ai_suggestions']
+        $allSuggestions = $suggestions;
+        unset($allSuggestions[$fieldKey]);
+        if (empty($allSuggestions)) {
+            $this->suggestionService->clearSuggestions($asset);
+        } else {
+            $this->suggestionService->storeSuggestions($asset, $allSuggestions);
+        }
+
+        Log::info('[AssetMetadataController] AI suggestion accepted', [
+            'asset_id' => $asset->id,
+            'field_key' => $fieldKey,
+            'user_id' => $user->id,
+        ]);
+
+        // TODO (Optional Enhancement): Soft audit trail
+        // If you want to track "who accepted what" for analytics:
+        // - Log event: 'ai.suggestion.accepted' with context (user_id, asset_id, field_key, value, confidence)
+        // - Could enable metrics like "AI suggestion adoption rate"
+        // - No schema change required if using existing events/log system
+
+        return response()->json(['message' => 'Suggestion accepted']);
+    }
+
+    /**
+     * Dismiss an AI metadata suggestion (remove from suggestions).
+     *
+     * POST /assets/{asset}/metadata/suggestions/{fieldKey}/dismiss
+     *
+     * @param Asset $asset
+     * @param string $fieldKey
+     * @return JsonResponse
+     */
+    public function dismissSuggestion(Asset $asset, string $fieldKey): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get suggestions
+        $suggestions = $this->suggestionService->getSuggestions($asset);
+        if (!isset($suggestions[$fieldKey])) {
+            return response()->json(['message' => 'Suggestion not found'], 404);
+        }
+
+        $suggestion = $suggestions[$fieldKey];
+        $value = $suggestion['value'] ?? null;
+
+        // Record dismissal to prevent this suggestion from reappearing
+        $this->suggestionService->recordDismissal($asset, $fieldKey, $value);
+
+        // Remove suggestion from active suggestions
+        unset($suggestions[$fieldKey]);
+        if (empty($suggestions)) {
+            $this->suggestionService->clearSuggestions($asset);
+        } else {
+            $this->suggestionService->storeSuggestions($asset, $suggestions);
+        }
+
+        Log::info('[AssetMetadataController] AI suggestion dismissed', [
+            'asset_id' => $asset->id,
+            'field_key' => $fieldKey,
+            'value' => $value,
+            'user_id' => $user->id,
+        ]);
+
+        // Record dismissal activity event
+        try {
+            // Get field label for better timeline display
+            $fieldLabel = null;
+            $field = DB::table('metadata_fields')
+                ->where('key', $fieldKey)
+                ->where('tenant_id', $tenant->id)
+                ->first();
+            if ($field) {
+                $fieldLabel = $field->label ?? $field->name ?? $fieldKey;
+            }
+
+            ActivityRecorder::record(
+                tenant: $tenant,
+                eventType: \App\Enums\EventType::ASSET_AI_SUGGESTION_DISMISSED,
+                subject: $asset,
+                actor: $user,
+                brand: $brand,
+                metadata: [
+                    'field_key' => $fieldKey,
+                    'field_label' => $fieldLabel,
+                    'value' => $value,
+                ]
+            );
+        } catch (\Exception $e) {
+            // Activity logging must never break processing
+            Log::error('Failed to log AI suggestion dismissal activity', [
+                'asset_id' => $asset->id,
+                'field_key' => $fieldKey,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json(['message' => 'Suggestion dismissed']);
     }
 }

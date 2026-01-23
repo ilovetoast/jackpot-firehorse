@@ -3,9 +3,10 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
-use App\Models\AssetEvent;
+use App\Services\ActivityRecorder;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -90,18 +91,10 @@ class AITaggingJob implements ShouldQueue
             'metadata' => $currentMetadata,
         ]);
 
-        // Emit AI tagging completed event
-        AssetEvent::create([
-            'tenant_id' => $asset->tenant_id,
-            'brand_id' => $asset->brand_id,
-            'asset_id' => $asset->id,
-            'user_id' => null,
-            'event_type' => 'asset.ai_tagging.completed',
-            'metadata' => [
-                'job' => 'AITaggingJob',
-                'tag_count' => count($tags),
-            ],
-            'created_at' => now(),
+        // Record AI tagging completed activity event
+        ActivityRecorder::logAsset($asset, EventType::ASSET_AI_TAGGING_COMPLETED, [
+            'job' => 'AITaggingJob',
+            'tag_count' => count($tags),
         ]);
 
         Log::info('AI tagging completed', [

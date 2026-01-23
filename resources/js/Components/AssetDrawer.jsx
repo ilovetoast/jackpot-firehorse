@@ -47,7 +47,7 @@ import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, Exclamatio
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
-import AiMetadataSuggestions from './AiMetadataSuggestions'
+import AiMetadataSuggestionsInline from './AiMetadataSuggestionsInline'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
@@ -1046,7 +1046,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
                 {/* Phase 2 – Step 5.5: AI Metadata Suggestions */}
                 {displayAsset?.id && (
-                    <AiMetadataSuggestions assetId={displayAsset.id} />
+                    <AiMetadataSuggestionsInline key={displayAsset.id} assetId={displayAsset.id} />
                 )}
 
                 {/* Dominant Colors Display (read-only) */}
@@ -1176,6 +1176,40 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </dd>
                             </div>
                         )}
+                        {/* File Dimensions - if available from metadata */}
+                        {(() => {
+                            // Try to get dimensions from metadata
+                            // Dimensions are stored as "widthxheight" (e.g., "1920x1080")
+                            // Check metadata.fields structure (as merged by AssetController)
+                            let dimensionsValue = null
+                            
+                            // Check metadata.fields object (keyed by field key)
+                            if (displayAsset.metadata?.fields && typeof displayAsset.metadata.fields === 'object') {
+                                dimensionsValue = displayAsset.metadata.fields.dimensions || displayAsset.metadata.fields['dimensions']
+                            }
+                            
+                            // Fallback: try metadata_fields array (if available)
+                            if (!dimensionsValue && displayAsset.metadata_fields && Array.isArray(displayAsset.metadata_fields)) {
+                                const dimensionsField = displayAsset.metadata_fields.find(f => f.field_key === 'dimensions' || f.key === 'dimensions')
+                                dimensionsValue = dimensionsField?.value
+                            }
+                            
+                            // Parse and display if valid
+                            if (dimensionsValue && typeof dimensionsValue === 'string' && dimensionsValue.includes('x')) {
+                                const [width, height] = dimensionsValue.split('x')
+                                if (width && height && !isNaN(width) && !isNaN(height)) {
+                                    return (
+                                        <div className="flex justify-between">
+                                            <dt className="text-sm text-gray-500">Dimensions</dt>
+                                            <dd className="text-sm font-medium text-gray-900">
+                                                {parseInt(width).toLocaleString()} × {parseInt(height).toLocaleString()} px
+                                            </dd>
+                                        </div>
+                                    )
+                                }
+                            }
+                            return null
+                        })()}
                     </dl>
                 </div>
 

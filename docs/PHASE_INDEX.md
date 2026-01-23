@@ -264,7 +264,33 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 
 ---
 
-### 9. Future Design Specifications
+### 9. AI Usage & Suggestions
+
+**Status:** ✅ LOCKED
+
+**Phase Documents:**
+- `AI_USAGE_LIMITS_AND_SUGGESTIONS.md` — AI usage tracking and suggestion system (LOCKED)
+
+**Key Components:**
+- `AiUsageService` — Usage tracking with hard stop enforcement
+- `AiMetadataSuggestionService` — Suggestion generation and management
+- Monthly calendar-based caps (tagging and suggestions)
+- Transaction-safe usage tracking
+- Ephemeral suggestion storage
+
+**What's Locked:**
+- Usage tracking logic and enforcement
+- Cap interpretation (0 = unlimited, -1 = disabled)
+- Monthly reset behavior (calendar-based)
+- Transaction safety mechanisms
+- Suggestion generation rules
+- Hard stop behavior
+
+**Current State:** Complete and production-ready. Prevents runaway AI costs.
+
+---
+
+### 10. Future Design Specifications
 
 **Status:** 📋 FUTURE (Design Only)
 
@@ -313,6 +339,7 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 | `PDF_SETUP_QUICKSTART.md` | ✅ COMPLETE | PDF thumbnail setup guide |
 | `QUEUE_WORKERS.md` | ✅ COMPLETE | Queue worker configuration |
 | `RUNBOOK_ALERTS_AND_TICKETS.md` | ✅ COMPLETE | Operational runbook |
+| `AI_USAGE_LIMITS_AND_SUGGESTIONS.md` | ✅ LOCKED | AI usage tracking and suggestion system |
 
 ---
 
@@ -390,6 +417,14 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 - No schema ownership by categories
 - No metadata versioning
 - No backend persistence for drag-and-drop order (session only by design)
+
+**AI Usage & Suggestions:**
+- AI usage tracking with hard stop enforcement
+- Monthly calendar-based reset (no explicit reset jobs)
+- Transaction safety prevents race conditions
+- Cap interpretation: 0 = unlimited, -1 = disabled, positive = cap
+- Suggestions are ephemeral (never auto-applied)
+- Separate tracking for tagging vs suggestions
 
 ---
 
@@ -507,6 +542,7 @@ This is acceptable. This index reflects documented phases only.
 - ✅ Metadata Engine: LOCKED (backend) and complete (automation)
 - ✅ Metadata Governance: COMPLETE (admin)
 - ✅ Metadata UX: COMPLETE + PAUSED (Phase G, tenant)
+- ✅ AI Usage & Suggestions: LOCKED (usage tracking and suggestion system)
 - 🔨 Analytics & Observability: IN PROGRESS
 - 🔨 Support & Ticketing: IN PROGRESS
 - 📋 Tenant AI: FUTURE (design only)

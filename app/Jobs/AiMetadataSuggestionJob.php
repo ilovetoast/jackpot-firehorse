@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\Category;
+use App\Services\ActivityRecorder;
 use App\Services\AiMetadataSuggestionService;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
@@ -99,6 +101,12 @@ class AiMetadataSuggestionJob implements ShouldQueue
 
             $asset->update([
                 'metadata' => $currentMetadata,
+            ]);
+
+            // Record AI suggestions generated activity event
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AI_SUGGESTIONS_GENERATED, [
+                'job' => 'AiMetadataSuggestionJob',
+                'suggestions_count' => count($suggestions),
             ]);
 
             Log::info('[AiMetadataSuggestionJob] Completed', [

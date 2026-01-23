@@ -65,6 +65,13 @@ class EventType
     public const ASSET_METADATA_POPULATED = 'asset.metadata.populated';
     public const ASSET_COLOR_ANALYSIS_COMPLETED = 'asset.color_analysis.completed';
     
+    // AI and system tagging events
+    public const ASSET_AI_TAGGING_COMPLETED = 'asset.ai_tagging.completed';
+    public const ASSET_SYSTEM_TAGGING_COMPLETED = 'asset.system_tagging.completed';
+    public const ASSET_AI_SUGGESTIONS_GENERATED = 'asset.ai_suggestions.generated';
+    public const ASSET_AI_SUGGESTION_ACCEPTED = 'asset.ai_suggestion.accepted';
+    public const ASSET_AI_SUGGESTION_DISMISSED = 'asset.ai_suggestion.dismissed';
+    
     /**
      * Asset lifecycle events (processing pipeline)
      * 
@@ -207,6 +214,11 @@ class EventType
             self::ASSET_METADATA_UPDATED,
             self::ASSET_METADATA_POPULATED,
             self::ASSET_COLOR_ANALYSIS_COMPLETED,
+            self::ASSET_AI_TAGGING_COMPLETED,
+            self::ASSET_SYSTEM_TAGGING_COMPLETED,
+            self::ASSET_AI_SUGGESTIONS_GENERATED,
+            self::ASSET_AI_SUGGESTION_ACCEPTED,
+            self::ASSET_AI_SUGGESTION_DISMISSED,
             self::ASSET_UPLOAD_FINALIZED,
             self::ASSET_THUMBNAIL_STARTED,
             self::ASSET_THUMBNAIL_COMPLETED,

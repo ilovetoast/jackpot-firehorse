@@ -111,8 +111,11 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
     }
 
     const formatLimit = (limit) => {
-        if (limit === Number.MAX_SAFE_INTEGER || limit === 2147483647 || limit === 999999) {
+        if (limit === Number.MAX_SAFE_INTEGER || limit === 2147483647 || limit === 999999 || limit === 0) {
             return 'Unlimited'
+        }
+        if (limit === -1) {
+            return 'Disabled'
         }
         return limit
     }
@@ -128,14 +131,17 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
     }
 
     const formatUsage = (current, max) => {
-        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999) {
+        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999 || max === 0) {
             return `${current} of Unlimited`
+        }
+        if (max === -1) {
+            return `${current} (Disabled)`
         }
         return `${current} of ${max}`
     }
 
     const getUsagePercentage = (current, max) => {
-        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999) {
+        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999 || max === 0 || max === -1) {
             return 0
         }
         return Math.min((current / max) * 100, 100)
@@ -274,7 +280,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     {currentPlanData && (
                         <div className="mb-12 bg-white rounded-lg border border-gray-200 shadow-sm p-6">
                             <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Plan: {currentPlanData.name}</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-8 gap-4">
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-gray-600">Brands</span>
@@ -355,6 +361,40 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             className="h-2 rounded-full transition-all"
                                             style={{
                                                 width: `${getUsagePercentage(current_usage?.download_links || 0, current_plan_limits?.max_downloads_per_month || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">AI Tagging</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(current_usage?.ai_tagging || 0, current_plan_limits?.max_ai_tagging_per_month || 0)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.ai_tagging || 0, current_plan_limits?.max_ai_tagging_per_month || 0)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-600">AI Suggestions</span>
+                                        <span className="text-gray-900 font-medium">
+                                            {formatUsage(current_usage?.ai_suggestions || 0, current_plan_limits?.max_ai_suggestions_per_month || 0)}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${getUsagePercentage(current_usage?.ai_suggestions || 0, current_plan_limits?.max_ai_suggestions_per_month || 0)}%`,
                                                 backgroundColor: sitePrimaryColor,
                                             }}
                                         />
@@ -469,6 +509,26 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                         : formatLimit(plan.limits.max_downloads_per_month)}
                                                 </span>
                                             </div>
+                                            <div className="flex justify-between">
+                                                <span>AI Tagging:</span>
+                                                <span className="font-medium text-gray-900">
+                                                    {formatLimit(plan.limits.max_ai_tagging_per_month)}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>AI Suggestions:</span>
+                                                <span className="font-medium text-gray-900">
+                                                    {formatLimit(plan.limits.max_ai_suggestions_per_month)}
+                                                </span>
+                                            </div>
+                                            {plan.limits.max_custom_metadata_fields !== undefined && (
+                                                <div className="flex justify-between">
+                                                    <span>Custom Metadata Fields:</span>
+                                                    <span className="font-medium text-gray-900">
+                                                        {formatLimit(plan.limits.max_custom_metadata_fields)}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Features List */}

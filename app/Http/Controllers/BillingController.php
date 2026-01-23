@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\DownloadStatus;
 use App\Models\Download;
+use App\Services\AiUsageService;
 use App\Services\BillingService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
@@ -15,7 +16,8 @@ use Stripe\Stripe;
 class BillingController extends Controller
 {
     public function __construct(
-        protected BillingService $billingService
+        protected BillingService $billingService,
+        protected AiUsageService $aiUsageService
     ) {
     }
 
@@ -58,6 +60,9 @@ class BillingController extends Controller
         $startOfMonth = now()->startOfMonth();
         $endOfMonth = now()->endOfMonth();
         
+        // Get AI usage for current month
+        $aiUsageStatus = $this->aiUsageService->getUsageStatus($tenant);
+        
         $currentUsage = [
             'brands' => $tenant->brands()->count(),
             'users' => $tenant->users()->count(),
@@ -69,6 +74,9 @@ class BillingController extends Controller
                 ->where('status', DownloadStatus::READY)
                 ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
                 ->count(),
+            'custom_metadata_fields' => $tenant->metadataFields()->where('scope', 'tenant')->count(),
+            'ai_tagging' => $aiUsageStatus['tagging']['usage'] ?? 0,
+            'ai_suggestions' => $aiUsageStatus['suggestions']['usage'] ?? 0,
         ];
 
         // Fetch Stripe price data for each plan

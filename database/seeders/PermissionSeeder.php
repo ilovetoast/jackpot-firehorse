@@ -41,6 +41,15 @@ class PermissionSeeder extends Seeder
             'metadata.override_automatic',
             'metadata.review_candidates',
             'metadata.bulk_edit',
+            // AI Metadata Suggestions permissions
+            'metadata.suggestions.view',
+            'metadata.suggestions.apply',
+            'metadata.suggestions.dismiss',
+            // Metadata Field Management permissions
+            'metadata.fields.manage',
+            'metadata.fields.values.manage',
+            // AI Usage viewing (admin only)
+            'ai.usage.view',
         ];
 
         // DAM Governance permissions (tenant-scoped)
@@ -126,6 +135,7 @@ class PermissionSeeder extends Seeder
                 'tickets.reply',
                 'tickets.view_tenant',
                 'tickets.view_any',
+                'ai.usage.view', // View AI usage status
             ]
         ));
 
@@ -141,10 +151,11 @@ class PermissionSeeder extends Seeder
                 'tickets.reply',
                 'tickets.view_tenant',
                 'tickets.view_any',
+                'ai.usage.view', // View AI usage status
             ]
         ));
 
-        // Manager: All Contributor permissions + bypass approval + override automatic + bulk edit
+        // Manager: All Contributor permissions + bypass approval + override automatic + bulk edit + suggestions
         $manager->syncPermissions(array_merge(
             $companyPermissions,
             $assetPermissions,
@@ -155,6 +166,9 @@ class PermissionSeeder extends Seeder
                 'metadata.override_automatic',
                 'metadata.review_candidates',
                 'metadata.bulk_edit',
+                'metadata.suggestions.view',
+                'metadata.suggestions.apply',
+                'metadata.suggestions.dismiss',
             ]
             // Note: Tickets permissions removed per standard DAM role definition
             // Tickets can be added separately if needed for specific tenants
@@ -191,12 +205,15 @@ class PermissionSeeder extends Seeder
             // Tickets can be added separately if needed for specific tenants
         ]);
 
-        // Brand Manager: Legacy role - keep existing permissions
+        // Brand Manager: Legacy role - keep existing permissions + suggestions
         $brandManager->syncPermissions([
             'brand_settings.manage',
             'brand_categories.manage',
             'billing.view',
             'assets.retry_thumbnails',
+            'metadata.suggestions.view',
+            'metadata.suggestions.apply',
+            'metadata.suggestions.dismiss',
             'tickets.create',
             'tickets.reply',
             'tickets.view_tenant',

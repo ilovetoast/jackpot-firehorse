@@ -22,6 +22,9 @@ return [
             'max_users' => 2,
             'max_downloads_per_month' => 50,
             'max_custom_metadata_fields' => 0, // Phase C3: No custom fields on free plan
+            // AI Usage caps (per month)
+            'max_ai_tagging_per_month' => 5, // 5 AI tagging calls per month (very low allowance for free plan)
+            'max_ai_suggestions_per_month' => 10, // 10 AI suggestions per month (small allowance for free plan)
         ],
         'features' => [
             'basic_asset_types',
@@ -50,6 +53,9 @@ return [
             'max_users' => 5,
             'max_downloads_per_month' => 200,
             'max_custom_metadata_fields' => 5, // Phase C3: 5 custom fields on starter plan
+            // AI Usage caps (per month)
+            'max_ai_tagging_per_month' => 100, // 100 AI tagging calls per month
+            'max_ai_suggestions_per_month' => 500, // 500 AI suggestions per month
         ],
         'features' => [
             'all_asset_types',
@@ -79,6 +85,9 @@ return [
             'max_users' => 20,
             'max_downloads_per_month' => 1000,
             'max_custom_metadata_fields' => 20, // Phase C3: 20 custom fields on pro plan
+            // AI Usage caps (per month)
+            'max_ai_tagging_per_month' => 1000, // 1000 AI tagging calls per month
+            'max_ai_suggestions_per_month' => 5000, // 5000 AI suggestions per month
         ],
         'features' => [
             'all_asset_types',
@@ -112,6 +121,9 @@ return [
             'max_users' => 200, // Unlimited
             'max_downloads_per_month' => 999999, // Unlimited
             'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on enterprise plan
+            // AI Usage caps (per month)
+            'max_ai_tagging_per_month' => 0, // 0 = unlimited
+            'max_ai_suggestions_per_month' => 0, // 0 = unlimited
         ],
         'features' => [
             'all_asset_types',

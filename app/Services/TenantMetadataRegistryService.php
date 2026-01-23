@@ -120,7 +120,8 @@ class TenantMetadataRegistryService
             $result[] = [
                 'id' => $field->id,
                 'key' => $field->key,
-                'label' => $field->system_label,
+                'label' => $field->system_label ?: $field->key, // Fallback to key if system_label is empty
+                'system_label' => $field->system_label, // Also include for reference
                 'field_type' => $field->type,
                 'applies_to' => $field->applies_to,
                 'population_mode' => $field->population_mode ?? 'manual',

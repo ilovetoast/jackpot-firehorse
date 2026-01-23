@@ -55,9 +55,20 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         
         // Phase C3: Tenant metadata field management
         Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');
+        Route::get('/tenant/metadata/fields/create', [\App\Http\Controllers\TenantMetadataFieldController::class, 'create'])->name('tenant.metadata.fields.create');
+        Route::get('/tenant/metadata/fields/{field}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'show'])->name('tenant.metadata.fields.show');
         Route::post('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'store'])->name('tenant.metadata.fields.store');
+        Route::put('/tenant/metadata/fields/{field}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'update'])->name('tenant.metadata.fields.update');
         Route::post('/tenant/metadata/fields/{field}/disable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'disable'])->name('tenant.metadata.fields.disable');
         Route::post('/tenant/metadata/fields/{field}/enable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'enable'])->name('tenant.metadata.fields.enable');
+        Route::post('/tenant/metadata/fields/{field}/ai-eligible', [\App\Http\Controllers\TenantMetadataFieldController::class, 'updateAiEligible'])->name('tenant.metadata.fields.ai-eligible');
+        
+        // Allowed values (options) management
+        Route::post('/tenant/metadata/fields/{field}/values', [\App\Http\Controllers\TenantMetadataFieldController::class, 'addValue'])->name('tenant.metadata.fields.values.add');
+        Route::delete('/tenant/metadata/fields/{field}/values/{option}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'removeValue'])->name('tenant.metadata.fields.values.remove');
+        
+        // AI Usage tracking (admin only)
+        Route::get('/api/companies/ai-usage', [\App\Http\Controllers\CompanyController::class, 'getAiUsage'])->name('companies.ai-usage');
         
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
@@ -224,6 +235,11 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveSuggestion'])->name('assets.metadata.ai-suggestions.approve');
             Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/edit-accept', [\App\Http\Controllers\AssetMetadataController::class, 'editAndAcceptSuggestion'])->name('assets.metadata.ai-suggestions.edit-accept');
             Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectSuggestion'])->name('assets.metadata.ai-suggestions.reject');
+            
+            // AI Metadata Suggestions (new ephemeral format from asset.metadata['_ai_suggestions'])
+            Route::get('/assets/{asset}/metadata/suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getSuggestions'])->name('assets.metadata.suggestions');
+            Route::post('/assets/{asset}/metadata/suggestions/{fieldKey}/accept', [\App\Http\Controllers\AssetMetadataController::class, 'acceptSuggestion'])->name('assets.metadata.suggestions.accept');
+            Route::post('/assets/{asset}/metadata/suggestions/{fieldKey}/dismiss', [\App\Http\Controllers\AssetMetadataController::class, 'dismissSuggestion'])->name('assets.metadata.suggestions.dismiss');
             
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');

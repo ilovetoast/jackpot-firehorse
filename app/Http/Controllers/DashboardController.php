@@ -11,6 +11,7 @@ use App\Models\AssetMetric;
 use App\Models\Download;
 use App\Enums\DownloadStatus;
 use App\Enums\MetricType;
+use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
@@ -23,7 +24,8 @@ use Inertia\Response;
 class DashboardController extends Controller
 {
     public function __construct(
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected AiUsageService $aiUsageService
     ) {
     }
 
@@ -142,6 +144,33 @@ class DashboardController extends Controller
         $downloadLinksChange = $downloadLinksLastMonthPeriod > 0
             ? round((($downloadLinksThisMonth - $downloadLinksLastMonthPeriod) / $downloadLinksLastMonthPeriod) * 100, 2)
             : ($downloadLinksThisMonth > 0 ? 100 : 0);
+        
+        // Get AI usage data (tenant-scoped, shared across all brands)
+        // Only include if user has permission to view AI usage
+        $aiUsageData = null;
+        if ($user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
+            $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
+            $aiUsageData = [
+                'tagging' => [
+                    'usage' => $usageStatus['tagging']['usage'] ?? 0,
+                    'cap' => $usageStatus['tagging']['cap'] ?? 0,
+                    'is_unlimited' => $usageStatus['tagging']['is_unlimited'] ?? false,
+                    'is_disabled' => $usageStatus['tagging']['is_disabled'] ?? false,
+                    'is_exceeded' => $usageStatus['tagging']['is_exceeded'] ?? false,
+                    'remaining' => $usageStatus['tagging']['remaining'] ?? null,
+                    'percentage' => $usageStatus['tagging']['percentage'] ?? 0,
+                ],
+                'suggestions' => [
+                    'usage' => $usageStatus['suggestions']['usage'] ?? 0,
+                    'cap' => $usageStatus['suggestions']['cap'] ?? 0,
+                    'is_unlimited' => $usageStatus['suggestions']['is_unlimited'] ?? false,
+                    'is_disabled' => $usageStatus['suggestions']['is_disabled'] ?? false,
+                    'is_exceeded' => $usageStatus['suggestions']['is_exceeded'] ?? false,
+                    'remaining' => $usageStatus['suggestions']['remaining'] ?? null,
+                    'percentage' => $usageStatus['suggestions']['percentage'] ?? 0,
+                ],
+            ];
+        }
         
         // Get most viewed assets (top 6) - only visible, non-deleted assets
         $mostViewedAssetIds = AssetMetric::where('asset_metrics.tenant_id', $tenant->id)
@@ -312,6 +341,7 @@ class DashboardController extends Controller
             ],
             'most_viewed_assets' => $mostViewedAssets,
             'most_downloaded_assets' => $mostDownloadedAssets,
+            'ai_usage' => $aiUsageData, // Tenant-scoped AI usage (shared across all brands)
         ]);
     }
 

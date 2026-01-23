@@ -3,443 +3,597 @@
 namespace App\Services;
 
 use App\Models\Asset;
-use App\Models\Category;
+use App\Services\AiUsageService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
  * AI Metadata Suggestion Service
  *
- * Phase 2 – Step 5: Generates AI-based metadata suggestions for assets.
+ * Generates AI metadata suggestions without auto-applying values.
+ * Suggestions are ephemeral and stored in asset.metadata['_ai_suggestions'].
  *
- * This service:
- * - Identifies AI-eligible metadata fields
- * - Runs AI inference (stub implementation)
- * - Stores suggestions as unapproved metadata
- * - Creates audit entries
+ * CRITICAL GUARDRAILS:
+ * - DO NOT auto-write suggested values into asset metadata
+ * - DO NOT modify Phase H logic
+ * - DO NOT change existing metadata schemas
+ * - Suggestions must be additive and ephemeral
+ * - Auto-apply: NEVER
+ * - Suggest-only threshold: >= 0.90
+ * - Below threshold: discard silently
+ * - Missing confidence: discard silently
  *
- * Rules:
- * - AI suggestions are NEVER auto-applied
- * - AI suggestions NEVER overwrite user-entered metadata
- * - AI suggestions MUST respect visibility rules
- * - AI suggestions MUST respect option visibility
- * - AI suggestions MUST include confidence score
- *
- * @see docs/PHASE_1_5_METADATA_SCHEMA.md
+ * Suggestion Rules:
+ * - Only for non-system, user-owned fields
+ * - Only if field is currently empty
+ * - Only from predefined allowed values (no free-text hallucinations)
+ * - Only if confidence >= VERY HIGH threshold (0.90+)
+ * - Deterministic (same asset + same AI output = same suggestion)
  */
 class AiMetadataSuggestionService
 {
+    /**
+     * @param AiMetadataConfidenceService $confidenceService
+     * @param AiUsageService $usageService
+     */
     public function __construct(
-        protected MetadataSchemaResolver $metadataSchemaResolver
+        protected AiMetadataConfidenceService $confidenceService,
+        protected AiUsageService $usageService
     ) {
     }
-
     /**
-     * Generate AI metadata suggestions for an asset.
+     * Generate suggestions for an asset based on AI metadata candidates.
      *
      * @param Asset $asset The asset to generate suggestions for
-     * @param Category|null $category Optional category for schema resolution
-     * @return array Array of suggestions created (for logging)
+     * @param array $aiMetadataValues Keyed by field_key => ['value' => mixed, 'confidence' => float, 'source' => string]
+     * @return array Generated suggestions: ['field_key' => ['value' => mixed, 'confidence' => float, 'source' => string]]
      */
-    public function generateSuggestions(Asset $asset, ?Category $category = null): array
+    public function generateSuggestions(Asset $asset, array $aiMetadataValues): array
     {
-        // Skip if no category (required for schema resolution)
-        if (!$category) {
-            Log::info('[AiMetadataSuggestion] Skipping - no category', [
-                'asset_id' => $asset->id,
-            ]);
+        if (!config('ai_metadata.suggestions.enabled', true)) {
             return [];
         }
 
-        // Determine asset type for schema resolution
-        $assetType = $this->determineAssetType($asset);
-
-        // Resolve metadata schema for asset context
-        $schema = $this->metadataSchemaResolver->resolve(
-            $asset->tenant_id,
-            $asset->brand_id,
-            $category->id,
-            $assetType
-        );
-
-        // Filter to AI-eligible fields only
-        $eligibleFields = $this->filterAiEligibleFields($schema);
-
-        if (empty($eligibleFields)) {
-            Log::info('[AiMetadataSuggestion] No AI-eligible fields', [
-                'asset_id' => $asset->id,
-                'category_id' => $category->id,
-            ]);
-            return [];
+        // Check AI usage cap before generating suggestions
+        $tenant = \App\Models\Tenant::find($asset->tenant_id);
+        if ($tenant) {
+            try {
+                $this->usageService->checkUsage($tenant, 'suggestions', 1);
+            } catch (\App\Exceptions\PlanLimitExceededException $e) {
+                // Hard stop when cap exceeded - return empty suggestions
+                Log::warning('[AiMetadataSuggestionService] AI usage cap exceeded', [
+                    'tenant_id' => $tenant->id,
+                    'feature' => 'suggestions',
+                    'error' => $e->getMessage(),
+                ]);
+                return [];
+            }
         }
 
-        // Collect AI context
-        $aiContext = $this->collectAiContext($asset);
+        $minConfidence = config('ai_metadata.suggestions.min_confidence', 0.90);
+        $suggestions = [];
 
-        // Generate AI suggestions (stub implementation)
-        $suggestions = $this->callAiService($asset, $eligibleFields, $aiContext);
+        foreach ($aiMetadataValues as $fieldKey => $aiData) {
+            $value = $aiData['value'] ?? null;
+            $confidence = $aiData['confidence'] ?? null;
+            $source = $aiData['source'] ?? 'ai';
 
+            // Rule 1: Strict confidence gating
+            // - Missing confidence: discard silently
+            // - Below threshold (0.90): discard silently
+            // - Only >= 0.90 confidence values are suggested
+            if (!$this->meetsConfidenceThreshold($confidence, $minConfidence)) {
+                // Discard silently - no logging, no error, just skip
+                continue;
+            }
+
+            // Rule 2: Only for eligible fields (non-system, user-owned, empty)
+            if (!$this->isFieldEligible($asset, $fieldKey)) {
+                continue;
+            }
+
+            // Rule 3: Only from predefined allowed values
+            if (!$this->isValueAllowed($fieldKey, $value)) {
+                continue;
+            }
+
+            // Rule 4: Only if field is currently empty
+            if (!$this->isFieldEmpty($asset, $fieldKey)) {
+                continue;
+            }
+
+            // Rule 5: Check if this suggestion has been dismissed
+            // Dismissed suggestions never reappear (unless value differs)
+            if ($this->isSuggestionDismissed($asset, $fieldKey, $value)) {
+                // This exact field+value combination was dismissed - skip
+                continue;
+            }
+
+            // Generate suggestion
+            $suggestions[$fieldKey] = [
+                'value' => $value,
+                'confidence' => $confidence,
+                'source' => $source,
+                'generated_at' => now()->toIso8601String(),
+            ];
+        }
+
+        // Track usage if suggestions were generated
+        if (!empty($suggestions) && $tenant) {
+            $this->usageService->trackUsage($tenant, 'suggestions', count($suggestions));
+        }
+
+        return $suggestions;
+    }
+
+    /**
+     * Check if confidence meets the strict suggestion threshold.
+     *
+     * Rules:
+     * - Missing confidence (null): discard (return false)
+     * - Non-numeric confidence: discard (return false)
+     * - Below threshold (< 0.90): discard (return false)
+     * - At or above threshold (>= 0.90): allow (return true)
+     *
+     * This method ensures strict confidence gating and reuses the existing
+     * confidence service's logic for handling missing/malformed confidence.
+     *
+     * @param mixed $confidence Confidence value (float, null, or other)
+     * @param float $minConfidence Minimum threshold (default: 0.90)
+     * @return bool True if confidence meets threshold, false if discarded
+     */
+    protected function meetsConfidenceThreshold($confidence, float $minConfidence): bool
+    {
+        // Missing confidence: discard silently
+        if ($confidence === null) {
+            return false;
+        }
+
+        // Non-numeric confidence: discard silently
+        if (!is_numeric($confidence)) {
+            return false;
+        }
+
+        // Cast to float for comparison
+        $confidenceFloat = (float) $confidence;
+
+        // Below threshold: discard silently
+        if ($confidenceFloat < $minConfidence) {
+            return false;
+        }
+
+        // At or above threshold: allow
+        return true;
+    }
+
+    /**
+     * Store suggestions in asset.metadata['_ai_suggestions'].
+     *
+     * @param Asset $asset
+     * @param array $suggestions Suggestions keyed by field_key
+     * @return void
+     */
+    public function storeSuggestions(Asset $asset, array $suggestions): void
+    {
         if (empty($suggestions)) {
-            Log::info('[AiMetadataSuggestion] No suggestions generated', [
-                'asset_id' => $asset->id,
-            ]);
-            return [];
+            return;
         }
 
-        // Validate and persist suggestions
-        $persisted = $this->persistSuggestions($asset, $eligibleFields, $suggestions);
+        $metadata = $asset->metadata ?? [];
+        $metadata['_ai_suggestions'] = $suggestions;
 
-        Log::info('[AiMetadataSuggestion] Suggestions generated', [
+        $asset->update(['metadata' => $metadata]);
+
+        Log::debug('[AiMetadataSuggestionService] Stored suggestions', [
             'asset_id' => $asset->id,
-            'suggestions_count' => count($persisted),
+            'suggestion_count' => count($suggestions),
+            'field_keys' => array_keys($suggestions),
         ]);
-
-        return $persisted;
     }
 
     /**
-     * Determine asset type for schema resolution.
+     * Get existing suggestions for an asset.
      *
      * @param Asset $asset
-     * @return string 'image' | 'video' | 'document'
+     * @return array Suggestions keyed by field_key
      */
-    protected function determineAssetType(Asset $asset): string
+    public function getSuggestions(Asset $asset): array
     {
-        // Use asset type enum value, defaulting to 'image'
-        $type = $asset->type?->value ?? 'image';
-
-        // Map asset type enum to schema asset type
-        if (in_array($type, ['image', 'video', 'document'], true)) {
-            return $type;
-        }
-
-        // Default to 'image' for unknown types
-        return 'image';
+        return $asset->metadata['_ai_suggestions'] ?? [];
     }
 
     /**
-     * Filter schema to AI-eligible fields only.
-     *
-     * AI eligibility rules:
-     * - is_ai_trainable = true
-     * - is_visible = true
-     * - Field is NOT rating type
-     * - Field is user-editable
-     *
-     * @param array $schema Resolved metadata schema
-     * @return array Array of eligible field definitions
-     */
-    protected function filterAiEligibleFields(array $schema): array
-    {
-        // Load is_ai_trainable and is_user_editable flags from database
-        // (not included in resolved schema to keep resolver focused on visibility)
-        $fieldIds = array_map(fn($f) => $f['field_id'], $schema['fields'] ?? []);
-        
-        if (empty($fieldIds)) {
-            return [];
-        }
-
-        $fieldFlags = DB::table('metadata_fields')
-            ->whereIn('id', $fieldIds)
-            ->select('id', 'is_ai_trainable', 'is_user_editable')
-            ->get()
-            ->keyBy('id');
-
-        $eligible = [];
-
-        foreach ($schema['fields'] ?? [] as $field) {
-            $fieldId = $field['field_id'] ?? null;
-            if (!$fieldId) {
-                continue;
-            }
-
-            $flags = $fieldFlags[$fieldId] ?? null;
-            if (!$flags) {
-                continue;
-            }
-
-            // Check AI eligibility rules
-            if (!($flags->is_ai_trainable ?? false)) {
-                continue;
-            }
-
-            if (!($field['is_visible'] ?? false)) {
-                continue;
-            }
-
-            if (($field['type'] ?? '') === 'rating') {
-                continue;
-            }
-
-            if (!($flags->is_user_editable ?? true)) {
-                continue;
-            }
-
-            $eligible[] = $field;
-        }
-
-        return $eligible;
-    }
-
-    /**
-     * Collect AI context for inference.
+     * Clear all suggestions for an asset.
      *
      * @param Asset $asset
-     * @return array Context data for AI
+     * @return void
      */
-    protected function collectAiContext(Asset $asset): array
+    public function clearSuggestions(Asset $asset): void
     {
-        return [
-            'asset_id' => $asset->id,
-            'title' => $asset->title,
-            'original_filename' => $asset->original_filename,
-            'mime_type' => $asset->mime_type,
-            // Thumbnail URLs would be added here in future
-            // EXIF data would be added here in future
-        ];
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['_ai_suggestions']);
+
+        $asset->update(['metadata' => $metadata]);
     }
 
     /**
-     * Call AI service to generate suggestions (stub implementation).
+     * Check if a suggestion has been dismissed.
+     *
+     * Dismissed suggestions are tracked per asset + field + value.
+     * Once dismissed, the same value will never be suggested again.
+     * New suggestions are allowed only if the value differs.
      *
      * @param Asset $asset
-     * @param array $eligibleFields
-     * @param array $context
-     * @return array Array of suggestions: [field_key => [value, confidence]]
+     * @param string $fieldKey
+     * @param mixed $value
+     * @return bool True if dismissed, false if not dismissed
      */
-    protected function callAiService(Asset $asset, array $eligibleFields, array $context): array
+    public function isSuggestionDismissed(Asset $asset, string $fieldKey, $value): bool
     {
-        // Stub implementation - returns empty array
-        // Future phase will add actual AI inference
-        return [];
-    }
+        $dismissed = $asset->metadata['_ai_suggestions_dismissed'] ?? [];
 
-    /**
-     * Validate and persist AI suggestions.
-     *
-     * @param Asset $asset
-     * @param array $eligibleFields
-     * @param array $suggestions Array of [field_key => [value, confidence]]
-     * @return array Array of persisted suggestion IDs
-     */
-    protected function persistSuggestions(Asset $asset, array $eligibleFields, array $suggestions): array
-    {
-        // Build map of field_key to field definition
-        $fieldMap = [];
-        foreach ($eligibleFields as $field) {
-            $fieldMap[$field['key']] = $field;
+        if (!isset($dismissed[$fieldKey])) {
+            return false;
         }
 
-        // Check for existing user-approved metadata (AI must not overwrite)
-        $existingMetadata = $this->loadExistingUserMetadata($asset);
+        // Normalize value for comparison
+        $normalizedValue = $this->normalizeValueForComparison($value);
+        $dismissedValues = $dismissed[$fieldKey] ?? [];
 
-        $persisted = [];
-
-        // Wrap in transaction for safety
-        DB::transaction(function () use ($asset, $fieldMap, $suggestions, $existingMetadata, &$persisted) {
-            foreach ($suggestions as $fieldKey => $suggestionData) {
-                // Skip if field not in eligible fields
-                if (!isset($fieldMap[$fieldKey])) {
-                    Log::warning('[AiMetadataSuggestion] Field not in eligible fields', [
-                        'asset_id' => $asset->id,
-                        'field_key' => $fieldKey,
-                    ]);
-                    continue;
-                }
-
-                $field = $fieldMap[$fieldKey];
-
-                // Skip if user already provided value for this field
-                if (isset($existingMetadata[$fieldKey])) {
-                    Log::info('[AiMetadataSuggestion] Skipping - user already provided value', [
-                        'asset_id' => $asset->id,
-                        'field_key' => $fieldKey,
-                    ]);
-                    continue;
-                }
-
-                $value = $suggestionData['value'] ?? null;
-                $confidence = $suggestionData['confidence'] ?? 0.0;
-
-                // Validate value against field type and options
-                if (!$this->validateSuggestionValue($field, $value)) {
-                    Log::warning('[AiMetadataSuggestion] Invalid suggestion value', [
-                        'asset_id' => $asset->id,
-                        'field_key' => $fieldKey,
-                        'value' => $value,
-                    ]);
-                    continue;
-                }
-
-                // Normalize value for persistence
-                $normalizedValues = $this->normalizeValue($field, $value);
-
-                // Persist each value (one row per value for multi-value fields)
-                foreach ($normalizedValues as $normalizedValue) {
-                    // Insert asset_metadata row (unapproved)
-                    // Phase B7: AI suggestions have producer = 'ai' and use AI confidence
-                    $assetMetadataId = DB::table('asset_metadata')->insertGetId([
-                        'asset_id' => $asset->id,
-                        'metadata_field_id' => $field['field_id'],
-                        'value_json' => json_encode($normalizedValue),
-                        'source' => 'ai',
-                        'confidence' => $confidence, // AI-provided confidence
-                        'producer' => 'ai', // Phase B7: AI suggestions are from AI
-                        'approved_at' => null, // Unapproved
-                        'approved_by' => null,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-
-                    // Insert audit history entry
-                    DB::table('asset_metadata_history')->insert([
-                        'asset_metadata_id' => $assetMetadataId,
-                        'old_value_json' => null,
-                        'new_value_json' => json_encode($normalizedValue),
-                        'source' => 'ai',
-                        'changed_by' => null, // AI, not a user
-                        'created_at' => now(),
-                    ]);
-
-                    $persisted[] = $assetMetadataId;
-                }
+        // Check if this exact value was dismissed
+        foreach ($dismissedValues as $dismissedValue) {
+            $normalizedDismissed = $this->normalizeValueForComparison($dismissedValue);
+            if ($this->valuesMatch($normalizedValue, $normalizedDismissed)) {
+                return true;
             }
-        });
-
-        return $persisted;
-    }
-
-    /**
-     * Load existing user-approved metadata for asset.
-     *
-     * @param Asset $asset
-     * @return array Keyed by field_key
-     */
-    protected function loadExistingUserMetadata(Asset $asset): array
-    {
-        // Load all user-approved metadata for this asset
-        $userMetadata = DB::table('asset_metadata')
-            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->where('asset_metadata.source', 'user')
-            ->whereNotNull('asset_metadata.approved_at')
-            ->select('metadata_fields.key', 'asset_metadata.value_json')
-            ->get();
-
-        $result = [];
-        foreach ($userMetadata as $row) {
-            $result[$row->key] = json_decode($row->value_json, true);
         }
 
-        return $result;
+        return false;
     }
 
     /**
-     * Validate suggestion value against field definition.
+     * Record a dismissed suggestion.
      *
-     * @param array $field Field definition
-     * @param mixed $value Suggested value
-     * @return bool
+     * Stores the dismissal marker in asset.metadata['_ai_suggestions_dismissed']
+     * to prevent the same suggestion from reappearing.
+     *
+     * @param Asset $asset
+     * @param string $fieldKey
+     * @param mixed $value
+     * @return void
      */
-    protected function validateSuggestionValue(array $field, $value): bool
+    public function recordDismissal(Asset $asset, string $fieldKey, $value): void
     {
-        $fieldType = $field['type'] ?? 'text';
+        $metadata = $asset->metadata ?? [];
+        $dismissed = $metadata['_ai_suggestions_dismissed'] ?? [];
 
-        // For select/multiselect, validate against allowed options
-        if (in_array($fieldType, ['select', 'multiselect'])) {
-            $allowedOptions = [];
-            foreach ($field['options'] ?? [] as $option) {
-                if ($option['is_visible'] ?? true) {
-                    $allowedOptions[] = $option['value'];
-                }
+        // Initialize field array if needed
+        if (!isset($dismissed[$fieldKey])) {
+            $dismissed[$fieldKey] = [];
+        }
+
+        // Normalize value for storage
+        $normalizedValue = $this->normalizeValueForComparison($value);
+
+        // Check if this value is already dismissed (avoid duplicates)
+        $alreadyDismissed = false;
+        foreach ($dismissed[$fieldKey] as $dismissedValue) {
+            $normalizedDismissed = $this->normalizeValueForComparison($dismissedValue);
+            if ($this->valuesMatch($normalizedValue, $normalizedDismissed)) {
+                $alreadyDismissed = true;
+                break;
             }
+        }
 
-            if (empty($allowedOptions)) {
-                // Field has no visible options - cannot suggest
+        if (!$alreadyDismissed) {
+            // Store original value (not normalized) for reference
+            $dismissed[$fieldKey][] = $value;
+            $metadata['_ai_suggestions_dismissed'] = $dismissed;
+
+            $asset->update(['metadata' => $metadata]);
+
+            Log::debug('[AiMetadataSuggestionService] Recorded dismissal', [
+                'asset_id' => $asset->id,
+                'field_key' => $fieldKey,
+                'value' => $value,
+            ]);
+        }
+    }
+
+    /**
+     * Normalize a value for comparison.
+     *
+     * Handles arrays, strings, numbers, etc. to ensure consistent comparison.
+     *
+     * @param mixed $value
+     * @return mixed Normalized value
+     */
+    protected function normalizeValueForComparison($value): mixed
+    {
+        if (is_array($value)) {
+            // Sort arrays for consistent comparison
+            sort($value);
+            return $value;
+        }
+
+        if (is_string($value)) {
+            // Trim and lowercase for string comparison
+            return strtolower(trim($value));
+        }
+
+        if (is_numeric($value)) {
+            // Normalize numbers (float vs int)
+            return is_float($value) ? (float) $value : (int) $value;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if ($value === null) {
+            return null;
+        }
+
+        // For other types, convert to string
+        return (string) $value;
+    }
+
+    /**
+     * Check if two normalized values match.
+     *
+     * @param mixed $value1
+     * @param mixed $value2
+     * @return bool True if values match
+     */
+    protected function valuesMatch($value1, $value2): bool
+    {
+        // Handle arrays
+        if (is_array($value1) && is_array($value2)) {
+            if (count($value1) !== count($value2)) {
                 return false;
             }
-
-            if ($fieldType === 'multiselect') {
-                if (!is_array($value)) {
-                    return false;
-                }
-                // All values must be in allowed options
-                foreach ($value as $v) {
-                    if (!in_array($v, $allowedOptions, true)) {
-                        return false;
-                    }
-                }
-            } else {
-                // Single select
-                if (!in_array($value, $allowedOptions, true)) {
-                    return false;
-                }
-            }
+            // Both arrays are already sorted from normalizeValueForComparison
+            return $value1 === $value2;
         }
 
-        // Type-specific validation
-        switch ($fieldType) {
-            case 'number':
-                return is_numeric($value);
-            case 'boolean':
-                return is_bool($value);
-            case 'date':
-                // Validate date format (ISO 8601 or similar)
-                return $this->isValidDate($value);
-            case 'text':
-                return is_string($value) && $value !== '';
-            default:
-                return true; // Unknown types - allow for now
+        // Handle null
+        if ($value1 === null && $value2 === null) {
+            return true;
         }
+
+        // Strict comparison for normalized values
+        return $value1 === $value2;
     }
 
     /**
-     * Check if value is a valid date.
+     * Check if a field is eligible for suggestions.
      *
+     * Rules:
+     * - Must be non-system field (not system-generated)
+     * - Must be user-owned (is_user_editable = true)
+     * - Must not be automatic-only (population_mode !== 'automatic')
+     * - Must have ai_eligible = true
+     * - Must have allowed_values (metadata_options) defined
+     * - Must be select or multiselect type
+     *
+     * @param Asset $asset
+     * @param string $fieldKey
+     * @return bool
+     */
+    protected function isFieldEligible(Asset $asset, string $fieldKey): bool
+    {
+        // Get field definition - handle both system fields (scope='system', tenant_id=null) and tenant fields
+        $field = DB::table('metadata_fields')
+            ->where('key', $fieldKey)
+            ->where(function ($query) use ($asset) {
+                $query->where('scope', 'system')
+                    ->orWhere(function ($q) use ($asset) {
+                        $q->where('tenant_id', $asset->tenant_id)
+                            ->where('scope', '!=', 'system');
+                    });
+            })
+            ->first();
+
+        if (!$field) {
+            return false;
+        }
+
+        // Must be user-editable (system fields can be editable too)
+        if (!($field->is_user_editable ?? true)) {
+            return false;
+        }
+
+        // Must not be automatic-only (population_mode !== 'automatic')
+        // Automatic fields are system-generated and should not have suggestions
+        if (($field->population_mode ?? 'manual') === 'automatic') {
+            return false;
+        }
+
+        // Must have ai_eligible = true
+        // This flag is set by admins to explicitly enable AI suggestions
+        if (!($field->ai_eligible ?? false)) {
+            return false;
+        }
+
+        // Must be select or multiselect type (to ensure allowed_values exist)
+        $fieldType = $field->type ?? 'text';
+        if (!in_array($fieldType, ['select', 'multiselect'], true)) {
+            return false;
+        }
+
+        // Must have allowed_values (metadata_options) defined
+        // If no options exist, AI suggestions are disabled to prevent free-text hallucinations
+        $optionsCount = DB::table('metadata_options')
+            ->where('metadata_field_id', $field->id)
+            ->count();
+
+        if ($optionsCount === 0) {
+            return false;
+        }
+
+        // Must be enabled for the asset's category (not suppressed)
+        if (!$this->isFieldEnabledForCategory($asset, $field->id)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if a field is enabled for the asset's category.
+     * 
+     * A field is enabled if it's not suppressed for the category.
+     *
+     * @param Asset $asset
+     * @param int $fieldId
+     * @return bool
+     */
+    protected function isFieldEnabledForCategory(Asset $asset, int $fieldId): bool
+    {
+        // Get category from asset metadata
+        $categoryId = $asset->metadata['category_id'] ?? null;
+        if (!$categoryId) {
+            // No category means field is enabled (no suppression)
+            return true;
+        }
+
+        // Check if field is suppressed for this category
+        // System fields: Check system-level suppression
+        $field = DB::table('metadata_fields')->where('id', $fieldId)->first();
+        if ($field && ($field->scope ?? null) === 'system') {
+            // Check system-level category suppression
+            $isSuppressed = DB::table('metadata_field_category_visibility')
+                ->where('metadata_field_id', $fieldId)
+                ->where('category_id', $categoryId)
+                ->where('is_suppressed', true)
+                ->exists();
+            
+            return !$isSuppressed;
+        }
+
+        // Tenant fields: Check tenant-level suppression
+        $isSuppressed = DB::table('metadata_field_category_visibility')
+            ->where('metadata_field_id', $fieldId)
+            ->where('category_id', $categoryId)
+            ->where('tenant_id', $asset->tenant_id)
+            ->where('is_suppressed', true)
+            ->exists();
+
+        return !$isSuppressed;
+    }
+
+    /**
+     * Check if a value is allowed (from predefined options).
+     *
+     * AI suggestions may ONLY choose from allowed_values (metadata_options).
+     * This prevents free-text hallucinations and ensures AI respects tenant-defined constraints.
+     *
+     * Rules:
+     * - Value must be in metadata_options for the field
+     * - For multiselect, all values must be in options
+     * - If no options exist, suggestions are disabled
+     *
+     * @param string $fieldKey
      * @param mixed $value
      * @return bool
      */
-    protected function isValidDate($value): bool
+    protected function isValueAllowed(string $fieldKey, $value): bool
     {
-        if (!is_string($value)) {
+        // Get field definition
+        $field = DB::table('metadata_fields')
+            ->where('key', $fieldKey)
+            ->first();
+
+        if (!$field) {
             return false;
         }
 
-        try {
-            new \DateTime($value);
-            return true;
-        } catch (\Exception $e) {
+        $fieldType = $field->type ?? 'text';
+
+        // Only select/multiselect fields are eligible for AI suggestions
+        // This ensures we always have allowed_values to validate against
+        if (!in_array($fieldType, ['select', 'multiselect'], true)) {
             return false;
         }
+
+        // Get allowed values from metadata_options
+        $options = DB::table('metadata_options')
+            ->where('metadata_field_id', $field->id)
+            ->pluck('value')
+            ->toArray();
+
+        if (empty($options)) {
+            // No options defined - reject to prevent hallucinations
+            // AI suggestions require allowed_values to be defined
+            return false;
+        }
+
+        // For multiselect, check each value
+        if ($fieldType === 'multiselect' && is_array($value)) {
+            foreach ($value as $item) {
+                if (!in_array($item, $options, true)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // For select, check single value
+        return in_array($value, $options, true);
     }
 
     /**
-     * Normalize value based on field type.
+     * Check if a metadata field is currently empty for an asset.
      *
-     * Returns array of values (one element for single-value, multiple for multi-value).
-     *
-     * @param array $field Field definition
-     * @param mixed $value Raw value
-     * @return array Array of normalized values
+     * @param Asset $asset
+     * @param string $fieldKey
+     * @return bool True if field is empty, false if it has a value
      */
-    protected function normalizeValue(array $field, $value): array
+    protected function isFieldEmpty(Asset $asset, string $fieldKey): bool
     {
-        $fieldType = $field['type'] ?? 'text';
+        // Get field ID
+        $field = DB::table('metadata_fields')
+            ->where('key', $fieldKey)
+            ->where('tenant_id', $asset->tenant_id)
+            ->first();
 
-        // Handle multi-value fields
-        if ($fieldType === 'multiselect') {
-            if (!is_array($value)) {
-                return [];
-            }
-
-            // Dedupe values
-            $uniqueValues = array_unique($value, SORT_REGULAR);
-
-            // Return as array of individual values
-            return array_map(fn($v) => $v, $uniqueValues);
+        if (!$field) {
+            return false; // Field doesn't exist - not eligible
         }
 
-        // Single-value fields - return as single-element array
-        return [$value];
+        // Check asset_metadata table (authoritative source)
+        $existingValue = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $field->id)
+            ->whereNotNull('approved_at')
+            ->first();
+
+        if ($existingValue) {
+            // Field has an approved value - not empty
+            return false;
+        }
+
+        // Field is empty - eligible for suggestion
+        return true;
+    }
+
+    /**
+     * Generate and store suggestions for an asset.
+     *
+     * Convenience method that combines generateSuggestions() and storeSuggestions().
+     *
+     * @param Asset $asset
+     * @param array $aiMetadataValues Keyed by field_key => ['value' => mixed, 'confidence' => float, 'source' => string]
+     * @return array Generated suggestions
+     */
+    public function generateAndStoreSuggestions(Asset $asset, array $aiMetadataValues): array
+    {
+        $suggestions = $this->generateSuggestions($asset, $aiMetadataValues);
+        
+        if (!empty($suggestions)) {
+            $this->storeSuggestions($asset, $suggestions);
+        }
+
+        return $suggestions;
     }
 }

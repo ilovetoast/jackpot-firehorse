@@ -155,8 +155,14 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         // Write metadata values (respects manual overrides)
         $results = $writer->writeMetadata($asset, $metadataValues);
         
-        // Log metadata population completion
+        // Log system tagging completion (automatic metadata population)
         if (!empty($metadataValues)) {
+            ActivityRecorder::logAsset($asset, EventType::ASSET_SYSTEM_TAGGING_COMPLETED, [
+                'fields_populated' => array_keys($metadataValues),
+                'fields_count' => count($metadataValues),
+            ]);
+            
+            // Also log metadata populated for backward compatibility
             ActivityRecorder::logAsset($asset, EventType::ASSET_METADATA_POPULATED, [
                 'fields_populated' => array_keys($metadataValues),
                 'fields_count' => count($metadataValues),

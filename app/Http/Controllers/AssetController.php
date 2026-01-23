@@ -7,6 +7,7 @@ use App\Enums\AssetType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Category;
+use App\Services\AiMetadataConfidenceService;
 use App\Services\AssetDeletionService;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
@@ -28,7 +29,8 @@ class AssetController extends Controller
         protected PlanService $planService,
         protected AssetDeletionService $deletionService,
         protected MetadataFilterService $metadataFilterService,
-        protected MetadataSchemaResolver $metadataSchemaResolver
+        protected MetadataSchemaResolver $metadataSchemaResolver,
+        protected AiMetadataConfidenceService $confidenceService
     ) {
     }
 
@@ -617,13 +619,20 @@ class AssetController extends Controller
                     ->whereNotNull('asset_metadata.approved_at') // Only approved values
                     ->whereIn('metadata_fields.key', array_keys($filterableFieldKeys))
                     ->whereNotNull('asset_metadata.value_json')
-                    ->select('metadata_fields.key', 'asset_metadata.value_json')
+                    ->select('metadata_fields.key', 'asset_metadata.value_json', 'asset_metadata.confidence')
                     ->distinct()
                     ->get();
                 
-                // Group values by field key
+                // Group values by field key (with confidence filtering for AI metadata)
                 foreach ($assetMetadataValues as $row) {
                     $fieldKey = $row->key;
+                    $confidence = $row->confidence !== null ? (float) $row->confidence : null;
+                    
+                    // Suppress low-confidence AI metadata values
+                    if ($this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
+                        continue; // Skip this value - treat as if it doesn't exist
+                    }
+                    
                     $value = json_decode($row->value_json, true);
                     
                     // Skip null values
