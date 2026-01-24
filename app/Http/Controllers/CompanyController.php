@@ -1089,12 +1089,13 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'You do not have permission to update AI settings.'], 403);
             }
 
-            $validated = $request->validate([
+            $validated =             $request->validate([
                 'disable_ai_tagging' => 'boolean',
                 'enable_ai_tag_suggestions' => 'boolean',
                 'enable_ai_tag_auto_apply' => 'boolean',
                 'ai_auto_tag_limit_mode' => 'in:best_practices,custom',
-                'ai_auto_tag_limit_value' => 'nullable|integer|min:1|max:50',
+                'ai_auto_tag_limit_value' => 'nullable|integer|min:1|max:10',
+                'ai_best_practices_limit' => 'nullable|integer|min:1|max:10',
             ]);
 
             // Update settings via the policy service

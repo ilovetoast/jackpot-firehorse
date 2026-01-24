@@ -10,6 +10,7 @@
  * - "Show Info" toggle (controls asset card metadata visibility)
  * - Grid size controls (card size control)
  * - Bulk selection toggle (if applicable)
+ * - More filters section (optional)
  * - Responsive layout (mobile-first)
  * 
  * @param {Object} props
@@ -21,9 +22,12 @@
  * @param {Array} props.filterable_schema - Filterable metadata schema from backend
  * @param {number|null} props.selectedCategoryId - Currently selected category ID
  * @param {Object} props.available_values - Map of field_key to available values
+ * @param {React.ReactNode} props.moreFiltersContent - Optional more filters section content
+ * @param {boolean} props.showMoreFilters - Whether to show the more filters section
  */
 import { useState } from 'react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
+import { InformationCircleIcon } from '@heroicons/react/24/outline'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -38,6 +42,8 @@ export default function AssetGridToolbar({
     filterable_schema = [], // Primary metadata filters
     selectedCategoryId = null, // Current category
     available_values = {}, // Available filter values
+    moreFiltersContent = null, // More filters section content
+    showMoreFilters = false, // Whether to show more filters section
 }) {
     // Static filter chip placeholders (non-functional)
     const filterChips = ['Nature', 'Space', 'Color-grading', 'Amsterdam', 'Summer']
@@ -111,131 +117,140 @@ export default function AssetGridToolbar({
     }
 
     return (
-        <div className="bg-white border-b border-gray-200 px-4 py-4 sm:px-6">
-            {/* Toolbar Row - Stacks on Mobile, Single Row on Desktop */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                {/* Search Input - Coming Soon */}
-                <div className="flex-1 flex items-center gap-3">
-                    <div className={`relative transition-all duration-200 ${isSearchFocused ? 'flex-1 min-w-[200px]' : 'w-48 sm:w-56'}`}>
-                        <input
-                            type="text"
-                            placeholder="Search assets… (Coming soon)"
-                            className="block w-full px-4 py-2 bg-gray-50 rounded-xl border border-gray-200 text-gray-400 placeholder-gray-400 focus:outline-none transition-colors cursor-not-allowed"
-                            onFocus={() => setIsSearchFocused(true)}
-                            onBlur={() => setIsSearchFocused(false)}
-                            readOnly
-                            disabled
-                            title="Search functionality coming in Phase 6.1"
-                        />
-                        {/* TODO: Phase 6.1 — Wire search input to backend filtering */}
+        <div className={`bg-white ${showMoreFilters ? 'border-b border-gray-200' : 'border-b border-gray-200'}`}>
+            {/* Primary Toolbar Row */}
+            <div className="px-4 py-4 sm:px-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    {/* Search Input - Coming Soon */}
+                    <div className="flex-1 flex items-center gap-3">
+                        <div className={`relative transition-all duration-200 ${isSearchFocused ? 'flex-1 min-w-[200px]' : 'w-48 sm:w-56'}`}>
+                            <input
+                                type="text"
+                                placeholder="Search assets… (Coming soon)"
+                                className="block w-full px-3 py-2 text-sm bg-gray-50 rounded-lg border border-gray-200 text-gray-400 placeholder-gray-400 focus:outline-none transition-colors cursor-not-allowed"
+                                onFocus={() => setIsSearchFocused(true)}
+                                onBlur={() => setIsSearchFocused(false)}
+                                readOnly
+                                disabled
+                                title="Search functionality coming in Phase 6.1"
+                            />
+                            {/* TODO: Phase 6.1 — Wire search input to backend filtering */}
+                        </div>
+                        
+                        {/* Primary Metadata Filters - Between search and controls */}
+                        <div className="flex items-center gap-2 min-w-[100px]">
+                            <AssetGridMetadataPrimaryFilters
+                                filterable_schema={filterable_schema}
+                                selectedCategoryId={selectedCategoryId}
+                                available_values={available_values}
+                                assetType="image"
+                                compact={true}
+                            />
+                        </div>
                     </div>
-                    
-                    {/* Primary Metadata Filters - Between search and controls */}
-                    <div className="flex items-center gap-2 min-w-[100px]">
-                        <AssetGridMetadataPrimaryFilters
-                            filterable_schema={filterable_schema}
-                            selectedCategoryId={selectedCategoryId}
-                            available_values={available_values}
-                            assetType="image"
-                            compact={true}
-                        />
-                    </div>
-                </div>
 
-                {/* Controls - Right Side on Desktop */}
-                <div className="flex items-center gap-4 flex-shrink-0">
-                    {/* Phase 2 – Step 7: Bulk Actions */}
-                    {onToggleBulkMode && (
-                        <>
-                            <button
-                                type="button"
-                                onClick={onToggleBulkMode}
-                                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                                    isBulkMode
-                                        ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
-                                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                                }`}
-                            >
-                                {isBulkMode ? 'Cancel Selection' : 'Select Multiple'}
-                            </button>
-                            {isBulkMode && bulkSelectedCount > 0 && onBulkEdit && (
+                    {/* Controls - Right Side on Desktop */}
+                    <div className="flex items-center gap-4 flex-shrink-0">
+                        {/* Phase 2 – Step 7: Bulk Actions */}
+                        {onToggleBulkMode && (
+                            <>
                                 <button
                                     type="button"
-                                    onClick={onBulkEdit}
-                                    className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                    onClick={onToggleBulkMode}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                        isBulkMode
+                                            ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                                            : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                                    }`}
                                 >
-                                    Edit Metadata ({bulkSelectedCount})
+                                    {isBulkMode ? 'Cancel Selection' : 'Select Multiple'}
                                 </button>
-                            )}
-                        </>
-                    )}
-
-                    {/* Show Info Toggle */}
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={showInfo}
-                            onClick={onToggleInfo}
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`}
-                            style={{
-                                backgroundColor: showInfo ? primaryColor : '#d1d5db',
-                            }}
-                            onFocus={(e) => {
-                                e.currentTarget.style.setProperty('--tw-ring-color', primaryColor)
-                            }}
-                        >
-                            <span
-                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
-                                    showInfo ? 'translate-x-5' : 'translate-x-0'
-                                }`}
-                            />
-                        </button>
-                        <span className="text-sm font-medium text-gray-700">Show info</span>
-                    </label>
-
-                    {/* Grid Size Button Group */}
-                    <div className="flex items-center gap-2.5">
-                        <span className="text-sm font-medium text-gray-700">Size:</span>
-                        <div className="inline-flex rounded-md shadow-sm" role="group">
-                            {SIZE_PRESETS.map((size, index) => {
-                                const isSelected = currentPresetIndex === index
-                                const iconSizes = ['small', 'medium', 'large', 'xlarge']
-                                
-                                return (
+                                {isBulkMode && bulkSelectedCount > 0 && onBulkEdit && (
                                     <button
-                                        key={size}
                                         type="button"
-                                        onClick={() => onCardSizeChange(size)}
-                                        className={`
-                                            px-3 py-1.5 text-sm font-medium transition-all
-                                            flex items-center justify-center
-                                            ${index === 0 ? 'rounded-l-md' : ''}
-                                            ${index === SIZE_PRESETS.length - 1 ? 'rounded-r-md' : ''}
-                                            ${index > 0 ? '-ml-px' : ''}
-                                            ${isSelected 
-                                                ? 'bg-white text-gray-900 shadow-sm z-10' 
-                                                : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                                            }
-                                            border border-gray-300
-                                            focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
-                                        `}
-                                        style={isSelected ? {
-                                            borderColor: primaryColor,
-                                            '--tw-ring-color': primaryColor,
-                                        } : {}}
-                                        aria-pressed={isSelected}
-                                        aria-label={`${iconSizes[index]} size`}
-                                        title={`${iconSizes[index].charAt(0).toUpperCase() + iconSizes[index].slice(1)} size`}
+                                        onClick={onBulkEdit}
+                                        className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                     >
-                                        <SizeIcon size={iconSizes[index]} />
+                                        Edit Metadata ({bulkSelectedCount})
                                     </button>
-                                )
-                            })}
+                                )}
+                            </>
+                        )}
+
+                        {/* Show Info Toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer">                        
+                            <InformationCircleIcon className="h-4 w-4 text-gray-700" title="Show info" />
+
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={showInfo}
+                                onClick={onToggleInfo}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2`}
+                                style={{
+                                    backgroundColor: showInfo ? primaryColor : '#d1d5db',
+                                }}
+                                onFocus={(e) => {
+                                    e.currentTarget.style.setProperty('--tw-ring-color', primaryColor)
+                                }}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ease-in-out ${
+                                        showInfo ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>                        
+                        </label>
+
+                        {/* Grid Size Button Group */}
+                        <div className="flex items-center gap-2.5">                        
+                            <div className="inline-flex rounded-md shadow-sm" role="group" aria-label="Grid size">
+                                {SIZE_PRESETS.map((size, index) => {
+                                    const isSelected = currentPresetIndex === index
+                                    const iconSizes = ['small', 'medium', 'large', 'xlarge']
+                                    
+                                    return (
+                                        <button
+                                            key={size}
+                                            type="button"
+                                            onClick={() => onCardSizeChange(size)}
+                                            className={`
+                                                px-3 py-1.5 text-sm font-medium transition-all
+                                                flex items-center justify-center
+                                                ${index === 0 ? 'rounded-l-md' : ''}
+                                                ${index === SIZE_PRESETS.length - 1 ? 'rounded-r-md' : ''}
+                                                ${index > 0 ? '-ml-px' : ''}
+                                                ${isSelected 
+                                                    ? 'bg-white text-gray-900 shadow-sm z-10' 
+                                                    : 'bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                                                }
+                                                border border-gray-300
+                                                focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
+                                            `}
+                                            style={isSelected ? {
+                                                borderColor: primaryColor,
+                                                '--tw-ring-color': primaryColor,
+                                            } : {}}
+                                            aria-pressed={isSelected}
+                                            aria-label={`${iconSizes[index]} size`}
+                                            title={`${iconSizes[index].charAt(0).toUpperCase() + iconSizes[index].slice(1)} size`}
+                                        >
+                                            <SizeIcon size={iconSizes[index]} />
+                                        </button>
+                                    )
+                                })}
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
+
+            {/* More Filters Section - Integrated into toolbar */}
+            {showMoreFilters && moreFiltersContent && (
+                <div className="border-t border-gray-200">
+                    {moreFiltersContent}
+                </div>
+            )}
         </div>
     )
 }

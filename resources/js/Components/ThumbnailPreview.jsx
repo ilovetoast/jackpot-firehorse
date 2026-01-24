@@ -95,7 +95,7 @@ export default function ThumbnailPreview({
             const newUrl = newFinal || newPreview || null
             const assetIdChanged = prevAssetIdRef.current !== asset?.id
             
-            // In drawer context: always allow updates
+            // In drawer context: always allow updates (including when preview is removed)
             // In grid context: only update if thumbnail becomes available (was null, now has URL)
             const shouldUpdate = isDrawerContext 
                 ? (assetIdChanged || (newUrl && newUrl !== lockedUrl) || (!newUrl && lockedUrl && prevAssetIdRef.current === asset?.id))
@@ -123,6 +123,17 @@ export default function ThumbnailPreview({
         }
     }, [isDrawerContext, asset?.id, asset?.final_thumbnail_url, asset?.preview_thumbnail_url, thumbnailVersion, lockedUrl])
     
+    // Handle case where preview was removed - if locked URL exists but asset data shows no preview, clear it
+    useEffect(() => {
+        if (lockedUrl && lockedType === 'preview' && !asset?.preview_thumbnail_url && !asset?.final_thumbnail_url) {
+            // Preview was removed - clear locked URL to show icon
+            setLockedUrl(null)
+            setLockedType(null)
+            setImageLoaded(false)
+            setImageError(false)
+        }
+    }, [lockedUrl, lockedType, asset?.preview_thumbnail_url, asset?.final_thumbnail_url])
+    
     // Determine if locked URL is final or preview (based on what was locked at mount)
     const lockedIsFinal = lockedType === 'final'
     const lockedIsPreview = lockedType === 'preview'
@@ -139,6 +150,11 @@ export default function ThumbnailPreview({
     const { state } = useMemo(() => {
         return getThumbnailState(asset, retryCount)
     }, [asset?.id, retryCount])
+
+    // Check thumbnail status - if FAILED, show icon immediately
+    const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
+    const isFailed = thumbnailStatus === 'FAILED' || thumbnailStatus === 'failed' || state === 'FAILED'
+    const hasThumbnailError = !!asset?.thumbnail_error
 
     /* ------------------------------------------------------------
        Animation trigger (only for meaningful transitions)
@@ -174,7 +190,19 @@ export default function ThumbnailPreview({
                 url: activeThumbnailUrl,
             })
             setImageLoaded(false)
-            setImageError(false)
+            // Check if preview was actually removed (no preview URL in asset data)
+            if (!asset?.preview_thumbnail_url && !asset?.final_thumbnail_url) {
+                // Preview was removed - clear locked URL to show icon
+                setLockedUrl(null)
+                setLockedType(null)
+                setImageError(false)
+            } else {
+                // Preview URL exists but image failed to load - likely broken/missing file
+                // Clear locked URL to show icon instead of white space
+                setLockedUrl(null)
+                setLockedType(null)
+                setImageError(false)
+            }
         } else {
             console.error('[ThumbnailPreview] Final thumbnail failed', {
                 assetId: asset?.id,
@@ -182,14 +210,53 @@ export default function ThumbnailPreview({
             })
             setImageLoaded(false)
             setImageError(true)
+            
+            // If thumbnail status is FAILED, trigger re-render to show icon
+            // This handles the case where a broken URL exists but status is FAILED
+            if (isFailed || hasThumbnailError) {
+                // Force component to re-evaluate and show icon
+                // The isFailed check at the top will catch this on next render
+            } else {
+                // Final thumbnail URL exists but image failed to load - clear to show icon
+                setLockedUrl(null)
+                setLockedType(null)
+            }
         }
+    }
+
+    /* ------------------------------------------------------------
+       PRIORITY 0 — FAILED STATE: Show icon immediately if thumbnail failed
+       If thumbnail generation failed, show icon even if URL exists (broken/corrupted file)
+    ------------------------------------------------------------ */
+    if (isFailed || hasThumbnailError) {
+        return (
+            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+                <AssetPlaceholder
+                    asset={asset}
+                    primaryColor={brandPrimaryColor}
+                />
+            </div>
+        )
     }
 
     /* ------------------------------------------------------------
        PRIORITY 1 — FINAL THUMBNAIL (only if successfully loaded)
        HARD STABILIZATION: Render ONLY lockedUrl - never respond to updates
+       If image fails to load AND status is FAILED, show icon instead
     ------------------------------------------------------------ */
     if (canUseFinal && lockedUrl) {
+        // If image failed to load AND status is FAILED, show icon
+        if (imageError && (isFailed || hasThumbnailError)) {
+            return (
+                <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+                    <AssetPlaceholder
+                        asset={asset}
+                        primaryColor={brandPrimaryColor}
+                    />
+                </div>
+            )
+        }
+        
         return (
             <div className={`relative ${className}`}>
                 {/* Background placeholder - only show if image not loaded and not animating */}

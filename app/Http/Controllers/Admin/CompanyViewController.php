@@ -10,6 +10,8 @@ use App\Models\Asset;
 use App\Services\CompanyCostService;
 use App\Services\CompanyDataService;
 use App\Services\PlanService;
+use App\Services\AiUsageService;
+use App\Services\AICostReportingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +50,8 @@ class CompanyViewController extends Controller
 
         $planService = app(PlanService::class);
         $costService = app(CompanyCostService::class);
+        $aiUsageService = app(AiUsageService::class);
+        $aiCostReportingService = app(AICostReportingService::class);
 
         // Get basic company information
         $owner = $tenant->owner();
@@ -189,6 +193,81 @@ class CompanyViewController extends Controller
             ];
         }
 
+        // Get AI usage and billing estimates
+        $aiUsageData = null;
+        try {
+            // Get usage status and breakdown
+            $usageStatus = $aiUsageService->getUsageStatus($tenant);
+            
+            // Get individual feature usage for current month
+            $taggingUsage = $aiUsageService->getMonthlyUsage($tenant, 'tagging');
+            $suggestionsUsage = $aiUsageService->getMonthlyUsage($tenant, 'suggestions');
+            $totalUsage = $taggingUsage + $suggestionsUsage;
+            
+            // Get AI cost report for current month (filter by tenant in query)
+            $monthStart = now()->startOfMonth();
+            $monthEnd = now()->endOfMonth();
+            
+            // Query AIAgentRun directly for tenant-specific cost data
+            $tenantCostData = \App\Models\AIAgentRun::where('tenant_id', $tenant->id)
+                ->whereBetween('started_at', [$monthStart, $monthEnd])
+                ->get();
+            
+            $totalCost = $tenantCostData->sum('estimated_cost');
+            $totalRuns = $tenantCostData->count();
+            
+            // Get monthly cap data
+            $taggingCap = $aiUsageService->getMonthlyCap($tenant, 'tagging');
+            $suggestionsCap = $aiUsageService->getMonthlyCap($tenant, 'suggestions');
+            
+            // Calculate projections based on current usage
+            $daysInMonth = $monthEnd->day;
+            $daysElapsed = now()->day;
+            $dailyAverageUsage = $daysElapsed > 0 ? $totalUsage / $daysElapsed : 0;
+            $projectedMonthlyUsage = $dailyAverageUsage * $daysInMonth;
+            
+            // Calculate estimated costs
+            $dailyAverageCost = $daysElapsed > 0 ? $totalCost / $daysElapsed : 0;
+            $projectedMonthlyCost = $dailyAverageCost * $daysInMonth;
+            
+            // Calculate usage percentage against highest cap
+            $maxCap = max($taggingCap ?: 0, $suggestionsCap ?: 0);
+            $usagePercentage = $maxCap > 0 ? min(100, ($projectedMonthlyUsage / $maxCap) * 100) : 0;
+            
+            $aiUsageData = [
+                'current_usage' => [
+                    'total_calls' => $totalUsage,
+                    'features' => [
+                        'tagging' => $taggingUsage,
+                        'suggestions' => $suggestionsUsage,
+                    ],
+                    'cost_to_date' => round($totalCost, 4),
+                    'total_runs' => $totalRuns,
+                ],
+                'caps' => [
+                    'tagging' => $taggingCap,
+                    'suggestions' => $suggestionsCap,
+                ],
+                'projections' => [
+                    'monthly_usage' => round($projectedMonthlyUsage),
+                    'monthly_cost' => round($projectedMonthlyCost, 2),
+                    'usage_percentage' => round($usagePercentage, 1),
+                ],
+                'usage_status' => $usageStatus,
+                'status' => 'success',
+            ];
+        } catch (\Exception $e) {
+            Log::warning('[CompanyViewController] Failed to load AI usage data', [
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage(),
+            ]);
+            
+            $aiUsageData = [
+                'status' => 'error',
+                'message' => 'Unable to load AI usage data',
+            ];
+        }
+
         return Inertia::render('Admin/CompanyView', [
             'company' => [
                 'id' => $tenant->id,
@@ -228,6 +307,7 @@ class CompanyViewController extends Controller
                 'total_assets' => $assetCount,
                 'total_storage_gb' => $totalStorageGB,
             ],
+            'aiUsage' => $aiUsageData,
         ]);
     }
 

@@ -3,12 +3,15 @@
  *
  * Phase 2 – Step 2: Renders appropriate input based on field type.
  * Phase 2 – Step 3: Adds required field indicators and validation.
+ * Phase J.2.8: Special handling for tags field using TagInputUnified.
  *
  * Supports all field types from the upload metadata schema.
  * Handles empty options gracefully.
  */
 
 import { isFieldSatisfied } from '../../utils/metadataValidation'
+import TagInputUnified from '../TagInputUnified'
+import { usePage } from '@inertiajs/react'
 
 /**
  * MetadataFieldInput - Renders metadata field input
@@ -30,6 +33,36 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         if (!isDisabled) {
             onChange(newValue)
         }
+    }
+
+    // Phase J.2.8: Special handling for tags field
+    if (field.key === 'tags') {
+        const { tenant } = usePage().props
+        const tenantId = tenant?.id
+        
+        return (
+            <div>
+                <TagInputUnified
+                    mode="upload"
+                    value={Array.isArray(value) ? value : []}
+                    onChange={handleChange}
+                    tenantId={tenantId}
+                    placeholder="Add tags for this upload..."
+                    showTitle={true}
+                    title={field.display_label}
+                    showCounter={true}
+                    maxTags={10}
+                    compact={false}
+                    className="w-full"
+                    ariaLabel={`${field.display_label} input`}
+                />
+                {hasError && (
+                    <p className="mt-1 text-sm text-red-600">
+                        This field is required.
+                    </p>
+                )}
+            </div>
+        )
     }
 
     // Render based on field type

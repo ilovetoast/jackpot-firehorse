@@ -151,32 +151,23 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
 
     if (loading) {
         return (
-            <div className="space-y-3">
-                <h3 className="text-sm font-medium text-gray-900">Timeline</h3>
-                <div className="text-center py-4">
-                    <ArrowPathIcon className="h-5 w-5 text-gray-400 mx-auto animate-spin" />
-                    <p className="mt-2 text-xs text-gray-500">Loading timeline...</p>
-                </div>
+            <div className="text-center py-4">
+                <ArrowPathIcon className="h-5 w-5 text-gray-400 mx-auto animate-spin" />
+                <p className="mt-2 text-xs text-gray-500">Loading timeline...</p>
             </div>
         )
     }
 
     if (!events || events.length === 0) {
         return (
-            <div className="space-y-3 border-t border-gray-200 pt-6">
-                <h3 className="text-sm font-medium text-gray-900">Timeline</h3>
-                <div className="text-center py-4 text-xs text-gray-500">
-                    No activity yet
-                </div>
+            <div className="text-center py-4 text-xs text-gray-500">
+                No activity yet
             </div>
         )
     }
 
     return (
-        <div className="space-y-3 border-t border-gray-200 pt-6">
-            <h3 className="text-sm font-medium text-gray-900">Timeline</h3>
-            
-            <div className="relative">
+        <div className="relative">
                 {/* Timeline line */}
                 <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200"></div>
                 
@@ -295,6 +286,5 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                     })}
                 </div>
             </div>
-        </div>
     )
 }

@@ -22,6 +22,7 @@ export default function AiTagSuggestionsInline({ assetId }) {
     const [suggestions, setSuggestions] = useState([])
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(new Set())
+    const [showConfirmDismiss, setShowConfirmDismiss] = useState(null) // {id, tag} for dismiss confirmation
     const hasFetchedSuggestions = useRef(false) // Prevent multiple fetches per component instance
     
     const { hasPermission: canView } = usePermission('metadata.suggestions.view')
@@ -103,6 +104,10 @@ export default function AiTagSuggestionsInline({ assetId }) {
 
             if (!response.ok) {
                 const data = await response.json()
+                if (response.status === 403 && data.limit_type === 'tags_per_asset') {
+                    // Plan limit exceeded - show detailed message
+                    throw new Error(`${data.message}\n\nUpgrade your plan to add more tags per asset. Visit the billing page to see available plans.`)
+                }
                 throw new Error(data.message || 'Failed to accept tag')
             }
 
@@ -133,15 +138,19 @@ export default function AiTagSuggestionsInline({ assetId }) {
         }
     }
 
-    // Handle dismiss (mark candidate as dismissed)
-    const handleDismiss = async (candidateId, tag) => {
+    // Handle dismiss (show confirmation modal)
+    const handleDismiss = (candidateId, tag) => {
         if (processing.has(candidateId)) return
+        setShowConfirmDismiss({ id: candidateId, tag: tag })
+    }
 
-        if (!confirm('Are you sure you want to dismiss this tag suggestion?')) {
-            return
-        }
-
+    // Handle confirmed dismiss (mark candidate as dismissed)
+    const handleConfirmedDismiss = async () => {
+        if (!showConfirmDismiss) return
+        
+        const { id: candidateId, tag } = showConfirmDismiss
         setProcessing((prev) => new Set(prev).add(candidateId))
+        setShowConfirmDismiss(null)
 
         try {
             const response = await fetch(
@@ -266,6 +275,65 @@ export default function AiTagSuggestionsInline({ assetId }) {
                     )
                 })}
             </div>
+
+            {/* Confirm Dismiss Modal */}
+            {showConfirmDismiss && (
+                <ConfirmModal
+                    title="Dismiss AI Tag Suggestion"
+                    message={`Are you sure you want to dismiss the "${showConfirmDismiss.tag}" tag suggestion? This will permanently remove it from future suggestions.`}
+                    confirmText="Dismiss"
+                    confirmClass="bg-red-600 hover:bg-red-700"
+                    onConfirm={handleConfirmedDismiss}
+                    onCancel={() => setShowConfirmDismiss(null)}
+                    processing={processing.has(showConfirmDismiss.id)}
+                />
+            )}
         </div>
+    )
+}
+
+// Confirm Modal Component
+function ConfirmModal({ title, message, confirmText, confirmClass, onConfirm, onCancel, processing }) {
+    return (
+        <>
+            {/* Backdrop */}
+            <div
+                className="fixed inset-0 bg-black/50 z-50 transition-opacity"
+                onClick={onCancel}
+                aria-hidden="true"
+            />
+
+            {/* Modal */}
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                    <div className="p-6">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+                        <p className="text-sm text-gray-600 mb-6">{message}</p>
+
+                        <div className="flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={onCancel}
+                                disabled={processing}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onConfirm}
+                                disabled={processing}
+                                className={`px-4 py-2 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 ${confirmClass}`}
+                            >
+                                {processing ? 'Processing...' : confirmText}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </>
     )
 }

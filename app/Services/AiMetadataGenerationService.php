@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Models\Tenant;
 use App\Services\AI\Contracts\AIProviderInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;

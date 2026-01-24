@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Events\AssetDeleted;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Models\DeletionError;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
@@ -55,41 +56,58 @@ class DeleteAssetJob implements ShouldQueue
             return;
         }
 
-        // Verify storage - check if files exist in S3
-        $this->verifyStorage($asset);
+        try {
+            // Verify storage - check if files exist in S3
+            $this->verifyStorage($asset);
 
-        // Delete all files and folders from S3
-        $deletedPaths = $this->deleteStorageFiles($asset);
+            // Delete all files and folders from S3
+            $deletedPaths = $this->deleteStorageFiles($asset);
 
-        // Confirm removal - verify files are gone
-        $this->confirmRemoval($asset, $deletedPaths);
+            // Confirm removal - verify files are gone
+            $this->confirmRemoval($asset, $deletedPaths);
 
-        // Emit deletion event before database deletion
-        event(new AssetDeleted($asset, $deletedPaths));
+            // Emit deletion event before database deletion
+            event(new AssetDeleted($asset, $deletedPaths));
 
-        // Emit asset deleted event
-        AssetEvent::create([
-            'tenant_id' => $asset->tenant_id,
-            'brand_id' => $asset->brand_id,
-            'asset_id' => $asset->id,
-            'user_id' => null, // System event
-            'event_type' => 'asset.hard_deleted',
-                'metadata' => [
-                    'deletion_type' => 'hard',
-                    'deleted_paths' => $deletedPaths,
-                    'original_filename' => $asset->original_filename,
-                ],
-            'created_at' => now(),
-        ]);
+            // Emit asset deleted event
+            AssetEvent::create([
+                'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
+                'asset_id' => $asset->id,
+                'user_id' => null, // System event
+                'event_type' => 'asset.hard_deleted',
+                    'metadata' => [
+                        'deletion_type' => 'hard',
+                        'deleted_paths' => $deletedPaths,
+                        'original_filename' => $asset->original_filename,
+                    ],
+                'created_at' => now(),
+            ]);
 
-        Log::info('Asset permanently deleted', [
-            'asset_id' => $asset->id,
-            'file_name' => $asset->file_name,
-            'deleted_paths' => $deletedPaths,
-        ]);
+            Log::info('Asset permanently deleted', [
+                'asset_id' => $asset->id,
+                'file_name' => $asset->file_name,
+                'deleted_paths' => $deletedPaths,
+            ]);
 
-        // Permanently delete asset from database
-        $asset->forceDelete();
+            // Permanently delete asset from database
+            $asset->forceDelete();
+
+            // Clean up any existing deletion errors for this asset (successful deletion)
+            DeletionError::where('asset_id', $asset->id)
+                ->whereNull('resolved_at')
+                ->update([
+                    'resolved_at' => now(),
+                    'resolution_notes' => 'Asset successfully deleted',
+                ]);
+                
+        } catch (\Throwable $e) {
+            // Record detailed error information for user presentation
+            $this->recordDeletionError($asset, $e);
+            
+            // Re-throw to trigger job failure handling
+            throw $e;
+        }
     }
 
     /**
@@ -116,10 +134,15 @@ class DeleteAssetJob implements ShouldQueue
                 // Continue deletion even if main file doesn't exist (idempotent)
             }
         } catch (S3Exception $e) {
+            $errorType = $this->categorizeS3Error($e);
+            
             Log::error('Failed to verify asset storage before deletion', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
+                'error_type' => $errorType,
+                'aws_error_code' => $e->getAwsErrorCode(),
             ]);
+            
             throw new \RuntimeException("Failed to verify storage: {$e->getMessage()}", 0, $e);
         }
     }
@@ -208,11 +231,16 @@ class DeleteAssetJob implements ShouldQueue
 
             return $deletedPaths;
         } catch (S3Exception $e) {
+            $errorType = $this->categorizeS3Error($e);
+            
             Log::error('Failed to delete asset storage files', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
-                'code' => $e->getAwsErrorCode(),
+                'error_type' => $errorType,
+                'aws_error_code' => $e->getAwsErrorCode(),
+                'deleted_paths_partial' => $deletedPaths,
             ]);
+            
             throw new \RuntimeException("Failed to delete storage files: {$e->getMessage()}", 0, $e);
         }
     }
@@ -311,11 +339,15 @@ class DeleteAssetJob implements ShouldQueue
         $asset = Asset::withTrashed()->find($this->assetId);
 
         if ($asset) {
+            // Record structured error for user presentation
+            $this->recordDeletionError($asset, $exception);
+
             // Log failure but don't change asset status (already DELETED)
-            Log::error('Asset hard deletion failed', [
+            Log::error('Asset hard deletion failed - final attempt', [
                 'asset_id' => $asset->id,
                 'error' => $exception->getMessage(),
                 'attempts' => $this->attempts(),
+                'max_attempts' => $this->tries,
             ]);
 
             // Emit deletion failed event
@@ -328,10 +360,115 @@ class DeleteAssetJob implements ShouldQueue
                 'metadata' => [
                     'job' => 'DeleteAssetJob',
                     'error' => $exception->getMessage(),
+                    'error_type' => $this->categorizeError($exception),
                     'attempts' => $this->attempts(),
+                    'final_failure' => true,
                 ],
                 'created_at' => now(),
             ]);
         }
+    }
+
+    /**
+     * Record deletion error for user presentation and tracking.
+     */
+    protected function recordDeletionError(Asset $asset, \Throwable $exception): void
+    {
+        $errorType = $this->categorizeError($exception);
+        $errorDetails = [
+            'exception_class' => get_class($exception),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace_summary' => array_slice($exception->getTrace(), 0, 3), // First 3 trace entries
+        ];
+
+        // Add AWS-specific details if it's an S3Exception
+        if ($exception instanceof S3Exception) {
+            $errorDetails['aws_error_code'] = $exception->getAwsErrorCode();
+            $errorDetails['aws_error_type'] = $exception->getAwsErrorType();
+            $errorDetails['status_code'] = $exception->getStatusCode();
+        }
+
+        // Find existing error or create new one
+        $existingError = DeletionError::where('asset_id', $asset->id)
+            ->where('error_type', $errorType)
+            ->whereNull('resolved_at')
+            ->first();
+
+        if ($existingError) {
+            // Update existing error with new attempt
+            $existingError->update([
+                'attempts' => $this->attempts(),
+                'error_message' => $exception->getMessage(),
+                'error_details' => $errorDetails,
+                'updated_at' => now(),
+            ]);
+        } else {
+            // Create new error record
+            DeletionError::create([
+                'tenant_id' => $asset->tenant_id,
+                'asset_id' => $asset->id,
+                'original_filename' => $asset->original_filename,
+                'deletion_type' => 'hard',
+                'error_type' => $errorType,
+                'error_message' => $exception->getMessage(),
+                'error_details' => $errorDetails,
+                'attempts' => $this->attempts(),
+            ]);
+        }
+    }
+
+    /**
+     * Categorize error for better user presentation.
+     */
+    protected function categorizeError(\Throwable $exception): string
+    {
+        if ($exception instanceof S3Exception) {
+            return $this->categorizeS3Error($exception);
+        }
+
+        // Check error message patterns for other exceptions
+        $message = strtolower($exception->getMessage());
+        
+        if (str_contains($message, 'timeout') || str_contains($message, 'timed out')) {
+            return 'timeout';
+        }
+        
+        if (str_contains($message, 'permission') || str_contains($message, 'access denied')) {
+            return 'permission_denied';
+        }
+        
+        if (str_contains($message, 'network') || str_contains($message, 'connection')) {
+            return 'network_error';
+        }
+        
+        if (str_contains($message, 'database') || str_contains($message, 'sql')) {
+            return 'database_deletion_failed';
+        }
+
+        return 'unknown_error';
+    }
+
+    /**
+     * Categorize S3 errors for better user presentation.
+     */
+    protected function categorizeS3Error(S3Exception $exception): string
+    {
+        $awsErrorCode = $exception->getAwsErrorCode();
+        $statusCode = $exception->getStatusCode();
+
+        return match($awsErrorCode) {
+            'AccessDenied', 'Forbidden' => 'permission_denied',
+            'NoSuchBucket', 'NoSuchKey' => 'storage_verification_failed',
+            'RequestTimeout', 'ServiceUnavailable' => 'timeout',
+            'NetworkingError' => 'network_error',
+            default => match($statusCode) {
+                403 => 'permission_denied',
+                404 => 'storage_verification_failed',
+                408, 503, 504 => 'timeout',
+                500, 502 => 'network_error',
+                default => 'storage_deletion_failed'
+            }
+        };
     }
 }

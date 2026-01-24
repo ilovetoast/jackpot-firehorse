@@ -163,6 +163,44 @@ class GenerateThumbnailsJob implements ShouldQueue
             return;
         }
 
+        // Step 5.5: Clear old skip reasons for formats that are now supported
+        // This handles cases where support was added after assets were marked as skipped
+        // (e.g., TIFF/AVIF support added via Imagick)
+        $metadata = $asset->metadata ?? [];
+        if (isset($metadata['thumbnail_skip_reason'])) {
+            $skipReason = $metadata['thumbnail_skip_reason'];
+            $mimeType = strtolower($asset->mime_type ?? '');
+            $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+            
+            // Check if this skip reason is for a format that's now supported
+            $isNowSupported = false;
+            if ($skipReason === 'unsupported_format:tiff' && 
+                ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') &&
+                extension_loaded('imagick')) {
+                $isNowSupported = true;
+            } elseif ($skipReason === 'unsupported_format:avif' && 
+                      ($mimeType === 'image/avif' || $extension === 'avif') &&
+                      extension_loaded('imagick')) {
+                $isNowSupported = true;
+            }
+            
+            if ($isNowSupported) {
+                // Clear the skip reason and reset status to allow regeneration
+                unset($metadata['thumbnail_skip_reason']);
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::PENDING,
+                    'thumbnail_error' => null,
+                    'metadata' => $metadata,
+                ]);
+                
+                Log::info('[GenerateThumbnailsJob] Cleared old skip reason - format now supported', [
+                    'asset_id' => $asset->id,
+                    'old_skip_reason' => $skipReason,
+                    'format' => $mimeType . '/' . $extension,
+                ]);
+            }
+        }
+
         // Update status to processing and record start time for timeout detection
         $asset->update([
             'thumbnail_status' => ThumbnailStatus::PROCESSING,
@@ -292,7 +330,9 @@ class GenerateThumbnailsJob implements ShouldQueue
             $s3Client = $this->createS3Client();
             $allThumbnailsValid = true;
             $verificationErrors = [];
-            $minValidSize = 1024; // 1KB threshold - prevents 1x1 pixel placeholders
+            // Minimum size: 50 bytes - only catches truly broken/corrupted files
+            // Small valid thumbnails (e.g., 710 bytes for compressed WebP) are acceptable
+            $minValidSize = 50;
             
             // Step 6: Only verify FINAL thumbnails (exclude preview)
             foreach ($finalThumbnails as $styleName => $thumbnailData) {
@@ -314,13 +354,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'Key' => $thumbnailPath,
                     ]);
                     
-                    // Verify file size > minimum threshold
+                    // Verify file size > minimum threshold (only catch broken/corrupted files)
                     $contentLength = $result['ContentLength'] ?? 0;
                     if ($contentLength < $minValidSize) {
                         $allThumbnailsValid = false;
                         $errorMsg = "Thumbnail file too small for style '{$styleName}' (size: {$contentLength} bytes, minimum: {$minValidSize} bytes)";
                         $verificationErrors[] = $errorMsg;
-                        Log::error('Thumbnail file too small (likely 1x1 pixel placeholder)', [
+                        Log::error('Thumbnail file too small (likely corrupted or empty)', [
                             'asset_id' => $asset->id,
                             'style' => $styleName,
                             'thumbnail_path' => $thumbnailPath,
@@ -703,9 +743,33 @@ class GenerateThumbnailsJob implements ShouldQueue
             return true;
         }
         
+        // TIFF support - uses Imagick for thumbnail generation
+        if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
+            // Verify Imagick extension is available
+            if (!extension_loaded('imagick')) {
+                Log::warning('[GenerateThumbnailsJob] TIFF support requires Imagick PHP extension', [
+                    'asset_id' => $asset->id,
+                ]);
+                return false;
+            }
+            return true;
+        }
+        
+        // AVIF support - uses Imagick for thumbnail generation
+        if ($mimeType === 'image/avif' || $extension === 'avif') {
+            // Verify Imagick extension is available
+            if (!extension_loaded('imagick')) {
+                Log::warning('[GenerateThumbnailsJob] AVIF support requires Imagick PHP extension', [
+                    'asset_id' => $asset->id,
+                ]);
+                return false;
+            }
+            return true;
+        }
+        
         // Supported image MIME types - ONLY formats that GD library can actually process
         // GD library supports: JPEG, PNG, WEBP, GIF
-        // TIFF, BMP, SVG are NOT supported by GD (would require Imagick or other tools)
+        // BMP, SVG are NOT supported by GD (would require Imagick or other tools)
         $supportedMimeTypes = [
             'image/jpeg',
             'image/jpg',
@@ -729,10 +793,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             // SVG excluded: GD library does not support SVG
         ];
         
-        // AVIF is explicitly excluded (backend doesn't support it yet)
-        if ($mimeType === 'image/avif' || $extension === 'avif') {
-            return false;
-        }
+        // AVIF support check is handled above - if we reach here, it's not AVIF
         
         // Check MIME type first
         if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
@@ -758,14 +819,26 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     protected function determineSkipReason(string $mimeType, string $extension): string
     {
-        // TIFF - GD library does not support TIFF (requires Imagick)
+        // TIFF - Check if Imagick is available, otherwise mark as unsupported
         if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
-            return 'unsupported_format:tiff';
+            // If Imagick is not available, mark as unsupported
+            if (!extension_loaded('imagick')) {
+                return 'unsupported_format:tiff';
+            }
+            // If Imagick is available, TIFF should be supported - return generic reason
+            // (This shouldn't normally be reached if supportsThumbnailGeneration works correctly)
+            return 'unsupported_file_type';
         }
         
-        // AVIF - Backend pipeline does not support AVIF yet
+        // AVIF - Check if Imagick is available, otherwise mark as unsupported
         if ($mimeType === 'image/avif' || $extension === 'avif') {
-            return 'unsupported_format:avif';
+            // If Imagick is not available, mark as unsupported
+            if (!extension_loaded('imagick')) {
+                return 'unsupported_format:avif';
+            }
+            // If Imagick is available, AVIF should be supported - return generic reason
+            // (This shouldn't normally be reached if supportsThumbnailGeneration works correctly)
+            return 'unsupported_file_type';
         }
         
         // BMP - GD library has limited BMP support, not reliable

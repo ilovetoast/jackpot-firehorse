@@ -80,14 +80,40 @@ export default function AssetMetadataDisplay({ assetId }) {
         }
     }
 
-    // Format value for display
+    // Check if field has a value
+    const hasValue = (value) => {
+        return value !== null && value !== undefined && value !== ''
+    }
+
+    // Get label for a value from options
+    const getLabelForValue = (options, value) => {
+        if (!options || !Array.isArray(options)) {
+            return null
+        }
+        
+        const option = options.find(opt => opt.value === value || opt.value === String(value))
+        return option?.display_label || null
+    }
+
+    // Format value for display (with label lookup for select/multiselect)
     const formatValue = (field, value) => {
-        if (value === null || value === undefined || value === '') {
-            return <span className="text-gray-400 italic">Not set</span>
+        if (!hasValue(value)) {
+            return null // Return null instead of "Not set" text
         }
 
         if (field.type === 'multiselect' && Array.isArray(value)) {
-            return value.join(', ')
+            // Look up labels for each value
+            const labels = value.map(v => {
+                const label = getLabelForValue(field.options || [], v)
+                return label || String(v)
+            })
+            return labels.join(', ')
+        }
+
+        if (field.type === 'select') {
+            // Look up label for the value
+            const label = getLabelForValue(field.options || [], value)
+            return label || String(value)
         }
 
         if (field.type === 'boolean') {
@@ -108,65 +134,70 @@ export default function AssetMetadataDisplay({ assetId }) {
 
     if (loading) {
         return (
-            <div className="px-6 py-4 border-t border-gray-200">
-                <div className="text-sm text-gray-500">Loading metadata...</div>
-            </div>
+            <div className="text-sm text-gray-500">Loading metadata...</div>
         )
     }
 
-    // Always show the Metadata section header, even if no fields (for consistency)
+    // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
-            <div className="px-6 py-4 border-t border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4">Metadata</h3>
+            <div>
                 {fields.length === 0 ? (
                     <div className="text-sm text-gray-500 italic">No editable metadata fields available</div>
                 ) : (
-                    <dl className="space-y-4">
-                        {fields.map((field) => (
-                            <div key={field.metadata_field_id} className="flex items-start justify-between">
-                                <div className="flex-1">
-                                    <dt className="text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                        {field.display_label}
-                                        {field.has_pending && (
-                                            <span
-                                                className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
-                                                title="This field has pending changes awaiting approval"
-                                            >
-                                                Pending
-                                            </span>
+                    <dl className="space-y-2">
+                        {fields.filter(field => field.key !== 'tags' && field.field_key !== 'tags').map((field) => {
+                            const fieldHasValue = hasValue(field.current_value)
+                            const formattedValue = formatValue(field, field.current_value)
+                            
+                            return (
+                                <div key={field.metadata_field_id} className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                        <dt className="text-sm text-gray-500 mb-1 flex items-center">
+                                            {field.display_label}
+                                            {field.has_pending && (
+                                                <span
+                                                    className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
+                                                    title="This field has pending changes awaiting approval"
+                                                >
+                                                    Pending
+                                                </span>
+                                            )}
+                                            {/* Phase B2: Show readonly indicator for automatic fields */}
+                                            {(field.readonly || field.population_mode === 'automatic') && (
+                                                <span
+                                                    className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500"
+                                                    title="This field is automatically populated and cannot be edited"
+                                                >
+                                                    <LockClosedIcon className="h-3 w-3" />
+                                                    <span className="italic">Auto</span>
+                                                </span>
+                                            )}
+                                        </dt>
+                                        {/* Only show the value if there is one */}
+                                        {formattedValue && (
+                                            <dd className="text-sm font-semibold text-gray-900">
+                                                {formattedValue}
+                                            </dd>
                                         )}
-                                        {/* Phase B2: Show readonly indicator for automatic fields */}
-                                        {(field.readonly || field.population_mode === 'automatic') && (
-                                            <span
-                                                className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500"
-                                                title="This field is automatically populated and cannot be edited"
-                                            >
-                                                <LockClosedIcon className="h-3 w-3" />
-                                                <span className="italic">Auto</span>
-                                            </span>
-                                        )}
-                                    </dt>
-                                    <dd className="text-sm text-gray-900">
-                                        {formatValue(field, field.current_value)}
-                                    </dd>
+                                    </div>
+                                    {/* Phase B2: Hide edit button for readonly fields */}
+                                    {!(field.readonly || field.population_mode === 'automatic') && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEditingFieldId(field.metadata_field_id)
+                                                setEditingField(field)
+                                            }}
+                                            className="ml-4 flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                        >
+                                            <PencilIcon className="h-3 w-3" />
+                                            {fieldHasValue ? 'Edit' : 'Add'}
+                                        </button>
+                                    )}
                                 </div>
-                                {/* Phase B2: Hide edit button for readonly fields */}
-                                {!(field.readonly || field.population_mode === 'automatic') && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setEditingFieldId(field.metadata_field_id)
-                                            setEditingField(field)
-                                        }}
-                                        className="ml-4 flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                    >
-                                        <PencilIcon className="h-3 w-3" />
-                                        Edit
-                                    </button>
-                                )}
-                            </div>
-                        ))}
+                            )
+                        })}
                     </dl>
                 )}
             </div>

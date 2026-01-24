@@ -11,6 +11,7 @@ use App\Services\BulkMetadataService;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
 use App\Services\MetadataApprovalResolver;
+use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -32,7 +33,8 @@ class AssetMetadataController extends Controller
         protected MetadataPermissionResolver $permissionResolver,
         protected MetadataApprovalResolver $approvalResolver,
         protected AiMetadataConfidenceService $confidenceService,
-        protected AiMetadataSuggestionService $suggestionService
+        protected AiMetadataSuggestionService $suggestionService,
+        protected PlanService $planService
     ) {
     }
 
@@ -2166,12 +2168,13 @@ class AssetMetadataController extends Controller
     }
 
     /**
-     * Approve a metadata candidate (creates manual_override).
+     * Approve a metadata candidate (accepts AI suggestion).
      *
      * POST /metadata/candidates/{candidateId}/approve
      *
-     * Phase B9: Approves a candidate by creating a manual_override in asset_metadata.
-     * Sets source = manual_override, confidence = 1.0, producer = 'user'.
+     * Phase B9: Accepts an AI suggestion by preserving original AI attribution.
+     * Maintains source = 'ai', original confidence, producer = 'ai'.
+     * This is NOT a manual override - it's accepting an AI recommendation.
      *
      * @param int $candidateId
      * @return JsonResponse
@@ -2224,18 +2227,19 @@ class AssetMetadataController extends Controller
         $fieldLabel = $field->system_label ?? $fieldKey;
 
         DB::transaction(function () use ($asset, $candidate, $user, $candidateId, $fieldKey, $fieldLabel, $tenant, $brand) {
-            // Create manual_override in asset_metadata
+            // Accept AI suggestion by preserving AI attribution 
+            // This is NOT a manual override - it's accepting an AI recommendation
             DB::table('asset_metadata')->insert([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $candidate->metadata_field_id,
                 'value_json' => $candidate->value_json,
-                'source' => 'manual_override',
-                'confidence' => 1.0, // Phase B9: Approvals are certain
-                'producer' => 'user', // Phase B9: Approvals are from user
+                'source' => $candidate->source, // Preserve original source (typically 'ai')
+                'confidence' => $candidate->confidence, // Preserve original AI confidence
+                'producer' => $candidate->producer, // Preserve original producer (typically 'ai') 
                 'approved_at' => now(),
                 'approved_by' => $user->id,
-                'overridden_at' => now(),
-                'overridden_by' => $user->id,
+                'overridden_at' => null, // Not an override - it's an acceptance of AI suggestion
+                'overridden_by' => null, // Not an override - it's an acceptance of AI suggestion
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -2875,6 +2879,13 @@ class AssetMetadataController extends Controller
         // Check permission
         if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
             return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Check plan tag limit before accepting AI suggestion
+        try {
+            $this->planService->enforceTagLimit($asset);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return $e->render($request);
         }
 
         // Get candidate

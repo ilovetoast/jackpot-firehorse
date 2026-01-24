@@ -8,6 +8,7 @@ use App\Services\AiUsageService;
 use App\Services\BillingService;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use Stripe\Price;
@@ -74,7 +75,11 @@ class BillingController extends Controller
                 ->where('status', DownloadStatus::READY)
                 ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
                 ->count(),
-            'custom_metadata_fields' => $tenant->metadataFields()->where('scope', 'tenant')->count(),
+            'custom_metadata_fields' => DB::table('metadata_fields')
+                ->where('tenant_id', $tenant->id)
+                ->where('scope', 'tenant')
+                ->where('is_active', true)
+                ->count(),
             'ai_tagging' => $aiUsageStatus['tagging']['usage'] ?? 0,
             'ai_suggestions' => $aiUsageStatus['suggestions']['usage'] ?? 0,
         ];

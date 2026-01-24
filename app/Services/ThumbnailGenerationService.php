@@ -17,7 +17,14 @@ use Illuminate\Support\Facades\Storage;
  *
  * File type support:
  * - Images: jpg, png, webp, gif (direct thumbnail generation via GD library) ✓ IMPLEMENTED
+ * - TIFF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
+ * - AVIF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - PDF: first page extraction (page 1 only, via spatie/pdf-to-image) ✓ IMPLEMENTED
+ * 
+ * Thumbnail output format:
+ * - Configurable: WebP (default, better compression) or JPEG (maximum compatibility)
+ * - WebP offers 25-35% smaller file sizes with similar quality
+ * - Modern browser support is excellent (Chrome, Firefox, Safari, Edge)
  * - PSD/PSB: flattened preview (best-effort) - @todo Implement
  * - AI: best-effort preview - @todo Implement
  * - Office (Word/Excel/PowerPoint): icon or first-page render (best-effort) - @todo Implement
@@ -53,60 +60,13 @@ class ThumbnailGenerationService
      * replacing them with clear, actionable error messages.
      * 
      * @param string $errorMessage The raw error message
+     * @param string|null $fileType Optional file type for type-specific errors
      * @return string User-friendly error message
      */
-    protected function sanitizeErrorMessage(string $errorMessage): string
+    protected function sanitizeErrorMessage(string $errorMessage, ?string $fileType = null): string
     {
-        // Map technical errors to user-friendly messages
-        $errorMappings = [
-            // PDF-related errors
-            'Call to undefined method.*setPage' => 'PDF processing error. Please try again or contact support if the issue persists.',
-            'Call to undefined method.*selectPage' => 'PDF processing error. Please try again or contact support if the issue persists.',
-            'PDF file does not exist' => 'The PDF file could not be found or accessed.',
-            'Invalid PDF format' => 'The PDF file appears to be corrupted or invalid.',
-            'PDF thumbnail generation failed' => 'Unable to generate preview from PDF. The file may be corrupted or too large.',
-            
-            // Image processing errors
-            'getimagesize.*failed' => 'Unable to read image file. The file may be corrupted.',
-            'imagecreatefrom.*failed' => 'Unable to process image. The file format may not be supported.',
-            'imagecopyresampled.*failed' => 'Unable to resize image. Please try again.',
-            
-            // Storage errors
-            'S3.*error' => 'Unable to save thumbnail. Please try again.',
-            'Storage.*failed' => 'Unable to save thumbnail. Please check storage configuration.',
-            
-            // Timeout errors
-            'timeout' => 'Thumbnail generation timed out. The file may be too large or complex.',
-            'Maximum execution time' => 'Thumbnail generation took too long. The file may be too large.',
-            
-            // Generic technical errors
-            'Error:' => 'An error occurred during thumbnail generation.',
-            'Exception:' => 'An error occurred during thumbnail generation.',
-            'Fatal error' => 'An error occurred during thumbnail generation.',
-        ];
-        
-        // Check for specific error patterns and replace with user-friendly messages
-        foreach ($errorMappings as $pattern => $friendlyMessage) {
-            if (preg_match('/' . $pattern . '/i', $errorMessage)) {
-                return $friendlyMessage;
-            }
-        }
-        
-        // If error contains class names or technical paths, provide generic message
-        if (preg_match('/(\\\\[A-Z][a-zA-Z0-9\\\\]+|::|->|at\s+\/.*\.php)/', $errorMessage)) {
-            return 'An error occurred during thumbnail generation. Please try again or contact support if the issue persists.';
-        }
-        
-        // For other errors, try to extract a meaningful message
-        // Remove common technical prefixes
-        $cleaned = preg_replace('/^(Error|Exception|Fatal error):\s*/i', '', $errorMessage);
-        
-        // If the cleaned message is still too technical, use generic message
-        if (strlen($cleaned) > 200 || preg_match('/[{}()\[\]\\\]/', $cleaned)) {
-            return 'An error occurred during thumbnail generation. Please try again.';
-        }
-        
-        return $cleaned;
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        return $fileTypeService->sanitizeErrorMessage($errorMessage, $fileType);
     }
 
     /**
@@ -344,6 +304,74 @@ class ThumbnailGenerationService
                 'source_file_size' => $sourceFileSize,
                 'file_type' => 'pdf',
             ]);
+        } elseif ($fileType === 'tiff') {
+            // TIFF validation: Use Imagick to get dimensions
+            // TIFF files require Imagick for processing
+            if (!extension_loaded('imagick')) {
+                throw new \RuntimeException('TIFF file processing requires Imagick PHP extension');
+            }
+            
+            try {
+                $imagick = new \Imagick();
+                $imagick->readImage($tempPath);
+                $imagick->setIteratorIndex(0);
+                $imagick = $imagick->getImage();
+                
+                $sourceImageWidth = (int) $imagick->getImageWidth();
+                $sourceImageHeight = (int) $imagick->getImageHeight();
+                
+                $imagick->clear();
+                $imagick->destroy();
+                
+                if ($sourceImageWidth === 0 || $sourceImageHeight === 0) {
+                    throw new \RuntimeException("TIFF file has invalid dimensions (size: {$sourceFileSize} bytes)");
+                }
+                
+                Log::info('[ThumbnailGenerationService] Source TIFF file downloaded and verified', [
+                    'asset_id' => $asset->id,
+                    'temp_path' => $tempPath,
+                    'source_file_size' => $sourceFileSize,
+                    'source_image_width' => $sourceImageWidth,
+                    'source_image_height' => $sourceImageHeight,
+                    'file_type' => 'tiff',
+                ]);
+            } catch (\ImagickException $e) {
+                throw new \RuntimeException("Downloaded file is not a valid TIFF image: {$e->getMessage()}");
+            }
+        } elseif ($fileType === 'avif') {
+            // AVIF validation: Use Imagick to get dimensions
+            // AVIF files require Imagick for processing
+            if (!extension_loaded('imagick')) {
+                throw new \RuntimeException('AVIF file processing requires Imagick PHP extension');
+            }
+            
+            try {
+                $imagick = new \Imagick();
+                $imagick->readImage($tempPath);
+                $imagick->setIteratorIndex(0);
+                $imagick = $imagick->getImage();
+                
+                $sourceImageWidth = (int) $imagick->getImageWidth();
+                $sourceImageHeight = (int) $imagick->getImageHeight();
+                
+                $imagick->clear();
+                $imagick->destroy();
+                
+                if ($sourceImageWidth === 0 || $sourceImageHeight === 0) {
+                    throw new \RuntimeException("AVIF file has invalid dimensions (size: {$sourceFileSize} bytes)");
+                }
+                
+                Log::info('[ThumbnailGenerationService] Source AVIF file downloaded and verified', [
+                    'asset_id' => $asset->id,
+                    'temp_path' => $tempPath,
+                    'source_file_size' => $sourceFileSize,
+                    'source_image_width' => $sourceImageWidth,
+                    'source_image_height' => $sourceImageHeight,
+                    'file_type' => 'avif',
+                ]);
+            } catch (\ImagickException $e) {
+                throw new \RuntimeException("Downloaded file is not a valid AVIF image: {$e->getMessage()}");
+            }
         } elseif ($fileType === 'image') {
             // Image validation: Verify file is actually an image (not corrupted or wrong format)
             // CRITICAL: Get dimensions from ORIGINAL source file using getimagesize()
@@ -515,7 +543,7 @@ class ThumbnailGenerationService
             // Store source image dimensions in metadata ONLY for image file types
             // These dimensions are from the ORIGINAL source file (not thumbnails)
             // Only image file types have pixel dimensions - PDFs, videos, and other types do not
-            if ($fileType === 'image' && $sourceImageWidth && $sourceImageHeight) {
+            if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
                 $metadata = $asset->metadata ?? [];
                 $metadata['image_width'] = $sourceImageWidth;
                 $metadata['image_height'] = $sourceImageHeight;
@@ -670,34 +698,20 @@ class ThumbnailGenerationService
             return $this->generateImageMagickThumbnail($sourcePath, $styleConfig, $asset);
         }
         
-        // Route to appropriate generator based on file type
-        switch ($fileType) {
-            case 'image':
-                return $this->generateImageThumbnail($sourcePath, $styleConfig);
-            
-            case 'pdf':
-                return $this->generatePdfThumbnail($sourcePath, $styleConfig);
-            
-            case 'psd':
-                return $this->generatePsdThumbnail($sourcePath, $styleConfig);
-            
-            case 'ai':
-                return $this->generateAiThumbnail($sourcePath, $styleConfig);
-            
-            case 'office':
-                return $this->generateOfficeThumbnail($sourcePath, $styleConfig);
-            
-            case 'video':
-                return $this->generateVideoThumbnail($sourcePath, $styleConfig);
-            
-            default:
-                Log::info('Thumbnail generation not supported for file type', [
-                    'asset_id' => $asset->id,
-                    'file_type' => $fileType,
-                    'mime_type' => $asset->mime_type,
-                ]);
-                return null;
+        // Route to appropriate generator based on file type using FileTypeService
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $handler = $fileTypeService->getHandler($fileType, 'thumbnail');
+        
+        if (!$handler || !method_exists($this, $handler)) {
+            Log::info('Thumbnail generation not supported for file type', [
+                'asset_id' => $asset->id,
+                'file_type' => $fileType,
+                'mime_type' => $asset->mime_type,
+            ]);
+            return null;
         }
+        
+        return $this->$handler($sourcePath, $styleConfig);
     }
 
     /**
@@ -775,12 +789,25 @@ class ThumbnailGenerationService
                 throw new \RuntimeException('Failed to create thumbnail image resource');
             }
             
-            // Preserve transparency for PNG and GIF
+            // Detect if image has white content on transparent background
+            $needsDarkBackground = false;
             if ($sourceType === IMAGETYPE_PNG || $sourceType === IMAGETYPE_GIF) {
-                imagealphablending($thumbImage, false);
-                imagesavealpha($thumbImage, true);
-                $transparent = imagecolorallocatealpha($thumbImage, 0, 0, 0, 127);
-                imagefill($thumbImage, 0, 0, $transparent);
+                // Check if image has transparency and white content
+                $needsDarkBackground = $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
+                
+                if ($needsDarkBackground) {
+                    // Use darker gray background (gray-300: #D1D5DB / RGB: 209, 213, 219)
+                    // This makes white content clearly visible on transparent backgrounds
+                    // Gray-300 provides better contrast than gray-200 for white logos/text
+                    $darkGray = imagecolorallocate($thumbImage, 209, 213, 219);
+                    imagefill($thumbImage, 0, 0, $darkGray);
+                } else {
+                    // Preserve transparency for PNG and GIF
+                    imagealphablending($thumbImage, false);
+                    imagesavealpha($thumbImage, true);
+                    $transparent = imagecolorallocatealpha($thumbImage, 0, 0, 0, 127);
+                    imagefill($thumbImage, 0, 0, $transparent);
+                }
             } else {
                 // Fill with white background for opaque formats
                 $white = imagecolorallocate($thumbImage, 255, 255, 255);
@@ -810,12 +837,22 @@ class ThumbnailGenerationService
                 }
             }
             
-            // Save thumbnail to temporary file
-            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
+            // Determine output format based on config (default to WebP for better compression)
+            $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
             $quality = $styleConfig['quality'] ?? 85;
             
-            if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
-                throw new \RuntimeException('Failed to save thumbnail image');
+            // Save thumbnail to temporary file
+            if ($outputFormat === 'webp' && function_exists('imagewebp')) {
+                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.webp';
+                if (!imagewebp($thumbImage, $thumbPath, $quality)) {
+                    throw new \RuntimeException('Failed to save thumbnail image as WebP');
+                }
+            } else {
+                // Fallback to JPEG if WebP not available or not configured
+                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
+                if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
+                    throw new \RuntimeException('Failed to save thumbnail image as JPEG');
+                }
             }
             
             return $thumbPath;
@@ -824,6 +861,263 @@ class ThumbnailGenerationService
             if (isset($thumbImage)) {
                 imagedestroy($thumbImage);
             }
+        }
+    }
+
+    /**
+     * Generate thumbnail for TIFF files using Imagick.
+     *
+     * TIFF files require Imagick as GD library does not support TIFF format.
+     * This method uses Imagick to read and process TIFF images.
+     *
+     * @param string $sourcePath Local path to TIFF file
+     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @return string Path to generated thumbnail image (JPEG)
+     * @throws \RuntimeException If TIFF processing fails
+     */
+    protected function generateTiffThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        // Verify Imagick extension is loaded
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('TIFF thumbnail generation requires Imagick PHP extension');
+        }
+
+        // Verify source file exists and is readable
+        if (!file_exists($sourcePath)) {
+            throw new \RuntimeException("Source TIFF file does not exist: {$sourcePath}");
+        }
+
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException("Source TIFF file is empty (size: 0 bytes)");
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating TIFF thumbnail using Imagick', [
+            'source_path' => $sourcePath,
+            'source_file_size' => $sourceFileSize,
+            'style_config' => $styleConfig,
+        ]);
+
+        try {
+            $imagick = new \Imagick();
+            
+            // Read the TIFF file
+            $imagick->readImage($sourcePath);
+            
+            // Get first image if multi-page TIFF
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+            
+            // Get source dimensions
+            $sourceWidth = $imagick->getImageWidth();
+            $sourceHeight = $imagick->getImageHeight();
+            
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('TIFF image has invalid dimensions');
+            }
+
+            Log::info('[ThumbnailGenerationService] TIFF image loaded', [
+                'source_path' => $sourcePath,
+                'source_width' => $sourceWidth,
+                'source_height' => $sourceHeight,
+            ]);
+
+            // Calculate thumbnail dimensions (maintain aspect ratio)
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            // Resize image using high-quality Lanczos filter
+            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+
+            // Apply blur for preview thumbnails (LQIP effect)
+            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                $imagick->blurImage(0, 2); // Moderate blur
+            }
+
+            // Determine output format based on config (default to WebP for better compression)
+            $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
+            $quality = $styleConfig['quality'] ?? 85;
+            $imagick->setImageFormat($outputFormat);
+            $imagick->setImageCompressionQuality($quality);
+
+            // Create temporary output file
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_tiff_') . '.' . $extension;
+
+            // Write to file
+            $imagick->writeImage($thumbPath);
+            $imagick->clear();
+            $imagick->destroy();
+
+            // Verify output file was created
+            if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
+                throw new \RuntimeException('TIFF thumbnail generation failed - output file is missing or empty');
+            }
+
+            Log::info('[ThumbnailGenerationService] TIFF thumbnail generated successfully', [
+                'source_path' => $sourcePath,
+                'thumb_path' => $thumbPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+                'thumb_size_bytes' => filesize($thumbPath),
+                'output_format' => $outputFormat,
+            ]);
+
+            return $thumbPath;
+        } catch (\ImagickException $e) {
+            Log::error('[ThumbnailGenerationService] TIFF thumbnail generation failed', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+            ]);
+            throw new \RuntimeException("TIFF thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] TIFF thumbnail generation error', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+            ]);
+            throw new \RuntimeException("TIFF thumbnail generation error: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
+     * Generate thumbnail for AVIF files using Imagick.
+     *
+     * AVIF (AV1 Image File Format) files require Imagick as GD library does not support AVIF format.
+     * This method uses Imagick to read and process AVIF images.
+     *
+     * @param string $sourcePath Local path to AVIF file
+     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @return string Path to generated thumbnail image (JPEG or WebP)
+     * @throws \RuntimeException If AVIF processing fails
+     */
+    protected function generateAvifThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        // Verify Imagick extension is loaded
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('AVIF thumbnail generation requires Imagick PHP extension');
+        }
+
+        // Verify source file exists and is readable
+        if (!file_exists($sourcePath)) {
+            throw new \RuntimeException("Source AVIF file does not exist: {$sourcePath}");
+        }
+
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException("Source AVIF file is empty (size: 0 bytes)");
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating AVIF thumbnail using Imagick', [
+            'source_path' => $sourcePath,
+            'source_file_size' => $sourceFileSize,
+            'style_config' => $styleConfig,
+        ]);
+
+        try {
+            $imagick = new \Imagick();
+            
+            // Read the AVIF file
+            $imagick->readImage($sourcePath);
+            
+            // Get first image if multi-image AVIF
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+            
+            // Get source dimensions
+            $sourceWidth = $imagick->getImageWidth();
+            $sourceHeight = $imagick->getImageHeight();
+            
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('AVIF image has invalid dimensions');
+            }
+
+            Log::info('[ThumbnailGenerationService] AVIF image loaded', [
+                'source_path' => $sourcePath,
+                'source_width' => $sourceWidth,
+                'source_height' => $sourceHeight,
+            ]);
+
+            // Calculate thumbnail dimensions (maintain aspect ratio)
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            // Resize image using high-quality Lanczos filter
+            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+
+            // Apply blur for preview thumbnails (LQIP effect)
+            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                $imagick->blurImage(0, 2); // Moderate blur
+            }
+
+            // Determine output format based on config (default to WebP for better compression)
+            $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
+            $imagick->setImageFormat($outputFormat);
+            
+            $quality = $styleConfig['quality'] ?? 85;
+            if ($outputFormat === 'webp') {
+                $imagick->setImageCompressionQuality($quality);
+            } else {
+                $imagick->setImageCompressionQuality($quality);
+            }
+
+            // Create temporary output file
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_avif_') . '.' . $extension;
+
+            // Write to file
+            $imagick->writeImage($thumbPath);
+            $imagick->clear();
+            $imagick->destroy();
+
+            // Verify output file was created
+            if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
+                throw new \RuntimeException('AVIF thumbnail generation failed - output file is missing or empty');
+            }
+
+            Log::info('[ThumbnailGenerationService] AVIF thumbnail generated successfully', [
+                'source_path' => $sourcePath,
+                'thumb_path' => $thumbPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+                'thumb_size_bytes' => filesize($thumbPath),
+                'output_format' => $outputFormat,
+            ]);
+
+            return $thumbPath;
+        } catch (\ImagickException $e) {
+            Log::error('[ThumbnailGenerationService] AVIF thumbnail generation failed', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+            ]);
+            throw new \RuntimeException("AVIF thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] AVIF thumbnail generation error', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+            ]);
+            throw new \RuntimeException("AVIF thumbnail generation error: {$e->getMessage()}", 0, $e);
         }
     }
 
@@ -1094,9 +1388,22 @@ class ThumbnailGenerationService
                     throw new \RuntimeException('Failed to create thumbnail image resource');
                 }
 
-                // Fill with white background (PDFs may have transparency)
-                $white = imagecolorallocate($thumbImage, 255, 255, 255);
-                imagefill($thumbImage, 0, 0, $white);
+                // Check if extracted PDF page has white content
+                // Use the already-loaded sourceImage to detect white content
+                $needsDarkBackground = $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
+                
+                // Use darker background if white content detected, otherwise white
+                if ($needsDarkBackground) {
+                    // Use darker gray background (gray-300: #D1D5DB / RGB: 209, 213, 219)
+                    // This makes white content clearly visible on transparent backgrounds
+                    // Gray-300 provides better contrast than gray-200 for white logos/text
+                    $darkGray = imagecolorallocate($thumbImage, 209, 213, 219);
+                    imagefill($thumbImage, 0, 0, $darkGray);
+                } else {
+                    // Fill with white background (PDFs may have transparency)
+                    $white = imagecolorallocate($thumbImage, 255, 255, 255);
+                    imagefill($thumbImage, 0, 0, $white);
+                }
 
                 // Resize image
                 imagecopyresampled(
@@ -1116,12 +1423,22 @@ class ThumbnailGenerationService
                     }
                 }
 
-                // Save thumbnail to temporary file (JPEG format for consistency)
-                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
+                // Determine output format based on config (default to WebP for better compression)
+                $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
                 $quality = $styleConfig['quality'] ?? 85;
 
-                if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
-                    throw new \RuntimeException('Failed to save PDF thumbnail image');
+                // Save thumbnail to temporary file
+                if ($outputFormat === 'webp' && function_exists('imagewebp')) {
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.webp';
+                    if (!imagewebp($thumbImage, $thumbPath, $quality)) {
+                        throw new \RuntimeException('Failed to save PDF thumbnail image as WebP');
+                    }
+                } else {
+                    // Fallback to JPEG if WebP not available or not configured
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
+                    if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
+                        throw new \RuntimeException('Failed to save PDF thumbnail image as JPEG');
+                    }
                 }
 
                 Log::info('[ThumbnailGenerationService] PDF thumbnail generated successfully', [
@@ -1156,7 +1473,7 @@ class ThumbnailGenerationService
                 'exception_class' => get_class($e),
             ]);
             // Use sanitized error message for user-facing errors
-            $userFriendlyMessage = $this->sanitizeErrorMessage($e->getMessage());
+            $userFriendlyMessage = $this->sanitizeErrorMessage($e->getMessage(), 'pdf');
             throw new \RuntimeException($userFriendlyMessage, 0, $e);
         }
     }
@@ -1276,12 +1593,15 @@ class ThumbnailGenerationService
                 $imagick->blurImage(0, 2); // Moderate blur
             }
             
-            // Set image format to JPEG for output
-            $imagick->setImageFormat('jpeg');
-            $imagick->setImageCompressionQuality(85);
+            // Determine output format based on config (default to WebP for better compression)
+            $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
+            $quality = $styleConfig['quality'] ?? 85;
+            $imagick->setImageFormat($outputFormat);
+            $imagick->setImageCompressionQuality($quality);
             
             // Create temporary output file
-            $outputPath = tempnam(sys_get_temp_dir(), 'thumb_imagick_') . '.jpg';
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $outputPath = tempnam(sys_get_temp_dir(), 'thumb_imagick_') . '.' . $extension;
             
             // Write to file
             $imagick->writeImage($outputPath);
@@ -1379,45 +1699,10 @@ class ThumbnailGenerationService
      */
     protected function detectFileType(Asset $asset): string
     {
-        $mimeType = $asset->mime_type ?? '';
-        $filename = $asset->original_filename ?? '';
-        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
         
-        // Image types
-        if (str_starts_with($mimeType, 'image/') || in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'])) {
-            return 'image';
-        }
-        
-        // PDF
-        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
-            return 'pdf';
-        }
-        
-        // PSD/PSB
-        if (in_array($extension, ['psd', 'psb']) || $mimeType === 'image/vnd.adobe.photoshop') {
-            return 'psd';
-        }
-        
-        // AI
-        if ($extension === 'ai' || $mimeType === 'application/postscript') {
-            return 'ai';
-        }
-        
-        // Office documents
-        if (in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']) ||
-            str_starts_with($mimeType, 'application/msword') ||
-            str_starts_with($mimeType, 'application/vnd.ms-excel') ||
-            str_starts_with($mimeType, 'application/vnd.ms-powerpoint') ||
-            str_starts_with($mimeType, 'application/vnd.openxmlformats')) {
-            return 'office';
-        }
-        
-        // Video
-        if (str_starts_with($mimeType, 'video/') || in_array($extension, ['mp4', 'mov', 'avi', 'mkv', 'webm'])) {
-            return 'video';
-        }
-        
-        return 'unknown';
+        return $fileType ?? 'unknown';
     }
 
     /**
@@ -1497,13 +1782,102 @@ class ThumbnailGenerationService
      */
     protected function getMimeTypeForExtension(string $extension): string
     {
-        return match (strtolower($extension)) {
-            'jpg', 'jpeg' => 'image/jpeg',
-            'png' => 'image/png',
-            'gif' => 'image/gif',
-            'webp' => 'image/webp',
-            default => 'image/jpeg',
-        };
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        return $fileTypeService->getMimeTypeForExtension($extension) ?? 'image/jpeg';
+    }
+
+    /**
+     * Detect if image has white content on transparent background.
+     * 
+     * Samples pixels from the image to determine if visible content is mostly white.
+     * This helps identify logos/text that would be invisible on white/transparent backgrounds.
+     * 
+     * Uses a more aggressive detection strategy:
+     * - Lower white threshold (RGB > 220 instead of 240) to catch more white content
+     * - Lower ratio threshold (40% instead of 60%) to be more inclusive
+     * - Also checks if average brightness is high (bright images likely need dark bg)
+     *
+     * @param resource $imageResource GD image resource
+     * @param int $width Image width
+     * @param int $height Image height
+     * @return bool True if image appears to have white content on transparent background
+     */
+    protected function hasWhiteContentOnTransparent($imageResource, int $width, int $height): bool
+    {
+        // Sample more pixels for better detection (especially for small images)
+        $sampleSize = min(50, max(10, min($width, $height) / 5)); // Sample 10-50 points
+        $stepX = max(1, (int)($width / $sampleSize));
+        $stepY = max(1, (int)($height / $sampleSize));
+        
+        $whitePixelCount = 0;
+        $visiblePixelCount = 0;
+        $totalBrightness = 0;
+        $totalSampled = 0;
+        
+        // Sample pixels across the image
+        for ($y = 0; $y < $height; $y += $stepY) {
+            for ($x = 0; $x < $width; $x += $stepX) {
+                $totalSampled++;
+                $color = imagecolorat($imageResource, $x, $y);
+                
+                // Extract RGBA components
+                $alpha = ($color >> 24) & 0x7F; // Alpha channel (0 = opaque, 127 = transparent)
+                $red = ($color >> 16) & 0xFF;
+                $green = ($color >> 8) & 0xFF;
+                $blue = $color & 0xFF;
+                
+                // Only consider visible pixels (not fully transparent)
+                if ($alpha < 127) {
+                    $visiblePixelCount++;
+                    
+                    // Calculate brightness (luminance formula)
+                    $brightness = (0.299 * $red + 0.587 * $green + 0.114 * $blue);
+                    $totalBrightness += $brightness;
+                    
+                    // Check if pixel is white or near-white
+                    // More aggressive threshold: RGB values all > 200 (catches off-white, cream, light gray)
+                    // Also check if any channel is very high (>230) - catches mostly-white pixels
+                    // This catches white logos/text on transparent backgrounds more reliably
+                    $isWhite = ($red > 200 && $green > 200 && $blue > 200) || 
+                               ($red > 230 || $green > 230 || $blue > 230);
+                    if ($isWhite) {
+                        $whitePixelCount++;
+                    }
+                }
+            }
+        }
+        
+        // If we have visible pixels, check if most are white
+        if ($visiblePixelCount === 0) {
+            return false; // No visible content, can't determine
+        }
+        
+        // Calculate average brightness
+        $avgBrightness = $totalBrightness / $visiblePixelCount;
+        
+        // If more than 30% of visible pixels are white, likely white content on transparent
+        // Very aggressive threshold (30% instead of 40%) to catch more cases
+        $whiteRatio = $whitePixelCount / $visiblePixelCount;
+        
+        // Also check if average brightness is high (bright images likely need dark bg)
+        // Average brightness > 180 indicates a bright image (lowered from 200)
+        $isBrightImage = $avgBrightness > 180;
+        
+        // Very aggressive detection: white content OR bright image
+        // If >30% white OR (>15% white AND bright), use dark background
+        $isWhiteContent = $whiteRatio > 0.3 || ($whiteRatio > 0.15 && $isBrightImage);
+        
+        Log::debug('[ThumbnailGenerationService] White content detection', [
+            'total_sampled' => $totalSampled,
+            'visible_pixels' => $visiblePixelCount,
+            'white_pixels' => $whitePixelCount,
+            'white_ratio' => round($whiteRatio, 2),
+            'avg_brightness' => round($avgBrightness, 2),
+            'is_bright_image' => $isBrightImage,
+            'needs_dark_background' => $isWhiteContent,
+        ]);
+        
+        return $isWhiteContent;
     }
 
     /**

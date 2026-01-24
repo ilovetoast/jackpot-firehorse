@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import {
-    CollectionIcon,
+    RectangleStackIcon as CollectionIcon,
     FolderIcon,
 } from '@heroicons/react/24/outline'
 

@@ -510,6 +510,12 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 </span>
                                             </div>
                                             <div className="flex justify-between">
+                                                <span>Tags per Asset:</span>
+                                                <span className="font-medium text-gray-900">
+                                                    {formatLimit(plan.limits.max_tags_per_asset)}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
                                                 <span>AI Tagging:</span>
                                                 <span className="font-medium text-gray-900">
                                                     {formatLimit(plan.limits.max_ai_tagging_per_month)}

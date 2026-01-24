@@ -172,14 +172,35 @@ export default function MetadataCandidateReview({ assetId }) {
         }
     }
 
-    // Format value for display
-    const formatValue = (fieldType, value) => {
+    // Get label for a value from options
+    const getLabelForValue = (options, value) => {
+        if (!options || !Array.isArray(options)) {
+            return null
+        }
+        
+        const option = options.find(opt => opt.value === value || opt.value === String(value))
+        return option?.display_label || null
+    }
+
+    // Format value for display (with label lookup for select/multiselect)
+    const formatValue = (fieldType, value, options = []) => {
         if (value === null || value === undefined || value === '') {
             return <span className="text-gray-400 italic">Not set</span>
         }
 
         if (fieldType === 'multiselect' && Array.isArray(value)) {
-            return value.join(', ')
+            // Look up labels for each value
+            const labels = value.map(v => {
+                const label = getLabelForValue(options, v)
+                return label || String(v)
+            })
+            return labels.join(', ')
+        }
+
+        if (fieldType === 'select') {
+            // Look up label for the value
+            const label = getLabelForValue(options, value)
+            return label || String(value)
         }
 
         if (fieldType === 'boolean') {
@@ -241,7 +262,7 @@ export default function MetadataCandidateReview({ assetId }) {
                     Metadata Candidate Review
                 </h3>
                 <p className="text-xs text-gray-500 mb-4">
-                    Review and approve or reject metadata candidates. Approved candidates become manual overrides.
+                    Review and approve or reject AI metadata suggestions. Approved suggestions maintain their AI attribution.
                 </p>
                 <div className="space-y-6">
                     {reviewItems.map((item) => (
@@ -256,7 +277,7 @@ export default function MetadataCandidateReview({ assetId }) {
                                     <div className="mb-3 p-2 bg-white rounded border border-gray-200">
                                         <div className="text-xs text-gray-500 mb-1">Current Value:</div>
                                         <div className="text-sm text-gray-900">
-                                            {formatValue(item.field_type, item.current_resolved_value)}
+                                            {formatValue(item.field_type, item.current_resolved_value, item.options || [])}
                                         </div>
                                         {item.current_resolved_producer && (
                                             <div className="mt-1 flex items-center gap-2">
@@ -282,7 +303,7 @@ export default function MetadataCandidateReview({ assetId }) {
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">
                                                     <div className="text-sm font-medium text-gray-900 mb-1">
-                                                        {formatValue(item.field_type, candidate.value)}
+                                                        {formatValue(item.field_type, candidate.value, item.options || [])}
                                                     </div>
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         {formatProducer(candidate.producer)}
@@ -339,7 +360,7 @@ export default function MetadataCandidateReview({ assetId }) {
             {showConfirmApprove && (
                 <ConfirmModal
                     title="Approve Candidate"
-                    message="This candidate will be approved and become a manual override. It will take precedence over all automatic values."
+                    message="This AI suggestion will be approved and applied to the asset, maintaining its AI attribution and confidence score."
                     confirmText="Approve"
                     confirmClass="bg-green-600 hover:bg-green-700"
                     onConfirm={() => handleApprove(showConfirmApprove)}

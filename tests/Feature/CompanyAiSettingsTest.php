@@ -179,7 +179,7 @@ class CompanyAiSettingsTest extends TestCase
 
         // Test limit too high
         $response = $this->patchJson('/app/api/companies/ai-settings', [
-            'ai_auto_tag_limit_value' => 100,
+            'ai_auto_tag_limit_value' => 15,
         ]);
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['ai_auto_tag_limit_value']);

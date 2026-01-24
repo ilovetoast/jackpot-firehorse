@@ -77,11 +77,11 @@ class AiTagPolicyService
         $mode = $settings['ai_auto_tag_limit_mode'] ?? 'best_practices';
         
         if ($mode === 'custom') {
-            return max(1, $settings['ai_auto_tag_limit_value'] ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT);
+            return max(1, min(10, $settings['ai_auto_tag_limit_value'] ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT));
         }
         
-        // best_practices mode - use system-defined logic
-        return self::BEST_PRACTICES_AUTO_TAG_LIMIT;
+        // best_practices mode - use tenant-configurable limit (default 5, max 10)
+        return max(1, min(10, $settings['ai_best_practices_limit'] ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT));
     }
 
     /**
@@ -195,6 +195,7 @@ class AiTagPolicyService
             'enable_ai_tag_auto_apply',
             'ai_auto_tag_limit_mode',
             'ai_auto_tag_limit_value',
+            'ai_best_practices_limit',
         ];
 
         // Filter to only allowed keys
@@ -208,8 +209,15 @@ class AiTagPolicyService
         }
 
         if (isset($filteredSettings['ai_auto_tag_limit_value'])) {
-            if (!is_null($filteredSettings['ai_auto_tag_limit_value']) && $filteredSettings['ai_auto_tag_limit_value'] < 1) {
-                throw new \InvalidArgumentException('ai_auto_tag_limit_value must be at least 1 or null.');
+            if (!is_null($filteredSettings['ai_auto_tag_limit_value']) && 
+                ($filteredSettings['ai_auto_tag_limit_value'] < 1 || $filteredSettings['ai_auto_tag_limit_value'] > 10)) {
+                throw new \InvalidArgumentException('ai_auto_tag_limit_value must be between 1 and 10 or null.');
+            }
+        }
+        
+        if (isset($filteredSettings['ai_best_practices_limit'])) {
+            if ($filteredSettings['ai_best_practices_limit'] < 1 || $filteredSettings['ai_best_practices_limit'] > 10) {
+                throw new \InvalidArgumentException('ai_best_practices_limit must be between 1 and 10.');
             }
         }
 
@@ -261,6 +269,7 @@ class AiTagPolicyService
                 'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
                 'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
                 'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,
+                'ai_best_practices_limit' => $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT,
             ];
         });
     }

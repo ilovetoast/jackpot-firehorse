@@ -471,6 +471,72 @@ class AssetController extends Controller
                 // For most cases, the asset from the query is fresh enough
                 $metadata = $asset->metadata ?? [];
                 
+                // Clear old skip reasons for formats that are now supported (TIFF/AVIF via Imagick)
+                // This ensures UI shows correct status when viewing assets
+                if (isset($metadata['thumbnail_skip_reason'])) {
+                    $skipReason = $metadata['thumbnail_skip_reason'];
+                    $mimeType = strtolower($asset->mime_type ?? '');
+                    $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+                    
+                    $isNowSupported = false;
+                    if ($skipReason === 'unsupported_format:tiff' && 
+                        ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') &&
+                        extension_loaded('imagick')) {
+                        $isNowSupported = true;
+                    } elseif ($skipReason === 'unsupported_format:avif' && 
+                              ($mimeType === 'image/avif' || $extension === 'avif') &&
+                              extension_loaded('imagick')) {
+                        $isNowSupported = true;
+                    }
+                    
+                    if ($isNowSupported) {
+                        // Clear skip reason and reset status
+                        unset($metadata['thumbnail_skip_reason']);
+                        
+                        // Only dispatch job if not already processing or completed
+                        $currentStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                            ? $asset->thumbnail_status->value 
+                            : ($asset->thumbnail_status ?? 'pending');
+                        
+                        $shouldDispatch = $currentStatus !== 'processing' && $currentStatus !== 'completed';
+                        
+                        $asset->update([
+                            'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
+                            'thumbnail_error' => null,
+                            'metadata' => $metadata,
+                        ]);
+                        
+                        // Automatically dispatch thumbnail generation job for newly supported formats
+                        // Only if not already processing/completed to avoid duplicate jobs
+                        if ($shouldDispatch) {
+                            try {
+                                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
+                                \Illuminate\Support\Facades\Log::info('[AssetController] Dispatched thumbnail generation after clearing skip reason', [
+                                    'asset_id' => $asset->id,
+                                    'old_skip_reason' => $skipReason,
+                                    'format' => $mimeType . '/' . $extension,
+                                ]);
+                            } catch (\Exception $e) {
+                                \Illuminate\Support\Facades\Log::warning('[AssetController] Failed to dispatch thumbnail generation after clearing skip reason', [
+                                    'asset_id' => $asset->id,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+                        
+                        // Refresh asset to get updated status and metadata
+                        $asset->refresh();
+                        $metadata = $asset->metadata ?? [];
+                        
+                        \Illuminate\Support\Facades\Log::info('[AssetController] Cleared old skip reason on asset load', [
+                            'asset_id' => $asset->id,
+                            'old_skip_reason' => $skipReason,
+                            'format' => $mimeType . '/' . $extension,
+                            'dispatched_job' => $shouldDispatch,
+                        ]);
+                    }
+                }
+                
                 // Only refresh if we're looking for dimensions and they're missing
                 // This avoids expensive refresh() calls for every asset in the grid
                 $needsRefresh = false;
@@ -531,17 +597,16 @@ class AssetController extends Controller
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
                 
-                // Final thumbnail URL only provided when thumbnail_status === COMPLETED
-                // AND thumbnail path exists in metadata (defensive check)
-                // Includes version query param (thumbnails_generated_at) for cache busting
-                if ($thumbnailStatus === 'completed') {
-                    // Verify thumbnail path exists in metadata before generating URL
-                    // This prevents showing broken thumbnail URLs
+                // Final thumbnail URL provided when thumbnail_status === COMPLETED
+                // OR when thumbnails actually exist in metadata (handles status sync issues)
+                $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+                $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                
+                if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
+                    // Verify thumbnail path exists before generating URL
                     $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
                     
-                    if ($thumbnailPath) {
-                        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                        
+                    if ($thumbnailPath || $thumbnailsExistInMetadata) {
                         $finalThumbnailUrl = route('assets.thumbnail.final', [
                             'asset' => $asset->id,
                             'style' => 'thumb',
@@ -551,9 +616,18 @@ class AssetController extends Controller
                         if ($thumbnailVersion) {
                             $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
                         }
+                        
+                        // Auto-fix status if thumbnails exist but status is wrong
+                        if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
+                            \Illuminate\Support\Facades\Log::info('[AssetController] Auto-fixing thumbnail status - thumbnails exist but status was failed', [
+                                'asset_id' => $asset->id,
+                                'old_status' => $thumbnailStatus,
+                                'thumbnail_sizes' => array_keys($metadata['thumbnails'] ?? []),
+                            ]);
+                        }
                     } else {
-                        // Thumbnail status is completed but path is missing - log for debugging
-                        \Illuminate\Support\Facades\Log::warning('Asset marked as completed but thumbnail path missing', [
+                        // Thumbnail status says completed but no thumbnails found - log for debugging
+                        \Illuminate\Support\Facades\Log::warning('[AssetController] Thumbnail status mismatch', [
                             'asset_id' => $asset->id,
                             'thumbnail_status' => $thumbnailStatus,
                             'metadata_thumbnails' => isset($metadata['thumbnails']) ? array_keys($metadata['thumbnails'] ?? []) : 'not set',
@@ -999,14 +1073,38 @@ class AssetController extends Controller
                     // Step 4: CRITICAL - Never return status COMPLETED if final thumbnail URL does not exist
                     // Verify thumbnail file exists before returning COMPLETED status
                     // This prevents UI from showing "completed" when files don't exist
+                    // ALSO handle cases where thumbnails exist but status is failed
                     $finalThumbnailUrl = null;
                     $verifiedStatus = $thumbnailStatus;
+                    $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
                     
-                    if ($thumbnailStatus === 'completed') {
+                    if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
                         // Verify thumbnail file actually exists before returning COMPLETED
+                        // OR if thumbnails exist in metadata, trust that they're valid
                         $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
                         
-                        if ($thumbnailPath && $asset->storageBucket) {
+                        if ($thumbnailsExistInMetadata) {
+                            // Thumbnails exist in metadata - provide URL without S3 verification
+                            // This handles cases where status is failed but thumbnails actually exist
+                            $finalThumbnailUrl = route('assets.thumbnail.final', [
+                                'asset' => $asset->id,
+                                'style' => 'thumb',
+                            ]);
+                            
+                            if ($thumbnailVersion) {
+                                $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                            }
+                            
+                            // Auto-fix status if it was wrong
+                            if ($thumbnailStatus !== 'completed') {
+                                Log::info('[batchThumbnailStatus] Auto-fixing thumbnail status - thumbnails exist in metadata', [
+                                    'asset_id' => $asset->id,
+                                    'old_status' => $thumbnailStatus,
+                                    'thumbnail_sizes' => array_keys($metadata['thumbnails'] ?? []),
+                                ]);
+                                $verifiedStatus = 'completed';
+                            }
+                        } elseif ($thumbnailPath && $asset->storageBucket) {
                             try {
                                 // Create S3 client for verification
                                 $s3Client = $this->createS3ClientForVerification();
@@ -1015,9 +1113,10 @@ class AssetController extends Controller
                                     'Key' => $thumbnailPath,
                                 ]);
                                 
-                                // Verify file size > minimum threshold (1KB)
+                                // Verify file size > minimum threshold (only catch broken/corrupted files)
+                                // Small valid thumbnails (e.g., 710 bytes for compressed WebP) are acceptable
                                 $contentLength = $result['ContentLength'] ?? 0;
-                                $minValidSize = 1024; // 1KB
+                                $minValidSize = 50; // Only catch broken/corrupted files - allow small valid thumbnails
                                 
                                 if ($contentLength >= $minValidSize) {
                                     // File exists and is valid - return final URL
@@ -1192,10 +1291,12 @@ class AssetController extends Controller
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
         
-        // Final thumbnail URL only provided when thumbnail_status === COMPLETED
-        if ($thumbnailStatus === 'completed') {
-            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            
+        // Final thumbnail URL provided when thumbnail_status === COMPLETED
+        // OR when thumbnails actually exist in metadata (handles status sync issues)
+        $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+        
+        if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
             $finalThumbnailUrl = route('assets.thumbnail.final', [
                 'asset' => $asset->id,
                 'style' => 'thumb',
@@ -1204,6 +1305,15 @@ class AssetController extends Controller
             // Add version query param if available
             if ($thumbnailVersion) {
                 $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+            }
+            
+            // Auto-fix status if thumbnails exist but status is wrong  
+            if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
+                Log::info('[AssetController::show] Auto-fixing thumbnail status - thumbnails exist but status was failed', [
+                    'asset_id' => $asset->id,
+                    'old_status' => $thumbnailStatus,
+                    'thumbnail_sizes' => array_keys($metadata['thumbnails'] ?? []),
+                ]);
             }
         }
 

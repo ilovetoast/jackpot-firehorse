@@ -131,6 +131,18 @@ return [
 
     'thumbnail' => [
         /*
+         * Output format for generated thumbnails: 'webp' or 'jpeg'
+         *
+         * WebP offers significantly better compression (25-35% smaller files)
+         * while maintaining similar quality to JPEG. Modern browser support
+         * is excellent (Chrome, Firefox, Safari, Edge all support WebP).
+         *
+         * Recommendation: Use 'webp' for better performance and bandwidth savings.
+         * Fallback: Use 'jpeg' if you need maximum compatibility with older browsers.
+         */
+        'output_format' => env('THUMBNAIL_OUTPUT_FORMAT', 'webp'), // 'webp' or 'jpeg'
+
+        /*
          * Maximum number of manual retry attempts per asset.
          * Once this limit is reached, users cannot retry again for that asset.
          * This prevents abuse and infinite retry loops.

@@ -91,12 +91,29 @@ class MetadataReviewService
 
             $currentResolved = $resolvedValues->get($fieldId);
 
+            // Get field options for select/multiselect fields (for label lookup)
+            $options = [];
+            if (in_array($field->type, ['select', 'multiselect'])) {
+                $fieldOptions = DB::table('metadata_options')
+                    ->where('metadata_field_id', $fieldId)
+                    ->orderBy('system_label')
+                    ->get();
+                
+                foreach ($fieldOptions as $option) {
+                    $options[] = [
+                        'value' => $option->value,
+                        'display_label' => $option->system_label,
+                    ];
+                }
+            }
+
             $reviewItems[] = [
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $fieldId,
                 'field_key' => $field->key,
                 'field_label' => $field->system_label ?? $field->key,
                 'field_type' => $field->type,
+                'options' => $options, // Include options for label lookup
                 'current_resolved_value' => $currentResolved ? json_decode($currentResolved->value_json, true) : null,
                 'current_resolved_source' => $currentResolved ? $currentResolved->source : null,
                 'current_resolved_confidence' => $currentResolved ? $currentResolved->confidence : null,

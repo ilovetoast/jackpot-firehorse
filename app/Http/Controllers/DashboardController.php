@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\AssetStatus;
 use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
+use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetMetric;
@@ -312,6 +313,78 @@ class DashboardController extends Controller
             })->filter()->values();
         }
         
+        // Get recent company activity (last 5) - only if user has permission
+        $recentActivity = null;
+        if ($user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
+            $activityEvents = ActivityEvent::where('tenant_id', $tenant->id)
+                ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT) // Exclude system-level AI insights
+                ->orderBy('created_at', 'desc')
+                ->limit(5)
+                ->with(['brand', 'subject']) // Load relationships (excluding actor for polymorphic issues)
+                ->get();
+            
+            $recentActivity = $activityEvents->map(function ($event) {
+                // Format event type display name
+                $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
+                
+                // Get actor name
+                $actorName = 'System';
+                if ($event->actor_type === 'user' && $event->actor) {
+                    $actorName = $event->actor->name;
+                } elseif (!empty($event->metadata['actor_name'])) {
+                    $actorName = $event->metadata['actor_name'];
+                }
+                
+                // Get subject name with better fallbacks
+                $subjectName = 'Unknown';
+                if ($event->subject) {
+                    if (method_exists($event->subject, 'title') && !empty($event->subject->title)) {
+                        $subjectName = $event->subject->title;
+                    } elseif (method_exists($event->subject, 'original_filename') && !empty($event->subject->original_filename)) {
+                        $subjectName = $event->subject->original_filename;
+                    } elseif (method_exists($event->subject, 'name') && !empty($event->subject->name)) {
+                        $subjectName = $event->subject->name;
+                    } elseif (method_exists($event->subject, 'id')) {
+                        // For assets, create a generic name with ID
+                        if ($event->subject_type === 'App\\Models\\Asset') {
+                            $subjectName = 'Asset #' . substr($event->subject->id, 0, 8);
+                        } else {
+                            $subjectName = 'Item #' . substr($event->subject->id, 0, 8);
+                        }
+                    }
+                } elseif (!empty($event->metadata['subject_name'])) {
+                    $subjectName = $event->metadata['subject_name'];
+                } elseif (!empty($event->metadata['asset_title'])) {
+                    $subjectName = $event->metadata['asset_title'];
+                } elseif (!empty($event->metadata['asset_filename'])) {
+                    $subjectName = $event->metadata['asset_filename'];
+                }
+                
+                return [
+                    'id' => $event->id,
+                    'event_type' => $event->event_type,
+                    'event_type_label' => $eventTypeLabel,
+                    'description' => $event->metadata['description'] ?? null,
+                    'actor' => [
+                        'type' => $event->actor_type,
+                        'name' => $actorName,
+                    ],
+                    'subject' => [
+                        'type' => $event->subject_type,
+                        'name' => $subjectName,
+                        'id' => $event->subject_id,
+                    ],
+                    'brand' => $event->brand ? [
+                        'id' => $event->brand->id,
+                        'name' => $event->brand->name,
+                    ] : null,
+                    'metadata' => $event->metadata,
+                    'created_at' => $event->created_at->toISOString(),
+                    'created_at_human' => $event->created_at->diffForHumans(),
+                ];
+            });
+        }
+        
         return Inertia::render('Dashboard', [
             'tenant' => $tenant,
             'brand' => $brand,
@@ -342,6 +415,7 @@ class DashboardController extends Controller
             'most_viewed_assets' => $mostViewedAssets,
             'most_downloaded_assets' => $mostDownloadedAssets,
             'ai_usage' => $aiUsageData, // Tenant-scoped AI usage (shared across all brands)
+            'recent_activity' => $recentActivity, // Recent company activity (permission-gated)
         ]);
     }
 
@@ -371,5 +445,26 @@ class DashboardController extends Controller
                       ->orWhereNull('metadata->preview_generated');
             })
             ->whereNull('deleted_at');
+    }
+    
+    /**
+     * Format event type constant into a readable display name.
+     * 
+     * @param string $eventType
+     * @return string
+     */
+    protected function formatEventTypeLabel(string $eventType): string
+    {
+        // Convert dot notation to readable format
+        // e.g., "asset.uploaded" -> "Asset Uploaded"
+        $parts = explode('.', $eventType);
+        $formatted = array_map(function ($part) {
+            $formatted = ucfirst(str_replace('_', ' ', $part));
+            // Handle common abbreviations
+            $formatted = str_replace('Ai ', 'AI ', $formatted);
+            return $formatted;
+        }, $parts);
+        
+        return implode(' ', $formatted);
     }
 }

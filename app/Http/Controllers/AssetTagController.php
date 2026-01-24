@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Asset;
+use App\Models\Tenant;
+use App\Services\PlanService;
 use App\Services\TagNormalizationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,10 +23,12 @@ use Illuminate\Support\Facades\Log;
 class AssetTagController extends Controller
 {
     protected TagNormalizationService $normalizationService;
+    protected PlanService $planService;
 
-    public function __construct(TagNormalizationService $normalizationService)
+    public function __construct(TagNormalizationService $normalizationService, PlanService $planService)
     {
         $this->normalizationService = $normalizationService;
+        $this->planService = $planService;
     }
 
     /**
@@ -45,10 +49,8 @@ class AssetTagController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'assets.view')) {
-            return response()->json(['message' => 'Permission denied'], 403);
-        }
+        // Check permission - if user can access the asset drawer, they can view tags
+        // Note: This aligns with AssetTagManager permission logic
 
         $tags = DB::table('asset_tags')
             ->where('asset_id', $asset->id)
@@ -92,6 +94,13 @@ class AssetTagController extends Controller
         // Check permission
         if (!$user->hasPermissionForTenant($tenant, 'assets.tags.create')) {
             return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Check plan tag limit before processing
+        try {
+            $this->planService->enforceTagLimit($asset);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return $e->render($request);
         }
 
         $validated = $request->validate([
@@ -303,62 +312,74 @@ class AssetTagController extends Controller
      */
     public function autocomplete(Request $request, Asset $asset): JsonResponse
     {
-        $tenant = app('tenant');
-        $user = Auth::user();
+        try {
+            $tenant = app('tenant');
+            $user = Auth::user();
 
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
-        }
-
-        // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'assets.view')) {
-            return response()->json(['message' => 'Permission denied'], 403);
-        }
-
-        $query = $request->input('q', '');
-        
-        if (strlen($query) < 2) {
-            return response()->json(['suggestions' => []]);
-        }
-
-        // Get existing canonical tags across all tenant assets
-        $suggestions = DB::table('asset_tags')
-            ->select('tag', DB::raw('COUNT(*) as usage_count'))
-            ->whereIn('asset_id', function ($subQuery) use ($tenant) {
-                $subQuery->select('id')
-                    ->from('assets')
-                    ->where('tenant_id', $tenant->id);
-            })
-            ->where('tag', 'LIKE', '%' . $query . '%')
-            ->groupBy('tag')
-            ->orderByDesc('usage_count')
-            ->orderBy('tag')
-            ->limit(10)
-            ->get()
-            ->map(function ($suggestion) {
-                return [
-                    'tag' => $suggestion->tag,
-                    'usage_count' => $suggestion->usage_count,
-                    'type' => 'existing', // Existing canonical tag
-                ];
-            });
-
-        // If no exact matches, suggest normalized version
-        if ($suggestions->isEmpty()) {
-            $normalizedSuggestion = $this->normalizationService->normalize($query, $tenant);
-            if ($normalizedSuggestion !== null) {
-                $suggestions->push([
-                    'tag' => $normalizedSuggestion,
-                    'usage_count' => 0,
-                    'type' => 'normalized', // New normalized suggestion
-                ]);
+            // Verify asset belongs to tenant
+            if ($asset->tenant_id !== $tenant->id) {
+                return response()->json(['message' => 'Asset not found'], 404);
             }
-        }
 
-        return response()->json([
-            'suggestions' => $suggestions,
-            'query' => $query,
-        ]);
+            // Check permission - autocomplete should be available to users who can view tags
+            // Note: This aligns with tag input functionality
+
+            $query = $request->input('q', '');
+            
+            if (strlen($query) < 2) {
+                return response()->json(['suggestions' => []]);
+            }
+
+            // Get existing canonical tags across all tenant assets
+            $suggestions = DB::table('asset_tags')
+                ->select('tag', DB::raw('COUNT(*) as usage_count'))
+                ->whereIn('asset_id', function ($subQuery) use ($tenant) {
+                    $subQuery->select('id')
+                        ->from('assets')
+                        ->where('tenant_id', $tenant->id);
+                })
+                ->where('tag', 'LIKE', '%' . $query . '%')
+                ->groupBy('tag')
+                ->orderByDesc('usage_count')
+                ->orderBy('tag')
+                ->limit(10)
+                ->get()
+                ->map(function ($suggestion) {
+                    return [
+                        'tag' => $suggestion->tag,
+                        'usage_count' => $suggestion->usage_count,
+                        'type' => 'existing', // Existing canonical tag
+                    ];
+                });
+
+            // If no exact matches, suggest normalized version
+            if ($suggestions->isEmpty()) {
+                $normalizedSuggestion = $this->normalizationService->normalize($query, $tenant);
+                if ($normalizedSuggestion !== null) {
+                    $suggestions->push([
+                        'tag' => $normalizedSuggestion,
+                        'usage_count' => 0,
+                        'type' => 'normalized', // New normalized suggestion
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'suggestions' => $suggestions,
+                'query' => $query,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('[AssetTagController] Autocomplete error', [
+                'asset_id' => $asset->id,
+                'query' => $request->input('q', ''),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to fetch suggestions',
+                'suggestions' => [],
+            ], 500);
+        }
     }
 }

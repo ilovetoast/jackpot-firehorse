@@ -54,6 +54,7 @@ import { usePage, router } from '@inertiajs/react'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters } from '../utils/filterVisibilityRules'
+import TagPrimaryFilter from './TagPrimaryFilter'
 
 /**
  * Primary Metadata Filter Bar Component
@@ -267,6 +268,7 @@ export default function AssetGridMetadataPrimaryFilters({
                                 operator={currentOperator}
                                 availableValues={available_values[fieldKey] || []}
                                 onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
+                                compact={true}
                             />
                         )
                     })}
@@ -297,6 +299,7 @@ export default function AssetGridMetadataPrimaryFilters({
                         operator={currentOperator}
                         availableValues={available_values[fieldKey] || []}
                         onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
+                        compact={false}
                     />
                 )
                 })}
@@ -313,9 +316,24 @@ export default function AssetGridMetadataPrimaryFilters({
  * 
  * This is the same component used by AssetGridSecondaryFilters to ensure consistency.
  */
-function FilterFieldInput({ field, value, operator, onChange, availableValues = [] }) {
+function FilterFieldInput({ field, value, operator, onChange, availableValues = [], compact = false }) {
     const fieldKey = field.field_key || field.key
     const fieldType = field.type || 'text'
+    
+    // Phase J.2.8: Special rendering for tags field (no label)
+    if (fieldKey === 'tags') {
+        return (
+            <div className="flex-shrink-0">
+                <FilterValueInput
+                    field={field}
+                    operator={operator}
+                    value={value}
+                    onChange={onChange}
+                    compact={compact}
+                />
+            </div>
+        )
+    }
     
     // Filter options to only show values that exist in available_values
     // This ensures users only see options that actually have matching assets
@@ -362,15 +380,18 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     return (
         <div className="flex-shrink-0">
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-                {field.display_label || field.label}
-            </label>
+            {/* Show label for Photo Type even in compact mode, hide for others */}
+            {(!compact || fieldKey === 'photo_type' || fieldKey === 'type' || (field.display_label && field.display_label.toLowerCase().includes('photo'))) && (
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                    {field.display_label || field.label}
+                </label>
+            )}
             <div className="flex items-center gap-2">
                 {field.operators && field.operators.length > 1 && (
                     <select
                         value={operator}
                         onChange={handleOperatorChange}
-                        className="flex-shrink-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        className="flex-shrink-0 px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                     >
                         {field.operators.map((op) => (
                             <option key={op.value} value={op.value}>
@@ -385,6 +406,7 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                     value={value}
                     filteredOptions={filteredOptions}
                     onChange={handleValueChange}
+                    compact={compact}
                 />
             </div>
         </div>
@@ -399,8 +421,26 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
  * 
  * This is the same component used by AssetGridSecondaryFilters to ensure consistency.
  */
-function FilterValueInput({ field, operator, value, onChange, filteredOptions = null }) {
+function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, compact = false }) {
     const fieldType = field.type || 'text'
+    const fieldKey = field.field_key || field.key
+    
+    // Phase J.2.8: Special handling for tags field
+    if (fieldKey === 'tags') {
+        // Get tenant ID from page props for tag autocomplete
+        const pageProps = usePage().props
+        const tenantId = pageProps.tenant?.id || pageProps.auth?.user?.current_tenant_id
+        
+        return (
+            <TagPrimaryFilter
+                value={value}
+                onChange={onChange}
+                tenantId={tenantId}
+                placeholder="Filter by tags..."
+                compact={true}
+            />
+        )
+    }
     
     // Use filteredOptions if provided and non-empty, otherwise fall back to field.options
     // filteredOptions is null when not provided (use all options)
@@ -417,7 +457,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="text"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value)}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                     placeholder="Enter value..."
                 />
             )
@@ -430,7 +472,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                             type="number"
                             value={Array.isArray(value) ? value[0] : ''}
                             onChange={(e) => onChange([e.target.value || null, Array.isArray(value) ? value[1] : null])}
-                            className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 w-20"
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20 transition-colors"
                             placeholder="Min"
                         />
                         <span className="text-xs text-gray-500">-</span>
@@ -438,7 +480,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                             type="number"
                             value={Array.isArray(value) ? value[1] : ''}
                             onChange={(e) => onChange([Array.isArray(value) ? value[0] : null, e.target.value || null])}
-                            className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 w-20"
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20 transition-colors"
                             placeholder="Max"
                         />
                     </div>
@@ -449,7 +491,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="number"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                     placeholder="Enter number..."
                 />
             )
@@ -459,7 +503,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                 <select
                     value={value === null ? '' : String(value)}
                     onChange={(e) => onChange(e.target.value === 'true' ? true : e.target.value === 'false' ? false : null)}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                 >
                     <option value="">Any</option>
                     <option value="true">Yes</option>
@@ -472,7 +518,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                 <select
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value || null)}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                 >
                     <option value="">Any</option>
                     {options.map((option) => (
@@ -492,7 +540,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                         const selected = Array.from(e.target.selectedOptions, (opt) => opt.value)
                         onChange(selected.length > 0 ? selected : null)
                     }}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                     size={Math.min((options?.length || 0) + 1, 5)}
                 >
                     {options.map((option) => (
@@ -511,14 +561,14 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                             type="date"
                             value={Array.isArray(value) ? value[0] : ''}
                             onChange={(e) => onChange([e.target.value || null, Array.isArray(value) ? value[1] : null])}
-                            className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                         />
                         <span className="text-xs text-gray-500">-</span>
                         <input
                             type="date"
                             value={Array.isArray(value) ? value[1] : ''}
                             onChange={(e) => onChange([Array.isArray(value) ? value[0] : null, e.target.value || null])}
-                            className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                         />
                     </div>
                 )
@@ -528,7 +578,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="date"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value || null)}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                 />
             )
         
@@ -538,7 +590,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="text"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value)}
-                    className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    }`}
                     placeholder="Enter value..."
                 />
             )

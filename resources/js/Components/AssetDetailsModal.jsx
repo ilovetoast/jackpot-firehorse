@@ -16,11 +16,13 @@
  * @param {Function} props.onClose - Callback when modal should close
  */
 import { useEffect, useState, useRef } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import DominantColorsSwatches from './DominantColorsSwatches'
+import AssetTagManager from './AssetTagManager'
 import { usePermission } from '../hooks/usePermission'
 import { router, usePage } from '@inertiajs/react'
+import { supportsThumbnail } from '../utils/thumbnailUtils'
 
 export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [metadata, setMetadata] = useState(null)
@@ -60,6 +62,10 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [selectedThumbnailStyles, setSelectedThumbnailStyles] = useState(['thumb', 'medium', 'large'])
     const [forceImageMagick, setForceImageMagick] = useState(false)
     const thumbnailDropdownRef = useRef(null)
+    
+    // Remove preview state
+    const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
+    const [removePreviewError, setRemovePreviewError] = useState(null)
     
     // Available thumbnail styles
     const availableThumbnailStyles = [
@@ -105,15 +111,21 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
         }
     }
 
+    // Check if field has a value
+    const hasValue = (value, type) => {
+        if (value === null || value === undefined) return false
+        if (type === 'multiselect' && Array.isArray(value)) {
+            return value.length > 0
+        }
+        return value !== ''
+    }
+
     const formatValue = (value, type) => {
-        if (value === null || value === undefined) {
-            return <span className="text-gray-400 italic">Not set</span>
+        if (!hasValue(value, type)) {
+            return null // Return null instead of "Not set" text
         }
 
         if (type === 'multiselect' && Array.isArray(value)) {
-            if (value.length === 0) {
-                return <span className="text-gray-400 italic">Not set</span>
-            }
             return (
                 <span className="text-gray-700">
                     {value.map((v, idx) => (
@@ -159,9 +171,9 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
             )
         }
 
-        // Check for AI origin first (either source='ai' or producer='ai' or has confidence from AI)
-        // This ensures AI suggestions show as "AI" even if source was set to 'user' during acceptance
-        if (source === 'ai' || producer === 'ai' || (confidence !== null && source !== 'automatic' && source !== 'system')) {
+        // Check for AI origin first (either source='ai' or producer='ai')
+        // This ensures AI suggestions show as "AI" even if source was changed during processing
+        if (source === 'ai' || producer === 'ai') {
             return (
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800">
                     AI {confidence ? `(${(confidence * 100).toFixed(0)}%)` : ''}
@@ -358,6 +370,86 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
             setRegeneratingThumbnails(false)
         }
     }
+    
+    // Handle Remove Preview
+    const handleRemovePreview = async () => {
+        if (!asset?.id) {
+            setRemovePreviewError('Asset ID is missing')
+            return
+        }
+        
+        setRemovePreviewLoading(true)
+        setRemovePreviewError(null)
+        
+        try {
+            console.log('[AssetDetailsModal] Attempting to remove preview thumbnails for asset:', asset.id)
+            console.log('[AssetDetailsModal] Asset data:', {
+                id: asset.id,
+                preview_thumbnail_url: asset.preview_thumbnail_url,
+                metadata: asset.metadata,
+                metadata_preview_thumbnails: asset.metadata?.preview_thumbnails
+            })
+            
+            const response = await window.axios.delete(`/app/assets/${asset.id}/thumbnails/preview`, {
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                }
+            })
+            
+            console.log('[AssetDetailsModal] Remove preview response:', response)
+            console.log('[AssetDetailsModal] Response status:', response.status)
+            console.log('[AssetDetailsModal] Response data:', response.data)
+            
+            // Check for success in response - backend returns { success: true, message: ... }
+            if (response.data?.success === true || response.status === 200) {
+                const message = response.data?.message || 'Preview thumbnails removed successfully'
+                console.log('[AssetDetailsModal] Preview thumbnails removed successfully:', message)
+                
+                // Check if there were actually any thumbnails to remove
+                if (message.includes('No preview thumbnails to remove')) {
+                    setRemovePreviewError('No preview thumbnails found to remove')
+                    setRemovePreviewLoading(false)
+                    return
+                }
+                
+                // Refresh metadata first
+                await fetchMetadata()
+                // Then reload the page to show updated thumbnails
+                router.reload({ 
+                    preserveScroll: true,
+                    only: ['asset', 'auth'],
+                    onSuccess: () => {
+                        console.log('[AssetDetailsModal] Page reloaded after preview removal')
+                        setRemovePreviewLoading(false)
+                    },
+                    onError: (error) => {
+                        console.error('[AssetDetailsModal] Error reloading page:', error)
+                        setRemovePreviewError('Preview removed but page reload failed')
+                        setRemovePreviewLoading(false)
+                    }
+                })
+            } else {
+                const errorMsg = response.data?.error || response.data?.message || 'Failed to remove preview thumbnails'
+                console.error('[AssetDetailsModal] Remove preview failed:', errorMsg)
+                throw new Error(errorMsg)
+            }
+        } catch (error) {
+            console.error('[AssetDetailsModal] Failed to remove preview thumbnails', error)
+            console.error('[AssetDetailsModal] Error details:', {
+                message: error.message,
+                response: error.response,
+                status: error.response?.status,
+                data: error.response?.data
+            })
+            
+            const errorMessage = error.response?.data?.error || 
+                                error.response?.data?.message || 
+                                error.message || 
+                                'Failed to remove preview thumbnails'
+            setRemovePreviewError(errorMessage)
+            setRemovePreviewLoading(false)
+        }
+    }
 
     if (!isOpen) return null
 
@@ -511,6 +603,35 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                 </div>
                                             )}
                                             
+                                            {/* Remove Preview */}
+                                            {/* Show button if asset supports thumbnails (backend will handle if none exist) */}
+                                            {supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split('.').pop()) && (
+                                                <div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleRemovePreview}
+                                                        disabled={removePreviewLoading}
+                                                        className="inline-flex items-center rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {removePreviewLoading ? (
+                                                            <>
+                                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                                                                Removing...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <TrashIcon className="h-4 w-4 mr-2" />
+                                                                Remove Preview
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                    {removePreviewError && (
+                                                        <p className="mt-2 text-sm text-red-600">{removePreviewError}</p>
+                                                    )}
+                                                    <p className="mt-1 text-xs text-gray-500">Remove preview thumbnails to force the file type icon to display instead</p>
+                                                </div>
+                                            )}
+                                            
                                             {/* Thumbnail Management */}
                                             {canRegenerateThumbnailsAdmin && (
                                                 <div>
@@ -629,7 +750,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                 {metadata.category && (
                                     <div>
                                         <h4 className="text-sm font-medium text-gray-900 mb-2">Category</h4>
-                                        <p className="text-sm text-gray-700">{metadata.category.name}</p>
+                                        <p className="text-sm font-semibold text-gray-900">{metadata.category.name}</p>
                                     </div>
                                 )}
 
@@ -646,27 +767,36 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                 {/* Metadata Fields */}
                                 <div>
                                     <h4 className="text-sm font-medium text-gray-900 mb-3">All Metadata Fields</h4>
-                                    <div className="space-y-2">
+                                    <div className="space-y-1">
                                         {metadata.fields && metadata.fields.length > 0 ? (
-                                            metadata.fields.map((field) => {
+                                            metadata.fields
+                                                .filter((field) => field.key !== 'tags') // Hide Tags field as we show it separately below
+                                                .map((field) => {
                                                 const typeLabel = field.type + 
                                                     (field.population_mode !== 'manual' ? ` (${field.population_mode})` : '') +
                                                     (field.readonly ? ' (read-only)' : '') +
                                                     (field.is_ai_related ? ' (AI-related)' : '');
                                                 
+                                                const fieldHasValue = hasValue(field.current_value, field.type)
+                                                const formattedValue = formatValue(field.current_value, field.type)
+                                                
                                                 return (
                                                     <div
                                                         key={field.metadata_field_id}
-                                                        className="flex items-start justify-between py-2 border-b border-gray-100 last:border-b-0"
+                                                        className="flex items-start justify-between py-1.5 border-b border-gray-100 last:border-b-0"
                                                     >
                                                         <div className="flex-1 min-w-0">
                                                             <div className="text-sm text-gray-900">
-                                                                <span className="font-medium">{field.display_label}</span>
-                                                                <span className="text-gray-500 ml-1">({typeLabel})</span>
-                                                                <span className="text-gray-400 mx-2">:</span>
-                                                                <span className="text-gray-700">
-                                                                    {formatValue(field.current_value, field.type)}
-                                                                </span>
+                                                                <span className="text-gray-500">{field.display_label}</span>
+                                                                <span className="text-gray-400 text-xs ml-1">({typeLabel})</span>
+                                                                {formattedValue && (
+                                                                    <>
+                                                                        <span className="text-gray-400 mx-2">:</span>
+                                                                        <span className="font-semibold text-gray-900">
+                                                                            {formattedValue}
+                                                                        </span>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                             {field.metadata && (field.metadata.approved_at || field.metadata.confidence !== null) && (
                                                                 <div className="mt-1 text-xs text-gray-400">
@@ -693,6 +823,17 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                             <p className="text-sm text-gray-500">No metadata fields available</p>
                                         )}
                                     </div>
+                                </div>
+
+                                {/* Tags Section - Detailed view at bottom */}
+                                <div className="mt-6 pt-4 border-t border-gray-200">
+                                    <AssetTagManager 
+                                        asset={asset}
+                                        showTitle={true}
+                                        showInput={false}
+                                        detailed={true}
+                                        className="mb-4"
+                                    />
                                 </div>
                             </div>
                         )}

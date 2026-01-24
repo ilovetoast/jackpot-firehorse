@@ -6,13 +6,22 @@ import {
     ArrowUpIcon,
     ArrowDownIcon,
     EyeIcon,
-    SparklesIcon
+    SparklesIcon,
+    ClockIcon,
+    UserIcon,
+    DocumentIcon,
+    PhotoIcon,
+    TagIcon,
+    CogIcon,
+    CheckCircleIcon,
+    ArrowUpCircleIcon,
+    BeakerIcon
 } from '@heroicons/react/24/outline'
 import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
@@ -82,6 +91,79 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                 {sign}{change.toFixed(2)}%
             </span>
         )
+    }
+
+    // Get appropriate icon and color for activity type
+    const getActivityIcon = (eventType, actorType) => {
+        const iconClass = "h-5 w-5"
+        
+        if (eventType.includes('metadata')) {
+            return <TagIcon className={`${iconClass} text-blue-500`} />
+        } else if (eventType.includes('uploaded') || eventType.includes('created')) {
+            return <ArrowUpCircleIcon className={`${iconClass} text-green-500`} />
+        } else if (eventType.includes('ai') || eventType.includes('suggestions') || eventType.includes('tagging')) {
+            return <SparklesIcon className={`${iconClass} text-purple-500`} />
+        } else if (eventType.includes('promoted') || eventType.includes('completed')) {
+            return <CheckCircleIcon className={`${iconClass} text-emerald-500`} />
+        } else if (eventType.includes('agent') || eventType.includes('run')) {
+            return <BeakerIcon className={`${iconClass} text-indigo-500`} />
+        } else if (actorType === 'user') {
+            return <UserIcon className={`${iconClass} text-gray-500`} />
+        } else {
+            return <CogIcon className={`${iconClass} text-gray-400`} />
+        }
+    }
+
+    // Format activity description to be more user-friendly
+    const formatActivityDescription = (activity) => {
+        const { event_type_label, actor, subject, metadata } = activity
+        
+        // Get a clean subject name
+        const subjectDisplay = subject.name && subject.name !== 'Unknown' 
+            ? subject.name 
+            : 'an asset'
+        
+        // Create more natural descriptions based on event type
+        if (activity.event_type.includes('metadata_updated')) {
+            const fieldName = metadata?.field_name || metadata?.metadata_field_name
+            if (fieldName) {
+                return `Updated ${fieldName} for ${subjectDisplay}`
+            }
+            return `Updated metadata for ${subjectDisplay}`
+        } else if (activity.event_type.includes('promoted')) {
+            return `Published ${subjectDisplay}`
+        } else if (activity.event_type.includes('ai_suggestions.generated')) {
+            const fieldName = metadata?.field_name || metadata?.suggestion_type
+            if (fieldName) {
+                return `Generated ${fieldName} suggestions for ${subjectDisplay}`
+            }
+            return `Generated AI suggestions for ${subjectDisplay}`
+        } else if (activity.event_type.includes('ai_metadata.generated')) {
+            return `Analyzed ${subjectDisplay} with AI`
+        } else if (activity.event_type.includes('agent_run.completed')) {
+            const agentType = metadata?.agent_type || metadata?.agent_name
+            if (agentType) {
+                return `Completed ${agentType} processing for ${subjectDisplay}`
+            }
+            return `Completed AI analysis of ${subjectDisplay}`
+        } else if (activity.event_type.includes('uploaded')) {
+            return `Uploaded ${subjectDisplay}`
+        } else if (activity.event_type.includes('deleted')) {
+            return `Deleted ${subjectDisplay}`
+        } else if (activity.event_type.includes('created')) {
+            return `Created ${subjectDisplay}`
+        } else if (activity.event_type.includes('updated')) {
+            return `Updated ${subjectDisplay}`
+        } else if (activity.event_type.includes('tagged')) {
+            const tagName = metadata?.tag_name
+            if (tagName) {
+                return `Added tag "${tagName}" to ${subjectDisplay}`
+            }
+            return `Tagged ${subjectDisplay}`
+        } else {
+            // Fallback to original description or create one
+            return activity.description || `${event_type_label} ${subjectDisplay}`
+        }
     }
 
     return (
@@ -488,33 +570,90 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                     </div>
                 </div>
 
-                <div className="mt-8">
-                    <div className="overflow-hidden rounded-lg bg-white shadow">
-                        <div className="px-4 py-5 sm:p-6">
-                            <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Activity</h3>
-                            <div className="mt-5">
-                                <div className="text-center py-12">
-                                    <svg
-                                        className="mx-auto h-12 w-12 text-gray-400"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                        aria-hidden="true"
+                {/* Recent Activity - Only show if user has permission */}
+                {recent_activity && (
+                    <div className="mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="px-4 py-5 sm:p-6">
+                                <div className="flex items-center justify-between mb-6">
+                                    <h3 className="text-lg font-semibold leading-6 text-gray-900 flex items-center gap-2">
+                                        <ClockIcon className="h-5 w-5 text-gray-400" />
+                                        Recent Activity
+                                    </h3>
+                                    <Link
+                                        href="/app/companies/activity"
+                                        className="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-900 transition-colors"
                                     >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-                                        />
-                                    </svg>
-                                    <h3 className="mt-2 text-sm font-semibold text-gray-900">No activity</h3>
-                                    <p className="mt-1 text-sm text-gray-500">Get started by adding your first asset.</p>
+                                        View All
+                                        <ArrowUpIcon className="h-3 w-3 rotate-45" />
+                                    </Link>
                                 </div>
+                                {recent_activity.length > 0 ? (
+                                    <div className="space-y-4">
+                                        {recent_activity.map((activity, index) => (
+                                            <div
+                                                key={activity.id}
+                                                className="group relative flex items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50/50 transition-all duration-200"
+                                            >
+                                                {/* Icon with background */}
+                                                <div className="flex-shrink-0">
+                                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 group-hover:bg-white transition-colors">
+                                                        {getActivityIcon(activity.event_type, activity.actor.type)}
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Content */}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-start justify-between">
+                                                        <div className="flex-1">
+                                                            <p className="text-sm font-medium text-gray-900 leading-5">
+                                                                {formatActivityDescription(activity)}
+                                                            </p>
+                                                            <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
+                                                                <span className="flex items-center gap-1">
+                                                                    {activity.actor.type === 'user' ? (
+                                                                        <UserIcon className="h-3 w-3" />
+                                                                    ) : (
+                                                                        <CogIcon className="h-3 w-3" />
+                                                                    )}
+                                                                    {activity.actor.name}
+                                                                </span>
+                                                                {activity.brand && (
+                                                                    <>
+                                                                        <span>•</span>
+                                                                        <span>{activity.brand.name}</span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <time className="flex-shrink-0 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                                                            {activity.created_at_human}
+                                                        </time>
+                                                    </div>
+                                                </div>
+
+                                                {/* Connecting line (except for last item) */}
+                                                {index < recent_activity.length - 1 && (
+                                                    <div className="absolute left-8 top-14 h-4 w-px bg-gray-200"></div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-12">
+                                        <div className="mx-auto h-16 w-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                                            <ClockIcon className="h-8 w-8 text-gray-400" />
+                                        </div>
+                                        <h3 className="text-sm font-semibold text-gray-900">No recent activity</h3>
+                                        <p className="mt-1 text-sm text-gray-500 max-w-sm mx-auto">
+                                            Activity will appear here as you upload assets and work with your content.
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
-                </div>
+                )}
             </main>
 
             <AppFooter />

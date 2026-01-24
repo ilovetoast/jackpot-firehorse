@@ -85,54 +85,20 @@ class ThumbnailRetryService
      */
     public function isFileTypeSupported(Asset $asset): bool
     {
-        $mimeType = strtolower($asset->mime_type ?? '');
-        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-
-        // PDF support - first-class supported type (matches GenerateThumbnailsJob)
-        // Uses spatie/pdf-to-image with ImageMagick/Ghostscript backend
-        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
-            // Verify spatie/pdf-to-image package is available
-            if (!class_exists(\Spatie\PdfToImage\Pdf::class)) {
-                return false;
-            }
-            return true;
-        }
-
-        // Supported image MIME types - ONLY formats that GD library can actually process
-        // This matches GenerateThumbnailsJob::supportsThumbnailGeneration()
-        $supportedMimeTypes = [
-            'image/jpeg',
-            'image/jpg',
-            'image/png',
-            'image/gif',
-            'image/webp',
-        ];
-
-        // Supported extensions
-        $supportedExtensions = [
-            'jpg',
-            'jpeg',
-            'png',
-            'gif',
-            'webp',
-        ];
-
-        // AVIF is explicitly excluded (backend doesn't support it yet)
-        if ($mimeType === 'image/avif' || $extension === 'avif') {
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        
+        if (!$fileType) {
             return false;
         }
-
-        // Check MIME type first
-        if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
-            return true;
+        
+        // Check if requirements are met
+        $requirements = $fileTypeService->checkRequirements($fileType);
+        if (!$requirements['met']) {
+            return false;
         }
-
-        // Fallback to extension check
-        if ($extension && in_array($extension, $supportedExtensions)) {
-            return true;
-        }
-
-        return false;
+        
+        return $fileTypeService->supportsCapability($fileType, 'thumbnail');
     }
 
     /**
@@ -172,6 +138,35 @@ class ThumbnailRetryService
 
         // Record retry attempt in metadata (append-only audit log)
         $metadata = $asset->metadata ?? [];
+        
+        // Clear old skip reasons for formats that are now supported (e.g., TIFF/AVIF)
+        // This allows previously skipped assets to be regenerated
+        if (isset($metadata['thumbnail_skip_reason'])) {
+            $skipReason = $metadata['thumbnail_skip_reason'];
+            $mimeType = strtolower($asset->mime_type ?? '');
+            $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+            
+            // Check if this skip reason is for a format that's now supported
+            $isNowSupported = false;
+            if ($skipReason === 'unsupported_format:tiff' && 
+                ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') &&
+                extension_loaded('imagick')) {
+                $isNowSupported = true;
+            } elseif ($skipReason === 'unsupported_format:avif' && 
+                      ($mimeType === 'image/avif' || $extension === 'avif') &&
+                      extension_loaded('imagick')) {
+                $isNowSupported = true;
+            }
+            
+            if ($isNowSupported) {
+                unset($metadata['thumbnail_skip_reason']);
+                Log::info('[ThumbnailRetryService] Cleared old skip reason during retry', [
+                    'asset_id' => $asset->id,
+                    'old_skip_reason' => $skipReason,
+                ]);
+            }
+        }
+        
         $retries = $metadata['thumbnail_retries'] ?? [];
         $retries[] = [
             'attempted_at' => now()->toIso8601String(),
@@ -183,11 +178,20 @@ class ThumbnailRetryService
 
         // Update retry count and metadata
         // IMPORTANT: We do NOT mutate Asset.status here - status represents visibility only
-        $asset->update([
+        // However, if asset was SKIPPED, reset thumbnail_status to PENDING to allow processing
+        $updateData = [
             'thumbnail_retry_count' => $asset->thumbnail_retry_count + 1,
             'thumbnail_last_retry_at' => now(),
             'metadata' => $metadata,
-        ]);
+        ];
+        
+        // Reset SKIPPED status to PENDING to allow regeneration
+        if ($asset->thumbnail_status === ThumbnailStatus::SKIPPED) {
+            $updateData['thumbnail_status'] = ThumbnailStatus::PENDING;
+            $updateData['thumbnail_error'] = null;
+        }
+        
+        $asset->update($updateData);
 
         // Dispatch RetryThumbnailGenerationJob which wraps GenerateThumbnailsJob
         // This respects the locked pipeline by not modifying GenerateThumbnailsJob

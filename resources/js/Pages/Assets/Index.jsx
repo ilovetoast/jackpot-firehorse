@@ -636,7 +636,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Primary metadata filters are now integrated into the toolbar (between search and controls) */}
-                        <div className="mb-6">
+                        <div className="mb-8">
                             <AssetGridToolbar
                                 showInfo={showInfo}
                                 onToggleInfo={() => setShowInfo(v => !v)}
@@ -659,45 +659,47 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={availableValues}
+                                showMoreFilters={true}
+                                moreFiltersContent={
+                                    /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
+                                    /* 
+                                        Secondary metadata filters are metadata fields NOT marked as primary.
+                                        These filters render in the "More filters" expandable section.
+                                        
+                                        Visibility rules (enforced by Phase H helpers):
+                                        - Field does NOT have is_primary === true (excluded from primary)
+                                        - Field is ENABLED for the current category (filterScopeRules.isFilterCompatible)
+                                        - Field has Filter = true (is_filterable) - enforced by backend filterable_schema
+                                        - Field has ≥1 value in current asset grid (filterVisibilityRules.hasAvailableValues)
+                                        
+                                        Phase H helpers used:
+                                        - normalizeFilterConfig: Normalizes Inertia props
+                                        - filterTierResolver.getSecondaryFilters: Gets metadata fields from schema (excludes is_primary === true)
+                                        - filterVisibilityRules.getVisibleFilters: Filters to visible only
+                                        
+                                        UI behavior:
+                                        - Bar always persists (content changes based on category)
+                                        - Shows "More filters" button always (disabled if no filters)
+                                        - Updates URL query params immediately on change
+                                        - Triggers grid refresh (only: ['assets'])
+                                        - Shows empty state if no filters available for current category
+                                        
+                                        Explicitly does NOT render:
+                                        - Category selectors (sidebar handles this)
+                                        - Asset type selectors (route/nav handles this)
+                                        - Brand selectors (never selectable)
+                                        - Primary metadata filters (is_primary === true) - handled by AssetGridMetadataPrimaryFilters
+                                    */
+                                    <AssetGridSecondaryFilters
+                                        filterable_schema={filterable_schema}
+                                        selectedCategoryId={selectedCategoryId}
+                                        available_values={availableValues}
+                                        canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
+                                        assetType="image"
+                                    />
+                                }
                             />
                         </div>
-                        
-                        {/* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */}
-                        {/* 
-                            Secondary metadata filters are metadata fields NOT marked as primary.
-                            These filters render in the "More filters" expandable section.
-                            
-                            Visibility rules (enforced by Phase H helpers):
-                            - Field does NOT have is_primary === true (excluded from primary)
-                            - Field is ENABLED for the current category (filterScopeRules.isFilterCompatible)
-                            - Field has Filter = true (is_filterable) - enforced by backend filterable_schema
-                            - Field has ≥1 value in current asset grid (filterVisibilityRules.hasAvailableValues)
-                            
-                            Phase H helpers used:
-                            - normalizeFilterConfig: Normalizes Inertia props
-                            - filterTierResolver.getSecondaryFilters: Gets metadata fields from schema (excludes is_primary === true)
-                            - filterVisibilityRules.getVisibleFilters: Filters to visible only
-                            
-                            UI behavior:
-                            - Bar always persists (content changes based on category)
-                            - Shows "More filters" button always (disabled if no filters)
-                            - Updates URL query params immediately on change
-                            - Triggers grid refresh (only: ['assets'])
-                            - Shows empty state if no filters available for current category
-                            
-                            Explicitly does NOT render:
-                            - Category selectors (sidebar handles this)
-                            - Asset type selectors (route/nav handles this)
-                            - Brand selectors (never selectable)
-                            - Primary metadata filters (is_primary === true) - handled by AssetGridMetadataPrimaryFilters
-                        */}
-                        <AssetGridSecondaryFilters
-                            filterable_schema={filterable_schema}
-                            selectedCategoryId={selectedCategoryId}
-                            available_values={availableValues}
-                            canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
-                            assetType="image"
-                        />
                             
                             {/* Assets Grid or Empty State */}
                             {localAssets && localAssets.length > 0 ? (

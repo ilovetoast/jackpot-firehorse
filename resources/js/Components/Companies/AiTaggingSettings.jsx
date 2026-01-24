@@ -13,7 +13,7 @@
  * - Permission-based editing
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ExclamationTriangleIcon, CheckCircleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
 import { debounce } from 'lodash-es'
 
@@ -44,6 +44,7 @@ function Toggle({ checked, onChange, disabled = false, className = "" }) {
 
 export default function AiTaggingSettings({ 
     canEdit = false, 
+    currentPlan = 'free',
     className = "" 
 }) {
     const [settings, setSettings] = useState(null)
@@ -51,11 +52,35 @@ export default function AiTaggingSettings({
     const [error, setError] = useState(null)
     const [saving, setSaving] = useState(false)
     const [lastSaved, setLastSaved] = useState(null)
+    
+    // Get plan tag limits
+    const planLimits = {
+        free: { max: 1, name: 'Free' },
+        starter: { max: 5, name: 'Starter' },
+        pro: { max: 10, name: 'Pro' },
+        enterprise: { max: 15, name: 'Enterprise' }
+    }
+    const planLimit = planLimits[currentPlan] || planLimits.free
+    const maxTagsPerAsset = planLimit.max
+
+    // Local state for tag limit input (for immediate UI feedback)
+    const [localTagLimit, setLocalTagLimit] = useState('')
+    const tagLimitUpdateRef = useRef(null)
 
     // Load initial settings
     useEffect(() => {
         loadSettings()
     }, [])
+    
+    // Sync local tag limit with server settings
+    useEffect(() => {
+        if (settings) {
+            // Default to plan max or server setting, whichever is lower
+            const serverLimit = settings.ai_best_practices_limit || Math.min(5, maxTagsPerAsset)
+            const effectiveLimit = Math.min(serverLimit, maxTagsPerAsset)
+            setLocalTagLimit(String(effectiveLimit))
+        }
+    }, [settings, maxTagsPerAsset])
 
     const loadSettings = async () => {
         try {
@@ -118,6 +143,48 @@ export default function AiTaggingSettings({
         // Send to server (debounced)
         debouncedUpdateSettings(newSettings)
     }
+    
+    // Debounced update for tag limit specifically
+    const debouncedUpdateTagLimit = useCallback(
+        debounce((value) => {
+            const numValue = parseInt(value)
+            // Respect plan limit: 1 to maxTagsPerAsset
+            if (!isNaN(numValue) && numValue >= 1 && numValue <= maxTagsPerAsset) {
+                // Update both the limit value and ensure mode is set to best_practices
+                const newSettings = { 
+                    ...settings, 
+                    ai_best_practices_limit: numValue,
+                    ai_auto_tag_limit_mode: 'best_practices'
+                }
+                setSettings(newSettings)
+                debouncedUpdateSettings(newSettings)
+            }
+        }, 800), // Slightly longer debounce for number input
+        [settings, debouncedUpdateSettings, maxTagsPerAsset]
+    )
+    
+    // Handle tag limit input changes
+    const handleTagLimitChange = (e) => {
+        const value = e.target.value
+        setLocalTagLimit(value) // Immediate UI update
+        
+        // Clear previous timer
+        if (tagLimitUpdateRef.current) {
+            clearTimeout(tagLimitUpdateRef.current)
+        }
+        
+        // Debounce the actual update
+        debouncedUpdateTagLimit(value)
+    }
+    
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (tagLimitUpdateRef.current) {
+                clearTimeout(tagLimitUpdateRef.current)
+            }
+        }
+    }, [])
 
     // Render loading state
     if (loading) {
@@ -168,8 +235,6 @@ export default function AiTaggingSettings({
 
     const isAiDisabled = settings.disable_ai_tagging
     const isAutoApplyEnabled = settings.enable_ai_tag_auto_apply
-    const limitMode = settings.ai_auto_tag_limit_mode
-    const customLimit = settings.ai_auto_tag_limit_value
 
     return (
         <div className={`space-y-6 ${className}`}>
@@ -277,72 +342,33 @@ export default function AiTaggingSettings({
                     />
                 </div>
 
-                {/* Quantity Control (shown when auto-apply is enabled) */}
-                {isAutoApplyEnabled && (
+                {/* Quantity Control (shown when AI is enabled) */}
+                {!isAiDisabled && (
                     <div className="bg-gray-50 rounded-lg p-4">
                         <label className="text-base font-medium text-gray-900">
                             Auto-Apply Tag Limit
                         </label>
                         <p className="text-sm text-gray-500 mb-4">
-                            Maximum number of tags to auto-apply per asset.
+                            Configure how many tags AI can suggest or auto-apply per asset.
                         </p>
 
-                        {/* Mode Selector */}
-                        <div className="space-y-4">
-                            <div className="flex items-center">
-                                <input
-                                    id="best-practices"
-                                    type="radio"
-                                    name="limit-mode"
-                                    checked={limitMode === 'best_practices'}
-                                    onChange={() => updateSetting('ai_auto_tag_limit_mode', 'best_practices')}
-                                    disabled={!canEdit || isAiDisabled}
-                                    className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-600 disabled:opacity-50"
-                                />
-                                <label htmlFor="best-practices" className="ml-3 block text-sm font-medium text-gray-700">
-                                    Best Practices (Recommended)
-                                </label>
-                            </div>
-                            <p className="ml-7 text-sm text-gray-500">
-                                System-defined limits based on asset type and confidence scores.
-                            </p>
-
-                            <div className="flex items-center">
-                                <input
-                                    id="custom"
-                                    type="radio"
-                                    name="limit-mode"
-                                    checked={limitMode === 'custom'}
-                                    onChange={() => updateSetting('ai_auto_tag_limit_mode', 'custom')}
-                                    disabled={!canEdit || isAiDisabled}
-                                    className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-600 disabled:opacity-50"
-                                />
-                                <label htmlFor="custom" className="ml-3 block text-sm font-medium text-gray-700">
-                                    Custom Limit
-                                </label>
-                            </div>
-
-                            {/* Custom Limit Input */}
-                            {limitMode === 'custom' && (
-                                <div className="ml-7">
-                                    <div className="flex items-center space-x-3">
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            max="50"
-                                            value={customLimit || 5}
-                                            onChange={(e) => updateSetting('ai_auto_tag_limit_value', parseInt(e.target.value))}
-                                            disabled={!canEdit || isAiDisabled}
-                                            className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-600 focus:ring-indigo-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
-                                        />
-                                        <span className="text-sm text-gray-700">tags per asset</span>
-                                    </div>
-                                    <p className="mt-1 text-sm text-gray-500">
-                                        Range: 1-50 tags. Higher limits may reduce tag quality.
-                                    </p>
-                                </div>
-                            )}
+                        <div className="flex items-center space-x-3">
+                            <label className="text-sm font-medium text-gray-700">Limit:</label>
+                            <input
+                                type="number"
+                                min="1"
+                                max={maxTagsPerAsset}
+                                value={localTagLimit}
+                                onChange={handleTagLimitChange}
+                                disabled={!canEdit || isAiDisabled}
+                                className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-600 focus:ring-indigo-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                                placeholder={String(Math.min(5, maxTagsPerAsset))}
+                            />
+                            <span className="text-sm text-gray-700">tags per asset</span>
                         </div>
+                        <p className="mt-2 text-sm text-gray-500">
+                            Range: 1-{maxTagsPerAsset} tags ({planLimit.name} plan limit). <strong>{Math.min(5, maxTagsPerAsset)} is recommended</strong> for balanced quality and coverage. Higher limits may reduce tag quality.
+                        </p>
                     </div>
                 )}
 

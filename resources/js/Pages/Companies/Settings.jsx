@@ -827,7 +827,10 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     </div>
                                     {/* Right: Content */}
                                     <div className="lg:col-span-2 px-6 py-6">
-                                        <AiTaggingSettings canEdit={canEditCompanySettings} />
+                                        <AiTaggingSettings 
+                                            canEdit={canEditCompanySettings} 
+                                            currentPlan={billing?.current_plan}
+                                        />
                                     </div>
                                 </div>
                             </div>

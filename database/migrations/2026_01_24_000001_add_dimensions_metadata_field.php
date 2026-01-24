@@ -24,20 +24,20 @@ return new class extends Migration
                 'key' => 'dimensions',
                 'system_label' => 'Dimensions',
                 'type' => 'text',
+                'applies_to' => 'image',
                 'scope' => 'system',
-                'description' => 'Image dimensions in width×height format (e.g., 1920×1080)',
-                'population_mode' => 'automatic',
-                'show_on_upload' => false,
-                'show_on_edit' => true,
-                'show_in_filters' => true,
-                'readonly' => true,
+                'is_filterable' => true,
+                'is_user_editable' => true,
+                'is_ai_trainable' => false,
+                'is_upload_visible' => false,
+                'is_internal_only' => false,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
-            $this->command->info("Created dimensions metadata field (ID: {$fieldId})");
+            // Dimensions metadata field created
         } else {
-            $this->command->info("Dimensions metadata field already exists (ID: {$existing->id})");
+            // Dimensions metadata field already exists
         }
     }
 

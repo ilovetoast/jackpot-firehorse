@@ -184,6 +184,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/support/tickets/suggestions/{suggestion}/reject', [\App\Http\Controllers\AdminTicketController::class, 'rejectSuggestion'])->name('admin.support.tickets.suggestions.reject');
     Route::post('/admin/support/tickets/suggestions/{suggestion}/create-ticket', [\App\Http\Controllers\AdminTicketController::class, 'createTicketFromSuggestion'])->name('admin.support.tickets.suggestions.create-ticket');
     
+    // Deletion Error Management routes (admin only)
+    Route::get('/admin/deletion-errors', [\App\Http\Controllers\DeletionErrorController::class, 'index'])->name('deletion-errors.index');
+    Route::get('/admin/deletion-errors/{deletionError}', [\App\Http\Controllers\DeletionErrorController::class, 'show'])->name('deletion-errors.show');
+    Route::post('/admin/deletion-errors/{deletionError}/resolve', [\App\Http\Controllers\DeletionErrorController::class, 'resolve'])->name('deletion-errors.resolve');
+    Route::post('/admin/deletion-errors/{deletionError}/retry', [\App\Http\Controllers\DeletionErrorController::class, 'retry'])->name('deletion-errors.retry');
+    Route::delete('/admin/deletion-errors/{deletionError}', [\App\Http\Controllers\DeletionErrorController::class, 'destroy'])->name('deletion-errors.destroy');
+    Route::get('/admin/deletion-errors/api/stats', [\App\Http\Controllers\DeletionErrorController::class, 'stats'])->name('deletion-errors.stats');
+    
     // AI Dashboard routes (no tenant middleware - system-level only)
         Route::get('/admin/ai', [\App\Http\Controllers\Admin\AIDashboardController::class, 'index'])->name('admin.ai.index');
         Route::get('/admin/ai/activity', [\App\Http\Controllers\Admin\AIDashboardController::class, 'activity'])->name('admin.ai.activity');
@@ -327,6 +335,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/assets/{asset}/thumbnails/retry', [\App\Http\Controllers\AssetThumbnailController::class, 'retry'])->name('assets.thumbnails.retry');
             // Thumbnail generation endpoint (for existing assets without thumbnails)
             Route::post('/assets/{asset}/thumbnails/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generate'])->name('assets.thumbnails.generate');
+            // Remove preview thumbnails endpoint
+            Route::delete('/assets/{asset}/thumbnails/preview', [\App\Http\Controllers\AssetThumbnailController::class, 'removePreview'])->name('assets.thumbnails.remove-preview');
             // Admin thumbnail style regeneration endpoint (site roles only)
             Route::post('/assets/{asset}/thumbnails/regenerate-styles', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateStyles'])->name('assets.thumbnails.regenerate-styles');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
@@ -336,6 +346,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
 
             // Upload routes (tenant-scoped)
+            Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');
+            Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->name('uploads.validate');
             Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
             Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
             Route::get('/uploads/metadata-schema', [\App\Http\Controllers\UploadController::class, 'getMetadataSchema'])->name('uploads.metadata-schema');

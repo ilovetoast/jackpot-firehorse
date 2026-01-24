@@ -1128,73 +1128,32 @@ class UploadCompletionService
     /**
      * Check if thumbnail generation is supported for an asset.
      * 
-     * Matches frontend logic: only image types that the backend pipeline can actually process.
-     * AVIF is excluded because the backend thumbnail pipeline does not yet support it.
+     * Uses FileTypeService to determine support based on centralized configuration.
      * 
      * @param Asset $asset
      * @return bool True if thumbnail generation is supported
      */
     protected function supportsThumbnailGeneration(Asset $asset): bool
     {
-        $mimeType = strtolower($asset->mime_type ?? '');
-        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
         
-        // PDF support - first-class supported type for thumbnail generation
-        // Uses spatie/pdf-to-image with ImageMagick/Ghostscript backend
-        // Only page 1 is used for thumbnail generation (enforced in ThumbnailGenerationService)
-        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
-            // Verify spatie/pdf-to-image package is available
-            if (!class_exists(\Spatie\PdfToImage\Pdf::class)) {
-                \Illuminate\Support\Facades\Log::warning('[UploadCompletionService] PDF support requires spatie/pdf-to-image package', [
-                    'asset_id' => $asset->id,
-                ]);
-                return false;
-            }
-            return true;
-        }
-        
-        // Supported image MIME types - ONLY formats that GD library can actually process
-        // GD library supports: JPEG, PNG, WEBP, GIF
-        // TIFF, BMP, SVG are NOT supported by GD (would require Imagick or other tools)
-        $supportedMimeTypes = [
-            'image/jpeg',
-            'image/jpg',
-            'image/png',
-            'image/gif',
-            'image/webp',
-            // TIFF excluded: GD library does not support TIFF (requires Imagick)
-            // BMP excluded: GD library has limited BMP support, not reliable
-            // SVG excluded: GD library does not support SVG (requires Imagick or other tools)
-        ];
-        
-        // Supported extensions - ONLY formats that GD library can actually process
-        $supportedExtensions = [
-            'jpg',
-            'jpeg',
-            'png',
-            'gif',
-            'webp',
-            // TIFF excluded: GD library does not support TIFF
-            // BMP excluded: GD library has limited BMP support
-            // SVG excluded: GD library does not support SVG
-        ];
-        
-        // AVIF is explicitly excluded (backend doesn't support it yet)
-        if ($mimeType === 'image/avif' || $extension === 'avif') {
+        if (!$fileType) {
             return false;
         }
         
-        // Check MIME type first
-        if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
-            return true;
+        // Check if requirements are met
+        $requirements = $fileTypeService->checkRequirements($fileType);
+        if (!$requirements['met']) {
+            \Illuminate\Support\Facades\Log::warning('[UploadCompletionService] File type requirements not met', [
+                'asset_id' => $asset->id,
+                'file_type' => $fileType,
+                'missing' => $requirements['missing'],
+            ]);
+            return false;
         }
         
-        // Fallback to extension check
-        if ($extension && in_array($extension, $supportedExtensions)) {
-            return true;
-        }
-        
-        return false;
+        return $fileTypeService->supportsCapability($fileType, 'thumbnail');
     }
 
     /**
@@ -1237,7 +1196,7 @@ class UploadCompletionService
     /**
      * Determine skip reason for unsupported file types.
      * 
-     * Step 5: Provides human-readable skip reasons for UI display.
+     * Uses FileTypeService to determine skip reasons from centralized configuration.
      * 
      * @param string $mimeType
      * @param string $extension
@@ -1245,24 +1204,18 @@ class UploadCompletionService
      */
     protected function determineSkipReason(string $mimeType, string $extension): string
     {
-        // TIFF - GD library does not support TIFF (requires Imagick)
-        if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
-            return 'unsupported_format:tiff';
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        
+        // Check if explicitly unsupported
+        $unsupported = $fileTypeService->getUnsupportedReason($mimeType, $extension);
+        if ($unsupported) {
+            return $unsupported['skip_reason'];
         }
         
-        // AVIF - Backend pipeline does not support AVIF yet
-        if ($mimeType === 'image/avif' || $extension === 'avif') {
-            return 'unsupported_format:avif';
-        }
-        
-        // BMP - GD library has limited BMP support, not reliable
-        if ($mimeType === 'image/bmp' || $extension === 'bmp') {
-            return 'unsupported_format:bmp';
-        }
-        
-        // SVG - GD library does not support SVG (requires Imagick or other tools)
-        if ($mimeType === 'image/svg+xml' || $extension === 'svg') {
-            return 'unsupported_format:svg';
+        // Check if type is detected but doesn't support thumbnails
+        $fileType = $fileTypeService->detectFileType($mimeType, $extension);
+        if ($fileType && !$fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+            return "unsupported_format:{$fileType}";
         }
         
         // Generic fallback

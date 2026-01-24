@@ -263,7 +263,7 @@ export default function AssetGridSecondaryFilters({
     // Content changes based on category, but bar persists
     // Show empty state if no filters available for current category
     return (
-        <div className="bg-white border-b border-gray-200">
+        <div>
             {/* Toggle Button - Always visible */}
             <button
                 type="button"

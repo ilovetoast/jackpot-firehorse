@@ -43,11 +43,10 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, ChevronDownIcon, EyeIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
-import AiMetadataSuggestionsInline from './AiMetadataSuggestionsInline'
 import AiTagSuggestionsInline from './AiTagSuggestionsInline'
 import AssetTagManager from './AssetTagManager'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
@@ -56,6 +55,7 @@ import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
 import AssetDetailsModal from './AssetDetailsModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
+import CollapsibleSection from './CollapsibleSection'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
@@ -476,32 +476,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Check if user has permission to generate/retry thumbnails
     const { hasPermission: canRetryThumbnails } = usePermission('assets.retry_thumbnails')
     
-    // Check if user has admin permission to regenerate specific styles (site roles only)
-    const { hasPermission: canRegenerateStylesAdmin } = usePermission('assets.regenerate_thumbnails_admin')
     const { auth } = usePage().props
     
-    // Admin thumbnail regeneration state
-    const [showThumbnailManagement, setShowThumbnailManagement] = useState(false) // Collapsible toggle state
-    const [showRegenerateDropdown, setShowRegenerateDropdown] = useState(false)
-    const [regenerateStylesLoading, setRegenerateStylesLoading] = useState(false)
-    const [regenerateStylesError, setRegenerateStylesError] = useState(null)
-    const [selectedStyles, setSelectedStyles] = useState(['thumb', 'medium', 'large']) // Default to all final styles
-    const [forceImageMagick, setForceImageMagick] = useState(false) // Admin override: bypass file type checks
-    const regenerateDropdownRef = useRef(null)
-    
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (regenerateDropdownRef.current && !regenerateDropdownRef.current.contains(event.target)) {
-                setShowRegenerateDropdown(false)
-            }
-        }
-        
-        if (showRegenerateDropdown) {
-            document.addEventListener('mousedown', handleClickOutside)
-            return () => document.removeEventListener('mousedown', handleClickOutside)
-        }
-    }, [showRegenerateDropdown])
 
     // Check if asset can have thumbnail generated (for previously skipped assets)
     // IMPORTANT: This is for existing assets that were skipped but are now supported
@@ -611,55 +587,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         }
     }
     
-    // Handle admin thumbnail style regeneration
-    const handleRegenerateStyles = async () => {
-        if (!displayAsset?.id || !canRegenerateStylesAdmin || selectedStyles.length === 0) return
-        
-        setRegenerateStylesLoading(true)
-        setRegenerateStylesError(null)
-        setShowRegenerateDropdown(false)
-        
-        try {
-            const response = await window.axios.post(`/app/assets/${displayAsset.id}/thumbnails/regenerate-styles`, {
-                styles: selectedStyles,
-                force_imagick: forceImageMagick
-            })
-            
-            if (response.data.success) {
-                // Success - refresh the page to show updated thumbnails
-                router.reload({ only: ['asset', 'auth'], preserveState: false })
-            } else {
-                setRegenerateStylesError(response.data.error || 'Failed to regenerate thumbnails')
-                setRegenerateStylesLoading(false)
-            }
-        } catch (error) {
-            console.error('Thumbnail style regeneration error:', error)
-            
-            if (error.response) {
-                const status = error.response.status
-                const errorMessage = error.response.data?.error || 'Failed to regenerate thumbnails'
-                
-                if (status === 403) {
-                    setRegenerateStylesError('You do not have permission to regenerate thumbnails')
-                } else if (status === 404) {
-                    setRegenerateStylesError('Asset not found')
-                } else {
-                    setRegenerateStylesError(errorMessage)
-                }
-            } else {
-                setRegenerateStylesError('Network error. Please try again.')
-            }
-            
-            setRegenerateStylesLoading(false)
-        }
-    }
-    
-    // Available thumbnail styles (final styles only - preview is excluded from admin regeneration)
-    const availableStyles = [
-        { name: 'thumb', label: 'Thumb (320×320)', description: 'Grid thumbnails' },
-        { name: 'medium', label: 'Medium (1024×1024)', description: 'Drawer previews' },
-        { name: 'large', label: 'Large (4096×4096)', description: 'Full-screen previews' },
-    ]
     
     // Cleanup timeout on unmount or when asset changes
     useEffect(() => {
@@ -696,8 +623,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             return false
         }
         
-        // Must be in failed or missing state
-        if (thumbnailStatus !== 'failed' && thumbnailStatus !== 'pending') {
+        // Must be in failed, pending, or skipped state
+        // Allow skipped assets to be retried (they may now be supported, e.g., TIFF/AVIF)
+        if (thumbnailStatus !== 'failed' && thumbnailStatus !== 'pending' && thumbnailStatus !== 'skipped') {
             return false
         }
         
@@ -709,16 +637,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         }
         
         // Check if file type is supported (same logic as backend)
-        // Includes both images (GD) and PDFs (ImageMagick/Ghostscript)
+        // Includes both images (GD), PDFs (ImageMagick/Ghostscript), and TIFF/AVIF (Imagick)
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
-        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf']
-        
-        // AVIF is explicitly unsupported
-        if (mimeType === 'image/avif' || extension === 'avif') {
-            return false
-        }
+        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif']
+        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'tiff', 'tif', 'avif']
         
         // Check if MIME type or extension is supported
         if (mimeType && !supportedMimeTypes.includes(mimeType)) {
@@ -768,7 +691,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         return null
     }
 
-    // Handle thumbnail retry
+
     const handleRetryThumbnail = async () => {
         if (!displayAsset?.id || !canRetryThumbnail) return
         
@@ -843,123 +766,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </button>
                 </div>
                 
-                {/* Thumbnail Management - Collapsible section under title (admin only) */}
-                {canRegenerateStylesAdmin && (
-                    <div className="border-t border-gray-200">
-                        <button
-                            type="button"
-                            onClick={() => setShowThumbnailManagement(!showThumbnailManagement)}
-                            className="w-full px-6 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
-                        >
-                            <span className="text-sm font-medium text-gray-900">Thumbnail Management</span>
-                            <ChevronDownIcon className={`h-4 w-4 text-gray-500 transition-transform ${showThumbnailManagement ? 'rotate-180' : ''}`} />
-                        </button>
-                        
-                        {showThumbnailManagement && (
-                            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                                <div className="relative" ref={regenerateDropdownRef}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowRegenerateDropdown(!showRegenerateDropdown)}
-                                        disabled={regenerateStylesLoading}
-                                        className="inline-flex items-center justify-between w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <span>
-                                            {regenerateStylesLoading ? 'Regenerating...' : 'Regenerate Thumbnails'}
-                                        </span>
-                                        <ChevronDownIcon className={`h-4 w-4 ml-2 transition-transform ${showRegenerateDropdown ? 'rotate-180' : ''}`} />
-                                    </button>
-                                    
-                                    {/* Dropdown menu */}
-                                    {showRegenerateDropdown && !regenerateStylesLoading && (
-                                        <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-                                            <div className="py-2 px-3">
-                                                <p className="text-xs font-medium text-gray-700 mb-2">Select styles to regenerate:</p>
-                                                
-                                                <div className="space-y-2">
-                                                    {availableStyles.map((style) => (
-                                                        <label
-                                                            key={style.name}
-                                                            className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedStyles.includes(style.name)}
-                                                                onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        setSelectedStyles([...selectedStyles, style.name])
-                                                                    } else {
-                                                                        setSelectedStyles(selectedStyles.filter(s => s !== style.name))
-                                                                    }
-                                                                }}
-                                                                className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                                            />
-                                                            <div className="flex-1">
-                                                                <div className="text-xs font-medium text-gray-900">{style.label}</div>
-                                                                <div className="text-xs text-gray-500">{style.description}</div>
-                                                            </div>
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                                
-                                                {/* Force ImageMagick option (admin override for testing unsupported file types) */}
-                                                <div className="mt-3 pt-3 border-t border-gray-200">
-                                                    <label className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={forceImageMagick}
-                                                            onChange={(e) => setForceImageMagick(e.target.checked)}
-                                                            className="mt-0.5"
-                                                        />
-                                                        <div className="flex-1">
-                                                            <div className="text-xs font-medium text-gray-900">Force ImageMagick</div>
-                                                            <div className="text-xs text-gray-500">Bypass file type checks and use ImageMagick for any file type (testing only)</div>
-                                                        </div>
-                                                    </label>
-                                                </div>
-                                                
-                                                {regenerateStylesError && (
-                                                    <div className="mt-3 bg-red-50 border border-red-200 rounded-md p-2">
-                                                        <p className="text-xs text-red-800">{regenerateStylesError}</p>
-                                                    </div>
-                                                )}
-                                                
-                                                <div className="mt-3 flex justify-end gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowRegenerateDropdown(false)}
-                                                        className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleRegenerateStyles}
-                                                        disabled={selectedStyles.length === 0}
-                                                        className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        Regenerate Selected
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                                
-                                <p className="mt-2 text-xs text-gray-500">
-                                    Site roles can regenerate specific thumbnail styles for troubleshooting or testing new file types.
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                )}
             </div>
 
             {/* Content */}
-            <div className="px-6 py-6 space-y-6">
+            <div className="px-4 py-4 space-y-4">
                 {/* Large Preview */}
-                <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-gray-900">Preview</h3>
+                <div className="space-y-3">                    
                     
                     {/* Phase 3.0C: Thumbnail preview with state machine and fade-in */}
                     <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative" style={{ aspectRatio: '16/9', minHeight: '240px' }}>
@@ -1026,8 +838,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </div>
                 </div>
 
-                {/* Analytics/Metrics */}
-                <div className="border-t border-gray-200 pt-6">
+                {/* Analytics/Metrics & Action Buttons */}
+                <div className="border-t border-gray-200 pt-6 space-y-4">
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                             <EyeIcon className="h-4 w-4 text-gray-400" />
@@ -1044,44 +856,71 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             <span className="text-gray-500">downloads</span>
                         </div>
                     </div>
+                    
+                    {/* Action Buttons */}
+                    {displayAsset?.id && (
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowDetailsModal(true)}
+                                className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                            >
+                                <EyeIcon className="h-4 w-4 mr-2" />
+                                Details
+                            </button>
+                            <a
+                                href={`/app/assets/${displayAsset.id}/download`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            >
+                                <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
+                                Download
+                            </a>
+                        </div>
+                    )}
                 </div>
 
-                {/* Phase 2 – Step 5.5: AI Metadata Suggestions */}
+                {/* Phase B9: Metadata Candidate Review (moved up from bottom) */}
                 {displayAsset?.id && (
-                    <AiMetadataSuggestionsInline key={displayAsset.id} assetId={displayAsset.id} />
+                    <MetadataCandidateReview assetId={displayAsset.id} />
                 )}
 
-                {/* Tag Management */}
-                {displayAsset?.id && (
-                    <div className="px-6 py-4 border-t border-gray-200">
-                        <AssetTagManager 
-                            key={`tag-manager-${displayAsset.id}`} 
-                            asset={displayAsset}
-                            showTitle={true}
-                            showInput={true}
-                            compact={false}
-                        />
-                    </div>
-                )}
+                {/* Remove standalone Tag Management - will be moved into metadata section */}
 
                 {/* AI Tag Suggestions */}
                 {displayAsset?.id && (
-                    <AiTagSuggestionsInline key={`tags-${displayAsset.id}`} assetId={displayAsset.id} />
+                    <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} />
                 )}
 
                 {/* Dominant Colors Display (read-only) */}
                 {displayAsset?.metadata?.dominant_colors && Array.isArray(displayAsset.metadata.dominant_colors) && displayAsset.metadata.dominant_colors.length > 0 && (
                     <div className="px-6 py-4 border-t border-gray-200">
                         <div className="flex items-center gap-3">
-                            <span className="text-sm font-medium text-gray-700">Dominant Colors</span>
+                            <span className="text-sm text-gray-500">Dominant Colors</span>
                             <DominantColorsSwatches dominantColors={displayAsset.metadata.dominant_colors} />
                         </div>
                     </div>
                 )}
 
-                {/* Phase 2 – Step 6: Manual Metadata Editing */}
+                {/* Tags and Metadata */}
                 {displayAsset?.id && (
-                    <AssetMetadataDisplay assetId={displayAsset.id} />
+                    <div className="border-t border-gray-200">
+                        <CollapsibleSection title="Metadata" defaultExpanded={true}>
+                            <AssetMetadataDisplay assetId={displayAsset.id} />
+                            {/* Tags at bottom of metadata */}
+                            <div className="mt-4 pt-4 border-t border-gray-100">
+                                <AssetTagManager 
+                                    key={`tag-manager-${asset.id}`} 
+                                    asset={displayAsset}
+                                    showTitle={true}
+                                    showInput={true}
+                                    compact={true}
+                                    inline={true}
+                                />
+                            </div>
+                        </CollapsibleSection>
+                    </div>
                 )}
 
                 {/* Phase 8: Pending Metadata Approval */}
@@ -1089,39 +928,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     <PendingMetadataList assetId={displayAsset.id} />
                 )}
 
-                {/* Phase B9: Metadata Candidate Review */}
-                {displayAsset?.id && (
-                    <MetadataCandidateReview assetId={displayAsset.id} />
-                )}
 
-                {/* Phase 3.1 — Minimal drawer download action.
-                    This is a temporary test-only UI.
-                    Do not expand into full download UX here. */}
-                {displayAsset?.id && (
-                    <div className="border-t border-gray-200 pt-6 space-y-3">
-                        <button
-                            type="button"
-                            onClick={() => setShowDetailsModal(true)}
-                            className="w-full inline-flex items-center justify-center rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-                        >
-                            <EyeIcon className="h-5 w-5 mr-2" />
-                            Details
-                        </button>
-                        <a
-                            href={`/app/assets/${displayAsset.id}/download`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
-                            <ArrowDownTrayIcon className="h-5 w-5 mr-2" />
-                            Download
-                        </a>
-                    </div>
-                )}
+                {/* Buttons moved up to analytics section */}
 
                 {/* File Information */}
-                <div className="space-y-3 border-t border-gray-200 pt-6">
-                    <h3 className="text-sm font-medium text-gray-900">File Information</h3>
+                <div className="border-t border-gray-200">
+                    <CollapsibleSection title="File Information" defaultExpanded={true}>
                     
                     {/* Created By - moved below preview, at top of file info */}
                     {/* Use displayAsset (with live updates) instead of prop asset */}
@@ -1152,13 +964,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     <dl className="space-y-3">
                         <div className="flex justify-between">
                             <dt className="text-sm text-gray-500">File Type</dt>
-                            <dd className="text-sm font-medium text-gray-900 uppercase">
+                            <dd className="text-sm font-semibold text-gray-900 uppercase">
                                 {fileExtension || 'Unknown'}
                             </dd>
                         </div>
                         <div className="flex justify-between">
                             <dt className="text-sm text-gray-500">File Size</dt>
-                            <dd className="text-sm font-medium text-gray-900">
+                            <dd className="text-sm font-semibold text-gray-900">
                                 {formatFileSize(displayAsset.size_bytes)}
                             </dd>
                         </div>
@@ -1177,21 +989,21 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {displayAsset.created_at && (
                             <div className="flex justify-between">
                                 <dt className="text-sm text-gray-500">Uploaded</dt>
-                                <dd className="text-sm font-medium text-gray-900">
+                                <dd className="text-sm font-semibold text-gray-900">
                                     {formatDate(displayAsset.created_at)}
                                 </dd>
                             </div>
                         )}
                         <div className="flex justify-between">
                             <dt className="text-sm text-gray-500">Category</dt>
-                            <dd className="text-sm font-medium text-gray-900">
+                            <dd className="text-sm font-semibold text-gray-900">
                                 {categoryName}
                             </dd>
                         </div>
                         {displayAsset.original_filename && (
                             <div>
                                 <dt className="text-sm text-gray-500 mb-1">Filename</dt>
-                                <dd className="text-sm font-mono text-gray-700 break-all">
+                                <dd className="text-sm font-mono font-semibold text-gray-900 break-all">
                                     {displayAsset.original_filename}
                                 </dd>
                             </div>
@@ -1203,7 +1015,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 return (
                                     <div className="flex justify-between">
                                         <dt className="text-sm text-gray-500">Dimensions</dt>
-                                        <dd className="text-sm font-medium text-gray-900">
+                                        <dd className="text-sm font-semibold text-gray-900">
                                             {displayAsset.source_dimensions.width.toLocaleString()} × {displayAsset.source_dimensions.height.toLocaleString()} px
                                         </dd>
                                     </div>
@@ -1215,7 +1027,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 return (
                                     <div className="flex justify-between">
                                         <dt className="text-sm text-gray-500">Dimensions</dt>
-                                        <dd className="text-sm font-medium text-gray-900">
+                                        <dd className="text-sm font-semibold text-gray-900">
                                             {parseInt(displayAsset.metadata.image_width).toLocaleString()} × {parseInt(displayAsset.metadata.image_height).toLocaleString()} px
                                         </dd>
                                     </div>
@@ -1241,7 +1053,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     return (
                                         <div className="flex justify-between">
                                             <dt className="text-sm text-gray-500">Dimensions</dt>
-                                            <dd className="text-sm font-medium text-gray-900">
+                                            <dd className="text-sm font-semibold text-gray-900">
                                                 {parseInt(width).toLocaleString()} × {parseInt(height).toLocaleString()} px
                                             </dd>
                                         </div>
@@ -1251,7 +1063,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             return null
                         })()}
                     </dl>
-                </div>
 
                 {/* Processing State - Skipped (informational, not error) */}
                 {/* Show different UI for assets that can now generate thumbnails vs truly unsupported */}
@@ -1311,17 +1122,32 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 {/* Show skip reason if available in metadata */}
                                 {/* Use displayAsset (with live updates) instead of prop asset */}
                                 {displayAsset.metadata?.thumbnail_skip_reason && (
-                                    <p className="text-xs text-blue-600 mt-1">
-                                        Reason: {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' 
-                                            ? 'Unsupported file type (TIFF)' 
-                                            : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
-                                            ? 'Unsupported file type (AVIF)'
-                                            : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
-                                            ? 'Unsupported file type (BMP)'
-                                            : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
-                                            ? 'Unsupported file type (SVG)'
-                                            : 'Unsupported file type'}
-                                    </p>
+                                    <>
+                                        <p className="text-xs text-blue-600 mt-1">
+                                            Reason: {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' 
+                                                ? 'Unsupported file type (TIFF)' 
+                                                : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
+                                                ? 'Unsupported file type (AVIF)'
+                                                : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
+                                                ? 'Unsupported file type (BMP)'
+                                                : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
+                                                ? 'Unsupported file type (SVG)'
+                                                : 'Unsupported file type'}
+                                        </p>
+                                        {/* Show regeneration option for TIFF/AVIF if retry is allowed */}
+                                        {(displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' || 
+                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif') && 
+                                         canRetryThumbnail && (
+                                            <div className="mt-2">
+                                                <p className="text-xs text-green-700 font-medium">
+                                                    💡 TIFF/AVIF support is now available via Imagick.
+                                                </p>
+                                                <p className="text-xs text-green-600 mt-1">
+                                                    Skip reason will be cleared automatically and thumbnails will regenerate.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                                 {/* Fallback to thumbnail_error if skip_reason not in metadata */}
                                 {!displayAsset.metadata?.thumbnail_skip_reason && displayAsset.thumbnail_error && (
@@ -1358,17 +1184,20 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </div>
                             )}
                             
-                            {/* Retry button - only show if retry is allowed */}
-                            {canRetryThumbnail && (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowRetryModal(true)}
-                                    className="inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                >
-                                    <ArrowPathIcon className="h-4 w-4 mr-2" />
-                                    Retry Thumbnail Generation
-                                </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {/* Retry button - only show if retry is allowed */}
+                                {canRetryThumbnail && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowRetryModal(true)}
+                                        className="inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                    >
+                                        <ArrowPathIcon className="h-4 w-4 mr-2" />
+                                        Retry Thumbnail Generation
+                                    </button>
+                                )}
+                                
+                            </div>
                             
                             {/* Retry limit or unsupported type message */}
                             {!canRetryThumbnail && getRetryErrorMessage() && (
@@ -1380,21 +1209,29 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </div>
                 )}
 
+                    </CollapsibleSection>
+                </div>
+
                 {/* Asset Timeline */}
-                <AssetTimeline 
-                    events={activityEvents} 
-                    loading={activityLoading}
-                    onThumbnailRetry={() => {
-                        // Phase 3.0C: UI-only retry (max 2 retries)
-                        if (thumbnailRetryCount < 2) {
-                            setThumbnailRetryCount(prev => prev + 1)
-                            // Trigger a re-render by updating asset reference
-                            // This is UI-only - no backend call
-                            // The thumbnail will be re-checked on next render
-                        }
-                    }}
-                    thumbnailRetryCount={thumbnailRetryCount}
-                />
+                <div className="border-t border-gray-200">
+                    <CollapsibleSection title="Timeline" defaultExpanded={true}>
+                        <AssetTimeline 
+                            events={activityEvents} 
+                            loading={activityLoading}
+                            onThumbnailRetry={() => {
+                                // Phase 3.0C: UI-only retry (max 2 retries)
+                                if (thumbnailRetryCount < 2) {
+                                    setThumbnailRetryCount(prev => prev + 1)
+                                    // Trigger a re-render by updating asset reference
+                                    // This is UI-only - no backend call
+                                    // The thumbnail will be re-checked on next render
+                                }
+                            }}
+                            thumbnailRetryCount={thumbnailRetryCount}
+                        />
+                    </CollapsibleSection>
+                </div>
+                
             </div>
 
             {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) */}

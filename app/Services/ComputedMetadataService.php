@@ -84,22 +84,18 @@ class ComputedMetadataService
     /**
      * Check if asset is an image.
      *
+     * Uses FileTypeService to determine if asset is an image type.
+     *
      * @param Asset $asset
      * @return bool
      */
     protected function isImageAsset(Asset $asset): bool
     {
-        $mimeType = $asset->mime_type ?? '';
-        if (str_starts_with($mimeType, 'image/')) {
-            return true;
-        }
-
-        // Check by extension as fallback
-        $filename = $asset->original_filename ?? '';
-        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif'];
-
-        return in_array($extension, $imageExtensions);
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        
+        // Check if it's an image type (image, tiff, avif)
+        return in_array($fileType, ['image', 'tiff', 'avif']);
     }
 
     /**

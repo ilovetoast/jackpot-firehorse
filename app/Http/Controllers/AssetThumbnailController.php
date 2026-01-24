@@ -664,6 +664,188 @@ class AssetThumbnailController extends Controller
     }
 
     /**
+     * Remove preview thumbnails for an asset.
+     *
+     * DELETE /app/assets/{asset}/thumbnails/preview
+     *
+     * Removes preview thumbnails from S3 and clears preview_thumbnail_url from metadata.
+     * This forces the UI to show the file type icon instead of preview thumbnails.
+     * Useful when preview thumbnails are bad/corrupted and need to be removed.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function removePreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        // Authorize: User must have permission to manage thumbnails
+        $this->authorize('retryThumbnails', $asset);
+
+        $user = $request->user();
+        $s3Client = $this->getS3Client();
+
+        try {
+            $metadata = $asset->metadata ?? [];
+            $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+            $finalThumbnails = $metadata['thumbnails'] ?? []; // Final thumbnails are stored in 'thumbnails' key
+            
+            // Check if there are any thumbnails to remove (preview or final)
+            $hasPreviewThumbnails = !empty($previewThumbnails);
+            $hasFinalThumbnails = !empty($finalThumbnails);
+            $hasPreviewUrl = !empty($asset->preview_thumbnail_url);
+            $hasFinalUrl = !empty($asset->final_thumbnail_url);
+            
+            if (!$hasPreviewThumbnails && !$hasFinalThumbnails && !$hasPreviewUrl && !$hasFinalUrl) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No thumbnails to remove',
+                ], 200);
+            }
+
+            $bucket = $asset->storageBucket;
+            if (!$bucket) {
+                return response()->json([
+                    'error' => 'Asset missing storage bucket',
+                ], 422);
+            }
+
+            $deletedPaths = [];
+            $errors = [];
+            $deletedStyles = [];
+
+            // Delete preview thumbnail files from S3
+            foreach ($previewThumbnails as $styleName => $thumbnailData) {
+                $thumbnailPath = $thumbnailData['path'] ?? null;
+                if (!$thumbnailPath) {
+                    continue;
+                }
+
+                try {
+                    $s3Client->deleteObject([
+                        'Bucket' => $bucket->name,
+                        'Key' => $thumbnailPath,
+                    ]);
+                    $deletedPaths[] = $thumbnailPath;
+                    $deletedStyles[] = "preview:{$styleName}";
+                    
+                    Log::info('[AssetThumbnailController] Preview thumbnail deleted from S3', [
+                        'asset_id' => $asset->id,
+                        'style' => $styleName,
+                        's3_path' => $thumbnailPath,
+                        'user_id' => $user->id,
+                    ]);
+                } catch (S3Exception $e) {
+                    // Log error but continue with other thumbnails
+                    $errors[] = "Failed to delete preview {$styleName}: {$e->getMessage()}";
+                    Log::warning('[AssetThumbnailController] Failed to delete preview thumbnail from S3', [
+                        'asset_id' => $asset->id,
+                        'style' => $styleName,
+                        's3_path' => $thumbnailPath,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Delete final thumbnail files from S3
+            foreach ($finalThumbnails as $styleName => $thumbnailData) {
+                $thumbnailPath = $thumbnailData['path'] ?? null;
+                if (!$thumbnailPath) {
+                    continue;
+                }
+
+                try {
+                    $s3Client->deleteObject([
+                        'Bucket' => $bucket->name,
+                        'Key' => $thumbnailPath,
+                    ]);
+                    $deletedPaths[] = $thumbnailPath;
+                    $deletedStyles[] = "final:{$styleName}";
+                    
+                    Log::info('[AssetThumbnailController] Final thumbnail deleted from S3', [
+                        'asset_id' => $asset->id,
+                        'style' => $styleName,
+                        's3_path' => $thumbnailPath,
+                        'user_id' => $user->id,
+                    ]);
+                } catch (S3Exception $e) {
+                    // Log error but continue with other thumbnails
+                    $errors[] = "Failed to delete final {$styleName}: {$e->getMessage()}";
+                    Log::warning('[AssetThumbnailController] Failed to delete final thumbnail from S3', [
+                        'asset_id' => $asset->id,
+                        'style' => $styleName,
+                        's3_path' => $thumbnailPath,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            // Remove thumbnails from metadata
+            unset($metadata['preview_thumbnails']);
+            unset($metadata['thumbnails']); // Remove final thumbnails
+            unset($metadata['thumbnails_generated_at']); // Clear generation timestamp
+            unset($metadata['thumbnails_generated']); // Clear generation flag
+            
+            // Also clear preview_thumbnail_url if it exists in metadata (some assets might store it there)
+            if (isset($metadata['preview_thumbnail_url'])) {
+                unset($metadata['preview_thumbnail_url']);
+            }
+            
+            // Update asset metadata
+            $asset->update(['metadata' => $metadata]);
+            
+            // Also clear thumbnail_status to allow regeneration
+            $asset->update(['thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING]);
+
+            // Log activity event
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_THUMBNAIL_REMOVED,
+                    [
+                        'removed_preview_styles' => array_keys($previewThumbnails),
+                        'removed_final_styles' => array_keys($finalThumbnails),
+                        'deleted_paths' => $deletedPaths,
+                        'errors' => $errors,
+                        'triggered_by_user_id' => $user->id,
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Activity logging must never break the request
+                Log::error('Failed to log thumbnail removal event', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            $message = 'Thumbnails removed successfully';
+            if (!empty($errors)) {
+                $message .= ' (some files could not be deleted: ' . implode(', ', $errors) . ')';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'deleted_styles' => $deletedStyles,
+                'deleted_paths' => $deletedPaths,
+                'errors' => $errors,
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('[AssetThumbnailController] Failed to remove preview thumbnails', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to remove preview thumbnails: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Authorize asset access.
      *
      * @param Request $request
@@ -733,14 +915,14 @@ class AssetThumbnailController extends Controller
                 'Key' => $thumbnailPath,
             ]);
 
-            // Phase 3.1E: Validate thumbnail file size - reject 1x1 pixel placeholders
-            // If thumbnail is < 1KB, it's likely a failed generation (1x1 pixel ~70 bytes)
-            // DO NOT return invalid thumbnails - let UI fall back to file icon
+            // Validate thumbnail file size - only reject truly broken/corrupted files
+            // Minimum size: 50 bytes - allows small valid thumbnails (e.g., compressed WebP)
+            // Small thumbnails are acceptable, especially for small source images or highly compressed formats
             $contentLength = $result['ContentLength'] ?? 0;
-            $minValidSize = 1024; // 1KB threshold
+            $minValidSize = 50; // Only catch broken/corrupted files
             
             if ($contentLength < $minValidSize) {
-                Log::error('Thumbnail file too small (likely 1x1 pixel placeholder)', [
+                Log::error('Thumbnail file too small (likely corrupted or empty)', [
                     'asset_id' => $asset->id,
                     'thumbnail_path' => $thumbnailPath,
                     'bucket' => $bucket->name,

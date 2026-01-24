@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Exceptions\PlanLimitExceededException;
+use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Tenant;
+use Illuminate\Support\Facades\DB;
 
 class PlanService
 {
@@ -197,6 +199,104 @@ class PlanService
     }
 
     /**
+     * Get current storage usage in bytes for a tenant.
+     */
+    public function getCurrentStorageUsage(Tenant $tenant): int
+    {
+        // Sum up size_bytes for all visible assets in the tenant
+        // Only count completed assets (not failed/processing uploads)
+        $totalBytes = DB::table('assets')
+            ->where('tenant_id', $tenant->id)
+            ->where('status', 'visible') // Only count visible assets
+            ->whereNull('deleted_at')
+            ->sum('size_bytes');
+
+        return (int) $totalBytes;
+    }
+
+    /**
+     * Get storage usage as a percentage of the plan limit.
+     */
+    public function getStorageUsagePercentage(Tenant $tenant): float
+    {
+        $maxStorage = $this->getMaxStorage($tenant);
+        $currentUsage = $this->getCurrentStorageUsage($tenant);
+
+        // Handle unlimited plans (very large numbers)
+        if ($maxStorage >= 999999 * 1024 * 1024) {
+            return 0.0; // Unlimited
+        }
+
+        if ($maxStorage === 0) {
+            return 100.0; // No storage allowed
+        }
+
+        return ($currentUsage / $maxStorage) * 100;
+    }
+
+    /**
+     * Check if adding a file would exceed storage limits.
+     */
+    public function canAddFile(Tenant $tenant, int $fileSizeBytes): bool
+    {
+        $maxStorage = $this->getMaxStorage($tenant);
+        $currentUsage = $this->getCurrentStorageUsage($tenant);
+
+        // Handle unlimited plans (very large numbers)
+        if ($maxStorage >= 999999 * 1024 * 1024) {
+            return true; // Unlimited
+        }
+
+        return ($currentUsage + $fileSizeBytes) <= $maxStorage;
+    }
+
+    /**
+     * Get storage usage information for display.
+     */
+    public function getStorageInfo(Tenant $tenant): array
+    {
+        $maxStorage = $this->getMaxStorage($tenant);
+        $currentUsage = $this->getCurrentStorageUsage($tenant);
+        $usagePercentage = $this->getStorageUsagePercentage($tenant);
+
+        $isUnlimited = $maxStorage >= 999999 * 1024 * 1024;
+
+        return [
+            'current_usage_bytes' => $currentUsage,
+            'max_storage_bytes' => $maxStorage,
+            'current_usage_mb' => round($currentUsage / 1024 / 1024, 2),
+            'max_storage_mb' => round($maxStorage / 1024 / 1024, 2),
+            'usage_percentage' => round($usagePercentage, 2),
+            'remaining_bytes' => $isUnlimited ? PHP_INT_MAX : max(0, $maxStorage - $currentUsage),
+            'remaining_mb' => $isUnlimited ? PHP_INT_MAX : round(max(0, $maxStorage - $currentUsage) / 1024 / 1024, 2),
+            'is_unlimited' => $isUnlimited,
+            'is_near_limit' => !$isUnlimited && $usagePercentage >= 80,
+            'is_at_limit' => !$isUnlimited && $usagePercentage >= 95,
+        ];
+    }
+
+    /**
+     * Enforce storage limits before upload.
+     * 
+     * @param Tenant $tenant
+     * @param int $additionalBytes Additional bytes to be added
+     * @throws PlanLimitExceededException
+     */
+    public function enforceStorageLimit(Tenant $tenant, int $additionalBytes): void
+    {
+        if (!$this->canAddFile($tenant, $additionalBytes)) {
+            $storageInfo = $this->getStorageInfo($tenant);
+            
+            throw new PlanLimitExceededException(
+                'storage',
+                $storageInfo['current_usage_bytes'] + $additionalBytes,
+                $storageInfo['max_storage_bytes'],
+                "Adding this file would exceed your storage limit. Current usage: {$storageInfo['current_usage_mb']} MB, Plan limit: {$storageInfo['max_storage_mb']} MB"
+            );
+        }
+    }
+
+    /**
      * Generic limit checker.
      *
      * @throws PlanLimitExceededException
@@ -260,5 +360,67 @@ class PlanService
         $features = $this->getPlanFeatures($tenant);
         
         return in_array($feature, $features);
+    }
+
+    /**
+     * Get maximum tags allowed per asset for tenant's plan.
+     */
+    public function getMaxTagsPerAsset(Tenant $tenant): int
+    {
+        $limits = $this->getPlanLimits($tenant);
+        return $limits['max_tags_per_asset'] ?? 1; // Default to 1 if not set
+    }
+
+    /**
+     * Get current tag count for an asset.
+     */
+    public function getCurrentTagCount(Asset $asset): int
+    {
+        return DB::table('asset_tags')
+            ->where('asset_id', $asset->id)
+            ->count();
+    }
+
+    /**
+     * Check if tenant can add a tag to an asset.
+     */
+    public function canAddTag(Asset $asset): bool
+    {
+        $tenant = $asset->tenant;
+        $maxTags = $this->getMaxTagsPerAsset($tenant);
+        $currentTags = $this->getCurrentTagCount($asset);
+
+        return $currentTags < $maxTags;
+    }
+
+    /**
+     * Check if tenant can add multiple tags to an asset.
+     */
+    public function canAddTags(Asset $asset, int $tagCount): bool
+    {
+        $tenant = $asset->tenant;
+        $maxTags = $this->getMaxTagsPerAsset($tenant);
+        $currentTags = $this->getCurrentTagCount($asset);
+
+        return ($currentTags + $tagCount) <= $maxTags;
+    }
+
+    /**
+     * Throw exception if adding tag would exceed plan limit.
+     */
+    public function enforceTagLimit(Asset $asset, int $additionalTags = 1): void
+    {
+        if (!$this->canAddTags($asset, $additionalTags)) {
+            $tenant = $asset->tenant;
+            $maxTags = $this->getMaxTagsPerAsset($tenant);
+            $currentTags = $this->getCurrentTagCount($asset);
+
+            throw new PlanLimitExceededException(
+                'tags_per_asset',
+                $currentTags,
+                $maxTags,
+                "This asset has reached the maximum of {$maxTags} tags allowed on your plan. Current tags: {$currentTags}."
+            );
+        }
     }
 }

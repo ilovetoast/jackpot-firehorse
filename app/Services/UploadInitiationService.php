@@ -484,6 +484,7 @@ class UploadInitiationService
      */
     protected function validatePlanLimits(Tenant $tenant, int $fileSize): void
     {
+        // Check individual file size limit
         $maxUploadSize = $this->planService->getMaxUploadSize($tenant);
 
         if ($fileSize > $maxUploadSize) {
@@ -494,6 +495,9 @@ class UploadInitiationService
                 "File size ({$fileSize} bytes) exceeds maximum upload size ({$maxUploadSize} bytes) for your plan."
             );
         }
+
+        // Check total storage limit
+        $this->planService->enforceStorageLimit($tenant, $fileSize);
     }
 
     /**

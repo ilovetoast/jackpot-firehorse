@@ -120,12 +120,11 @@ class ColorAnalysisService
 
     protected function isImageAsset(Asset $asset): bool
     {
-        $mime = $asset->mime_type ?? '';
-        if (str_starts_with($mime, 'image/')) {
-            return true;
-        }
-        $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-        return in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true);
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        
+        // Check if it's an image type (image, tiff, avif)
+        return in_array($fileType, ['image', 'tiff', 'avif']);
     }
 
     /**

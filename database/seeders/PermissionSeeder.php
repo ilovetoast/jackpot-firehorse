@@ -54,6 +54,12 @@ class PermissionSeeder extends Seeder
             'ai.usage.view',
         ];
 
+        // DAM Tag permissions (tenant-scoped) - Phase J.2.3+
+        $tagPermissions = [
+            'assets.tags.create',
+            'assets.tags.delete',
+        ];
+
         // DAM Governance permissions (tenant-scoped)
         $governancePermissions = [
             'tenant.manage_settings',
@@ -105,6 +111,7 @@ class PermissionSeeder extends Seeder
             $companyPermissions,
             $assetPermissions,
             $metadataPermissions,
+            $tagPermissions,
             $governancePermissions
         );
         foreach (array_merge($allCompanyPermissions, $sitePermissions) as $permission) {
@@ -126,11 +133,12 @@ class PermissionSeeder extends Seeder
         $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']); // Deprecated - kept for migration
 
         // Owner: ALL permissions (full access)
-        // Includes all company, asset, metadata, and governance permissions
+        // Includes all company, asset, metadata, tag, and governance permissions
         $owner->syncPermissions(array_merge(
             $companyPermissions,
             $assetPermissions,
             $metadataPermissions,
+            $tagPermissions,
             $governancePermissions,
             [
                 'tickets.create',
@@ -148,6 +156,7 @@ class PermissionSeeder extends Seeder
             $companyPermissions,
             $assetPermissions,
             $metadataPermissions,
+            $tagPermissions,
             $governancePermissions,
             [
                 'tickets.create',
@@ -163,6 +172,7 @@ class PermissionSeeder extends Seeder
         $manager->syncPermissions(array_merge(
             $companyPermissions,
             $assetPermissions,
+            $tagPermissions,
             [
                 'metadata.set_on_upload',
                 'metadata.edit_post_upload',
@@ -178,10 +188,11 @@ class PermissionSeeder extends Seeder
             // Tickets can be added separately if needed for specific tenants
         ));
 
-        // Contributor: View, download, upload + set on upload + edit post upload + review candidates
+        // Contributor: View, download, upload + set on upload + edit post upload + review candidates + tags
         // Upload metadata is auto-approved for contributors
         $contributor->syncPermissions(array_merge(
             $assetPermissions,
+            $tagPermissions,
             [
                 'metadata.set_on_upload',
                 'metadata.edit_post_upload',

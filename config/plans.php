@@ -22,6 +22,7 @@ return [
             'max_users' => 2,
             'max_downloads_per_month' => 50,
             'max_custom_metadata_fields' => 0, // Phase C3: No custom fields on free plan
+            'max_tags_per_asset' => 1, // Maximum tags allowed per asset
             // AI Usage caps (per month)
             'max_ai_tagging_per_month' => 5, // 5 AI tagging calls per month (very low allowance for free plan)
             'max_ai_suggestions_per_month' => 10, // 10 AI suggestions per month (small allowance for free plan)
@@ -38,6 +39,8 @@ return [
         'notes' => [
             'No "All" button in Assets/Marketing Assets category sidebar',
             'Download links limited to 50 per month',
+            'Limited to 1 tag per asset for basic organization',
+            '5 AI tagging operations and 10 AI suggestions per month',
         ],
     ],
 
@@ -53,9 +56,10 @@ return [
             'max_users' => 5,
             'max_downloads_per_month' => 200,
             'max_custom_metadata_fields' => 5, // Phase C3: 5 custom fields on starter plan
+            'max_tags_per_asset' => 5, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 100, // 100 AI tagging calls per month
-            'max_ai_suggestions_per_month' => 500, // 500 AI suggestions per month
+            'max_ai_tagging_per_month' => 50, // 50 AI tagging calls per month
+            'max_ai_suggestions_per_month' => 100, // 100 AI suggestions per month
         ],
         'features' => [
             'all_asset_types',
@@ -69,6 +73,8 @@ return [
         'notes' => [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
             'Download links limited to 200 per month',
+            'Up to 5 tags per asset for better organization',
+            '50 AI tagging operations and 100 AI suggestions per month',
         ],
     ],
 
@@ -85,9 +91,10 @@ return [
             'max_users' => 20,
             'max_downloads_per_month' => 1000,
             'max_custom_metadata_fields' => 20, // Phase C3: 20 custom fields on pro plan
+            'max_tags_per_asset' => 10, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 1000, // 1000 AI tagging calls per month
-            'max_ai_suggestions_per_month' => 5000, // 5000 AI suggestions per month
+            'max_ai_tagging_per_month' => 500, // 500 AI tagging calls per month
+            'max_ai_suggestions_per_month' => 1000, // 1000 AI suggestions per month
         ],
         'features' => [
             'all_asset_types',
@@ -105,6 +112,8 @@ return [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
             'Download links limited to 1,000 per month',
             'Share downloads with custom permissions',
+            'Up to 10 tags per asset for comprehensive categorization',
+            '500 AI tagging operations and 1,000 AI suggestions per month',
         ],
     ],
 
@@ -121,9 +130,10 @@ return [
             'max_users' => 200, // Unlimited
             'max_downloads_per_month' => 999999, // Unlimited
             'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on enterprise plan
+            'max_tags_per_asset' => 15, // Maximum tags allowed per asset
             // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 0, // 0 = unlimited
-            'max_ai_suggestions_per_month' => 0, // 0 = unlimited
+            'max_ai_tagging_per_month' => 10000, // 10,000 AI tagging calls per month
+            'max_ai_suggestions_per_month' => 10000, // 10,000 AI suggestions per month
         ],
         'features' => [
             'all_asset_types',
@@ -142,6 +152,8 @@ return [
             '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
             'Unlimited download links',
             'Share downloads with custom permissions',
+            'Up to 15 tags per asset for maximum flexibility',
+            '10,000 AI tagging operations and 10,000 AI suggestions per month',
         ],
     ],
 ];

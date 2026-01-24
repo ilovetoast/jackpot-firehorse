@@ -15,6 +15,9 @@ import {
     XCircleIcon,
     UserPlusIcon,
     PencilIcon,
+    SparklesIcon,
+    CpuChipIcon,
+    InformationCircleIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AdminCompanyView({ 
@@ -27,7 +30,8 @@ export default function AdminCompanyView({
     users,
     brands = [],
     all_brands = [],
-    stats
+    stats,
+    aiUsage = null
 }) {
     const [showAddUserForm, setShowAddUserForm] = useState(false)
     const [availableUsers, setAvailableUsers] = useState([])
@@ -815,17 +819,166 @@ export default function AdminCompanyView({
                         </div>
                     </div>
 
-                    {/* TODO Section */}
-                    <div className="mt-8 text-xs text-gray-500 bg-gray-50 rounded-lg p-4">
-                        <p className="font-semibold mb-2">TODO / Future Enhancements:</p>
+                    {/* AI Billing Estimates */}
+                    <div className="mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                        <SparklesIcon className="h-5 w-5 text-purple-500" />
+                                        AI Usage & Billing Estimates
+                                    </h2>
+                                </div>
+
+                                {aiUsage && aiUsage.status === 'success' ? (
+                                    <>
+                                        {/* Current Month Overview */}
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+                                            <div className="rounded-lg bg-purple-50 p-4">
+                                                <dt className="text-sm font-medium text-purple-800">Current Usage</dt>
+                                                <dd className="mt-1 text-2xl font-semibold text-purple-900">
+                                                    {aiUsage.current_usage?.total_calls || 0}
+                                                </dd>
+                                                <div className="mt-1 text-xs text-purple-700">AI calls this month</div>
+                                            </div>
+                                            <div className="rounded-lg bg-green-50 p-4">
+                                                <dt className="text-sm font-medium text-green-800">Cost to Date</dt>
+                                                <dd className="mt-1 text-2xl font-semibold text-green-900">
+                                                    {formatCurrency(aiUsage.current_usage?.cost_to_date || 0)}
+                                                </dd>
+                                                <div className="mt-1 text-xs text-green-700">This month so far</div>
+                                            </div>
+                                            <div className="rounded-lg bg-blue-50 p-4">
+                                                <dt className="text-sm font-medium text-blue-800">Projected Monthly</dt>
+                                                <dd className="mt-1 text-2xl font-semibold text-blue-900">
+                                                    {formatCurrency(aiUsage.projections?.monthly_cost || 0)}
+                                                </dd>
+                                                <div className="mt-1 text-xs text-blue-700">
+                                                    ~{aiUsage.projections?.monthly_usage || 0} calls
+                                                </div>
+                                            </div>
+                                            <div className={`rounded-lg p-4 ${
+                                                aiUsage.projections?.usage_percentage > 80 
+                                                    ? 'bg-red-50' 
+                                                    : aiUsage.projections?.usage_percentage > 60
+                                                    ? 'bg-yellow-50'
+                                                    : 'bg-gray-50'
+                                            }`}>
+                                                <dt className={`text-sm font-medium ${
+                                                    aiUsage.projections?.usage_percentage > 80 
+                                                        ? 'text-red-800' 
+                                                        : aiUsage.projections?.usage_percentage > 60
+                                                        ? 'text-yellow-800'
+                                                        : 'text-gray-800'
+                                                }`}>
+                                                    Cap Usage
+                                                </dt>
+                                                <dd className={`mt-1 text-2xl font-semibold ${
+                                                    aiUsage.projections?.usage_percentage > 80 
+                                                        ? 'text-red-900' 
+                                                        : aiUsage.projections?.usage_percentage > 60
+                                                        ? 'text-yellow-900'
+                                                        : 'text-gray-900'
+                                                }`}>
+                                                    {Math.round(aiUsage.projections?.usage_percentage || 0)}%
+                                                </dd>
+                                                <div className={`mt-1 text-xs ${
+                                                    aiUsage.projections?.usage_percentage > 80 
+                                                        ? 'text-red-700' 
+                                                        : aiUsage.projections?.usage_percentage > 60
+                                                        ? 'text-yellow-700'
+                                                        : 'text-gray-700'
+                                                }`}>
+                                                    of monthly cap
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Feature Breakdown */}
+                                        {aiUsage.current_usage?.features && Object.keys(aiUsage.current_usage.features).length > 0 && (
+                                            <div className="mb-6">
+                                                <h3 className="text-sm font-semibold text-gray-900 mb-3">Usage by Feature</h3>
+                                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                                    {Object.entries(aiUsage.current_usage.features).map(([feature, usage]) => (
+                                                        <div key={feature} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                                                            <div className="flex items-center gap-2">
+                                                                <CpuChipIcon className="h-4 w-4 text-gray-500" />
+                                                                <span className="text-sm font-medium text-gray-900 capitalize">
+                                                                    {feature}
+                                                                </span>
+                                                            </div>
+                                                            <div className="text-sm text-gray-600">
+                                                                {usage} calls
+                                                                {aiUsage.caps?.[feature] > 0 && (
+                                                                    <span className="text-xs text-gray-500 ml-1">
+                                                                        / {aiUsage.caps[feature]} cap
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Monthly Caps */}
+                                        <div className="border-t border-gray-200 pt-4">
+                                            <h3 className="text-sm font-semibold text-gray-900 mb-3">Monthly Caps & Limits</h3>
+                                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-md">
+                                                    <span className="text-sm font-medium text-blue-900">Tagging Cap</span>
+                                                    <span className="text-sm text-blue-700">
+                                                        {aiUsage.caps?.tagging > 0 ? `${aiUsage.caps.tagging} calls/month` : 'Unlimited'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center justify-between p-3 bg-indigo-50 rounded-md">
+                                                    <span className="text-sm font-medium text-indigo-900">Suggestions Cap</span>
+                                                    <span className="text-sm text-indigo-700">
+                                                        {aiUsage.caps?.suggestions > 0 ? `${aiUsage.caps.suggestions} calls/month` : 'Unlimited'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : aiUsage && aiUsage.status === 'error' ? (
+                                    <div className="rounded-md bg-red-50 p-4">
+                                        <div className="flex">
+                                            <div className="flex-shrink-0">
+                                                <ExclamationTriangleIcon className="h-5 w-5 text-red-400" />
+                                            </div>
+                                            <div className="ml-3">
+                                                <p className="text-sm text-red-800">
+                                                    {aiUsage.message || 'Failed to load AI usage data'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="rounded-md bg-gray-50 p-4">
+                                        <div className="flex">
+                                            <div className="flex-shrink-0">
+                                                <InformationCircleIcon className="h-5 w-5 text-gray-400" />
+                                            </div>
+                                            <div className="ml-3">
+                                                <p className="text-sm text-gray-600">
+                                                    AI usage data not available
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Remaining TODO Section */}
+                    <div className="mt-6 text-xs text-gray-500 bg-gray-50 rounded-lg p-4">
+                        <p className="font-semibold mb-2">Future Enhancements:</p>
                         <ul className="list-disc list-inside space-y-1">
-                            <li>Add detailed cost breakdown by category (storage, AI, API, etc.)</li>
-                            <li>Implement actual Stripe invoice fetching for accurate income data</li>
-                            <li>Add export functionality for financial reports</li>
-                            <li>Add time period selector for charts (monthly, quarterly, yearly)</li>
-                            <li>Add alerts for companies with negative profitability</li>
-                            <li>Add cost optimization recommendations</li>
-                            <li>Add activity timeline with filtering</li>
+                            <li>Add detailed cost breakdown by AI model (GPT-4, Claude, etc.)</li>
+                            <li>Add AI cost optimization recommendations</li>
+                            <li>Add AI usage alerts and notifications</li>
+                            <li>Add export functionality for AI cost reports</li>
                         </ul>
                     </div>
                 </div>

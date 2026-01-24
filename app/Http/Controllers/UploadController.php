@@ -12,6 +12,7 @@ use App\Services\ActivityRecorder;
 use App\Services\MetadataPersistenceService;
 use App\Services\MultipartUploadService;
 use App\Services\MultipartUploadUrlService;
+use App\Services\PlanService;
 use App\Services\ResumeMetadataService;
 use App\Services\UploadCompletionService;
 use App\Services\UploadInitiationService;
@@ -35,7 +36,8 @@ class UploadController extends Controller
         protected MultipartUploadUrlService $multipartUrlService,
         protected MultipartUploadService $multipartService,
         protected UploadMetadataSchemaResolver $uploadMetadataSchemaResolver,
-        protected MetadataPersistenceService $metadataPersistenceService
+        protected MetadataPersistenceService $metadataPersistenceService,
+        protected PlanService $planService
     ) {
     }
 
@@ -115,6 +117,144 @@ class UploadController extends Controller
                 'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
                 'file_type' => UploadErrorResponse::extractFileType($validated['file_name'] ?? null),
             ]);
+        }
+    }
+
+    /**
+     * Check storage limits before upload.
+     *
+     * GET /uploads/storage-check
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function checkStorageLimits(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        try {
+            // Get storage information
+            $storageInfo = $this->planService->getStorageInfo($tenant);
+            
+            // Get plan limits for context
+            $planLimits = $this->planService->getPlanLimits($tenant);
+            $maxUploadSizeBytes = $this->planService->getMaxUploadSize($tenant);
+
+            return response()->json([
+                'storage' => $storageInfo,
+                'limits' => [
+                    'max_upload_size_bytes' => $maxUploadSizeBytes,
+                    'max_upload_size_mb' => round($maxUploadSizeBytes / 1024 / 1024, 2),
+                ],
+                'plan' => [
+                    'name' => $this->planService->getCurrentPlan($tenant),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to check storage limits', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['error' => 'Failed to check storage limits'], 500);
+        }
+    }
+
+    /**
+     * Check if specific files can be uploaded (pre-upload validation).
+     *
+     * POST /uploads/validate
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function validateUpload(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'files' => 'required|array|min:1|max:100',
+            'files.*.file_name' => 'required|string|max:255',
+            'files.*.file_size' => 'required|integer|min:1',
+        ]);
+
+        try {
+            $results = [];
+            $totalSize = 0;
+            
+            // Get current limits
+            $maxUploadSizeBytes = $this->planService->getMaxUploadSize($tenant);
+            $storageInfo = $this->planService->getStorageInfo($tenant);
+
+            foreach ($validated['files'] as $file) {
+                $fileSize = $file['file_size'];
+                $fileName = $file['file_name'];
+                $totalSize += $fileSize;
+
+                $canUpload = true;
+                $errors = [];
+
+                // Check individual file size limit
+                if ($fileSize > $maxUploadSizeBytes) {
+                    $canUpload = false;
+                    $errors[] = [
+                        'type' => 'file_size_limit',
+                        'message' => "File size (" . round($fileSize / 1024 / 1024, 2) . " MB) exceeds maximum upload size (" . round($maxUploadSizeBytes / 1024 / 1024, 2) . " MB) for your plan.",
+                    ];
+                }
+
+                // Check if this file alone would exceed storage
+                if (!$this->planService->canAddFile($tenant, $fileSize)) {
+                    $canUpload = false;
+                    $errors[] = [
+                        'type' => 'storage_limit',
+                        'message' => "This file would exceed your storage limit.",
+                    ];
+                }
+
+                $results[] = [
+                    'file_name' => $fileName,
+                    'file_size' => $fileSize,
+                    'can_upload' => $canUpload,
+                    'errors' => $errors,
+                ];
+            }
+
+            // Check if total batch would exceed storage
+            $batchStorageExceeded = !$this->planService->canAddFile($tenant, $totalSize);
+
+            return response()->json([
+                'files' => $results,
+                'batch_summary' => [
+                    'total_files' => count($validated['files']),
+                    'total_size_bytes' => $totalSize,
+                    'total_size_mb' => round($totalSize / 1024 / 1024, 2),
+                    'can_upload_batch' => !$batchStorageExceeded && collect($results)->every('can_upload'),
+                    'storage_exceeded' => $batchStorageExceeded,
+                ],
+                'storage_info' => $storageInfo,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to validate upload', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['error' => 'Failed to validate upload'], 500);
         }
     }
 
