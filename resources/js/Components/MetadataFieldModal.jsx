@@ -50,7 +50,7 @@ export default function MetadataFieldModal({
         }
         acc[assetType].push(category)
         return acc
-    }, { asset: [], marketing: [] })
+    }, { asset: [], deliverable: [] })
 
     // Close category dropdown when clicking outside
     useEffect(() => {
@@ -156,13 +156,18 @@ export default function MetadataFieldModal({
                             const fullFieldData = fieldData?.field || field
                             const fieldOptions = fullFieldData.options || fullFieldData.allowed_values || field.options || field.allowed_values || []
                             
+                            // Prioritize ai_eligible from API response, then field prop, then default to false
+                            const aiEligibleValue = fullFieldData.ai_eligible !== undefined 
+                                ? fullFieldData.ai_eligible 
+                                : (field.ai_eligible !== undefined ? field.ai_eligible : false)
+                            
                             setFormData({
                                 key: field.key || '',
                                 system_label: field.label || field.system_label || '',
                                 type: field.field_type || field.type || 'text',
                                 selectedCategories: enabledCategoryIds,
                                 options: fieldOptions,
-                                ai_eligible: fullFieldData.ai_eligible !== undefined ? fullFieldData.ai_eligible : (field.ai_eligible || false),
+                                ai_eligible: aiEligibleValue,
                                 is_filterable: field.is_filterable !== false,
                                 show_on_upload: field.show_on_upload !== false,
                                 show_on_edit: field.show_on_edit !== false,
@@ -180,7 +185,7 @@ export default function MetadataFieldModal({
                                 type: field.field_type || field.type || 'text',
                                 selectedCategories: [],
                                 options: field.options || field.allowed_values || [],
-                                ai_eligible: field.ai_eligible || false,
+                                ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
                                 is_filterable: field.is_filterable !== false,
                                 show_on_upload: field.show_on_upload !== false,
                                 show_on_edit: field.show_on_edit !== false,
@@ -197,7 +202,7 @@ export default function MetadataFieldModal({
                         type: field.field_type || field.type || 'text',
                         selectedCategories: [],
                         options: field.options || field.allowed_values || [],
-                        ai_eligible: field.ai_eligible || false,
+                        ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
                         is_filterable: field.is_filterable !== false,
                         show_on_upload: field.show_on_upload !== false,
                         show_on_edit: field.show_on_edit !== false,
@@ -447,7 +452,8 @@ export default function MetadataFieldModal({
         })
     }
 
-    const requiresOptions = formData.type === 'select' || formData.type === 'multiselect'
+    const isTagsField = formData.key === 'tags' || field?.key === 'tags'
+    const requiresOptions = (formData.type === 'select' || formData.type === 'multiselect') && !isTagsField
 
     // Early return if not open
     if (!isOpen) {
@@ -696,13 +702,13 @@ export default function MetadataFieldModal({
                                                     </div>
                                                 )}
 
-                                                {/* Marketing Categories */}
-                                                {groupedCategories.marketing.length > 0 && (
+                                                {/* Deliverable Categories */}
+                                                {groupedCategories.deliverable.length > 0 && (
                                                     <div className="px-2 py-1 border-t border-gray-200 mt-1">
                                                         <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 px-2 mt-2">
-                                                            Marketing Asset Categories
+                                                            Deliverable Categories
                                                         </div>
-                                                        {groupedCategories.marketing.map(category => {
+                                                        {groupedCategories.deliverable.map(category => {
                                                             const isSelected = formData.selectedCategories.includes(category.id)
                                                             return (
                                                                 <label
@@ -935,8 +941,8 @@ export default function MetadataFieldModal({
                                 </fieldset>
                             </div>
 
-                            {/* AI Eligible (for select/multiselect fields) */}
-                            {requiresOptions && (
+                            {/* AI Eligible (for select/multiselect fields, or tags field) */}
+                            {(requiresOptions || isTagsField) && (
                                 <div className="relative flex items-start">
                                     <div className="flex h-6 items-center">
                                         <input
@@ -953,8 +959,8 @@ export default function MetadataFieldModal({
                                             Enable AI Suggestions
                                         </label>
                                         <p className="text-gray-500">
-                                            Allow AI to suggest values for this field based on asset content. 
-                                            {formData.options.length === 0 && (
+                                            Allow AI to suggest values for this field based on asset content.
+                                            {!isTagsField && formData.options.length === 0 && (
                                                 <span className="text-amber-600 font-medium"> Note: Options must be defined for AI suggestions to work.</span>
                                             )}
                                         </p>

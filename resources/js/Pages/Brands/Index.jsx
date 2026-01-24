@@ -12,7 +12,7 @@ export default function BrandsIndex({ brands, limits }) {
     const { auth } = usePage().props
     const { post, processing } = useForm()
     const [expandedBrand, setExpandedBrand] = useState(null)
-    const [categoryTab, setCategoryTab] = useState({}) // Track active tab per brand: { brandId: 'asset' | 'marketing' }
+    const [categoryTab, setCategoryTab] = useState({}) // Track active tab per brand: { brandId: 'asset' | 'deliverable' }
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
 
     const handleDelete = (brandId, brandName) => {
@@ -264,10 +264,10 @@ export default function BrandsIndex({ brands, limits }) {
                                                                             Asset
                                                                         </button>
                                                                         <button
-                                                                            onClick={() => setCategoryTab({ ...categoryTab, [brand.id]: 'marketing' })}
+                                                                            onClick={() => setCategoryTab({ ...categoryTab, [brand.id]: 'deliverable' })}
                                                                             className={`
                                                                                 group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
-                                                                                ${(categoryTab[brand.id] || 'asset') === 'marketing'
+                                                                                ${(categoryTab[brand.id] || 'asset') === 'deliverable'
                                                                                     ? 'border-indigo-500 text-indigo-600'
                                                                                     : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                                                                 }
@@ -276,7 +276,7 @@ export default function BrandsIndex({ brands, limits }) {
                                                                             <svg
                                                                                 className={`
                                                                                     -ml-0.5 mr-2 h-5 w-5
-                                                                                    ${(categoryTab[brand.id] || 'asset') === 'marketing' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                                                    ${(categoryTab[brand.id] || 'asset') === 'deliverable' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
                                                                                 `}
                                                                                 fill="none"
                                                                                 viewBox="0 0 24 24"
@@ -285,7 +285,7 @@ export default function BrandsIndex({ brands, limits }) {
                                                                             >
                                                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
                                                                             </svg>
-                                                                            Marketing Asset
+                                                                            Deliverable
                                                                         </button>
                                                                     </nav>
                                                                 </div>
@@ -322,7 +322,7 @@ export default function BrandsIndex({ brands, limits }) {
                                                                         ))}
                                                                     {brand.categories.filter(category => category.asset_type === (categoryTab[brand.id] || 'asset')).length === 0 && (
                                                                         <div className="px-4 py-8 text-center text-sm text-gray-500">
-                                                                            No {(categoryTab[brand.id] || 'asset') === 'asset' ? 'Asset' : 'Marketing Asset'} categories yet.
+                                                                            No {(categoryTab[brand.id] || 'asset') === 'asset' ? 'Asset' : 'Deliverable'} categories yet.
                                                                         </div>
                                                                     )}
                                                                 </div>

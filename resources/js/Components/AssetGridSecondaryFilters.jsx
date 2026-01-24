@@ -90,7 +90,7 @@ export default function AssetGridSecondaryFilters({
     // Note: getSecondaryFilters returns FilterClassification objects with .field property
     const visibilityContext = useMemo(() => {
         // Metadata filters use file type ('image', 'video', 'document') for asset_type compatibility
-        // The normalizedConfig.asset_type might be organizational ('asset', 'marketing')
+        // The normalizedConfig.asset_type might be organizational ('asset', 'deliverable')
         // For metadata field compatibility, we need to use 'image' as the file type
         // since most assets are images and metadata schema is resolved with file type
         const context = {

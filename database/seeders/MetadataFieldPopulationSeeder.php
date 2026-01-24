@@ -25,9 +25,9 @@ class MetadataFieldPopulationSeeder extends Seeder
     public function run(): void
     {
         // Fields that should be auto-populated, hidden from upload, readonly, but filterable
+        // Note: dimensions is file info, not metadata, so it's excluded from this seeder
         $automaticFields = [
             'orientation',
-            'dimensions',
             'color_mode',
             'color_space',
             'resolution_class',

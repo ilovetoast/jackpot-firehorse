@@ -151,7 +151,7 @@ class CategoryController extends Controller
             ],
             'asset_types' => [
                 ['value' => AssetType::ASSET->value, 'label' => 'Asset'],
-                ['value' => AssetType::MARKETING->value, 'label' => 'Marketing'],
+                ['value' => AssetType::DELIVERABLE->value, 'label' => 'Deliverable'],
             ],
             'plan' => [
                 'name' => $currentPlan,

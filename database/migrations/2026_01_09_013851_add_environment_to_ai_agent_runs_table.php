@@ -17,9 +17,13 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('ai_agent_runs', function (Blueprint $table) {
-            $table->string('environment')->nullable()->after('triggering_context')->index();
-        });
+        if (Schema::hasTable('ai_agent_runs')) {
+            Schema::table('ai_agent_runs', function (Blueprint $table) {
+                if (!Schema::hasColumn('ai_agent_runs', 'environment')) {
+                    $table->string('environment')->nullable()->after('triggering_context')->index();
+                }
+            });
+        }
     }
 
     /**

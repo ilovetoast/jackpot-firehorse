@@ -476,7 +476,7 @@ class AssetMetadataController extends Controller
     /**
      * Determine file type for metadata schema resolution.
      * 
-     * Note: asset->type is organizational (asset/marketing/ai_generated),
+     * Note: asset->type is organizational (asset/deliverable/ai_generated),
      * but MetadataSchemaResolver expects file type (image/video/document).
      * 
      * This method infers file type from asset's mime_type and filename.
@@ -740,6 +740,12 @@ class AssetMetadataController extends Controller
         foreach ($schema['fields'] ?? [] as $field) {
             // Exclude internal-only fields
             if ($field['is_internal_only'] ?? false) {
+                continue;
+            }
+
+            // Exclude dimensions - it's file info, not metadata, and should only appear in file info area
+            // Dimensions is still used for orientation calculation but shouldn't be shown in metadata section
+            if (($field['key'] ?? null) === 'dimensions') {
                 continue;
             }
 
@@ -1571,7 +1577,7 @@ class AssetMetadataController extends Controller
         }
 
         // Determine file type for metadata schema resolution
-        // Note: category->asset_type is organizational (asset/marketing/ai_generated),
+        // Note: category->asset_type is organizational (asset/deliverable/ai_generated),
         // but MetadataSchemaResolver expects file type (image/video/document)
         // Default to 'image' when we don't have an asset object to infer from
         // TODO: Could infer from actual assets in category or add file_type to categories

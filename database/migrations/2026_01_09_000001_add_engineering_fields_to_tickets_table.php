@@ -45,10 +45,20 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (!Schema::hasTable('tickets')) {
+            return;
+        }
+
         Schema::table('tickets', function (Blueprint $table) {
-            $table->dropIndex(['severity']);
-            $table->dropIndex(['environment']);
-            $table->dropIndex(['component']);
+            if (Schema::hasColumn('tickets', 'severity')) {
+                $table->dropIndex(['severity']);
+            }
+            if (Schema::hasColumn('tickets', 'environment')) {
+                $table->dropIndex(['environment']);
+            }
+            if (Schema::hasColumn('tickets', 'component')) {
+                $table->dropIndex(['component']);
+            }
             $table->dropColumn(['severity', 'environment', 'component']);
         });
     }

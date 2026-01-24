@@ -298,7 +298,7 @@ class UploadController extends Controller
         try {
             $validated = $request->validate([
                 'upload_session_id' => 'required|uuid|exists:upload_sessions,id',
-                'asset_type' => 'nullable|string|in:asset,marketing,ai_generated',
+                'asset_type' => 'nullable|string|in:asset,deliverable,ai_generated',
                 'filename' => 'nullable|string|max:255',
                 'title' => 'nullable|string|max:255',
                 'category_id' => 'nullable|integer',

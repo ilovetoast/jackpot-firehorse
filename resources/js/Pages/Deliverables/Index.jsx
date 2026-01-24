@@ -14,7 +14,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function MarketingAssetsIndex({ categories, selected_category, show_all_button = false, assets = [] }) {
+export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [] }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     
@@ -128,7 +128,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
         
         setSelectedCategoryId(categoryId)
         
-        router.get('/app/marketing-assets', 
+        router.get('/app/deliverables', 
             categorySlug ? { category: categorySlug } : {},
             { 
                 preserveState: true, 
@@ -155,7 +155,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
     
     // FINAL FIX: Force page remount via key to prevent multiple instances
     // This ensures React unmounts the old page instance when props change
-    const pageKey = `marketing-assets-${selectedCategoryId || 'all'}-${assets?.length || 0}`
+    const pageKey = `deliverables-${selectedCategoryId || 'all'}-${assets?.length || 0}`
     
     // Drag-and-drop state for files dropped on grid
     const [droppedFiles, setDroppedFiles] = useState(null)
@@ -230,11 +230,11 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                     <div className="flex flex-col w-72 h-full" style={{ backgroundColor: sidebarColor }}>
                         <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
                             <nav className="mt-5 flex-1 px-2 space-y-1">
-                                {/* Add Marketing Asset Button - Persistent in sidebar (only show if user has upload permissions) */}
+                                {/* Add Deliverable Button - Persistent in sidebar (only show if user has upload permissions) */}
                                 {auth?.user && (
                                     <div className="px-3 py-2 mb-4">
                                         <AddAssetButton 
-                                            defaultAssetType="marketing" 
+                                            defaultAssetType="deliverable" 
                                             className="w-full"
                                             onClick={handleOpenUploadDialog}
                                         />
@@ -339,7 +339,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                             ))
                                         ) : (
                                             <div className="px-3 py-2 text-sm" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
-                                                No marketing categories yet
+                                                No deliverable categories yet
                                             </div>
                                         )}
                                     </div>
@@ -405,7 +405,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                             </div>
                         )}
                         
-                        {/* Marketing Assets Grid or Empty State */}
+                        {/* Deliverables Grid or Empty State */}
                         {assets && assets.length > 0 ? (
                             <AssetGrid 
                                 assets={assets} 
@@ -421,16 +421,16 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                                     <SparklesIcon className="mx-auto h-16 w-16 text-gray-300" />
                                 </div>
                                 <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                    {selectedCategoryId ? 'No marketing assets in this category yet' : 'No marketing assets yet'}
+                                    {selectedCategoryId ? 'No deliverables in this category yet' : 'No deliverables yet'}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
                                     {selectedCategoryId
-                                        ? 'Get started by uploading your first marketing asset to this category. Manage your brand assets with ease and keep everything organized.'
-                                        : 'Get started by selecting a category or uploading your first marketing asset. Manage your brand assets with ease and keep everything in sync.'}
+                                        ? 'Get started by uploading your first deliverable to this category. Manage your brand assets with ease and keep everything organized.'
+                                        : 'Get started by selecting a category or uploading your first deliverable. Manage your brand assets with ease and keep everything in sync.'}
                                 </p>
                                 <div className="mt-8">
                                     <AddAssetButton 
-                                        defaultAssetType="marketing" 
+                                        defaultAssetType="deliverable" 
                                         onClick={handleOpenUploadDialog}
                                     />
                                 </div>
@@ -472,7 +472,7 @@ export default function MarketingAssetsIndex({ categories, selected_category, sh
                 <UploadAssetDialog
                     open={true}
                     onClose={handleCloseUploadDialog}
-                    defaultAssetType="marketing"
+                    defaultAssetType="deliverable"
                     categories={categories || []}
                     initialCategoryId={selectedCategoryId}
                     initialFiles={droppedFiles}

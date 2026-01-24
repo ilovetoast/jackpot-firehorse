@@ -30,11 +30,12 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('categories', function (Blueprint $table) {
+            // Drop foreign key first (this also removes the auto-created index)
+            $table->dropForeign(['system_category_id']);
+            // Drop the explicitly created indexes
             $table->dropIndex('category_upgrade_lookup');
             $table->dropIndex(['upgrade_available']);
             $table->dropIndex(['system_version']);
-            $table->dropIndex(['system_category_id']);
-            $table->dropForeign(['system_category_id']);
             $table->dropColumn(['system_category_id', 'system_version', 'upgrade_available']);
         });
     }

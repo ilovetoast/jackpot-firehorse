@@ -398,7 +398,7 @@ class DevelopmentDataSeeder extends Seeder
             
             for ($c = 0; $c < $categoryCount; $c++) {
                 $baseSlug = Str::slug(fake()->words(2, true));
-                $assetType = fake()->randomElement([AssetType::ASSET, AssetType::MARKETING]);
+                $assetType = fake()->randomElement([AssetType::ASSET, AssetType::DELIVERABLE]);
                 $slug = $baseSlug;
                 $counter = 1;
                 
@@ -441,7 +441,7 @@ class DevelopmentDataSeeder extends Seeder
             $user = fake()->randomElement($companyUsers);
             $category = $categories->isNotEmpty() ? fake()->randomElement($categories) : null;
             
-            $assetType = fake()->randomElement([AssetType::ASSET, AssetType::MARKETING, AssetType::AI_GENERATED]);
+            $assetType = fake()->randomElement([AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED]);
             $mimeTypes = [
                 'image/jpeg', 'image/png', 'image/gif', 'image/webp',
                 'application/pdf', 'video/mp4', 'application/zip',

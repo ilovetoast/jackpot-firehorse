@@ -893,16 +893,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} />
                 )}
 
-                {/* Dominant Colors Display (read-only) */}
-                {displayAsset?.metadata?.dominant_colors && Array.isArray(displayAsset.metadata.dominant_colors) && displayAsset.metadata.dominant_colors.length > 0 && (
-                    <div className="px-6 py-4 border-t border-gray-200">
-                        <div className="flex items-center gap-3">
-                            <span className="text-sm text-gray-500">Dominant Colors</span>
-                            <DominantColorsSwatches dominantColors={displayAsset.metadata.dominant_colors} />
-                        </div>
-                    </div>
-                )}
-
                 {/* Tags and Metadata */}
                 {displayAsset?.id && (
                     <div className="border-t border-gray-200">
@@ -1000,14 +990,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 {categoryName}
                             </dd>
                         </div>
-                        {displayAsset.original_filename && (
-                            <div>
-                                <dt className="text-sm text-gray-500 mb-1">Filename</dt>
-                                <dd className="text-sm font-mono font-semibold text-gray-900 break-all">
-                                    {displayAsset.original_filename}
-                                </dd>
-                            </div>
-                        )}
                         {/* File Dimensions - if available from source */}
                         {(() => {
                             // Priority 1: Check source_dimensions (from original image file)
@@ -1062,6 +1044,24 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             }
                             return null
                         })()}
+                        
+                        {/* Dominant Colors - file info, not metadata */}
+                        {displayAsset?.metadata?.dominant_colors && Array.isArray(displayAsset.metadata.dominant_colors) && displayAsset.metadata.dominant_colors.length > 0 && (
+                            <div className="flex justify-between items-center">
+                                <dt className="text-sm text-gray-500">Dominant Colors</dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    <DominantColorsSwatches dominantColors={displayAsset.metadata.dominant_colors} />
+                                </dd>
+                            </div>
+                        )}
+                        {displayAsset.original_filename && (
+                            <div>
+                                <dt className="text-sm text-gray-500 mb-1">Filename</dt>
+                                <dd className="text-sm font-mono font-semibold text-gray-900 break-all">
+                                    {displayAsset.original_filename}
+                                </dd>
+                            </div>
+                        )}
                     </dl>
 
                 {/* Processing State - Skipped (informational, not error) */}

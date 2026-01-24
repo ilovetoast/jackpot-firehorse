@@ -18,11 +18,11 @@ enum AssetType: string
     case ASSET = 'asset';
 
     /**
-     * Marketing-specific assets.
-     * Used for marketing materials, campaigns, and promotional content.
+     * Deliverable assets.
+     * Used for deliverables, campaigns, and promotional content.
      * May have different processing or access rules.
      */
-    case MARKETING = 'marketing';
+    case DELIVERABLE = 'deliverable';
 
     /**
      * AI-generated content.

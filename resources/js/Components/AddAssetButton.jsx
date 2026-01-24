@@ -10,7 +10,7 @@ import { usePage } from '@inertiajs/react'
  * BUGFIX: Dialog ownership lifted to page level to prevent duplicate renders.
  * This component is now a trigger-only button.
  * 
- * @param {string} defaultAssetType - Default asset type ('asset' or 'marketing')
+ * @param {string} defaultAssetType - Default asset type ('asset' or 'deliverable')
  * @param {string} buttonText - Optional button text override
  * @param {string} className - Optional additional CSS classes
  * @param {function} onClick - Callback when button is clicked (should open dialog)
@@ -26,7 +26,7 @@ export default function AddAssetButton({
     
     const defaultText = defaultAssetType === 'asset' 
         ? 'Add Asset' 
-        : 'Add Marketing Asset'
+        : 'Add Deliverable'
 
     return (
         <button

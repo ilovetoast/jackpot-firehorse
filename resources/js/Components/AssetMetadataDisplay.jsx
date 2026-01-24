@@ -145,38 +145,54 @@ export default function AssetMetadataDisplay({ assetId }) {
                 {fields.length === 0 ? (
                     <div className="text-sm text-gray-500 italic">No editable metadata fields available</div>
                 ) : (
-                    <dl className="space-y-2">
-                        {fields.filter(field => field.key !== 'tags' && field.field_key !== 'tags').map((field) => {
+                    <dl className="space-y-2 md:space-y-3">
+                        {fields.filter(field => {
+                            // Exclude tags (handled separately)
+                            if (field.key === 'tags' || field.field_key === 'tags') {
+                                return false;
+                            }
+                            // Exclude dimensions (it's file info, not metadata, shown in file info area)
+                            if (field.key === 'dimensions' || field.field_key === 'dimensions') {
+                                return false;
+                            }
+                            return true;
+                        }).map((field) => {
                             const fieldHasValue = hasValue(field.current_value)
                             const formattedValue = formatValue(field, field.current_value)
                             
                             return (
-                                <div key={field.metadata_field_id} className="flex items-start justify-between">
-                                    <div className="flex-1">
-                                        <dt className="text-sm text-gray-500 mb-1 flex items-center">
-                                            {field.display_label}
-                                            {field.has_pending && (
-                                                <span
-                                                    className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
-                                                    title="This field has pending changes awaiting approval"
-                                                >
-                                                    Pending
-                                                </span>
-                                            )}
-                                            {/* Phase B2: Show readonly indicator for automatic fields */}
-                                            {(field.readonly || field.population_mode === 'automatic') && (
-                                                <span
-                                                    className="ml-2 inline-flex items-center gap-1 text-xs text-gray-500"
-                                                    title="This field is automatically populated and cannot be edited"
-                                                >
-                                                    <LockClosedIcon className="h-3 w-3" />
-                                                    <span className="italic">Auto</span>
-                                                </span>
-                                            )}
+                                <div 
+                                    key={field.metadata_field_id} 
+                                    className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
+                                >
+                                    <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
+                                        {/* Mobile: label above, Desktop: fixed-width label column */}
+                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                            <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
+                                                {field.display_label}
+                                                {field.has_pending && (
+                                                    <span
+                                                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
+                                                        title="This field has pending changes awaiting approval"
+                                                    >
+                                                        Pending
+                                                    </span>
+                                                )}
+                                                {/* Phase B2: Show readonly indicator for automatic fields */}
+                                                {(field.readonly || field.population_mode === 'automatic') && (
+                                                    <span
+                                                        className="inline-flex items-center gap-1 text-xs text-gray-500"
+                                                        title="This field is automatically populated and cannot be edited"
+                                                    >
+                                                        <LockClosedIcon className="h-3 w-3" />
+                                                        <span className="italic">Auto</span>
+                                                    </span>
+                                                )}
+                                            </span>
                                         </dt>
                                         {/* Only show the value if there is one */}
                                         {formattedValue && (
-                                            <dd className="text-sm font-semibold text-gray-900">
+                                            <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
                                                 {formattedValue}
                                             </dd>
                                         )}
@@ -189,7 +205,7 @@ export default function AssetMetadataDisplay({ assetId }) {
                                                 setEditingFieldId(field.metadata_field_id)
                                                 setEditingField(field)
                                             }}
-                                            className="ml-4 flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                            className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                         >
                                             <PencilIcon className="h-3 w-3" />
                                             {fieldHasValue ? 'Edit' : 'Add'}

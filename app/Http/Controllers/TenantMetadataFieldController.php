@@ -645,6 +645,9 @@ class TenantMetadataFieldController extends Controller
         ]);
 
         // Only allow AI for select/multiselect fields with options
+        // Exception: tags field is special and doesn't require options
+        $isTagsField = $fieldRecord->key === 'tags';
+        
         if ($validated['ai_eligible']) {
             $fieldType = $fieldRecord->type ?? 'text';
             if (!in_array($fieldType, ['select', 'multiselect'], true)) {
@@ -653,14 +656,17 @@ class TenantMetadataFieldController extends Controller
                 ], 422);
             }
 
-            $optionsCount = DB::table('metadata_options')
-                ->where('metadata_field_id', $field)
-                ->count();
+            // Tags field is special - it doesn't require options for AI suggestions
+            if (!$isTagsField) {
+                $optionsCount = DB::table('metadata_options')
+                    ->where('metadata_field_id', $field)
+                    ->count();
 
-            if ($optionsCount === 0) {
-                return response()->json([
-                    'error' => 'AI suggestions require at least one allowed value (option) to be defined.',
-                ], 422);
+                if ($optionsCount === 0) {
+                    return response()->json([
+                        'error' => 'AI suggestions require at least one allowed value (option) to be defined.',
+                    ], 422);
+                }
             }
         }
 

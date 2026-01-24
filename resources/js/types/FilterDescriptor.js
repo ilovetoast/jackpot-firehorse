@@ -56,7 +56,7 @@
  * 
  * @property {Array<string>|null} asset_types - Asset types this filter applies to (required)
  *   - Array of asset type strings: Filter applies only to these asset types
- *     Example: ['asset', 'marketing', 'ai_generated']
+ *     Example: ['asset', 'deliverable', 'ai_generated']
  *   - null: Filter applies to all asset types (when is_global is true)
  *   - Empty array []: Filter applies to no asset types (effectively disabled)
  * 

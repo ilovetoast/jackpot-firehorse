@@ -273,7 +273,7 @@ class AssetController extends Controller
         
         if (!empty($filters) && is_array($filters)) {
             // Resolve metadata schema for filtering
-            // Note: asset_type in category is organizational (asset/marketing/ai_generated),
+            // Note: asset_type in category is organizational (asset/deliverable/ai_generated),
             // but MetadataSchemaResolver expects file type (image/video/document)
             // For now, default to 'image' as most assets are images
             // TODO: Could infer from actual assets in category or add file_type to categories

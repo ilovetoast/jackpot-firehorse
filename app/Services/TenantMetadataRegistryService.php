@@ -57,9 +57,11 @@ class TenantMetadataRegistryService
     protected function getSystemFields(Tenant $tenant): array
     {
         // Query system metadata fields
+        // Exclude dimensions - it's file info, not metadata, and shouldn't appear in metadata management UI
         $fields = DB::table('metadata_fields')
             ->where('scope', 'system')
             ->whereNull('deprecated_at')
+            ->where('key', '!=', 'dimensions') // Dimensions is file info, not metadata
             ->select([
                 'id',
                 'key',
@@ -77,6 +79,7 @@ class TenantMetadataRegistryService
                 'is_ai_trainable',
                 'is_internal_only',
                 'is_primary',
+                'ai_eligible', // Include AI eligibility flag
             ])
             ->orderBy('key')
             ->get();
@@ -136,6 +139,7 @@ class TenantMetadataRegistryService
                 'is_ai_trainable' => (bool) $field->is_ai_trainable,
                 'is_internal_only' => (bool) $field->is_internal_only,
                 'is_primary' => (bool) ($field->is_primary ?? false),
+                'ai_eligible' => (bool) ($field->ai_eligible ?? false), // AI eligibility flag
                 // Effective visibility (after tenant overrides)
                 'effective_show_on_upload' => $effectiveUpload,
                 'effective_show_on_edit' => $effectiveEdit,

@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -15,22 +16,26 @@ return new class extends Migration
     public function up(): void
     {
         // Update tenant_user pivot table
-        $tenantUserUpdated = DB::table('tenant_user')
-            ->where('role', 'member')
-            ->update(['role' => 'contributor']);
-        
-        Log::info('[Migration] Migrated member role to contributor in tenant_user', [
-            'updated_count' => $tenantUserUpdated,
-        ]);
+        if (Schema::hasTable('tenant_user')) {
+            $tenantUserUpdated = DB::table('tenant_user')
+                ->where('role', 'member')
+                ->update(['role' => 'contributor']);
+            
+            Log::info('[Migration] Migrated member role to contributor in tenant_user', [
+                'updated_count' => $tenantUserUpdated,
+            ]);
+        }
 
         // Update brand_user pivot table
-        $brandUserUpdated = DB::table('brand_user')
-            ->where('role', 'member')
-            ->update(['role' => 'contributor']);
-        
-        Log::info('[Migration] Migrated member role to contributor in brand_user', [
-            'updated_count' => $brandUserUpdated,
-        ]);
+        if (Schema::hasTable('brand_user')) {
+            $brandUserUpdated = DB::table('brand_user')
+                ->where('role', 'member')
+                ->update(['role' => 'contributor']);
+            
+            Log::info('[Migration] Migrated member role to contributor in brand_user', [
+                'updated_count' => $brandUserUpdated,
+            ]);
+        }
     }
 
     /**
@@ -42,13 +47,17 @@ return new class extends Migration
     public function down(): void
     {
         // Revert tenant_user pivot table
-        DB::table('tenant_user')
-            ->where('role', 'contributor')
-            ->update(['role' => 'member']);
+        if (Schema::hasTable('tenant_user')) {
+            DB::table('tenant_user')
+                ->where('role', 'contributor')
+                ->update(['role' => 'member']);
+        }
 
         // Revert brand_user pivot table
-        DB::table('brand_user')
-            ->where('role', 'contributor')
-            ->update(['role' => 'member']);
+        if (Schema::hasTable('brand_user')) {
+            DB::table('brand_user')
+                ->where('role', 'contributor')
+                ->update(['role' => 'member']);
+        }
     }
 };

@@ -175,7 +175,7 @@ class CategoryIcons
         if (str_contains($name, 'photo') || str_contains($name, 'image')) return 'photo';
         if (str_contains($name, 'video') || str_contains($name, 'film')) return 'video';
         if (str_contains($name, 'graphic') || str_contains($name, 'design')) return 'paint-brush';
-        if (str_contains($name, 'marketing') || str_contains($name, 'ad') || str_contains($name, 'campaign')) return 'megaphone';
+        if (str_contains($name, 'deliverable') || str_contains($name, 'ad') || str_contains($name, 'campaign')) return 'megaphone';
         if (str_contains($name, 'social')) return 'globe';
         if (str_contains($name, 'press') || str_contains($name, 'release')) return 'document';
         if (str_contains($name, 'digital') || str_contains($name, 'online')) return 'globe';

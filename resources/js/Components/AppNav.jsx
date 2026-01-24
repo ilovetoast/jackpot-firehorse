@@ -273,10 +273,10 @@ export default function AppNav({ brand, tenant }) {
                                     href="/app/assets"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
+                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
+                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
@@ -284,18 +284,18 @@ export default function AppNav({ brand, tenant }) {
                                     Assets
                                 </Link>
                                 <Link
-                                    href="/app/marketing-assets"
+                                    href="/app/deliverables"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/marketing-assets')
+                                        color: currentUrl.startsWith('/app/deliverables')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/marketing-assets')
+                                        borderBottomColor: currentUrl.startsWith('/app/deliverables')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
                                 >
-                                    Marketing Assets
+                                    Deliverables
                                 </Link>
                                 <Link
                                     href="/app/collections"
@@ -360,10 +360,10 @@ export default function AppNav({ brand, tenant }) {
                                     href="/app/assets"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
+                                        color: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/marketing-assets')
+                                        borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/deliverables')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
@@ -371,18 +371,18 @@ export default function AppNav({ brand, tenant }) {
                                     Assets
                                 </Link>
                                 <Link
-                                    href="/app/marketing-assets"
+                                    href="/app/deliverables"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
                                     style={{
-                                        color: currentUrl.startsWith('/app/marketing-assets')
+                                        color: currentUrl.startsWith('/app/deliverables')
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/marketing-assets')
+                                        borderBottomColor: currentUrl.startsWith('/app/deliverables')
                                             ? (activeBrand?.primary_color || '#6366f1')
                                             : 'transparent'
                                     }}
                                 >
-                                    Marketing Assets
+                                    Deliverables
                                 </Link>
                                 <Link
                                     href="/app/collections"

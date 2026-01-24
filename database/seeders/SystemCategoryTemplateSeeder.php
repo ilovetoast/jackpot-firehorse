@@ -12,7 +12,7 @@ use Illuminate\Database\Seeder;
  * Seeds initial system category templates that will be copied to new brands.
  * 
  * ASSET asset type categories: Logos, Photography, Graphics
- * Marketing asset type categories: Catalogs, Press Releases, Digital Ads, Social Creative, Videos
+ * Deliverable asset type categories: Catalogs, Press Releases, Digital Ads, Social Creative, Videos
  */
 class SystemCategoryTemplateSeeder extends Seeder
 {
@@ -47,11 +47,11 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_hidden' => false,
                 'sort_order' => 2,
             ],
-            // Marketing asset type system categories
+            // Deliverable asset type system categories
             [
                 'name' => 'Catalogs',
                 'slug' => 'catalogs',
-                'asset_type' => AssetType::MARKETING,
+                'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 0,
@@ -59,7 +59,7 @@ class SystemCategoryTemplateSeeder extends Seeder
             [
                 'name' => 'Press Releases',
                 'slug' => 'press-releases',
-                'asset_type' => AssetType::MARKETING,
+                'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 1,
@@ -67,7 +67,7 @@ class SystemCategoryTemplateSeeder extends Seeder
             [
                 'name' => 'Digital Ads',
                 'slug' => 'digital-ads',
-                'asset_type' => AssetType::MARKETING,
+                'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 2,
@@ -75,7 +75,7 @@ class SystemCategoryTemplateSeeder extends Seeder
             [
                 'name' => 'Social Creative',
                 'slug' => 'social-creative',
-                'asset_type' => AssetType::MARKETING,
+                'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 3,
@@ -83,7 +83,7 @@ class SystemCategoryTemplateSeeder extends Seeder
             [
                 'name' => 'Videos',
                 'slug' => 'videos',
-                'asset_type' => AssetType::MARKETING,
+                'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 4,

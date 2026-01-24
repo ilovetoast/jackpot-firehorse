@@ -61,7 +61,7 @@
  * @typedef {Object} FilterTierConfig
  * @property {number} brand_id - Brand ID (required)
  * @property {number|null} category_id - Category ID (nullable)
- * @property {string} asset_type - Asset type (e.g., 'asset', 'marketing')
+ * @property {string} asset_type - Asset type (e.g., 'asset', 'deliverable')
  * @property {Array<Object>} filterable_schema - Array of filterable field definitions
  * @property {boolean} [is_multi_brand=false] - Whether this is a multi-brand context
  * @property {Object<string, Array>} [available_values={}] - Map of field_key to available values for current result set

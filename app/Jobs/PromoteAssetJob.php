@@ -88,7 +88,7 @@ class PromoteAssetJob implements ShouldQueue
      *
      * Promotion runs when:
      * - Asset status is COMPLETED (after FinalizeAssetJob)
-     * - Asset type is 'asset' or 'marketing'
+     * - Asset type is 'asset' or 'deliverable'
      * - Asset is not already promoted (idempotency check)
      *
      * This job is chained after FinalizeAssetJob in the processing pipeline,
@@ -110,8 +110,8 @@ class PromoteAssetJob implements ShouldQueue
             return;
         }
 
-        // Only promote asset and marketing types
-        if (!in_array($asset->type->value, ['asset', 'marketing'])) {
+        // Only promote asset and deliverable types
+        if (!in_array($asset->type->value, ['asset', 'deliverable'])) {
             Log::info('Asset promotion skipped - unsupported asset type', [
                 'asset_id' => $asset->id,
                 'type' => $asset->type->value,

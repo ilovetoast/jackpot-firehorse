@@ -38,10 +38,18 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (!Schema::hasTable('tickets')) {
+            return;
+        }
+
         Schema::table('tickets', function (Blueprint $table) {
-            $table->dropForeign(['converted_from_ticket_id']);
-            $table->dropForeign(['converted_by_user_id']);
-            $table->dropIndex(['converted_from_ticket_id']);
+            if (Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
+                $table->dropForeign(['converted_from_ticket_id']);
+                $table->dropIndex(['converted_from_ticket_id']);
+            }
+            if (Schema::hasColumn('tickets', 'converted_by_user_id')) {
+                $table->dropForeign(['converted_by_user_id']);
+            }
             $table->dropColumn(['converted_from_ticket_id', 'converted_at', 'converted_by_user_id']);
         });
     }

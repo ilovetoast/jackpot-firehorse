@@ -17,15 +17,15 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
         is_private: false,
     })
     const [showCreateForm, setShowCreateForm] = useState(false)
-    const [activeTab, setActiveTab] = useState('asset') // 'asset' or 'marketing'
+    const [activeTab, setActiveTab] = useState('asset') // 'asset' or 'deliverable'
     const [editingId, setEditingId] = useState(null)
     
     // Update form asset_type when tab changes
     useEffect(() => {
         if (activeTab === 'asset') {
             setData('asset_type', 'asset')
-        } else if (activeTab === 'marketing') {
-            setData('asset_type', 'marketing')
+        } else if (activeTab === 'deliverable') {
+            setData('asset_type', 'deliverable')
         }
     }, [activeTab, setData])
     const [editName, setEditName] = useState('')
@@ -52,7 +52,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
     // Filter categories by active tab
     const filteredCategories = localCategories.filter(cat => {
         if (activeTab === 'asset') return cat.asset_type === 'asset'
-        if (activeTab === 'marketing') return cat.asset_type === 'marketing'
+        if (activeTab === 'deliverable') return cat.asset_type === 'deliverable'
         return true
     }).sort((a, b) => {
         // Sort by order first, then by name
@@ -297,7 +297,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                             ))}
                                         </select>
                                         <p className="mt-1 text-xs text-gray-500">
-                                            Creating a {data.asset_type === 'asset' ? 'Asset' : 'Marketing Asset'} category
+                                            Creating a {data.asset_type === 'asset' ? 'Asset' : 'Deliverable'} category
                                         </p>
                                     </div>
                                     <div>
@@ -371,10 +371,10 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                     Asset
                                 </button>
                                 <button
-                                    onClick={() => setActiveTab('marketing')}
+                                    onClick={() => setActiveTab('deliverable')}
                                     className={`
                                         group inline-flex items-center border-b-2 py-4 px-1 text-sm font-medium transition-colors
-                                        ${activeTab === 'marketing'
+                                        ${activeTab === 'deliverable'
                                             ? 'border-indigo-500 text-indigo-600'
                                             : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                         }
@@ -383,7 +383,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                     <svg
                                         className={`
                                             -ml-0.5 mr-2 h-5 w-5
-                                            ${activeTab === 'marketing' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                            ${activeTab === 'deliverable' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
                                         `}
                                         fill="none"
                                         viewBox="0 0 24 24"
@@ -392,7 +392,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                     >
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75m0 0h.375c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-.375A1.125 1.125 0 012 19.875v-4.5c0-.621.504-1.125 1.125-1.125H4.5z" />
                                     </svg>
-                                    Marketing Asset
+                                    Deliverable
                                 </button>
                             </nav>
                         </div>

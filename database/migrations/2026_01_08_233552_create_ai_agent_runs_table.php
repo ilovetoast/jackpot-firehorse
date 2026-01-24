@@ -26,8 +26,8 @@ return new class extends Migration
             
             // Context and attribution
             $table->enum('triggering_context', ['system', 'tenant', 'user'])->index();
-            $table->foreignId('tenant_id')->nullable()->constrained('tenants')->onDelete('cascade');
-            $table->foreignId('user_id')->nullable()->constrained('users')->onDelete('set null');
+            $table->unsignedBigInteger('tenant_id')->nullable();
+            $table->unsignedBigInteger('user_id')->nullable();
             
             // Task and model information
             $table->string('task_type')->index(); // e.g., 'support_ticket_summary' (from AITaskType enum)
@@ -56,6 +56,18 @@ return new class extends Migration
             $table->index(['tenant_id', 'triggering_context']);
             $table->index(['task_type', 'status']);
         });
+
+        // Add foreign key constraints if referenced tables exist
+        if (Schema::hasTable('tenants')) {
+            Schema::table('ai_agent_runs', function (Blueprint $table) {
+                $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('cascade');
+            });
+        }
+        if (Schema::hasTable('users')) {
+            Schema::table('ai_agent_runs', function (Blueprint $table) {
+                $table->foreign('user_id')->references('id')->on('users')->onDelete('set null');
+            });
+        }
     }
 
     /**

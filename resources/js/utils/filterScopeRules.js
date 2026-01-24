@@ -57,7 +57,7 @@
  * 
  * @typedef {Object} CompatibilityContext
  * @property {number|null} category_id - Current category ID (null = "All Categories")
- * @property {string} asset_type - Current asset type (e.g., 'asset', 'marketing')
+ * @property {string} asset_type - Current asset type (e.g., 'asset', 'deliverable')
  */
 
 /**
@@ -188,7 +188,7 @@ export function isCategoryCompatible(filter, category_id) {
  * specific string value.
  * 
  * @param {FilterDescriptor} filter - Filter descriptor to check
- * @param {string} asset_type - Asset type to check compatibility with (e.g., 'asset', 'marketing')
+ * @param {string} asset_type - Asset type to check compatibility with (e.g., 'asset', 'deliverable')
  * @returns {boolean} True if filter is compatible with the asset type
  * 
  * @example
@@ -202,7 +202,7 @@ export function isCategoryCompatible(filter, category_id) {
  * 
  * // Specific asset type scope - compatible with listed type
  * isAssetTypeCompatible(
- *   { asset_types: ['asset', 'marketing'] },
+ *   { asset_types: ['asset', 'deliverable'] },
  *   'asset'
  * )
  * // Returns: true
@@ -210,7 +210,7 @@ export function isCategoryCompatible(filter, category_id) {
  * // Specific asset type scope - incompatible with other type
  * isAssetTypeCompatible(
  *   { asset_types: ['asset'] },
- *   'marketing'
+ *   'deliverable'
  * )
  * // Returns: false
  * 
@@ -285,7 +285,7 @@ export function isAssetTypeCompatible(filter, asset_type) {
  * // Returns: false
  * 
  * // Incompatible - asset type doesn't match
- * isFilterCompatible(filter, { category_id: 1, asset_type: 'marketing' })
+ * isFilterCompatible(filter, { category_id: 1, asset_type: 'deliverable' })
  * // Returns: false
  * 
  * // "All Categories" context - only global filters compatible
@@ -348,7 +348,7 @@ export function isFilterCompatible(filter, context) {
  * const filters = [
  *   { is_global: true, category_ids: null, asset_types: ['asset'] },
  *   { is_global: false, category_ids: [1], asset_types: ['asset'] },
- *   { is_global: false, category_ids: [2], asset_types: ['marketing'] },
+ *   { is_global: false, category_ids: [2], asset_types: ['deliverable'] },
  * ]
  * 
  * filterCompatible(filters, { category_id: 1, asset_type: 'asset' })

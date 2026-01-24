@@ -63,7 +63,7 @@ import { isFilterCompatible } from './filterScopeRules';
  * 
  * @typedef {Object} VisibilityContext
  * @property {number|null} category_id - Current category ID (null = "All Categories")
- * @property {string} asset_type - Current asset type (e.g., 'asset', 'marketing')
+ * @property {string} asset_type - Current asset type (e.g., 'asset', 'deliverable')
  * @property {Object<string, Array>} available_values - Map of field_key to available values
  */
 

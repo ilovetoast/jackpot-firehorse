@@ -27,9 +27,15 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (!Schema::hasTable('ticket_attachments')) {
+            return;
+        }
+
         Schema::table('ticket_attachments', function (Blueprint $table) {
-            $table->dropIndex(['is_internal']);
-            $table->dropColumn('is_internal');
+            if (Schema::hasColumn('ticket_attachments', 'is_internal')) {
+                $table->dropIndex(['is_internal']);
+                $table->dropColumn('is_internal');
+            }
         });
     }
 };

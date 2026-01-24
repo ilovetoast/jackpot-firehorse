@@ -72,7 +72,7 @@ export default function ByCategoryView({
     const groupedCategories = useMemo(() => {
         const groups = {
             asset: [],
-            marketing: []
+            deliverable: []
         }
 
         categories.forEach(category => {
@@ -296,6 +296,49 @@ export default function ByCategoryView({
         }
     }
 
+    // Toggle AI tagging suggestions (ai_eligible)
+    const toggleAiEligible = async (fieldId, currentValue) => {
+        if (!canManageVisibility) return
+
+        const newValue = !currentValue
+
+        try {
+            const response = await fetch(`/app/tenant/metadata/fields/${fieldId}/ai-eligible`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    ai_eligible: newValue,
+                }),
+            })
+            
+            if (response.ok) {
+                // Show success message
+                setSuccessMessage(`AI tagging suggestions ${newValue ? 'enabled' : 'disabled'}`)
+                setTimeout(() => setSuccessMessage(null), 3000)
+                
+                // Silently reload registry in background without page refresh
+                router.reload({ 
+                    only: ['registry'],
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                const errorData = await response.json().catch(() => ({}))
+                setSuccessMessage(errorData.error || 'Failed to update AI tagging suggestions')
+                setTimeout(() => setSuccessMessage(null), 3000)
+            }
+        } catch (error) {
+            console.error('Failed to update AI eligible:', error)
+            setSuccessMessage('Failed to update AI tagging suggestions')
+            setTimeout(() => setSuccessMessage(null), 3000)
+        }
+    }
+
     // Get fields for selected category with ordering
     const getFieldsForCategory = useMemo(() => {
         if (!selectedCategoryId) {
@@ -405,10 +448,10 @@ export default function ByCategoryView({
                 }
             } else {
                 // For system fields, fetch full field data including options and ai_eligible
-                // Use the system metadata registry API or fetch from metadata_fields table
+                // Use the tenant metadata field API which includes ai_eligible
                 try {
-                    // Fetch field details including options
-                    const fieldResponse = await fetch(`/app/api/admin/metadata/fields/${field.id}`)
+                    // Fetch field details including options and ai_eligible
+                    const fieldResponse = await fetch(`/app/tenant/metadata/fields/${field.id}`)
                     if (fieldResponse.ok) {
                         const fieldData = await fieldResponse.json()
                         setEditingField({
@@ -416,21 +459,27 @@ export default function ByCategoryView({
                             ...fieldData.field,
                             scope: 'system',
                             is_system: true,
+                            // Ensure ai_eligible is included from API response or field prop
+                            ai_eligible: fieldData.field?.ai_eligible !== undefined 
+                                ? fieldData.field.ai_eligible 
+                                : (field.ai_eligible !== undefined ? field.ai_eligible : false),
                         })
                     } else {
-                        // Fallback to basic field data
+                        // Fallback to basic field data with ai_eligible from field prop
                         setEditingField({
                             ...field,
                             scope: 'system',
                             is_system: true,
+                            ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
                         })
                     }
                 } catch (err) {
-                    // Fallback to basic field data
+                    // Fallback to basic field data with ai_eligible from field prop
                     setEditingField({
                         ...field,
                         scope: 'system',
                         is_system: true,
+                        ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
                     })
                 }
                 setModalOpen(true)
@@ -514,13 +563,13 @@ export default function ByCategoryView({
                             </div>
                         )}
 
-                        {/* Marketing Categories */}
-                        {groupedCategories.marketing.length > 0 && (
+                        {/* Deliverable Categories */}
+                        {groupedCategories.deliverable.length > 0 && (
                             <div className="mt-4">
                                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                                    Marketing Asset Categories
+                                    Deliverable Categories
                                 </div>
-                                {groupedCategories.marketing.map(category => (
+                                {groupedCategories.deliverable.map(category => (
                                     <button
                                         key={category.id}
                                         onClick={() => setSelectedCategoryId(category.id)}
@@ -612,6 +661,7 @@ export default function ByCategoryView({
                                             onToggle={toggleCategoryField}
                                             onVisibilityToggle={toggleVisibility}
                                             onPrimaryToggle={togglePrimary}
+                                            onAiEligibleToggle={toggleAiEligible}
                                             onEdit={canManageFields ? handleEditField : null}
                                             canManage={canManageVisibility}
                                             canManageFields={canManageFields}
@@ -712,6 +762,7 @@ export default function ByCategoryView({
                                             onToggle={toggleCategoryField}
                                             onVisibilityToggle={toggleVisibility}
                                             onPrimaryToggle={togglePrimary}
+                                            onAiEligibleToggle={toggleAiEligible}
                                             canManage={canManageVisibility}
                                             systemFields={systemFields}
                                             fieldCategoryData={fieldCategoryData[field.id]}
@@ -762,6 +813,7 @@ function FieldRow({
     onToggle, 
     onVisibilityToggle,
     onPrimaryToggle,
+    onAiEligibleToggle,
     onEdit,
     canManage, 
     canManageFields = false,
@@ -805,6 +857,10 @@ function FieldRow({
         ? resolvePrimaryPlacement(field, categoryId, fieldCategoryData)
         : field.is_primary ?? false
 
+    // Check if this is the tags field
+    const isTagsField = field.key === 'tags'
+    const aiEligible = field.ai_eligible ?? false
+
     return (
         <div 
             className={`px-6 py-4 transition-colors ${
@@ -837,6 +893,12 @@ function FieldRow({
                         ) : (
                             <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded">
                                 Custom
+                            </span>
+                        )}
+                        {/* AI Suggestions Indicator - show for all AI-eligible fields */}
+                        {aiEligible && (
+                            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded">
+                                {isTagsField ? 'AI Tagging' : 'AI Suggestions'}
                             </span>
                         )}
                     </div>

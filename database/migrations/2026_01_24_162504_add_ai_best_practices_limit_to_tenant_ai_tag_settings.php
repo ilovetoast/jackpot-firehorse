@@ -13,10 +13,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('tenant_ai_tag_settings', function (Blueprint $table) {
-            $table->integer('ai_best_practices_limit')->default(5)->after('ai_auto_tag_limit_value')
-                ->comment('Best practices limit for auto-applied tags (1-10)');
-        });
+        if (Schema::hasTable('tenant_ai_tag_settings')) {
+            Schema::table('tenant_ai_tag_settings', function (Blueprint $table) {
+                if (!Schema::hasColumn('tenant_ai_tag_settings', 'ai_best_practices_limit')) {
+                    $table->integer('ai_best_practices_limit')->default(5)->after('ai_auto_tag_limit_value')
+                        ->comment('Best practices limit for auto-applied tags (1-10)');
+                }
+            });
+        }
     }
 
     /**

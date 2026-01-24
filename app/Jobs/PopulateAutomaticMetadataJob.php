@@ -123,9 +123,7 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         }
 
         // Compute metadata values
-        $computationResult = $this->computeMetadataValues($asset, $fieldsToPopulate, $colorService);
-        $metadataValues = $computationResult['values'];
-        $colorAnalysisResult = $computationResult['color_analysis'] ?? null;
+        $metadataValues = $this->computeMetadataValues($asset, $fieldsToPopulate);
 
         if (empty($metadataValues)) {
             Log::info('[PopulateAutomaticMetadataJob] No metadata values computed', [
@@ -134,7 +132,13 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             return;
         }
 
-        // Persist internal color analysis data (if ai_color_palette was computed)
+        // Run color analysis for dominant colors extraction (for image assets)
+        $colorAnalysisResult = null;
+        if ($this->determineAssetType($asset) === 'image') {
+            $colorAnalysisResult = $colorService->analyze($asset);
+        }
+
+        // Persist internal color analysis data (for dominant colors extraction)
         if ($colorAnalysisResult !== null) {
             $this->persistColorAnalysisData($asset, $colorAnalysisResult);
             
@@ -173,13 +177,11 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
      *
      * @param Asset $asset
      * @param array $fields Keyed by field_id
-     * @param ColorAnalysisService $colorService
-     * @return array{values: array, color_analysis: array|null} Metadata values and optional color analysis result
+     * @return array Metadata values
      */
-    protected function computeMetadataValues(Asset $asset, array $fields, ColorAnalysisService $colorService): array
+    protected function computeMetadataValues(Asset $asset, array $fields): array
     {
         $values = [];
-        $colorAnalysisResult = null;
 
         foreach ($fields as $fieldId => $field) {
             $fieldKey = $field['key'] ?? null;
@@ -187,13 +189,8 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 continue;
             }
 
-            // Handle ai_color_palette with deterministic color analysis
+            // Skip ai_color_palette - removed, using dominant colors instead
             if ($fieldKey === 'ai_color_palette') {
-                $result = $colorService->analyze($asset);
-                if ($result !== null && !empty($result['buckets'])) {
-                    $values[$fieldId] = $result['buckets'];
-                    $colorAnalysisResult = $result; // Store for internal data persistence
-                }
                 continue;
             }
 
@@ -204,10 +201,7 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             }
         }
 
-        return [
-            'values' => $values,
-            'color_analysis' => $colorAnalysisResult,
-        ];
+        return $values;
     }
 
     /**

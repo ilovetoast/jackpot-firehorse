@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
-class MarketingAssetController extends Controller
+class DeliverableController extends Controller
 {
     public function __construct(
         protected SystemCategoryService $systemCategoryService,
@@ -22,7 +22,7 @@ class MarketingAssetController extends Controller
     }
 
     /**
-     * Display a listing of marketing assets.
+     * Display a listing of deliverables.
      */
     public function index(Request $request): Response
     {
@@ -31,17 +31,17 @@ class MarketingAssetController extends Controller
         $user = $request->user();
 
         if (!$tenant || !$brand) {
-            return Inertia::render('MarketingAssets/Index', [
+            return Inertia::render('Deliverables/Index', [
                 'categories' => [],
                 'selected_category' => null,
                 'assets' => [], // Top-level prop must always be present for frontend
             ]);
         }
 
-        // Get only marketing categories for the brand
+        // Get only deliverable categories for the brand
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('asset_type', AssetType::MARKETING);
+            ->where('asset_type', AssetType::DELIVERABLE);
 
         // If user does not have 'manage categories' permission, filter out hidden categories
         if (! $user || ! $user->can('manage categories')) {
@@ -57,8 +57,8 @@ class MarketingAssetController extends Controller
             return $user ? Gate::forUser($user)->allows('view', $category) : false;
         });
 
-        // Get marketing system category templates
-        $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::MARKETING)
+        // Get deliverable system category templates
+        $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::DELIVERABLE)
             ->filter(fn ($template) => ! $template->is_hidden || ($user && $user->can('manage categories')));
 
         // Create merged list
@@ -148,13 +148,13 @@ class MarketingAssetController extends Controller
             }
         }
 
-        // Query marketing assets - show all visible assets regardless of processing state
+        // Query deliverables - show all visible assets regardless of processing state
         // This matches the behavior of the regular Assets page
         // Assets are visible immediately after upload, processing happens in background
         // Note: assets must be top-level prop for Inertia to pass to frontend component
         $assetsQuery = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::MARKETING)
+            ->where('type', AssetType::DELIVERABLE)
             ->where('status', AssetStatus::VISIBLE) // Only visible assets
             ->whereNull('deleted_at'); // Exclude soft-deleted assets
         
@@ -187,41 +187,41 @@ class MarketingAssetController extends Controller
         
         // Enhanced logging for debugging missing assets
         if ($assets->count() === 0) {
-            $totalMarketingAssets = Asset::where('tenant_id', $tenant->id)
+            $totalDeliverables = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::MARKETING)
+                ->where('type', AssetType::DELIVERABLE)
                 ->whereNull('deleted_at')
                 ->count();
             
-            $visibleMarketingAssets = Asset::where('tenant_id', $tenant->id)
+            $visibleDeliverables = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::MARKETING)
+                ->where('type', AssetType::DELIVERABLE)
                 ->where('status', AssetStatus::VISIBLE)
                 ->whereNull('deleted_at')
                 ->count();
             
-            $mostRecentMarketingAsset = Asset::where('tenant_id', $tenant->id)
+            $mostRecentDeliverable = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::MARKETING)
+                ->where('type', AssetType::DELIVERABLE)
                 ->whereNull('deleted_at')
                 ->latest('created_at')
                 ->first();
             
-            \Illuminate\Support\Facades\Log::info('[MARKETING_ASSET_QUERY_AUDIT] MarketingAssetController::index() query results (empty)', [
+            \Illuminate\Support\Facades\Log::info('[DELIVERABLE_QUERY_AUDIT] DeliverableController::index() query results (empty)', [
                 'query_tenant_id' => $tenant->id,
                 'query_brand_id' => $brand->id,
                 'category_filter' => $categoryId ?? 'none',
-                'total_marketing_assets' => $totalMarketingAssets,
-                'visible_marketing_assets' => $visibleMarketingAssets,
-                'most_recent_asset' => $mostRecentMarketingAsset ? [
-                    'id' => $mostRecentMarketingAsset->id,
-                    'status' => $mostRecentMarketingAsset->status?->value ?? 'null',
-                    'type' => $mostRecentMarketingAsset->type?->value ?? 'null',
-                    'thumbnail_status' => $mostRecentMarketingAsset->thumbnail_status?->value ?? 'null',
-                    'category_id' => $mostRecentMarketingAsset->metadata['category_id'] ?? 'null',
-                    'created_at' => $mostRecentMarketingAsset->created_at?->toIso8601String(),
+                'total_deliverables' => $totalDeliverables,
+                'visible_deliverables' => $visibleDeliverables,
+                'most_recent_asset' => $mostRecentDeliverable ? [
+                    'id' => $mostRecentDeliverable->id,
+                    'status' => $mostRecentDeliverable->status?->value ?? 'null',
+                    'type' => $mostRecentDeliverable->type?->value ?? 'null',
+                    'thumbnail_status' => $mostRecentDeliverable->thumbnail_status?->value ?? 'null',
+                    'category_id' => $mostRecentDeliverable->metadata['category_id'] ?? 'null',
+                    'created_at' => $mostRecentDeliverable->created_at?->toIso8601String(),
                 ] : 'none',
-                'note' => 'No marketing assets found - check status, type, brand_id, tenant_id, and category filter',
+                'note' => 'No deliverables found - check status, type, brand_id, tenant_id, and category filter',
             ]);
         }
         
@@ -374,7 +374,7 @@ class MarketingAssetController extends Controller
                         }
                     } else {
                         // Thumbnail status is completed but path is missing - log for debugging
-                        \Illuminate\Support\Facades\Log::warning('Marketing asset marked as completed but thumbnail path missing', [
+                        \Illuminate\Support\Facades\Log::warning('Deliverable marked as completed but thumbnail path missing', [
                             'asset_id' => $asset->id,
                             'thumbnail_status' => $thumbnailStatus,
                             'metadata_thumbnails' => isset($metadata['thumbnails']) ? array_keys($metadata['thumbnails'] ?? []) : 'not set',
@@ -412,7 +412,7 @@ class MarketingAssetController extends Controller
             })
             ->values();
 
-        return Inertia::render('MarketingAssets/Index', [
+        return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
             'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state

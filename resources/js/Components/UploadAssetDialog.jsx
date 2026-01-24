@@ -53,7 +53,7 @@ const USE_LEGACY_UPLOADER = false
  * 
  * @param {boolean} open - Whether dialog is open
  * @param {function} onClose - Callback when dialog closes
- * @param {string} defaultAssetType - Default asset type ('asset' or 'marketing')
+ * @param {string} defaultAssetType - Default asset type ('asset' or 'deliverable')
  * @param {Array} categories - Categories array from page props
  * @param {number|null} initialCategoryId - Optional initial category ID to prepopulate
  * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully (batchStatus === 'complete')
@@ -430,7 +430,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // Filter by asset type
         const matchesAssetType = defaultAssetType === 'asset' 
             ? (cat.asset_type === 'asset' || cat.asset_type === 'basic')
-            : cat.asset_type === 'marketing'
+            : cat.asset_type === 'deliverable'
         
         if (!matchesAssetType) {
             console.log('[UploadDialog] Filtered out category (wrong asset type):', cat.name, 'asset_type:', cat.asset_type, 'expected:', defaultAssetType)
@@ -3013,7 +3013,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 // Build payload - only include metadata if non-empty, otherwise send empty object
                 const payloadData = {
                     upload_session_id: item.uploadSessionId,
-                    asset_type: defaultAssetType === 'asset' ? 'asset' : 'marketing',
+                    asset_type: defaultAssetType === 'asset' ? 'asset' : 'deliverable',
                     title: item.title || null,
                     filename: item.resolvedFilename,
                     category_id: phase3Manager.context.categoryId || null,
@@ -3813,7 +3813,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         {/* Header */}
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
-                                Add {defaultAssetType === 'asset' ? 'Asset' : 'Marketing Asset'}
+                                Add {defaultAssetType === 'asset' ? 'Asset' : 'Deliverable'}
                             </h3>
                             {!hasUploadingItems && batchStatus !== 'finalizing' && (
                                 <button

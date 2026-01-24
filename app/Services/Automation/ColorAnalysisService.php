@@ -9,16 +9,16 @@ use Illuminate\Support\Facades\Log;
 /**
  * Color Analysis Service
  *
- * Deterministic image color analysis for ai_color_palette metadata.
- * Populates macro color buckets (red, orange, yellow, etc.) and persists
- * internal cluster data for future use. No LLM or external APIs.
+ * Deterministic image color analysis for dominant colors extraction.
+ * Analyzes images to extract color clusters and persists internal cluster data.
+ * Used by DominantColorsExtractor to extract top 3 dominant colors.
+ * No LLM or external APIs.
  *
  * Rules:
  * - Image assets only (GD: JPEG, PNG, WebP, GIF)
  * - Deterministic output for identical images
  * - Internal cluster data stored in asset.metadata['_color_analysis'] (non-UI)
- * - Macro buckets flow to ai_color_palette via PopulateAutomaticMetadataJob
- * - Phase H filter logic unchanged; no schema or UI changes
+ * - Cluster data used by DominantColorsExtractor for dominant colors
  */
 class ColorAnalysisService
 {
@@ -36,7 +36,7 @@ class ColorAnalysisService
 
     private const BUCKET_MAX = 4;
 
-    /** @var list<string> Allowed ai_color_palette buckets (must match seeder) */
+    /** @var list<string> Color buckets (legacy - no longer used for metadata, kept for internal analysis) */
     private const BUCKETS = [
         'red', 'orange', 'yellow', 'green', 'blue',
         'purple', 'pink', 'brown', 'black', 'white', 'gray',

@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('slug');
-            $table->string('asset_type'); // basic or marketing
+            $table->string('asset_type'); // asset or deliverable
             $table->boolean('is_private')->default(false);
             $table->boolean('is_hidden')->default(false);
             $table->integer('sort_order')->default(0);

@@ -37,7 +37,7 @@ return [
             'share_downloads_with_permissions' => false,
         ],
         'notes' => [
-            'No "All" button in Assets/Marketing Assets category sidebar',
+            'No "All" button in Assets/Deliverables category sidebar',
             'Download links limited to 50 per month',
             'Limited to 1 tag per asset for basic organization',
             '5 AI tagging operations and 10 AI suggestions per month',
@@ -71,7 +71,7 @@ return [
             'share_downloads_with_permissions' => false,
         ],
         'notes' => [
-            '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
+            '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
             'Download links limited to 200 per month',
             'Up to 5 tags per asset for better organization',
             '50 AI tagging operations and 100 AI suggestions per month',
@@ -109,7 +109,7 @@ return [
             'share_downloads_with_permissions' => true,
         ],
         'notes' => [
-            '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
+            '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
             'Download links limited to 1,000 per month',
             'Share downloads with custom permissions',
             'Up to 10 tags per asset for comprehensive categorization',
@@ -149,7 +149,7 @@ return [
             'share_downloads_with_permissions' => true,
         ],
         'notes' => [
-            '"All" button in Assets/Marketing Assets category sidebar to view all assets across categories',
+            '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
             'Unlimited download links',
             'Share downloads with custom permissions',
             'Up to 15 tags per asset for maximum flexibility',
