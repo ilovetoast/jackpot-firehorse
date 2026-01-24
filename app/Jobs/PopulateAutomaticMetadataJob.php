@@ -155,19 +155,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         // Write metadata values (respects manual overrides)
         $results = $writer->writeMetadata($asset, $metadataValues);
         
-        // Log system tagging completion (automatic metadata population)
-        if (!empty($metadataValues)) {
-            ActivityRecorder::logAsset($asset, EventType::ASSET_SYSTEM_TAGGING_COMPLETED, [
-                'fields_populated' => array_keys($metadataValues),
-                'fields_count' => count($metadataValues),
-            ]);
-            
-            // Also log metadata populated for backward compatibility
-            ActivityRecorder::logAsset($asset, EventType::ASSET_METADATA_POPULATED, [
-                'fields_populated' => array_keys($metadataValues),
-                'fields_count' => count($metadataValues),
-            ]);
-        }
+        // Note: We don't log activity here because:
+        // - System metadata generation is already logged by ComputedMetadataJob (ASSET_SYSTEM_METADATA_GENERATED)
+        // - This job just populates automatic/hybrid fields, which is part of system metadata processing
+        // - We only want to show: System Metadata, AI Metadata, and AI Tagging in the timeline
 
         Log::info('[PopulateAutomaticMetadataJob] Completed', [
             'asset_id' => $asset->id,
@@ -251,24 +242,11 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
      */
     protected function computeStubValue(Asset $asset, string $fieldKey, array $field): mixed
     {
-        // Stub implementations for common automatic fields
+        // Stub implementations for automatic fields that aren't computed by ComputedMetadataJob
+        // NOTE: orientation, dimensions, color_space, and resolution_class are computed by ComputedMetadataJob
+        // and should NOT be overwritten here. Only handle fields that aren't system-computed.
         switch ($fieldKey) {
-            case 'orientation':
-                // Deterministic: Based on filename hash
-                $hash = crc32($asset->original_filename);
-                $orientations = ['landscape', 'portrait', 'square'];
-                return $orientations[$hash % count($orientations)];
-
-            case 'dimensions':
-                // Deterministic: Based on file size
-                $size = $asset->size_bytes ?? 0;
-                // Simulate dimensions based on file size (placeholder logic)
-                $width = 1920 + ($size % 1000);
-                $height = 1080 + ($size % 500);
-                return "{$width}x{$height}";
-
             case 'color_mode':
-            case 'color_space':
                 // Deterministic: Based on mime type
                 $mimeType = $asset->mime_type ?? '';
                 if (str_contains($mimeType, 'jpeg') || str_contains($mimeType, 'jpg')) {
@@ -278,6 +256,8 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
 
             default:
                 // For other fields, return null (no stub value)
+                // This includes orientation, dimensions, color_space, resolution_class which are
+                // computed by ComputedMetadataJob and should not be overwritten
                 return null;
         }
     }

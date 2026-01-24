@@ -136,9 +136,10 @@ class ProcessAssetJob implements ShouldQueue
         // 5. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
         // 6. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
         // 7. AITaggingJob - AI-powered tagging
-        // 8. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5)
-        // 9. FinalizeAssetJob - Mark asset as completed
-        // 10. PromoteAssetJob - Move from temp/ to canonical assets/ location
+        // 8. AiMetadataGenerationJob - AI metadata generation (Phase I) - creates candidates
+        // 9. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5) - creates suggestions from candidates
+        // 10. FinalizeAssetJob - Mark asset as completed
+        // 11. PromoteAssetJob - Move from temp/ to canonical assets/ location
         //    (runs after thumbnail generation, requires COMPLETED status)
         Bus::chain([
             new ExtractMetadataJob($asset->id),
@@ -148,7 +149,8 @@ class ProcessAssetJob implements ShouldQueue
             new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
             new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
             new AITaggingJob($asset->id),
-            new AiMetadataSuggestionJob($asset->id), // Phase 2 – Step 5: AI metadata suggestions
+            new AiMetadataGenerationJob($asset->id), // Phase I: AI metadata generation (creates candidates)
+            new AiMetadataSuggestionJob($asset->id), // Phase 2 – Step 5: AI metadata suggestions (creates suggestions from candidates)
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),
         ])->dispatch();

@@ -47,6 +47,16 @@ class OpenAIProvider implements AIProviderInterface
         'gpt-4-turbo-preview',
         'gpt-4',
         'gpt-3.5-turbo',
+        'gpt-4o',
+        'gpt-4o-mini',
+    ];
+
+    /**
+     * Provider-specific pricing fallback for vision models.
+     */
+    protected array $visionModelPricing = [
+        'gpt-4o' => ['input' => 0.00001, 'output' => 0.00003],
+        'gpt-4o-mini' => ['input' => 0.00000015, 'output' => 0.0000006],
     ];
 
     /**
@@ -114,6 +124,19 @@ class OpenAIProvider implements AIProviderInterface
             if ($response->failed()) {
                 $error = $response->json();
                 $errorMessage = $error['error']['message'] ?? 'Unknown error from OpenAI API';
+                $errorCode = $error['error']['code'] ?? null;
+                
+                // Detect quota exceeded errors
+                if (stripos($errorMessage, 'quota') !== false || 
+                    stripos($errorMessage, 'exceeded') !== false ||
+                    $errorCode === 'insufficient_quota' ||
+                    $response->status() === 429) {
+                    throw new \App\Exceptions\AIQuotaExceededException(
+                        "OpenAI API quota exceeded: {$errorMessage}",
+                        'OpenAI'
+                    );
+                }
+                
                 throw new \Exception("OpenAI API error: {$errorMessage}", $response->status());
             }
 
@@ -138,6 +161,9 @@ class OpenAIProvider implements AIProviderInterface
                     'response_id' => $data['id'] ?? null,
                 ],
             ];
+        } catch (\App\Exceptions\AIQuotaExceededException $e) {
+            // Re-throw quota exceptions without logging (they'll be handled upstream)
+            throw $e;
         } catch (\Exception $e) {
             Log::error('OpenAI API call failed', [
                 'model' => $model,
@@ -177,7 +203,13 @@ class OpenAIProvider implements AIProviderInterface
         if (!$pricing) {
             // Normalize model name (e.g., 'gpt-4-turbo-preview' -> 'gpt-4-turbo')
             $normalizedModel = $this->normalizeModelName($model);
-            $pricing = $this->modelPricing[$normalizedModel] ?? $this->modelPricing['gpt-3.5-turbo'];
+            
+            // Check vision model pricing first (for gpt-4o models)
+            if (isset($this->visionModelPricing[$model])) {
+                $pricing = $this->visionModelPricing[$model];
+            } else {
+                $pricing = $this->modelPricing[$normalizedModel] ?? $this->modelPricing['gpt-3.5-turbo'];
+            }
         }
 
         $inputCost = ($tokensIn * ($pricing['input'] ?? 0));
@@ -236,5 +268,117 @@ class OpenAIProvider implements AIProviderInterface
         ];
 
         return $normalizations[$model] ?? $model;
+    }
+
+    /**
+     * Analyze an image with a prompt using OpenAI Vision API.
+     *
+     * This method handles vision-based image analysis for metadata generation.
+     * All OpenAI-specific logic (API key, base URL, request format) is contained here.
+     *
+     * @param string $imageUrl URL to the image (must be accessible by OpenAI)
+     * @param string $prompt Text prompt describing what to analyze
+     * @param array $options Additional options:
+     *   - model: Model name to use (default: gpt-4o-mini)
+     *   - max_tokens: Maximum tokens in response (default: 1000)
+     *   - response_format: Response format (default: ['type' => 'json_object'])
+     * @return array Response array with:
+     *   - text: Generated text response (typically JSON string)
+     *   - tokens_in: Number of input tokens used
+     *   - tokens_out: Number of output tokens used
+     *   - model: Actual model name used
+     *   - metadata: Provider-specific metadata
+     * @throws \Exception If the API call fails
+     */
+    public function analyzeImage(string $imageUrl, string $prompt, array $options = []): array
+    {
+        $model = $options['model'] ?? 'gpt-4o-mini';
+        $maxTokens = $options['max_tokens'] ?? 1000;
+        $responseFormat = $options['response_format'] ?? ['type' => 'json_object'];
+
+        if (!$this->isModelAvailable($model)) {
+            throw new \InvalidArgumentException("Model '{$model}' is not available or supported for vision analysis.");
+        }
+
+        try {
+            $response = Http::timeout(60)
+                ->withHeaders([
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->post("{$this->baseUrl}/chat/completions", [
+                    'model' => $model,
+                    'messages' => [
+                        [
+                            'role' => 'user',
+                            'content' => [
+                                [
+                                    'type' => 'text',
+                                    'text' => $prompt,
+                                ],
+                                [
+                                    'type' => 'image_url',
+                                    'image_url' => [
+                                        'url' => $imageUrl,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'max_tokens' => $maxTokens,
+                    'response_format' => $responseFormat,
+                ]);
+
+            if ($response->failed()) {
+                $error = $response->json();
+                $errorMessage = $error['error']['message'] ?? 'Unknown error from OpenAI API';
+                $errorCode = $error['error']['code'] ?? null;
+                
+                // Detect quota exceeded errors
+                if (stripos($errorMessage, 'quota') !== false || 
+                    stripos($errorMessage, 'exceeded') !== false ||
+                    $errorCode === 'insufficient_quota' ||
+                    $response->status() === 429) {
+                    throw new \App\Exceptions\AIQuotaExceededException(
+                        "OpenAI API quota exceeded: {$errorMessage}",
+                        'OpenAI'
+                    );
+                }
+                
+                throw new \Exception("OpenAI API error: {$errorMessage}", $response->status());
+            }
+
+            $data = $response->json();
+
+            if (!isset($data['choices'][0]['message']['content'])) {
+                throw new \Exception('Invalid response format from OpenAI API');
+            }
+
+            $usage = $data['usage'] ?? [];
+            $tokensIn = $usage['prompt_tokens'] ?? 0;
+            $tokensOut = $usage['completion_tokens'] ?? 0;
+            $actualModel = $data['model'] ?? $model;
+
+            return [
+                'text' => $data['choices'][0]['message']['content'],
+                'tokens_in' => $tokensIn,
+                'tokens_out' => $tokensOut,
+                'model' => $actualModel,
+                'metadata' => [
+                    'finish_reason' => $data['choices'][0]['finish_reason'] ?? null,
+                    'response_id' => $data['id'] ?? null,
+                ],
+            ];
+        } catch (\App\Exceptions\AIQuotaExceededException $e) {
+            // Re-throw quota exceptions without logging (they'll be handled upstream)
+            throw $e;
+        } catch (\Exception $e) {
+            Log::error('OpenAI Vision API call failed', [
+                'model' => $model,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
     }
 }

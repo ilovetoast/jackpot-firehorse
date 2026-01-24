@@ -13,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -64,13 +65,28 @@ class AiMetadataSuggestionJob implements ShouldQueue
         $asset = Asset::findOrFail($this->assetId);
 
         // Idempotency: Check if AI suggestions already generated
+        // BUT: If it failed before, allow retry (check for failed flag)
         $existingMetadata = $asset->metadata ?? [];
-        if (isset($existingMetadata['ai_metadata_suggestions_completed']) && 
-            $existingMetadata['ai_metadata_suggestions_completed'] === true) {
-            Log::info('[AiMetadataSuggestionJob] Skipping - already completed', [
+        $wasCompleted = isset($existingMetadata['ai_metadata_suggestions_completed']) && 
+            $existingMetadata['ai_metadata_suggestions_completed'] === true;
+        $wasFailed = isset($existingMetadata['ai_metadata_suggestions_failed']) && 
+            $existingMetadata['ai_metadata_suggestions_failed'] === true;
+        
+        // Skip if completed successfully, but allow retry if it failed
+        if ($wasCompleted && !$wasFailed) {
+            Log::info('[AiMetadataSuggestionJob] Skipping - already completed successfully', [
                 'asset_id' => $asset->id,
+                'suggestions_count' => $existingMetadata['ai_metadata_suggestions_count'] ?? 0,
             ]);
             return;
+        }
+        
+        // If it failed before, log that we're retrying
+        if ($wasFailed) {
+            Log::info('[AiMetadataSuggestionJob] Retrying after previous failure', [
+                'asset_id' => $asset->id,
+                'previous_error' => $existingMetadata['ai_metadata_suggestions_error'] ?? 'unknown',
+            ]);
         }
 
         // Load category for schema resolution
@@ -90,8 +106,65 @@ class AiMetadataSuggestionJob implements ShouldQueue
         }
 
         try {
-            // Generate AI suggestions
-            $suggestions = $service->generateSuggestions($asset, $category);
+            // Fetch AI metadata candidates from asset_metadata_candidates table
+            $candidates = DB::table('asset_metadata_candidates')
+                ->where('asset_id', $asset->id)
+                ->where('producer', 'ai')
+                ->whereNull('resolved_at')
+                ->whereNull('dismissed_at')
+                ->get();
+
+            // Format candidates into array expected by service
+            // Format: ['field_key' => ['value' => mixed, 'confidence' => float, 'source' => string]]
+            $aiMetadataValues = [];
+            foreach ($candidates as $candidate) {
+                // Get field key from metadata_field_id
+                $field = DB::table('metadata_fields')
+                    ->where('id', $candidate->metadata_field_id)
+                    ->first();
+                
+                if (!$field) {
+                    continue;
+                }
+                
+                $fieldKey = $field->key;
+                
+                // Decode value_json (stored as JSON in database)
+                $value = json_decode($candidate->value_json, true);
+                
+                $aiMetadataValues[$fieldKey] = [
+                    'value' => $value,
+                    'confidence' => $candidate->confidence ?? null,
+                    'source' => 'ai',
+                ];
+            }
+
+            Log::info('[AiMetadataSuggestionJob] Found candidates', [
+                'asset_id' => $asset->id,
+                'candidate_count' => $candidates->count(),
+                'field_keys' => array_keys($aiMetadataValues),
+                'candidates_detail' => $candidates->map(function($c) {
+                    return [
+                        'field_id' => $c->metadata_field_id,
+                        'value_json' => $c->value_json,
+                        'confidence' => $c->confidence,
+                    ];
+                })->toArray(),
+            ]);
+
+            // Generate AI suggestions from candidates
+            $suggestions = $service->generateSuggestions($asset, $aiMetadataValues);
+            
+            Log::info('[AiMetadataSuggestionJob] Generated suggestions', [
+                'asset_id' => $asset->id,
+                'suggestions_count' => count($suggestions),
+                'suggestions' => $suggestions,
+            ]);
+
+            // Store suggestions in asset metadata
+            if (!empty($suggestions)) {
+                $service->storeSuggestions($asset, $suggestions);
+            }
 
             // Mark as completed in asset metadata
             $currentMetadata = $asset->metadata ?? [];
@@ -130,6 +203,12 @@ class AiMetadataSuggestionJob implements ShouldQueue
 
             $asset->update([
                 'metadata' => $currentMetadata,
+            ]);
+
+            // Log failure event for timeline display
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AI_SUGGESTIONS_FAILED, [
+                'error' => $e->getMessage(),
+                'error_type' => get_class($e),
             ]);
 
             // Don't throw - allow job to complete successfully

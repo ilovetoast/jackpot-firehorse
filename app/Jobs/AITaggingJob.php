@@ -51,9 +51,14 @@ class AITaggingJob implements ShouldQueue
         // Idempotency: Check if AI tagging already completed
         $existingMetadata = $asset->metadata ?? [];
         if (isset($existingMetadata['ai_tagging_completed']) && $existingMetadata['ai_tagging_completed'] === true) {
-            Log::info('AI tagging skipped - already completed', [
+            Log::info('[AITaggingJob] AI tagging skipped - already completed', [
                 'asset_id' => $asset->id,
             ]);
+            // Ensure status is set even if already completed
+            if (!isset($existingMetadata['_ai_tagging_status'])) {
+                $existingMetadata['_ai_tagging_status'] = 'completed';
+                $asset->update(['metadata' => $existingMetadata]);
+            }
             // Job chaining is handled by Bus::chain() in ProcessAssetJob
             // Chain will continue to next job automatically
             return;
@@ -62,10 +67,11 @@ class AITaggingJob implements ShouldQueue
         // Ensure thumbnails have been generated (check thumbnail_status, not asset status)
         // Asset.status remains UPLOADED throughout processing for visibility
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
-            Log::warning('AI tagging skipped - thumbnails have not completed', [
+            Log::warning('[AITaggingJob] AI tagging skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
+            $this->markAsSkipped($asset, 'thumbnail_unavailable');
             return;
         }
 
@@ -91,13 +97,14 @@ class AITaggingJob implements ShouldQueue
             'metadata' => $currentMetadata,
         ]);
 
-        // Record AI tagging completed activity event
+        // Record AI tagging completed activity event (AI Tagging - general/freeform tags)
         ActivityRecorder::logAsset($asset, EventType::ASSET_AI_TAGGING_COMPLETED, [
             'job' => 'AITaggingJob',
             'tag_count' => count($tags),
+            'tags' => $tags,
         ]);
 
-        Log::info('AI tagging completed', [
+        Log::info('[AITaggingJob] AI tagging completed', [
             'asset_id' => $asset->id,
             'tag_count' => count($tags),
         ]);
@@ -120,6 +127,25 @@ class AITaggingJob implements ShouldQueue
     }
 
     /**
+     * Mark asset as skipped.
+     *
+     * Sets explicit status for debugging: _ai_tagging_status = "skipped:{reason}"
+     *
+     * @param Asset $asset
+     * @param string $reason Skip reason (e.g., 'thumbnail_unavailable')
+     * @return void
+     */
+    protected function markAsSkipped(Asset $asset, string $reason): void
+    {
+        $metadata = $asset->metadata ?? [];
+        $metadata['_ai_tagging_skipped'] = true;
+        $metadata['_ai_tagging_skip_reason'] = $reason;
+        $metadata['_ai_tagging_skipped_at'] = now()->toIso8601String();
+        $metadata['_ai_tagging_status'] = "skipped:{$reason}"; // Explicit status for debugging
+        $asset->update(['metadata' => $metadata]);
+    }
+
+    /**
      * Handle a job failure.
      */
     public function failed(\Throwable $exception): void
@@ -127,6 +153,14 @@ class AITaggingJob implements ShouldQueue
         $asset = Asset::find($this->assetId);
 
         if ($asset) {
+            // Mark as failed with explicit status
+            $metadata = $asset->metadata ?? [];
+            $metadata['_ai_tagging_failed'] = true;
+            $metadata['_ai_tagging_error'] = $exception->getMessage();
+            $metadata['_ai_tagging_failed_at'] = now()->toIso8601String();
+            $metadata['_ai_tagging_status'] = 'failed'; // Explicit status for debugging
+            $asset->update(['metadata' => $metadata]);
+            
             // Use centralized failure recording service
             app(AssetProcessingFailureService::class)->recordFailure(
                 $asset,

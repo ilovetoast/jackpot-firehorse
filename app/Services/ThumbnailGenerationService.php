@@ -328,30 +328,52 @@ class ThumbnailGenerationService
         // IMPORTANT: PDF support is additive - image validation remains unchanged
         $fileType = $this->detectFileType($asset);
         
+        // Capture source image dimensions ONLY for image file types (not PDFs, videos, or other types)
+        // Dimensions are read from the ORIGINAL source file, not from thumbnails
+        // Some file types (PDFs, videos, documents) do not have pixel dimensions
+        $sourceImageWidth = null;
+        $sourceImageHeight = null;
+        
         if ($fileType === 'pdf') {
             // PDF validation: Check file size and basic PDF structure
             // Full PDF validation happens during thumbnail generation
+            // PDFs do not have pixel dimensions - skip dimension capture
             Log::info('[ThumbnailGenerationService] Source PDF file downloaded and verified', [
                 'asset_id' => $asset->id,
                 'temp_path' => $tempPath,
                 'source_file_size' => $sourceFileSize,
                 'file_type' => 'pdf',
             ]);
-        } else {
+        } elseif ($fileType === 'image') {
             // Image validation: Verify file is actually an image (not corrupted or wrong format)
-            // This preserves existing behavior for image assets
+            // CRITICAL: Get dimensions from ORIGINAL source file using getimagesize()
+            // These are the actual pixel dimensions of the original image, not thumbnails
             $imageInfo = @getimagesize($tempPath);
             if ($imageInfo === false) {
                 throw new \RuntimeException("Downloaded file is not a valid image (size: {$sourceFileSize} bytes)");
             }
             
-            Log::info('[ThumbnailGenerationService] Source file downloaded and verified', [
+            // Capture source dimensions from original image file
+            // These are the authoritative pixel dimensions for the source image (original size)
+            // NOT thumbnail dimensions - these represent the actual uploaded file dimensions
+            $sourceImageWidth = (int) ($imageInfo[0] ?? 0);
+            $sourceImageHeight = (int) ($imageInfo[1] ?? 0);
+            
+            Log::info('[ThumbnailGenerationService] Source image file downloaded and verified', [
                 'asset_id' => $asset->id,
                 'temp_path' => $tempPath,
                 'source_file_size' => $sourceFileSize,
-                'image_width' => $imageInfo[0] ?? null,
-                'image_height' => $imageInfo[1] ?? null,
+                'source_image_width' => $sourceImageWidth,
+                'source_image_height' => $sourceImageHeight,
                 'image_type' => $imageInfo[2] ?? null,
+            ]);
+        } else {
+            // Other file types (videos, documents, etc.) - no pixel dimensions available
+            Log::info('[ThumbnailGenerationService] Source file downloaded (non-image type)', [
+                'asset_id' => $asset->id,
+                'temp_path' => $tempPath,
+                'source_file_size' => $sourceFileSize,
+                'file_type' => $fileType,
             ]);
         }
         
@@ -488,7 +510,26 @@ class ThumbnailGenerationService
             
             // Step 6: Merge preview thumbnails with final thumbnails
             // Preview thumbnails are stored separately in metadata but returned together
-            return array_merge($previewThumbnails, $thumbnails);
+            $allThumbnails = array_merge($previewThumbnails, $thumbnails);
+            
+            // Store source image dimensions in metadata ONLY for image file types
+            // These dimensions are from the ORIGINAL source file (not thumbnails)
+            // Only image file types have pixel dimensions - PDFs, videos, and other types do not
+            if ($fileType === 'image' && $sourceImageWidth && $sourceImageHeight) {
+                $metadata = $asset->metadata ?? [];
+                $metadata['image_width'] = $sourceImageWidth;
+                $metadata['image_height'] = $sourceImageHeight;
+                $asset->update(['metadata' => $metadata]);
+                
+                Log::info('[ThumbnailGenerationService] Stored original source image dimensions in metadata', [
+                    'asset_id' => $asset->id,
+                    'source_image_width' => $sourceImageWidth,
+                    'source_image_height' => $sourceImageHeight,
+                    'note' => 'Dimensions are from original source file, not thumbnails',
+                ]);
+            }
+            
+            return $allThumbnails;
         } finally {
             // Clean up temporary file
             if (file_exists($tempPath)) {

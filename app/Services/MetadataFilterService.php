@@ -133,14 +133,14 @@ class MetadataFilterService
                     ->from('asset_metadata as am')
                     ->whereColumn('am.asset_id', 'assets.id')
                     ->where('am.metadata_field_id', $fieldId)
-                    ->whereIn('am.source', ['user', 'system'])
+                    ->whereIn('am.source', ['user', 'system', 'ai', 'manual_override']) // Include all approved sources
                     ->whereNotNull('am.approved_at')
                     ->whereRaw("am.approved_at = (
                         SELECT MAX(approved_at)
                         FROM asset_metadata
                         WHERE asset_id = am.asset_id
                         AND metadata_field_id = ?
-                        AND source IN ('user', 'system')
+                        AND source IN ('user', 'system', 'ai', 'manual_override')
                         AND approved_at IS NOT NULL
                     )", [$fieldId]);
                 

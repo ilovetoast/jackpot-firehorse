@@ -48,6 +48,7 @@ import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
 import AiMetadataSuggestionsInline from './AiMetadataSuggestionsInline'
+import AiTagSuggestionsInline from './AiTagSuggestionsInline'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
@@ -1049,6 +1050,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     <AiMetadataSuggestionsInline key={displayAsset.id} assetId={displayAsset.id} />
                 )}
 
+                {/* AI Tag Suggestions */}
+                {displayAsset?.id && (
+                    <AiTagSuggestionsInline key={`tags-${displayAsset.id}`} assetId={displayAsset.id} />
+                )}
+
                 {/* Dominant Colors Display (read-only) */}
                 {displayAsset?.metadata?.dominant_colors && Array.isArray(displayAsset.metadata.dominant_colors) && displayAsset.metadata.dominant_colors.length > 0 && (
                     <div className="px-6 py-4 border-t border-gray-200">
@@ -1176,14 +1182,34 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </dd>
                             </div>
                         )}
-                        {/* File Dimensions - if available from metadata */}
+                        {/* File Dimensions - if available from source */}
                         {(() => {
-                            // Try to get dimensions from metadata
-                            // Dimensions are stored as "widthxheight" (e.g., "1920x1080")
-                            // Check metadata.fields structure (as merged by AssetController)
-                            let dimensionsValue = null
+                            // Priority 1: Check source_dimensions (from original image file)
+                            if (displayAsset.source_dimensions && displayAsset.source_dimensions.width && displayAsset.source_dimensions.height) {
+                                return (
+                                    <div className="flex justify-between">
+                                        <dt className="text-sm text-gray-500">Dimensions</dt>
+                                        <dd className="text-sm font-medium text-gray-900">
+                                            {displayAsset.source_dimensions.width.toLocaleString()} × {displayAsset.source_dimensions.height.toLocaleString()} px
+                                        </dd>
+                                    </div>
+                                )
+                            }
                             
-                            // Check metadata.fields object (keyed by field key)
+                            // Priority 2: Try to get dimensions from metadata (from thumbnail generation)
+                            if (displayAsset.metadata?.image_width && displayAsset.metadata?.image_height) {
+                                return (
+                                    <div className="flex justify-between">
+                                        <dt className="text-sm text-gray-500">Dimensions</dt>
+                                        <dd className="text-sm font-medium text-gray-900">
+                                            {parseInt(displayAsset.metadata.image_width).toLocaleString()} × {parseInt(displayAsset.metadata.image_height).toLocaleString()} px
+                                        </dd>
+                                    </div>
+                                )
+                            }
+                            
+                            // Priority 3: Try to get dimensions from metadata.fields (as merged by AssetController)
+                            let dimensionsValue = null
                             if (displayAsset.metadata?.fields && typeof displayAsset.metadata.fields === 'object') {
                                 dimensionsValue = displayAsset.metadata.fields.dimensions || displayAsset.metadata.fields['dimensions']
                             }

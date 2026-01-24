@@ -27,15 +27,20 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
             'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,
-            'asset.system_tagging.completed': `System tagging completed${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
+            'asset.ai_metadata.generated': `AI metadata generated`,
+            'asset.ai_metadata.failed': `AI metadata generation failed`,
             'asset.ai_suggestions.generated': `AI suggestions generated${metadata?.suggestions_count ? ` (${metadata.suggestions_count} suggestions)` : ''}`,
+            'asset.ai_suggestions.failed': `AI suggestions failed`,
             'asset.ai_suggestion.accepted': metadata?.field_label 
                 ? `AI suggestion accepted: ${metadata.field_label}`
                 : 'AI suggestion accepted',
             'asset.ai_suggestion.dismissed': metadata?.field_label
                 ? `AI suggestion dismissed: ${metadata.field_label}`
                 : 'AI suggestion dismissed',
-            'asset.metadata.populated': `Metadata populated${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
+            // Note: 'asset.system_tagging.completed' and 'asset.metadata.populated' are no longer logged
+            // System metadata is tracked via 'asset.system_metadata.generated' from ComputedMetadataJob
+            'asset.system_metadata.generated': `System metadata generated${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
+            'asset.system_metadata.regenerated': `System metadata regenerated${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
             'asset.color_analysis.completed': `Color analysis completed${metadata?.buckets_count ? ` (${metadata.buckets_count} colors)` : ''}`,
         }
         
@@ -60,7 +65,10 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
     }
 
     const getEventIcon = (eventType, allEvents = []) => {
-        if (eventType.includes('failed')) {
+        // AI failures should show red X icon
+        if (eventType.includes('failed') || 
+            eventType === 'asset.ai_metadata.failed' || 
+            eventType === 'asset.ai_suggestions.failed') {
             return {
                 icon: XCircleIcon,
                 color: 'text-red-500',
@@ -197,6 +205,16 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                 <div className="mt-1 text-xs text-gray-500">
                                                     {event.metadata.error && (
                                                         <p className="text-red-600">{event.metadata.error}</p>
+                                                    )}
+                                                    {/* Show error details for AI failures */}
+                                                    {(event.event_type === 'asset.ai_metadata.failed' || 
+                                                      event.event_type === 'asset.ai_suggestions.failed') && 
+                                                     event.metadata.error && (
+                                                        <p className="text-xs text-red-600 mt-1">
+                                                            {event.metadata.error_type === 'quota_exceeded' 
+                                                                ? 'API quota exceeded - check billing settings'
+                                                                : event.metadata.error}
+                                                        </p>
                                                     )}
                                                     {event.metadata.reason && event.event_type === 'asset.thumbnail.skipped' && (
                                                         <p className="text-blue-600">

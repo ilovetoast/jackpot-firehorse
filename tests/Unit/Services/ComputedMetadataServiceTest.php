@@ -216,6 +216,119 @@ class ComputedMetadataServiceTest extends TestCase
     }
 
     /**
+     * Test: Tall portrait image must be classified as portrait
+     * A 1080x1920 image (typical phone portrait) should NEVER be square
+     */
+    public function test_tall_portrait_image_must_be_portrait(): void
+    {
+        // Common phone portrait dimensions
+        $orientation = $this->callProtectedMethod('computeOrientation', [1080, 1920]);
+        $this->assertEquals('portrait', $orientation, 'Tall portrait image (1080x1920) must be classified as portrait, not square');
+        
+        // Even taller portrait
+        $orientation = $this->callProtectedMethod('computeOrientation', [800, 2400]);
+        $this->assertEquals('portrait', $orientation, 'Very tall portrait image must be classified as portrait');
+    }
+
+    /**
+     * Test: Wide landscape image must be classified as landscape
+     * A 1920x1080 image (typical landscape) should NEVER be square
+     */
+    public function test_wide_landscape_image_must_be_landscape(): void
+    {
+        // Common landscape dimensions
+        $orientation = $this->callProtectedMethod('computeOrientation', [1920, 1080]);
+        $this->assertEquals('landscape', $orientation, 'Wide landscape image (1920x1080) must be classified as landscape, not square');
+        
+        // Even wider landscape
+        $orientation = $this->callProtectedMethod('computeOrientation', [3840, 2160]);
+        $this->assertEquals('landscape', $orientation, 'Very wide landscape image must be classified as landscape');
+    }
+
+    /**
+     * Test: Image with bad or missing EXIF still computes orientation correctly
+     * Orientation should be computed from pixel dimensions, not EXIF
+     */
+    public function test_missing_exif_still_computes_orientation(): void
+    {
+        // Portrait image with no EXIF
+        [$width, $height] = $this->callProtectedMethod('normalizeDimensionsFromExif', [
+            1080,
+            1920,
+            [] // No EXIF data
+        ]);
+        
+        $this->assertEquals(1080, $width);
+        $this->assertEquals(1920, $height);
+        
+        $orientation = $this->callProtectedMethod('computeOrientation', [$width, $height]);
+        $this->assertEquals('portrait', $orientation, 'Portrait image without EXIF must still be classified as portrait');
+    }
+
+    /**
+     * Test: Image with invalid EXIF orientation still uses stored dimensions
+     * Invalid EXIF values should not break orientation detection
+     */
+    public function test_invalid_exif_orientation_uses_stored_dimensions(): void
+    {
+        // Invalid orientation value (should be 1-8)
+        [$width, $height] = $this->callProtectedMethod('normalizeDimensionsFromExif', [
+            1920,
+            1080,
+            ['Orientation' => 99] // Invalid value
+        ]);
+        
+        // Should use stored dimensions (no swap for invalid orientation)
+        $this->assertEquals(1920, $width);
+        $this->assertEquals(1080, $height);
+        
+        $orientation = $this->callProtectedMethod('computeOrientation', [$width, $height]);
+        $this->assertEquals('landscape', $orientation);
+    }
+
+    /**
+     * Test: Non-square original with square-like dimensions
+     * Edge case: Image that's close to square but clearly not square
+     */
+    public function test_near_square_but_clearly_landscape(): void
+    {
+        // 1200x1000 = 1.2 ratio (clearly landscape, not square)
+        $orientation = $this->callProtectedMethod('computeOrientation', [1200, 1000]);
+        $this->assertEquals('landscape', $orientation, 'Image with 1.2 ratio must be landscape, not square');
+    }
+
+    /**
+     * Test: Non-square original with square-like dimensions (portrait)
+     * Edge case: Image that's close to square but clearly not square
+     */
+    public function test_near_square_but_clearly_portrait(): void
+    {
+        // 1000x1200 = 0.833 ratio (clearly portrait, not square)
+        $orientation = $this->callProtectedMethod('computeOrientation', [1000, 1200]);
+        $this->assertEquals('portrait', $orientation, 'Image with 0.833 ratio must be portrait, not square');
+    }
+
+    /**
+     * Test: All EXIF orientations that don't require swap
+     * Orientations 2, 3, 4, 5, 7 should not swap dimensions
+     */
+    public function test_exif_orientations_without_swap(): void
+    {
+        $orientations = [2, 3, 4, 5, 7];
+        
+        foreach ($orientations as $exifOrientation) {
+            [$width, $height] = $this->callProtectedMethod('normalizeDimensionsFromExif', [
+                1920,
+                1080,
+                ['Orientation' => $exifOrientation]
+            ]);
+            
+            $this->assertEquals(1920, $width, "EXIF orientation {$exifOrientation} should not swap width");
+            $this->assertEquals(1080, $height, "EXIF orientation {$exifOrientation} should not swap height");
+        }
+    }
+
+    /**
      * Helper method to call protected methods for testing.
      *
      * @param string $methodName

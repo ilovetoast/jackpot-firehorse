@@ -84,6 +84,29 @@ return [
             ],
             'active' => true,
         ],
+        'gpt-4o' => [
+            'provider' => 'openai',
+            'model_name' => 'gpt-4o',
+            'capabilities' => ['text', 'reasoning', 'image', 'multimodal'],
+            'recommended_use' => ['tagging', 'metadata_generation'],
+            'default_cost_per_token' => [
+                'input' => 0.00001,  // $0.01 per 1K tokens (gpt-4o input)
+                'output' => 0.00003, // $0.03 per 1K tokens (gpt-4o output)
+            ],
+            'active' => true,
+        ],
+        'gpt-4o-mini' => [
+            'provider' => 'openai',
+            'model_name' => 'gpt-4o-mini',
+            'capabilities' => ['text', 'reasoning', 'image', 'multimodal'],
+            'recommended_use' => ['tagging', 'metadata_generation'],
+            'default_cost_per_token' => [
+                'input' => 0.00000015,  // $0.15 per 1M tokens (much cheaper)
+                'output' => 0.0000006,  // $0.60 per 1M tokens
+            ],
+            'active' => true,
+            'notes' => 'Cost-effective alternative for high-volume operations',
+        ],
     ],
 
     /*
@@ -202,6 +225,17 @@ return [
             'allowed_actions' => ['read'],
             'permissions' => [
                 // System-level agent - no specific permissions required
+            ],
+        ],
+        'metadata_generator' => [
+            'name' => 'Metadata Generator',
+            'description' => 'Generates AI metadata candidates for assets using vision analysis',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped agent - runs automatically during asset processing
+                // No specific permissions required (system-triggered)
             ],
         ],
     ],

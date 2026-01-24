@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Tenant;
 use App\Services\AiUsageService;
 use App\Services\BillingService;
+use App\Services\CompanyCostService;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,8 @@ class CompanyController extends Controller
     use HandlesFlashMessages;
     public function __construct(
         protected BillingService $billingService,
-        protected AiUsageService $aiUsageService
+        protected AiUsageService $aiUsageService,
+        protected CompanyCostService $companyCostService
     ) {
     }
 
@@ -41,6 +43,21 @@ class CompanyController extends Controller
                     ->orderBy('created_at', 'desc')
                     ->first();
                 
+                // Calculate AI costs for current month (all AI agents)
+                $aiCosts = $this->companyCostService->calculateAIAgentCosts($company);
+                
+                // Get AI usage from ai_usage table (tagging, suggestions)
+                $currentMonth = now()->startOfMonth();
+                $aiUsage = \Illuminate\Support\Facades\DB::table('ai_usage')
+                    ->where('tenant_id', $company->id)
+                    ->where('usage_date', '>=', $currentMonth)
+                    ->selectRaw('SUM(call_count) as total_calls, SUM(COALESCE(cost_usd, 0)) as total_cost')
+                    ->first();
+                
+                // Combine AI agent costs (from ai_agent_runs) with ai_usage costs
+                $totalAICost = ($aiCosts['total_cost'] ?? 0) + ($aiUsage->total_cost ?? 0);
+                $totalAICalls = ($aiCosts['runs_count'] ?? 0) + ($aiUsage->total_calls ?? 0);
+                
                 return [
                     'id' => $company->id,
                     'name' => $company->name,
@@ -50,6 +67,14 @@ class CompanyController extends Controller
                     'billing' => [
                         'current_plan' => $currentPlan,
                         'subscription_status' => $subscription ? $subscription->stripe_status : 'none',
+                    ],
+                    'ai_estimates' => [
+                        'current_month_cost' => round($totalAICost, 2),
+                        'current_month_calls' => (int) $totalAICalls,
+                        'agent_runs' => $aiCosts['runs_count'] ?? 0,
+                        'agent_cost' => round($aiCosts['total_cost'] ?? 0, 2),
+                        'usage_calls' => (int) ($aiUsage->total_calls ?? 0),
+                        'usage_cost' => round($aiUsage->total_cost ?? 0, 2),
                     ],
                 ];
             }),

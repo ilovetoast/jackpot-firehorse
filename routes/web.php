@@ -230,6 +230,11 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
             
+            // AI metadata generation (Phase I)
+            Route::post('/assets/{asset}/system-metadata/regenerate', [\App\Http\Controllers\AssetController::class, 'regenerateSystemMetadata'])->name('assets.system-metadata.regenerate');
+            Route::post('/assets/{asset}/ai-metadata/regenerate', [\App\Http\Controllers\AssetController::class, 'regenerateAiMetadata'])->name('assets.ai-metadata.regenerate');
+            Route::post('/assets/{asset}/ai-tagging/regenerate', [\App\Http\Controllers\AssetController::class, 'regenerateAiTagging'])->name('assets.ai-tagging.regenerate');
+            
             // Asset metadata AI suggestions (Phase 2 – Step 5.5)
             Route::get('/assets/{asset}/metadata/ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAiSuggestions'])->name('assets.metadata.ai-suggestions');
             Route::post('/assets/{asset}/metadata/ai-suggestions/{suggestionId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveSuggestion'])->name('assets.metadata.ai-suggestions.approve');
@@ -240,6 +245,11 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/metadata/suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getSuggestions'])->name('assets.metadata.suggestions');
             Route::post('/assets/{asset}/metadata/suggestions/{fieldKey}/accept', [\App\Http\Controllers\AssetMetadataController::class, 'acceptSuggestion'])->name('assets.metadata.suggestions.accept');
             Route::post('/assets/{asset}/metadata/suggestions/{fieldKey}/dismiss', [\App\Http\Controllers\AssetMetadataController::class, 'dismissSuggestion'])->name('assets.metadata.suggestions.dismiss');
+            
+            // AI Tag Suggestions (from asset_tag_candidates table)
+            Route::get('/assets/{asset}/tags/suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getTagSuggestions'])->name('assets.tags.suggestions');
+            Route::post('/assets/{asset}/tags/suggestions/{candidateId}/accept', [\App\Http\Controllers\AssetMetadataController::class, 'acceptTagSuggestion'])->name('assets.tags.suggestions.accept');
+            Route::post('/assets/{asset}/tags/suggestions/{candidateId}/dismiss', [\App\Http\Controllers\AssetMetadataController::class, 'dismissTagSuggestion'])->name('assets.tags.suggestions.dismiss');
             
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');

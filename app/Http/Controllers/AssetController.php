@@ -466,7 +466,30 @@ class AssetController extends Controller
                 // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
                 // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
                 
+                // Get metadata - refresh only if we suspect it might be stale
+                // (e.g., if thumbnail_status is completed but metadata seems incomplete)
+                // For most cases, the asset from the query is fresh enough
                 $metadata = $asset->metadata ?? [];
+                
+                // Only refresh if we're looking for dimensions and they're missing
+                // This avoids expensive refresh() calls for every asset in the grid
+                $needsRefresh = false;
+                if ($asset->mime_type && str_starts_with($asset->mime_type, 'image/')) {
+                    // For images, check if dimensions should exist but are missing
+                    $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                        ? $asset->thumbnail_status->value 
+                        : ($asset->thumbnail_status ?? 'pending');
+                    
+                    // If thumbnails are completed, dimensions should be available
+                    if ($thumbnailStatus === 'completed' && !isset($metadata['image_width']) && !isset($metadata['image_height'])) {
+                        $needsRefresh = true;
+                    }
+                }
+                
+                if ($needsRefresh) {
+                    $asset->refresh();
+                    $metadata = $asset->metadata ?? [];
+                }
                 
                 // Phase G.4: Merge asset_metadata table rows into metadata.fields structure
                 // This ensures automated fields (orientation, resolution_class, etc.) appear in the UI
@@ -538,6 +561,40 @@ class AssetController extends Controller
                     }
                 }
 
+                // Extract source dimensions if available
+                // Dimensions are stored in metadata during thumbnail generation (image_width, image_height)
+                // These are the actual pixel dimensions of the original source image
+                $sourceDimensions = null;
+                
+                // Check if dimensions are stored in metadata (from thumbnail generation)
+                // CRITICAL: Check both direct metadata and ensure asset is fresh from database
+                if (isset($metadata['image_width']) && isset($metadata['image_height'])) {
+                    $sourceDimensions = [
+                        'width' => (int) $metadata['image_width'],
+                        'height' => (int) $metadata['image_height'],
+                    ];
+                    
+                    // Debug: Log when dimensions are found (temporary - can be removed later)
+                    if (config('app.debug', false)) {
+                        Log::debug('[AssetController] Dimensions found in metadata', [
+                            'asset_id' => $asset->id,
+                            'source_dimensions' => $sourceDimensions,
+                        ]);
+                    }
+                } else {
+                    // Debug: Log if dimensions are missing (temporary - can be removed later)
+                    if (config('app.debug', false) && $asset->mime_type && str_starts_with($asset->mime_type, 'image/')) {
+                        Log::debug('[AssetController] Dimensions missing in metadata', [
+                            'asset_id' => $asset->id,
+                            'metadata_keys' => array_keys($metadata ?? []),
+                            'has_image_width' => isset($metadata['image_width']),
+                            'has_image_height' => isset($metadata['image_height']),
+                            'mime_type' => $asset->mime_type,
+                            'metadata_sample' => array_slice($metadata ?? [], 0, 10, true), // First 10 keys for debugging
+                        ]);
+                    }
+                }
+
                 return [
                     'id' => $asset->id,
                     'title' => $title,
@@ -553,6 +610,7 @@ class AssetController extends Controller
                         'name' => $categoryName,
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
+                    'source_dimensions' => $sourceDimensions, // Source image dimensions (width x height) if available
                     // Thumbnail URLs - distinct paths prevent cache confusion
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
                     'final_thumbnail_url' => $finalThumbnailUrl, // Final thumbnail (permanent, full-quality, only when completed)
@@ -1346,6 +1404,199 @@ class AssetController extends Controller
                 'message' => 'Failed to generate preview URL: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Regenerate AI metadata for an asset.
+     *
+     * POST /assets/{asset}/ai-metadata/regenerate
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function regenerateAiMetadata(Asset $asset): JsonResponse
+    {
+        $user = auth()->user();
+        $tenant = app('tenant');
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'error' => 'Asset not found',
+            ], 404);
+        }
+
+        // Permission check
+        if (!$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+            // Check if user is owner/admin (bypass permission)
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            if (!$isTenantOwnerOrAdmin) {
+                return response()->json([
+                    'error' => 'You do not have permission to regenerate AI metadata.',
+                ], 403);
+            }
+        }
+
+        // Check plan limits
+        $usageService = app(\App\Services\AiUsageService::class);
+        try {
+            $usageService->checkUsage($tenant, 'tagging', 1);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return response()->json([
+                'error' => 'Plan limit exceeded',
+                'message' => $e->getMessage(),
+            ], 403);
+        }
+
+        // **CRITICAL:** Manual regenerate does NOT clear dismissals
+        // The _ai_suggestions_dismissed array must persist across regenerations
+        // This prevents users from seeing previously dismissed suggestions again
+
+        // Clear previous status/error flags to allow fresh regeneration
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['_ai_metadata_generated_at'], $metadata['_ai_metadata_status']);
+        unset($metadata['_ai_metadata_skipped'], $metadata['_ai_metadata_skip_reason'], $metadata['_ai_metadata_skipped_at']);
+        unset($metadata['_ai_metadata_failed'], $metadata['_ai_metadata_error'], $metadata['_ai_metadata_failed_at']);
+        $asset->update(['metadata' => $metadata]);
+
+        // Dispatch job with manual rerun flag (will update _ai_metadata_generated_at timestamp)
+        \App\Jobs\AiMetadataGenerationJob::dispatch($asset->id, isManualRerun: true);
+
+        // Log activity
+        \App\Services\ActivityRecorder::logAsset($asset, \App\Enums\EventType::ASSET_AI_METADATA_REGENERATED, [
+            'triggered_by' => $user->id,
+            'triggered_at' => now()->toIso8601String(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'AI metadata regeneration queued',
+        ]);
+    }
+
+    /**
+     * Regenerate system metadata for an asset.
+     *
+     * POST /assets/{asset}/system-metadata/regenerate
+     *
+     * System metadata = orientation, color_space, resolution_class (automatically computed)
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function regenerateSystemMetadata(Asset $asset): JsonResponse
+    {
+        $user = auth()->user();
+        $tenant = app('tenant');
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'error' => 'Asset not found',
+            ], 404);
+        }
+
+        // Permission check - same as AI metadata
+        if (!$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            if (!$isTenantOwnerOrAdmin) {
+                return response()->json([
+                    'error' => 'You do not have permission to regenerate system metadata.',
+                ], 403);
+            }
+        }
+
+        // Clear completion flags to allow regeneration
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['computed_metadata_completed'], $metadata['computed_metadata_completed_at']);
+        $asset->update(['metadata' => $metadata]);
+
+        // Dispatch both jobs that handle system metadata
+        \App\Jobs\ComputedMetadataJob::dispatch($asset->id);
+        \App\Jobs\PopulateAutomaticMetadataJob::dispatch($asset->id);
+
+        // Log activity
+        \App\Services\ActivityRecorder::logAsset($asset, \App\Enums\EventType::ASSET_SYSTEM_METADATA_REGENERATED, [
+            'triggered_by' => $user->id,
+            'triggered_at' => now()->toIso8601String(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'System metadata regeneration queued',
+        ]);
+    }
+
+    /**
+     * Regenerate AI tagging for an asset.
+     *
+     * POST /assets/{asset}/ai-tagging/regenerate
+     *
+     * AI tagging = general/freeform tags (AITaggingJob)
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function regenerateAiTagging(Asset $asset): JsonResponse
+    {
+        $user = auth()->user();
+        $tenant = app('tenant');
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'error' => 'Asset not found',
+            ], 404);
+        }
+
+        // Permission check
+        if (!$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            if (!$isTenantOwnerOrAdmin) {
+                return response()->json([
+                    'error' => 'You do not have permission to regenerate AI tagging.',
+                ], 403);
+            }
+        }
+
+        // Check plan limits
+        $usageService = app(\App\Services\AiUsageService::class);
+        try {
+            $usageService->checkUsage($tenant, 'tagging', 1);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return response()->json([
+                'error' => 'Plan limit exceeded',
+                'message' => $e->getMessage(),
+            ], 403);
+        }
+
+        // Clear completion flags and status to allow regeneration
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['ai_tagging_completed'], $metadata['ai_tagging_completed_at']);
+        unset($metadata['_ai_tagging_status']);
+        unset($metadata['_ai_tagging_skipped'], $metadata['_ai_tagging_skip_reason'], $metadata['_ai_tagging_skipped_at']);
+        unset($metadata['_ai_tagging_failed'], $metadata['_ai_tagging_error'], $metadata['_ai_tagging_failed_at']);
+        $asset->update(['metadata' => $metadata]);
+
+        // Dispatch AI tagging job
+        \App\Jobs\AITaggingJob::dispatch($asset->id);
+
+        // Log activity
+        \App\Services\ActivityRecorder::logAsset($asset, \App\Enums\EventType::ASSET_AI_TAGGING_REGENERATED, [
+            'triggered_by' => $user->id,
+            'triggered_at' => now()->toIso8601String(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'AI tagging regeneration queued',
+        ]);
     }
 
     /**

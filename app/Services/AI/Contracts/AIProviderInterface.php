@@ -65,4 +65,27 @@ interface AIProviderInterface
      * @return bool True if the model is available
      */
     public function isModelAvailable(string $model): bool;
+
+    /**
+     * Analyze an image with a prompt using vision capabilities.
+     *
+     * This method is used for image analysis tasks like metadata generation.
+     * The provider handles image URL resolution, API authentication, and response parsing.
+     *
+     * @param string $imageUrl URL to the image (must be accessible by the provider)
+     * @param string $prompt Text prompt describing what to analyze
+     * @param array $options Additional options:
+     *   - model: Model name to use (overrides default)
+     *   - max_tokens: Maximum tokens in response (default: 1000)
+     *   - response_format: Response format (e.g., ['type' => 'json_object'])
+     *   - other provider-specific options
+     * @return array Response array with:
+     *   - text: Generated text response (typically JSON string)
+     *   - tokens_in: Number of input tokens used
+     *   - tokens_out: Number of output tokens used
+     *   - model: Actual model name used
+     *   - metadata: Provider-specific metadata
+     * @throws \Exception If the API call fails
+     */
+    public function analyzeImage(string $imageUrl, string $prompt, array $options = []): array;
 }

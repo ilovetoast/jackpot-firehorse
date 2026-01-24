@@ -87,6 +87,25 @@ Goals:
 
 ---
 
+## Related Phases
+
+### Phase I: AI Metadata Generation
+
+**Status:** 📋 PLANNING
+
+AI metadata generation for `ai_eligible` fields is planned in **Phase I**. See `PHASE_I_AI_METADATA_GENERATION.md` for complete design specification.
+
+**Key Points:**
+- Only processes fields with `ai_eligible = true`
+- Uses OpenAI Vision API (GPT-4o/GPT-4o-mini)
+- Respects plan limits (`max_ai_tagging_per_month`)
+- Creates candidates in `asset_metadata_candidates` table
+- Flows into existing `AiMetadataSuggestionJob` for suggestion generation
+
+**Current State:** AI metadata generation is NOT yet implemented. The `ai_eligible` flag is configured, but no AI analysis occurs. This phase will implement the missing AI generation layer.
+
+---
+
 ## Implementation Notes
 
 ### Permission System (Updated: January 2025)

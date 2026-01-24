@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Asset Model
@@ -350,5 +351,85 @@ class Asset extends Model
         }
 
         return $metadata['thumbnails'][$style]['path'];
+    }
+
+    /**
+     * Get the medium thumbnail URL for AI image analysis.
+     *
+     * This method checks both temp and final thumbnail paths to support
+     * AI metadata generation during asset processing (before promotion).
+     *
+     * CRITICAL: This method checks:
+     * 1. Final thumbnail path (after asset promotion)
+     * 2. Temp thumbnail path (during processing, before promotion)
+     *
+     * Returns a signed S3 URL that can be accessed by OpenAI's API.
+     * OpenAI requires publicly accessible URLs, so we generate a signed S3 URL.
+     *
+     * @return string|null Signed S3 URL to medium thumbnail, or null if not available
+     */
+    public function getMediumThumbnailUrlAttribute(): ?string
+    {
+        $metadata = $this->metadata ?? [];
+        
+        // Check if final thumbnail exists (after promotion)
+        if (isset($metadata['thumbnails']['medium']['path'])) {
+            $thumbnailPath = $metadata['thumbnails']['medium']['path'];
+            
+            // Check if thumbnail is in final location (assets/ path)
+            if (str_starts_with($thumbnailPath, 'assets/')) {
+                // Generate signed S3 URL for OpenAI to access
+                try {
+                    return \Illuminate\Support\Facades\Storage::disk('s3')
+                        ->temporaryUrl($thumbnailPath, now()->addHours(1));
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::error('[Asset] Failed to generate signed S3 URL for thumbnail', [
+                        'asset_id' => $this->id,
+                        'thumbnail_path' => $thumbnailPath,
+                        'error' => $e->getMessage(),
+                    ]);
+                    return null;
+                }
+            }
+            
+            // Check if thumbnail is in temp location (temp/uploads/ path)
+            if (str_starts_with($thumbnailPath, 'temp/uploads/')) {
+                // Temp thumbnail - check if file exists by verifying thumbnail_status
+                // If status is COMPLETED, we can use the temp path
+                if ($this->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+                    // Generate signed S3 URL for temp thumbnail
+                    try {
+                        return \Illuminate\Support\Facades\Storage::disk('s3')
+                            ->temporaryUrl($thumbnailPath, now()->addHours(1));
+                    } catch (\Exception $e) {
+                        \Illuminate\Support\Facades\Log::error('[Asset] Failed to generate signed S3 URL for temp thumbnail', [
+                            'asset_id' => $this->id,
+                            'thumbnail_path' => $thumbnailPath,
+                            'error' => $e->getMessage(),
+                        ]);
+                        return null;
+                    }
+                }
+            }
+        }
+        
+        // Check preview thumbnail as fallback (low quality, but available during processing)
+        if (isset($metadata['preview_thumbnails']['preview']['path'])) {
+            $previewPath = $metadata['preview_thumbnails']['preview']['path'];
+            // Generate signed S3 URL for preview thumbnail
+            try {
+                return Storage::disk('s3')
+                    ->temporaryUrl($previewPath, now()->addHours(1));
+            } catch (\Exception $e) {
+                Log::error('[Asset] Failed to generate signed S3 URL for preview thumbnail', [
+                    'asset_id' => $this->id,
+                    'thumbnail_path' => $previewPath,
+                    'error' => $e->getMessage(),
+                ]);
+                return null;
+            }
+        }
+        
+        return null;
     }
 }

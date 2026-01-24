@@ -87,19 +87,21 @@ export default function ThumbnailPreview({
     // Track previous asset ID to detect asset changes
     const prevAssetIdRef = useRef(asset?.id)
     
-    // In drawer context, update URL when asset or version changes
+    // Update URL when asset changes (drawer context) OR when thumbnail becomes available (grid context with polling)
     useEffect(() => {
-        if (isDrawerContext && asset) {
+        if (asset) {
             const newFinal = asset?.final_thumbnail_url
             const newPreview = asset?.preview_thumbnail_url
             const newUrl = newFinal || newPreview || null
             const assetIdChanged = prevAssetIdRef.current !== asset?.id
             
-            // Update if:
-            // 1. Asset ID changed (always reset for new asset, even if no thumbnail)
-            // 2. URL changed (thumbnail became available or changed)
-            // 3. URL was removed (switching from asset with thumb to one without)
-            if (assetIdChanged || (newUrl && newUrl !== lockedUrl) || (!newUrl && lockedUrl && prevAssetIdRef.current === asset?.id)) {
+            // In drawer context: always allow updates
+            // In grid context: only update if thumbnail becomes available (was null, now has URL)
+            const shouldUpdate = isDrawerContext 
+                ? (assetIdChanged || (newUrl && newUrl !== lockedUrl) || (!newUrl && lockedUrl && prevAssetIdRef.current === asset?.id))
+                : (assetIdChanged || (!lockedUrl && newUrl)) // Grid: only update if we didn't have a URL and now we do
+            
+            if (shouldUpdate) {
                 setLockedUrl(newUrl)
                 if (newFinal) {
                     setLockedType('final')

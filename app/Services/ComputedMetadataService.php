@@ -52,14 +52,29 @@ class ComputedMetadataService
         }
 
         // Compute values for each field
+        // CRITICAL: Orientation is computed from original file dimensions (after EXIF normalization)
         $orientation = $this->computeOrientation($imageData['width'], $imageData['height']);
+        
+        // TEMPORARY DEBUG LOGGING (dev only - can be removed later)
+        if (config('app.debug', false) && $orientation) {
+            Log::debug('[ComputedMetadataService] Final orientation computed', [
+                'asset_id' => $asset->id,
+                'width' => $imageData['width'],
+                'height' => $imageData['height'],
+                'orientation' => $orientation,
+                'ratio' => $imageData['height'] > 0 ? round($imageData['width'] / $imageData['height'], 4) : 0,
+            ]);
+        }
+        
         $colorSpace = $this->computeColorSpace($imageData['exif'] ?? []);
         $resolutionClass = $this->computeResolutionClass($imageData['width'], $imageData['height']);
+        $dimensions = $this->computeDimensions($imageData['width'], $imageData['height']);
         
         $computedValues = [
             'orientation' => $orientation,
             'color_space' => $colorSpace,
             'resolution_class' => $resolutionClass,
+            'dimensions' => $dimensions,
         ];
 
         // Persist computed metadata
@@ -90,13 +105,16 @@ class ComputedMetadataService
     /**
      * Extract image dimensions and EXIF data.
      *
+     * CRITICAL: This method MUST use the original image file, NOT thumbnails or cached metadata.
+     * Dimensions are computed from getimagesize() on the actual original file downloaded from S3.
+     *
      * @param Asset $asset
      * @return array|null Array with 'width', 'height', 'exif' keys, or null on failure
      */
     protected function extractImageData(Asset $asset): ?array
     {
         try {
-            // Get file path from S3
+            // CRITICAL: Ensure we're using the original file path, not thumbnails
             $bucket = $asset->storageBucket;
             if (!$bucket || !$asset->storage_root_path) {
                 Log::warning('[ComputedMetadataService] Missing storage info', [
@@ -105,41 +123,78 @@ class ComputedMetadataService
                 return null;
             }
 
-            // Download file to temporary location
-            $tempPath = $this->downloadFromS3($bucket, $asset->storage_root_path);
-            if (!file_exists($tempPath)) {
-                Log::warning('[ComputedMetadataService] Could not download file', [
+            // Verify storage_root_path is the original file (not a thumbnail)
+            // Original files should not contain 'thumbnail' or 'thumb' in the path
+            $originalPath = $asset->storage_root_path;
+            if (stripos($originalPath, 'thumbnail') !== false || stripos($originalPath, 'thumb') !== false) {
+                Log::error('[ComputedMetadataService] CRITICAL: storage_root_path appears to be a thumbnail, not original', [
                     'asset_id' => $asset->id,
-                    'storage_path' => $asset->storage_root_path,
+                    'storage_path' => $originalPath,
+                ]);
+                // Still proceed but log the issue - this should never happen
+            }
+
+            // Download ORIGINAL file to temporary location
+            $tempPath = $this->downloadFromS3($bucket, $originalPath);
+            if (!file_exists($tempPath)) {
+                Log::warning('[ComputedMetadataService] Could not download original file', [
+                    'asset_id' => $asset->id,
+                    'storage_path' => $originalPath,
                 ]);
                 return null;
             }
 
-            // Get image dimensions
+            // CRITICAL: Get dimensions from ORIGINAL image file using getimagesize()
+            // This is the ONLY authoritative source for pixel dimensions
             $imageInfo = @getimagesize($tempPath);
             if (!$imageInfo || !isset($imageInfo[0], $imageInfo[1])) {
-                Log::warning('[ComputedMetadataService] Could not read image dimensions', [
+                Log::warning('[ComputedMetadataService] Could not read image dimensions from original file', [
                     'asset_id' => $asset->id,
+                    'temp_path' => $tempPath,
                 ]);
                 @unlink($tempPath);
                 return null;
             }
 
-            $storedWidth = $imageInfo[0];
-            $storedHeight = $imageInfo[1];
+            // getimagesize() returns [width, height, type, ...]
+            // These are the ACTUAL pixel dimensions of the stored image file
+            $storedWidth = (int) $imageInfo[0];
+            $storedHeight = (int) $imageInfo[1];
 
-            // Extract EXIF data (if available)
+            // Extract EXIF data (if available) - used ONLY for orientation correction
             $exif = [];
+            $exifOrientation = null;
             if (function_exists('exif_read_data') && in_array(strtolower(pathinfo($tempPath, PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'tiff', 'tif'])) {
                 $exifData = @exif_read_data($tempPath);
                 if ($exifData !== false) {
                     $exif = $exifData;
+                    // Extract orientation from EXIF (if present)
+                    if (isset($exif['Orientation'])) {
+                        $exifOrientation = (int) $exif['Orientation'];
+                    } elseif (isset($exif['IFD0']['Orientation'])) {
+                        $exifOrientation = (int) $exif['IFD0']['Orientation'];
+                    }
                 }
             }
 
-            // Normalize dimensions based on EXIF orientation
+            // Normalize dimensions based on EXIF orientation (if present)
             // EXIF orientation tells us how the image should be displayed, not how it's stored
+            // Only swap width/height for orientations 6 and 8 (90° rotations)
             [$width, $height] = $this->normalizeDimensionsFromExif($storedWidth, $storedHeight, $exif);
+
+            // TEMPORARY DEBUG LOGGING (dev only - can be removed later)
+            if (config('app.debug', false)) {
+                Log::debug('[ComputedMetadataService] Orientation computation debug', [
+                    'asset_id' => $asset->id,
+                    'original_path' => $originalPath,
+                    'stored_width' => $storedWidth,
+                    'stored_height' => $storedHeight,
+                    'exif_orientation' => $exifOrientation,
+                    'normalized_width' => $width,
+                    'normalized_height' => $height,
+                    'aspect_ratio' => $height > 0 ? round($width / $height, 4) : 0,
+                ]);
+            }
 
             // Clean up temp file
             @unlink($tempPath);
@@ -153,6 +208,7 @@ class ComputedMetadataService
             Log::error('[ComputedMetadataService] Error extracting image data', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return null;
         }
@@ -262,20 +318,28 @@ class ComputedMetadataService
     /**
      * Normalize dimensions based on EXIF orientation.
      *
-     * EXIF orientation values:
-     * 1 = Normal (0°)
-     * 3 = 180° rotation
-     * 6 = 90° CW rotation (swap width/height)
-     * 8 = 90° CCW rotation (swap width/height)
+     * CRITICAL: EXIF orientation is used ONLY to swap width/height when the image
+     * is stored rotated (orientations 6 and 8). We NEVER use EXIF width/height directly.
      *
-     * @param int $storedWidth Width from getimagesize()
-     * @param int $storedHeight Height from getimagesize()
+     * EXIF orientation values:
+     * 1 = Normal (0°) - no swap
+     * 2 = Horizontal flip - no swap
+     * 3 = 180° rotation - no swap
+     * 4 = Vertical flip - no swap
+     * 5 = 90° CW + horizontal flip - no swap (flip doesn't affect dimensions)
+     * 6 = 90° CW rotation - SWAP width/height
+     * 7 = 90° CCW + horizontal flip - no swap (flip doesn't affect dimensions)
+     * 8 = 90° CCW rotation - SWAP width/height
+     *
+     * @param int $storedWidth Width from getimagesize() on original file
+     * @param int $storedHeight Height from getimagesize() on original file
      * @param array $exif EXIF data array
      * @return array{0: int, 1: int} [width, height] after orientation normalization
      */
     protected function normalizeDimensionsFromExif(int $storedWidth, int $storedHeight, array $exif): array
     {
         // Get EXIF orientation (if available)
+        // EXIF orientation is SECONDARY - we use it only to correct for stored rotation
         $orientation = null;
         if (isset($exif['Orientation'])) {
             $orientation = (int) $exif['Orientation'];
@@ -283,50 +347,63 @@ class ComputedMetadataService
             $orientation = (int) $exif['IFD0']['Orientation'];
         }
 
-        // If no EXIF orientation or orientation is 1 (normal), return stored dimensions
+        // If no EXIF orientation or orientation is 1 (normal), return stored dimensions as-is
+        // These are the authoritative pixel dimensions from getimagesize()
         if ($orientation === null || $orientation === 1) {
             return [$storedWidth, $storedHeight];
         }
 
-        // Orientations 6 and 8 require swapping width/height
-        // These represent 90° rotations where the image is stored rotated
+        // ONLY orientations 6 and 8 require swapping width/height
+        // These represent 90° rotations where the image is stored rotated in the file
+        // The pixel data is rotated, so we swap dimensions to get the visual dimensions
         if ($orientation === 6 || $orientation === 8) {
             return [$storedHeight, $storedWidth];
         }
 
-        // Orientations 2, 3, 4, 5, 7 don't require dimension swap
-        // (they're flips or 180° rotations)
+        // All other orientations (2, 3, 4, 5, 7) don't require dimension swap
+        // They're flips or 180° rotations that don't change the aspect ratio
         return [$storedWidth, $storedHeight];
     }
 
     /**
      * Compute orientation from dimensions using ratio-based classification.
      *
-     * Uses aspect ratio to determine orientation, allowing for near-square images:
-     * - ratio >= 0.95 AND ratio <= 1.05 → square
-     * - ratio > 1.05 → landscape
-     * - ratio < 0.95 → portrait
+     * CRITICAL: This uses the normalized dimensions (after EXIF correction) from the
+     * original image file. The ratio-based approach avoids floating-point precision
+     * issues and handles near-square images correctly.
      *
-     * @param int $width Visual width after EXIF normalization
-     * @param int $height Visual height after EXIF normalization
+     * Classification rules:
+     * - ratio >= 0.95 AND ratio <= 1.05 → square (allows for near-square images)
+     * - ratio > 1.05 → landscape (wider than tall)
+     * - ratio < 0.95 → portrait (taller than wide)
+     *
+     * @param int $width Visual width after EXIF normalization (from original file)
+     * @param int $height Visual height after EXIF normalization (from original file)
      * @return string|null 'landscape', 'portrait', 'square', or null if cannot determine
      */
     protected function computeOrientation(int $width, int $height): ?string
     {
         if ($width === 0 || $height === 0) {
+            Log::warning('[ComputedMetadataService] Cannot compute orientation - zero dimension', [
+                'width' => $width,
+                'height' => $height,
+            ]);
             return null;
         }
 
-        // Calculate aspect ratio
-        $ratio = $width / $height;
+        // Calculate aspect ratio (width / height)
+        // Use float for precision, but ratio-based thresholds avoid floating-point equality issues
+        $ratio = (float) $width / (float) $height;
 
         // Ratio-based classification (allows for near-square images)
-        // 0.95-1.05 range accounts for rounding and slight aspect variations
+        // 0.95-1.05 range accounts for rounding, slight aspect variations, and resize artifacts
+        // This prevents false "square" classifications for clearly non-square images
         if ($ratio >= 0.95 && $ratio <= 1.05) {
             return 'square';
         } elseif ($ratio > 1.05) {
             return 'landscape';
         } else {
+            // ratio < 0.95
             return 'portrait';
         }
     }
@@ -398,6 +475,22 @@ class ComputedMetadataService
         } else {
             return 'ultra';
         }
+    }
+
+    /**
+     * Compute dimensions string from pixel dimensions.
+     *
+     * @param int $width
+     * @param int $height
+     * @return string|null Format: "widthxheight" (e.g., "800x534"), or null if cannot determine
+     */
+    protected function computeDimensions(int $width, int $height): ?string
+    {
+        if ($width === 0 || $height === 0) {
+            return null;
+        }
+
+        return "{$width}x{$height}";
     }
 
     /**

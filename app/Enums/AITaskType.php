@@ -31,8 +31,9 @@ class AITaskType
     public const PERFORMANCE_ANALYSIS = 'performance_analysis';
     public const SYSTEM_RELIABILITY_ANALYSIS = 'system_reliability_analysis';
     
-    // Asset management tasks (future)
+    // Asset management tasks
     public const ASSET_TAG_SUGGESTION = 'asset_tag_suggestion';
+    public const ASSET_METADATA_GENERATION = 'asset_metadata_generation';
     
     // Alert and monitoring tasks
     public const ALERT_SUMMARY = 'alert_summary';
@@ -54,6 +55,7 @@ class AITaskType
             self::PERFORMANCE_ANALYSIS,
             self::SYSTEM_RELIABILITY_ANALYSIS,
             self::ASSET_TAG_SUGGESTION,
+            self::ASSET_METADATA_GENERATION,
             self::ALERT_SUMMARY,
         ];
     }
@@ -86,7 +88,7 @@ class AITaskType
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
             'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
-            'asset' => [self::ASSET_TAG_SUGGESTION],
+            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION],
         ];
         
         return $mapping[$category] ?? [];

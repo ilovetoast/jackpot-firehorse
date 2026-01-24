@@ -43,9 +43,16 @@ const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
  * Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
  */
 export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryId = null }) {
-    // HARD STABILIZATION: Disable polling entirely
-    // No polling. No background updates. No thrashing.
-    return
+    // Re-enabled: Grid polling for fade-in thumbnails (same as drawer)
+    // Async updates only - no view refreshes
+
+    // Initialize refs
+    const assetsRef = useRef(assets)
+    const onAssetUpdateRef = useRef(onAssetUpdate)
+    const isActiveRef = useRef(false)
+    const pollAttemptRef = useRef(0)
+    const prevCategoryIdRef = useRef(selectedCategoryId)
+    const timeoutIdRef = useRef(null)
 
     // Keep refs in sync
     useEffect(() => {

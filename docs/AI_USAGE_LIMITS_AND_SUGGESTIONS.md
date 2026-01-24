@@ -400,6 +400,16 @@ $monthEnd = now()->endOfMonth()->toDateString();     // e.g., '2025-01-31'
 
 ## Future Considerations
 
+### Phase I: AI Metadata Generation
+
+**Planned Extension:** AI metadata generation will extend this system with:
+- Cost tracking per operation (beyond call counts)
+- Token usage tracking (input/output tokens)
+- Model attribution (which model was used)
+- Extended `ai_usage_costs` table for detailed cost breakdown
+
+See `PHASE_I_AI_METADATA_GENERATION.md` for complete design.
+
 ### Potential Extensions (Future Phases)
 
 **Allowed (non-breaking):**

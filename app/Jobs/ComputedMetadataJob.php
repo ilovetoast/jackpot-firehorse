@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\EventType;
 use App\Models\Asset;
+use App\Services\ActivityRecorder;
 use App\Services\AssetProcessingFailureService;
 use App\Services\ComputedMetadataService;
 use Illuminate\Bus\Queueable;
@@ -65,15 +67,21 @@ class ComputedMetadataJob implements ShouldQueue
         }
 
         try {
-            // Compute metadata
+            // Compute metadata (System Metadata: orientation, color_space, resolution_class)
             $service->computeMetadata($asset);
 
             // Mark as completed in metadata
             $metadata['computed_metadata_completed'] = true;
             $metadata['computed_metadata_completed_at'] = now()->toIso8601String();
             $asset->update(['metadata' => $metadata]);
+            
+            // Log activity event (System Metadata Generation)
+            ActivityRecorder::logAsset($asset, EventType::ASSET_SYSTEM_METADATA_GENERATED, [
+                'job' => 'ComputedMetadataJob',
+                'fields' => ['orientation', 'color_space', 'resolution_class'],
+            ]);
         } catch (\Throwable $e) {
-            Log::error('[ComputedMetadataJob] Failed to compute metadata', [
+            Log::error('[ComputedMetadataJob] System metadata generation failed', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),

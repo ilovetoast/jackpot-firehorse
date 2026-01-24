@@ -290,6 +290,43 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 
 ---
 
+### 10. AI Metadata Generation (Phase I)
+
+**Status:** 📋 PLANNING
+
+**Phase Documents:**
+- `PHASE_I_AI_METADATA_GENERATION.md` — AI metadata generation system design (PLANNING)
+
+**Key Components (Planned):**
+- `AiMetadataGenerationService` — Core AI analysis service
+- `AiMetadataGenerationJob` — Background job for AI processing
+- OpenAI Vision API integration (GPT-4o/GPT-4o-mini)
+- Cost tracking and attribution
+- Admin rerun functionality
+- Activity logging
+
+**Scope:**
+- Only processes fields with `ai_eligible = true`
+- Respects plan limits (hard stops)
+- Tracks costs per tenant
+- Provides admin rerun capability
+- Never blocks uploads on failure
+
+**Dependencies:**
+- Phase C (Metadata Governance) — Field definitions and eligibility
+- AI Usage Limits System — Plan limit enforcement
+- Thumbnail Pipeline — Medium thumbnails required
+
+**Current State:** Design complete, ready for implementation.
+
+**Future Enhancements:**
+- Vector database integration for similarity search
+- Multi-provider support (Gemini, Claude)
+- Learning from user feedback
+- Admin configuration UI
+
+---
+
 ### 10. Future Design Specifications
 
 **Status:** 📋 FUTURE (Design Only)
@@ -543,6 +580,7 @@ This is acceptable. This index reflects documented phases only.
 - ✅ Metadata Governance: COMPLETE (admin)
 - ✅ Metadata UX: COMPLETE + PAUSED (Phase G, tenant)
 - ✅ AI Usage & Suggestions: LOCKED (usage tracking and suggestion system)
+- 📋 AI Metadata Generation: PLANNING (Phase I)
 - 🔨 Analytics & Observability: IN PROGRESS
 - 🔨 Support & Ticketing: IN PROGRESS
 - 📋 Tenant AI: FUTURE (design only)

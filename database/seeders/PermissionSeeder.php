@@ -45,6 +45,8 @@ class PermissionSeeder extends Seeder
             'metadata.suggestions.view',
             'metadata.suggestions.apply',
             'metadata.suggestions.dismiss',
+            // AI Metadata Generation permissions (Phase I)
+            'assets.ai_metadata.regenerate',
             // Metadata Field Management permissions
             'metadata.fields.manage',
             'metadata.fields.values.manage',
@@ -136,6 +138,7 @@ class PermissionSeeder extends Seeder
                 'tickets.view_tenant',
                 'tickets.view_any',
                 'ai.usage.view', // View AI usage status
+                'assets.ai_metadata.regenerate', // Phase I: AI metadata regeneration
             ]
         ));
 
@@ -152,6 +155,7 @@ class PermissionSeeder extends Seeder
                 'tickets.view_tenant',
                 'tickets.view_any',
                 'ai.usage.view', // View AI usage status
+                'assets.ai_metadata.regenerate', // Phase I: AI metadata regeneration
             ]
         ));
 

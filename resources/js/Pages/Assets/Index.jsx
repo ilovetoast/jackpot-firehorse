@@ -231,27 +231,25 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     //     isPaused: isUploadDialogOpen,
     // })
     
-    // HARD STABILIZATION: Thumbnail polling disabled
-    // NOTE: Thumbnails intentionally do NOT live-update on the grid.
-    // Stability > real-time updates.
-    // Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
-    // const handleThumbnailUpdate = useCallback((updatedAsset) => {
-    //     setLocalAssets(prevAssets => {
-    //         return prevAssets.map(asset => {
-    //             if (asset.id === updatedAsset.id) {
-    //                 // Merge updated asset data
-    //                 return mergeAsset(asset, updatedAsset)
-    //             }
-    //             return asset
-    //         })
-    //     })
-    // }, [])
-    // 
-    // useThumbnailSmartPoll({
-    //     assets: localAssets,
-    //     onAssetUpdate: handleThumbnailUpdate,
-    //     selectedCategoryId,
-    // })
+    // Grid thumbnail polling: Async updates for fade-in (same as drawer)
+    // No view refreshes - only local state updates
+    const handleThumbnailUpdate = useCallback((updatedAsset) => {
+        setLocalAssets(prevAssets => {
+            return prevAssets.map(asset => {
+                if (asset.id === updatedAsset.id) {
+                    // Merge updated asset data (async, no refresh)
+                    return mergeAsset(asset, updatedAsset)
+                }
+                return asset
+            })
+        })
+    }, [])
+    
+    useThumbnailSmartPoll({
+        assets: localAssets,
+        onAssetUpdate: handleThumbnailUpdate,
+        selectedCategoryId,
+    })
     
     // Track drawer animation state to freeze grid layout during animation
     // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow

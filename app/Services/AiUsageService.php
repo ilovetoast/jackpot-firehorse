@@ -99,6 +99,105 @@ class AiUsageService
     }
 
     /**
+     * Track AI usage with cost attribution.
+     *
+     * Extends trackUsage() to also track actual costs, tokens, and model used.
+     * This is used for AI metadata generation where we have detailed cost information.
+     *
+     * @param Tenant $tenant
+     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param int $callCount Number of calls (default: 1)
+     * @param float $costUsd Actual cost in USD
+     * @param int|null $tokensIn Input tokens used
+     * @param int|null $tokensOut Output tokens used
+     * @param string|null $model Model name used
+     * @return void
+     * @throws PlanLimitExceededException If cap would be exceeded
+     */
+    public function trackUsageWithCost(
+        Tenant $tenant,
+        string $feature,
+        int $callCount = 1,
+        float $costUsd = 0.0,
+        ?int $tokensIn = null,
+        ?int $tokensOut = null,
+        ?string $model = null
+    ): void {
+        $today = now()->toDateString();
+
+        // Use transaction to prevent race conditions and enforce hard stop
+        DB::transaction(function () use ($tenant, $feature, $callCount, $costUsd, $tokensIn, $tokensOut, $model, $today) {
+            // Get current month usage (within transaction for accuracy)
+            $monthStart = now()->startOfMonth()->toDateString();
+            $monthEnd = now()->endOfMonth()->toDateString();
+            
+            $currentUsage = (int) DB::table('ai_usage')
+                ->where('tenant_id', $tenant->id)
+                ->where('feature', $feature)
+                ->whereBetween('usage_date', [$monthStart, $monthEnd])
+                ->sum('call_count');
+
+            // Check cap before tracking (hard stop)
+            $cap = $this->getMonthlyCap($tenant, $feature);
+            if ($cap > 0 && ($currentUsage + $callCount) > $cap) {
+                throw new PlanLimitExceededException(
+                    "ai_{$feature}",
+                    $currentUsage,
+                    $cap,
+                    "Monthly AI {$feature} cap exceeded. Current: {$currentUsage}, Cap: {$cap}. Usage resets at the start of next month."
+                );
+            }
+
+            // Use insertOrUpdate pattern for MySQL compatibility
+            $existing = DB::table('ai_usage')
+                ->where('tenant_id', $tenant->id)
+                ->where('feature', $feature)
+                ->where('usage_date', $today)
+                ->lockForUpdate()
+                ->first();
+
+            if ($existing) {
+                // Increment existing count and add cost
+                DB::table('ai_usage')
+                    ->where('id', $existing->id)
+                    ->update([
+                        'call_count' => DB::raw("call_count + {$callCount}"),
+                        'cost_usd' => DB::raw("COALESCE(cost_usd, 0) + {$costUsd}"),
+                        'tokens_in' => DB::raw("COALESCE(tokens_in, 0) + " . ($tokensIn ?? 0)),
+                        'tokens_out' => DB::raw("COALESCE(tokens_out, 0) + " . ($tokensOut ?? 0)),
+                        'model' => $model ?? $existing->model, // Update model if provided
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                // Create new record with cost tracking
+                DB::table('ai_usage')->insert([
+                    'tenant_id' => $tenant->id,
+                    'feature' => $feature,
+                    'usage_date' => $today,
+                    'call_count' => $callCount,
+                    'cost_usd' => $costUsd,
+                    'tokens_in' => $tokensIn,
+                    'tokens_out' => $tokensOut,
+                    'model' => $model,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        });
+
+        Log::debug('[AiUsageService] Tracked AI usage with cost', [
+            'tenant_id' => $tenant->id,
+            'feature' => $feature,
+            'call_count' => $callCount,
+            'cost_usd' => $costUsd,
+            'tokens_in' => $tokensIn,
+            'tokens_out' => $tokensOut,
+            'model' => $model,
+            'date' => $today,
+        ]);
+    }
+
+    /**
      * Get current month's usage for a tenant and feature.
      *
      * @param Tenant $tenant

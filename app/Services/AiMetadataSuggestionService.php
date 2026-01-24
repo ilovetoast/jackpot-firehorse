@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Log;
  * Generates AI metadata suggestions without auto-applying values.
  * Suggestions are ephemeral and stored in asset.metadata['_ai_suggestions'].
  *
+ * This service processes candidates from asset_metadata_candidates table
+ * (created by AiMetadataGenerationJob) and applies strict filtering to create
+ * user-facing suggestions that can be accepted or dismissed.
+ *
  * CRITICAL GUARDRAILS:
  * - DO NOT auto-write suggested values into asset metadata
  * - DO NOT modify Phase H logic
@@ -23,12 +27,23 @@ use Illuminate\Support\Facades\Log;
  * - Below threshold: discard silently
  * - Missing confidence: discard silently
  *
- * Suggestion Rules:
- * - Only for non-system, user-owned fields
- * - Only if field is currently empty
- * - Only from predefined allowed values (no free-text hallucinations)
- * - Only if confidence >= VERY HIGH threshold (0.90+)
- * - Deterministic (same asset + same AI output = same suggestion)
+ * Suggestion Rules (Applied in generateSuggestions):
+ * - Confidence gating: Only >= 0.90 confidence values (meetsConfidenceThreshold)
+ * - Dismissal checks: Skip previously dismissed suggestions (isSuggestionDismissed)
+ * - Permission checks: Only user-editable fields (is_user_editable = true)
+ *   - System fields (scope='system') can be eligible if is_user_editable = true
+ *   - Example: photo_type (system field) can be suggested if configured correctly
+ * - Field eligibility: ai_eligible = true, select/multiselect, has options, not automatic-only
+ * - Category visibility: Field must be enabled for asset's category (not suppressed)
+ * - Field empty check: Only suggest if field has no approved value in asset_metadata
+ * - Value validation: Must match predefined allowed_values exactly
+ *
+ * Usage:
+ * - AiMetadataSuggestionJob reads candidates from asset_metadata_candidates
+ * - Feeds candidates into this service's generateSuggestions() method
+ * - Service applies all filters and returns eligible suggestions
+ * - Suggestions stored in asset.metadata['_ai_suggestions'] for UI display
+ * - Users can accept (creates asset_metadata) or dismiss (records dismissal)
  */
 class AiMetadataSuggestionService
 {
@@ -78,34 +93,63 @@ class AiMetadataSuggestionService
             $confidence = $aiData['confidence'] ?? null;
             $source = $aiData['source'] ?? 'ai';
 
+            Log::debug('[AiMetadataSuggestionService] Processing candidate', [
+                'asset_id' => $asset->id,
+                'field_key' => $fieldKey,
+                'value' => $value,
+                'confidence' => $confidence,
+            ]);
+
             // Rule 1: Strict confidence gating
             // - Missing confidence: discard silently
             // - Below threshold (0.90): discard silently
             // - Only >= 0.90 confidence values are suggested
             if (!$this->meetsConfidenceThreshold($confidence, $minConfidence)) {
-                // Discard silently - no logging, no error, just skip
+                Log::debug('[AiMetadataSuggestionService] Rejected: confidence threshold', [
+                    'asset_id' => $asset->id,
+                    'field_key' => $fieldKey,
+                    'confidence' => $confidence,
+                    'min_confidence' => $minConfidence,
+                ]);
                 continue;
             }
 
             // Rule 2: Only for eligible fields (non-system, user-owned, empty)
             if (!$this->isFieldEligible($asset, $fieldKey)) {
+                Log::debug('[AiMetadataSuggestionService] Rejected: field not eligible', [
+                    'asset_id' => $asset->id,
+                    'field_key' => $fieldKey,
+                ]);
                 continue;
             }
 
             // Rule 3: Only from predefined allowed values
             if (!$this->isValueAllowed($fieldKey, $value)) {
+                Log::debug('[AiMetadataSuggestionService] Rejected: value not allowed', [
+                    'asset_id' => $asset->id,
+                    'field_key' => $fieldKey,
+                    'value' => $value,
+                ]);
                 continue;
             }
 
             // Rule 4: Only if field is currently empty
             if (!$this->isFieldEmpty($asset, $fieldKey)) {
+                Log::debug('[AiMetadataSuggestionService] Rejected: field not empty', [
+                    'asset_id' => $asset->id,
+                    'field_key' => $fieldKey,
+                ]);
                 continue;
             }
 
             // Rule 5: Check if this suggestion has been dismissed
             // Dismissed suggestions never reappear (unless value differs)
             if ($this->isSuggestionDismissed($asset, $fieldKey, $value)) {
-                // This exact field+value combination was dismissed - skip
+                Log::debug('[AiMetadataSuggestionService] Rejected: suggestion dismissed', [
+                    'asset_id' => $asset->id,
+                    'field_key' => $fieldKey,
+                    'value' => $value,
+                ]);
                 continue;
             }
 
@@ -116,6 +160,13 @@ class AiMetadataSuggestionService
                 'source' => $source,
                 'generated_at' => now()->toIso8601String(),
             ];
+            
+            Log::debug('[AiMetadataSuggestionService] Accepted suggestion', [
+                'asset_id' => $asset->id,
+                'field_key' => $fieldKey,
+                'value' => $value,
+                'confidence' => $confidence,
+            ]);
         }
 
         // Track usage if suggestions were generated
@@ -443,6 +494,7 @@ class AiMetadataSuggestionService
      * Check if a field is enabled for the asset's category.
      * 
      * A field is enabled if it's not suppressed for the category.
+     * Uses the same logic as AiMetadataGenerationService for consistency.
      *
      * @param Asset $asset
      * @param int $fieldId
@@ -457,28 +509,31 @@ class AiMetadataSuggestionService
             return true;
         }
 
-        // Check if field is suppressed for this category
-        // System fields: Check system-level suppression
         $field = DB::table('metadata_fields')->where('id', $fieldId)->first();
-        if ($field && ($field->scope ?? null) === 'system') {
-            // Check system-level category suppression
-            $isSuppressed = DB::table('metadata_field_category_visibility')
-                ->where('metadata_field_id', $fieldId)
-                ->where('category_id', $categoryId)
-                ->where('is_suppressed', true)
-                ->exists();
-            
-            return !$isSuppressed;
+        if (!$field) {
+            return false;
         }
 
-        // Tenant fields: Check tenant-level suppression
+        // Get the category to find system_category_id
+        $category = \App\Models\Category::find($categoryId);
+        if (!$category || !$category->system_category_id) {
+            // Category doesn't exist or has no system_category_id - field is enabled by default
+            return true;
+        }
+
+        // Table structure: metadata_field_category_visibility uses:
+        // - system_category_id (not category_id) - references system_category templates
+        // - is_visible (false = suppressed, true = visible)
+        // - System-scoped only (no tenant_id column)
+        
+        // Check if field is suppressed for this system category
         $isSuppressed = DB::table('metadata_field_category_visibility')
             ->where('metadata_field_id', $fieldId)
-            ->where('category_id', $categoryId)
-            ->where('tenant_id', $asset->tenant_id)
-            ->where('is_suppressed', true)
+            ->where('system_category_id', $category->system_category_id)
+            ->where('is_visible', false) // is_visible = false means suppressed
             ->exists();
-
+        
+        // Absence of row = visible by default, presence with is_visible=false = suppressed
         return !$isSuppressed;
     }
 
@@ -551,10 +606,16 @@ class AiMetadataSuggestionService
      */
     protected function isFieldEmpty(Asset $asset, string $fieldKey): bool
     {
-        // Get field ID
+        // Get field ID - handle both system fields (scope='system') and tenant fields
         $field = DB::table('metadata_fields')
             ->where('key', $fieldKey)
-            ->where('tenant_id', $asset->tenant_id)
+            ->where(function ($query) use ($asset) {
+                $query->where('scope', 'system')
+                    ->orWhere(function ($q) use ($asset) {
+                        $q->where('tenant_id', $asset->tenant_id)
+                            ->where('scope', '!=', 'system');
+                    });
+            })
             ->first();
 
         if (!$field) {

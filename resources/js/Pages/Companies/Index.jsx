@@ -90,6 +90,20 @@ export default function CompaniesIndex({ companies }) {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
+                                                {company.ai_estimates ? (
+                                                    <>
+                                                        <div className="text-sm font-medium text-gray-900">
+                                                            ${company.ai_estimates.current_month_cost.toFixed(2)}
+                                                        </div>
+                                                        <div className="text-xs text-gray-500">
+                                                            {company.ai_estimates.current_month_calls.toLocaleString()} calls
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div className="text-sm text-gray-400">—</div>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="text-sm text-gray-900">{company.timezone}</div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">

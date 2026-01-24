@@ -2654,11 +2654,17 @@ class AssetMetadataController extends Controller
                 ->delete();
 
             // Insert new value
+            // Preserve AI origin: if suggestion came from AI, keep source='ai' and set producer='ai'
+            // This allows the UI to show "AI" badge even though user accepted it
+            $suggestionSource = $suggestion['source'] ?? 'ai'; // Default to 'ai' for AI suggestions
+            $isAISuggestion = ($suggestionSource === 'ai' || isset($suggestion['confidence']));
+            
             $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $field->id,
                 'value_json' => json_encode($suggestion['value']),
-                'source' => 'user', // User accepted the suggestion
+                'source' => $isAISuggestion ? 'ai' : 'user', // Preserve AI source if it was an AI suggestion
+                'producer' => $isAISuggestion ? 'ai' : 'user', // Mark producer as 'ai' for AI suggestions
                 'confidence' => $suggestion['confidence'] ?? null,
                 'approved_at' => $requiresApproval ? null : now(),
                 'approved_by' => $requiresApproval ? null : $user->id,
@@ -2787,5 +2793,195 @@ class AssetMetadataController extends Controller
         }
 
         return response()->json(['message' => 'Suggestion dismissed']);
+    }
+
+    /**
+     * Get AI tag suggestions for an asset.
+     *
+     * GET /assets/{asset}/tags/suggestions
+     *
+     * Returns tag candidates from asset_tag_candidates table.
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function getTagSuggestions(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission (reuse metadata suggestions permission)
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get tag candidates from asset_tag_candidates (unresolved, not dismissed)
+        $tagCandidates = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->whereNull('resolved_at')
+            ->whereNull('dismissed_at')
+            ->orderBy('confidence', 'desc')
+            ->get();
+
+        // Check permissions for apply/dismiss
+        $canApply = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply');
+        $canDismiss = $user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss');
+
+        $suggestions = $tagCandidates->map(function ($candidate) use ($canApply, $canDismiss) {
+            return [
+                'id' => $candidate->id,
+                'tag' => $candidate->tag,
+                'confidence' => $candidate->confidence ? (float) $candidate->confidence : null,
+                'source' => $candidate->source,
+                'can_apply' => $canApply,
+                'can_dismiss' => $canDismiss,
+            ];
+        })->values();
+
+        return response()->json([
+            'suggestions' => $suggestions,
+        ]);
+    }
+
+    /**
+     * Accept an AI tag suggestion.
+     *
+     * POST /assets/{asset}/tags/suggestions/{candidateId}/accept
+     *
+     * Creates tag in asset_tags table and marks candidate as resolved.
+     *
+     * @param Asset $asset
+     * @param int $candidateId
+     * @return JsonResponse
+     */
+    public function acceptTagSuggestion(Asset $asset, int $candidateId): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get candidate
+        $candidate = DB::table('asset_tag_candidates')
+            ->where('id', $candidateId)
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->whereNull('resolved_at')
+            ->whereNull('dismissed_at')
+            ->first();
+
+        if (!$candidate) {
+            return response()->json(['message' => 'Tag suggestion not found'], 404);
+        }
+
+        // Check if tag already exists (avoid duplicates)
+        $existingTag = DB::table('asset_tags')
+            ->where('asset_id', $asset->id)
+            ->where('tag', $candidate->tag)
+            ->first();
+
+        DB::transaction(function () use ($asset, $candidate, $candidateId, $user, $existingTag) {
+            if (!$existingTag) {
+                // Create tag in asset_tags table
+                DB::table('asset_tags')->insert([
+                    'asset_id' => $asset->id,
+                    'tag' => $candidate->tag,
+                    'source' => 'ai', // Tag was AI-generated, user accepted it
+                    'confidence' => $candidate->confidence,
+                    'created_at' => now(),
+                ]);
+            }
+
+            // Mark candidate as resolved
+            DB::table('asset_tag_candidates')
+                ->where('id', $candidateId)
+                ->update([
+                    'resolved_at' => now(),
+                    'updated_at' => now(),
+                ]);
+        });
+
+        Log::info('[AssetMetadataController] AI tag suggestion accepted', [
+            'asset_id' => $asset->id,
+            'candidate_id' => $candidateId,
+            'tag' => $candidate->tag,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json(['message' => 'Tag accepted']);
+    }
+
+    /**
+     * Dismiss an AI tag suggestion.
+     *
+     * POST /assets/{asset}/tags/suggestions/{candidateId}/dismiss
+     *
+     * Marks candidate as dismissed to prevent it from reappearing.
+     *
+     * @param Asset $asset
+     * @param int $candidateId
+     * @return JsonResponse
+     */
+    public function dismissTagSuggestion(Asset $asset, int $candidateId): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        // Verify asset belongs to tenant and brand
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get candidate
+        $candidate = DB::table('asset_tag_candidates')
+            ->where('id', $candidateId)
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->whereNull('resolved_at')
+            ->whereNull('dismissed_at')
+            ->first();
+
+        if (!$candidate) {
+            return response()->json(['message' => 'Tag suggestion not found'], 404);
+        }
+
+        // Mark candidate as dismissed
+        DB::table('asset_tag_candidates')
+            ->where('id', $candidateId)
+            ->update([
+                'dismissed_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        Log::info('[AssetMetadataController] AI tag suggestion dismissed', [
+            'asset_id' => $asset->id,
+            'candidate_id' => $candidateId,
+            'tag' => $candidate->tag,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json(['message' => 'Tag dismissed']);
     }
 }

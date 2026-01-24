@@ -139,10 +139,18 @@ class AWSCostService
                 ],
             ];
         } catch (AwsException $e) {
-            Log::error('Failed to fetch AWS costs', [
-                'error' => $e->getMessage(),
-                'code' => $e->getAwsErrorCode(),
-            ]);
+            // Suppress AccessDeniedException errors (expected when Cost Explorer isn't enabled)
+            if ($e->getAwsErrorCode() === 'AccessDeniedException') {
+                Log::debug('AWS Cost Explorer access denied (expected if not enabled)', [
+                    'error' => $e->getMessage(),
+                    'code' => $e->getAwsErrorCode(),
+                ]);
+            } else {
+                Log::error('Failed to fetch AWS costs', [
+                    'error' => $e->getMessage(),
+                    'code' => $e->getAwsErrorCode(),
+                ]);
+            }
 
             return [
                 'total' => 0,
