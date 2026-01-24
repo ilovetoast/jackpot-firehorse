@@ -2,11 +2,21 @@
 
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\SignupController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 
 
+// Handle OPTIONS preflight requests for CORS
+Route::options('/{any}', function () {
+    return response('', 200)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+})->where('any', '.*');
+
+// Home route - simple home page (subdomains disabled)
 Route::get('/', fn () => Inertia::render('Home'));
 
 Route::middleware('guest')->group(function () {
@@ -69,6 +79,17 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         
         // AI Usage tracking (admin only)
         Route::get('/api/companies/ai-usage', [\App\Http\Controllers\CompanyController::class, 'getAiUsage'])->name('companies.ai-usage');
+        
+            // Phase J.2.5: AI settings API endpoints (company admins only)
+            Route::get('/api/companies/ai-settings', [\App\Http\Controllers\CompanyController::class, 'getAiSettings'])->name('companies.ai-settings');
+            Route::patch('/api/companies/ai-settings', [\App\Http\Controllers\CompanyController::class, 'updateAiSettings'])->name('companies.ai-settings.update');
+            
+            // Phase J.2.6: Tag quality metrics API endpoints (company admins only)
+            Route::get('/api/companies/ai-tag-metrics', [\App\Http\Controllers\CompanyController::class, 'getTagQualityMetrics'])->name('companies.ai-tag-metrics');
+            Route::get('/api/companies/ai-tag-metrics/export', [\App\Http\Controllers\CompanyController::class, 'exportTagQualityMetrics'])->name('companies.ai-tag-metrics.export');
+        
+        // Company slug availability checking
+        Route::get('/api/companies/check-slug', [\App\Http\Controllers\CompanyController::class, 'checkSlugAvailability'])->name('companies.check-slug');
         
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
@@ -251,6 +272,13 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/assets/{asset}/tags/suggestions/{candidateId}/accept', [\App\Http\Controllers\AssetMetadataController::class, 'acceptTagSuggestion'])->name('assets.tags.suggestions.accept');
             Route::post('/assets/{asset}/tags/suggestions/{candidateId}/dismiss', [\App\Http\Controllers\AssetMetadataController::class, 'dismissTagSuggestion'])->name('assets.tags.suggestions.dismiss');
             
+            // Phase J.2.3: Tag UX API endpoints
+            Route::get('/api/assets/{asset}/tags', [\App\Http\Controllers\AssetTagController::class, 'index'])->name('api.assets.tags.index');
+            Route::post('/api/assets/{asset}/tags', [\App\Http\Controllers\AssetTagController::class, 'store'])->name('api.assets.tags.store');
+            Route::delete('/api/assets/{asset}/tags/{tagId}', [\App\Http\Controllers\AssetTagController::class, 'destroy'])->name('api.assets.tags.destroy');
+            Route::get('/api/assets/{asset}/tags/autocomplete', [\App\Http\Controllers\AssetTagController::class, 'autocomplete'])->name('api.assets.tags.autocomplete');
+            Route::get('/api/tenants/{tenant}/tags/autocomplete', [\App\Http\Controllers\AssetTagController::class, 'tenantAutocomplete'])->name('api.tenants.tags.autocomplete');
+            
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
             Route::get('/assets/{asset}/metadata/all', [\App\Http\Controllers\AssetMetadataController::class, 'getAllMetadata'])->name('assets.metadata.all');
@@ -303,6 +331,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/assets/{asset}/thumbnails/regenerate-styles', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateStyles'])->name('assets.thumbnails.regenerate-styles');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/marketing-assets', [\App\Http\Controllers\MarketingAssetController::class, 'index'])->name('marketing-assets.index');
+            Route::get('/collections', [\App\Http\Controllers\CollectionController::class, 'index'])->name('collections.index');
+            Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
+            Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
 
             // Upload routes (tenant-scoped)
             Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');

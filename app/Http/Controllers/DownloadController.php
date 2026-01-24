@@ -9,8 +9,11 @@ use App\Models\Download;
 use App\Services\DownloadEventEmitter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * 🔒 Phase 3.1 — Downloader System (LOCKED)
@@ -20,6 +23,19 @@ use Illuminate\Support\Facades\Storage;
  */
 class DownloadController extends Controller
 {
+    /**
+     * Show the downloads page.
+     */
+    public function index(): Response
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        return Inertia::render('Downloads/Index', [
+            'downloads' => [], // Empty for now - tmp page
+        ]);
+    }
+
     /**
      * Download a ZIP file from a download group.
      * 

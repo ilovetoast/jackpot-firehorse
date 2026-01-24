@@ -41,6 +41,36 @@ class ProcessAssetJob implements ShouldQueue
     ) {}
 
     /**
+     * Get AI jobs conditionally based on tenant policy.
+     * 
+     * Phase J.2.2: Enforcement guard for AI tagging controls
+     *
+     * @param Asset $asset
+     * @return array
+     */
+    protected function getConditionalAiJobs(Asset $asset): array
+    {
+        $policyService = app(\App\Services\AiTagPolicyService::class);
+        $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
+        
+        if (!$policyCheck['should_proceed']) {
+            Log::info('[ProcessAssetJob] AI tagging skipped due to policy', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'reason' => $policyCheck['reason'] ?? 'policy_denied',
+            ]);
+            return []; // Skip AI jobs entirely
+        }
+
+        // Policy allows AI tagging - proceed with normal AI pipeline
+        return [
+            new AiMetadataGenerationJob($asset->id), // Phase I: AI metadata generation (creates candidates)
+            new AiTagAutoApplyJob($asset->id), // Phase J.2.2: Auto-apply high-confidence tags (if enabled)
+            new AiMetadataSuggestionJob($asset->id), // Phase 2 – Step 5: AI metadata suggestions (creates suggestions from candidates)
+        ];
+    }
+
+    /**
      * Execute the job.
      */
     public function handle(): void
@@ -149,8 +179,8 @@ class ProcessAssetJob implements ShouldQueue
             new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
             new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
             new AITaggingJob($asset->id),
-            new AiMetadataGenerationJob($asset->id), // Phase I: AI metadata generation (creates candidates)
-            new AiMetadataSuggestionJob($asset->id), // Phase 2 – Step 5: AI metadata suggestions (creates suggestions from candidates)
+            // Phase J.2.2: Check AI tagging policy before proceeding
+            ...$this->getConditionalAiJobs($asset),
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),
         ])->dispatch();

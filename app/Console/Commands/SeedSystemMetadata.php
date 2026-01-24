@@ -292,6 +292,20 @@ class SeedSystemMetadata extends Command
                 'is_upload_visible' => true,
                 'is_internal_only' => false,
             ],
+
+            // 6. Tags (Phase J.2.7)
+            [
+                'key' => 'tags',
+                'system_label' => 'Tags',
+                'type' => 'multiselect',
+                'applies_to' => 'all',
+                'group_key' => 'general',
+                'is_filterable' => true,
+                'is_user_editable' => true,
+                'is_ai_trainable' => true,
+                'is_upload_visible' => true,
+                'is_internal_only' => false,
+            ],
         ];
     }
 }

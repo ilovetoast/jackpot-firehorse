@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'tenant' => \App\Http\Middleware\ResolveTenant::class,
+            'subdomain' => \App\Http\Middleware\ResolveSubdomainTenant::class,
             'ensure.brand.assignment' => \App\Http\Middleware\EnsureBrandAssignment::class,
             'ensure.account.active' => \App\Http\Middleware\EnsureAccountActive::class,
             'ensure.user.within.plan.limit' => \App\Http\Middleware\EnsureUserWithinPlanLimit::class,

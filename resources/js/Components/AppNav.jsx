@@ -297,6 +297,48 @@ export default function AppNav({ brand, tenant }) {
                                 >
                                     Marketing Assets
                                 </Link>
+                                <Link
+                                    href="/app/collections"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/collections')
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/collections')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Collections
+                                </Link>
+                                <Link
+                                    href="/app/generative"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/generative')
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/generative')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Generative
+                                </Link>
+                                <Link
+                                    href="/app/downloads"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/downloads')
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/downloads')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Downloads
+                                </Link>
                             </div>
                         ) : (
                             <div className="hidden sm:flex sm:space-x-8 sm:ml-6">
@@ -341,6 +383,48 @@ export default function AppNav({ brand, tenant }) {
                                     }}
                                 >
                                     Marketing Assets
+                                </Link>
+                                <Link
+                                    href="/app/collections"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/collections')
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/collections')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Collections
+                                </Link>
+                                <Link
+                                    href="/app/generative"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/generative')
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/generative')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Generative
+                                </Link>
+                                <Link
+                                    href="/app/downloads"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
+                                    style={{
+                                        color: currentUrl.startsWith('/app/downloads')
+                                            ? textColor
+                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
+                                        borderBottomColor: currentUrl.startsWith('/app/downloads')
+                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            : 'transparent'
+                                    }}
+                                >
+                                    Downloads
                                 </Link>
                             </div>
                         )}

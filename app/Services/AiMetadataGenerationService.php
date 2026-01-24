@@ -655,6 +655,37 @@ class AiMetadataGenerationService
                 continue;
             }
 
+            // Phase J.2.1: Normalize tag and check if canonical form has been dismissed
+            $tagNormalizationService = app(\App\Services\TagNormalizationService::class);
+            $tenant = Tenant::find($asset->tenant_id);
+            $canonicalTag = $tagNormalizationService->normalize($tagValue, $tenant);
+
+            // Skip if normalization results in blocked/invalid tag
+            if ($canonicalTag === null) {
+                continue;
+            }
+
+            // Check if any candidate with this canonical form has been dismissed
+            $allCandidates = DB::table('asset_tag_candidates')
+                ->where('asset_id', $asset->id)
+                ->where('producer', 'ai')
+                ->whereNotNull('dismissed_at')
+                ->get();
+
+            $canonicalDismissed = false;
+            foreach ($allCandidates as $dismissedCandidate) {
+                $dismissedCanonical = $tagNormalizationService->normalize($dismissedCandidate->tag, $tenant);
+                if ($dismissedCanonical === $canonicalTag) {
+                    $canonicalDismissed = true;
+                    break;
+                }
+            }
+
+            if ($canonicalDismissed) {
+                // Skip creating candidate for dismissed canonical tag
+                continue;
+            }
+
             // Check if candidate already exists (avoid duplicates)
             $existing = DB::table('asset_tag_candidates')
                 ->where('asset_id', $asset->id)

@@ -49,6 +49,7 @@ import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
 import AiMetadataSuggestionsInline from './AiMetadataSuggestionsInline'
 import AiTagSuggestionsInline from './AiTagSuggestionsInline'
+import AssetTagManager from './AssetTagManager'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
@@ -1048,6 +1049,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 {/* Phase 2 – Step 5.5: AI Metadata Suggestions */}
                 {displayAsset?.id && (
                     <AiMetadataSuggestionsInline key={displayAsset.id} assetId={displayAsset.id} />
+                )}
+
+                {/* Tag Management */}
+                {displayAsset?.id && (
+                    <div className="px-6 py-4 border-t border-gray-200">
+                        <AssetTagManager 
+                            key={`tag-manager-${displayAsset.id}`} 
+                            asset={displayAsset}
+                            showTitle={true}
+                            showInput={true}
+                            compact={false}
+                        />
+                    </div>
                 )}
 
                 {/* AI Tag Suggestions */}

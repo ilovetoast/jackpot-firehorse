@@ -1454,6 +1454,17 @@ class AssetController extends Controller
         // The _ai_suggestions_dismissed array must persist across regenerations
         // This prevents users from seeing previously dismissed suggestions again
 
+        // Phase J.2.2: Check AI tagging policy before manual regeneration
+        $policyService = app(\App\Services\AiTagPolicyService::class);
+        $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
+        
+        if (!$policyCheck['should_proceed']) {
+            return response()->json([
+                'error' => 'AI tagging is disabled for this tenant',
+                'reason' => $policyCheck['reason'] ?? 'policy_denied',
+            ], 403);
+        }
+
         // Clear previous status/error flags to allow fresh regeneration
         $metadata = $asset->metadata ?? [];
         unset($metadata['_ai_metadata_generated_at'], $metadata['_ai_metadata_status']);

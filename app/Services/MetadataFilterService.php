@@ -41,6 +41,12 @@ class MetadataFilterService
             return;
         }
 
+        // Phase J.2.7: Handle tags field specially (stored in asset_tags, not asset_metadata)
+        if (isset($filters['tags'])) {
+            $this->applyTagsFilter($query, $filters['tags']);
+            unset($filters['tags']); // Remove from standard processing
+        }
+
         // Build field map from schema
         $fieldMap = [];
         $tenant = app('tenant');
@@ -438,5 +444,98 @@ class MetadataFilterService
                 ['value' => 'equals', 'label' => 'Equals'],
             ],
         };
+    }
+
+    /**
+     * Phase J.2.7: Apply tags filter using asset_tags table.
+     * 
+     * Tags are stored in asset_tags table, not asset_metadata, so they need special handling.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query Asset query builder
+     * @param array $tagFilters Tag filter conditions: [operator => value]
+     * @return void
+     */
+    protected function applyTagsFilter($query, array $tagFilters): void
+    {
+        foreach ($tagFilters as $operator => $value) {
+            switch ($operator) {
+                case 'in':
+                case 'equals':
+                    // Filter assets that have any of the specified tags
+                    if (is_array($value)) {
+                        $query->whereExists(function ($subQuery) use ($value) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('asset_tags')
+                                ->whereColumn('asset_tags.asset_id', 'assets.id')
+                                ->whereIn('asset_tags.tag', $value);
+                        });
+                    } else {
+                        // Single tag value
+                        $query->whereExists(function ($subQuery) use ($value) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('asset_tags')
+                                ->whereColumn('asset_tags.asset_id', 'assets.id')
+                                ->where('asset_tags.tag', $value);
+                        });
+                    }
+                    break;
+
+                case 'all':
+                    // Filter assets that have ALL of the specified tags
+                    if (is_array($value) && count($value) > 0) {
+                        foreach ($value as $tag) {
+                            $query->whereExists(function ($subQuery) use ($tag) {
+                                $subQuery->select(DB::raw(1))
+                                    ->from('asset_tags')
+                                    ->whereColumn('asset_tags.asset_id', 'assets.id')
+                                    ->where('asset_tags.tag', $tag);
+                            });
+                        }
+                    }
+                    break;
+
+                case 'contains':
+                    // Text-based search within tag names
+                    if (is_string($value)) {
+                        $query->whereExists(function ($subQuery) use ($value) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('asset_tags')
+                                ->whereColumn('asset_tags.asset_id', 'assets.id')
+                                ->where('asset_tags.tag', 'LIKE', '%' . $value . '%');
+                        });
+                    }
+                    break;
+
+                case 'not_in':
+                    // Filter assets that do NOT have any of the specified tags
+                    if (is_array($value) && count($value) > 0) {
+                        $query->whereNotExists(function ($subQuery) use ($value) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('asset_tags')
+                                ->whereColumn('asset_tags.asset_id', 'assets.id')
+                                ->whereIn('asset_tags.tag', $value);
+                        });
+                    }
+                    break;
+
+                case 'empty':
+                    // Filter assets that have no tags
+                    $query->whereNotExists(function ($subQuery) {
+                        $subQuery->select(DB::raw(1))
+                            ->from('asset_tags')
+                            ->whereColumn('asset_tags.asset_id', 'assets.id');
+                    });
+                    break;
+
+                case 'not_empty':
+                    // Filter assets that have at least one tag
+                    $query->whereExists(function ($subQuery) {
+                        $subQuery->select(DB::raw(1))
+                            ->from('asset_tags')
+                            ->whereColumn('asset_tags.asset_id', 'assets.id');
+                    });
+                    break;
+            }
+        }
     }
 }

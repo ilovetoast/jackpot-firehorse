@@ -1,33 +1,132 @@
 import { Link, useForm, usePage, router } from '@inertiajs/react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
+import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
+import TagQuality from '../../Components/Companies/TagQuality'
 import { usePermission } from '../../hooks/usePermission'
+import { debounce } from 'lodash-es'
 
 export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null }) {
     const { auth } = usePage().props
     const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
+    const { hasPermission: canEditViaPermission } = usePermission('companies.settings.edit')
+    // Company owners should always be able to edit settings
+    const canEditCompanySettings = is_current_user_owner || canEditViaPermission
     const [activeSection, setActiveSection] = useState('company-information')
     
     // Debug permission check
     useEffect(() => {
-        console.log('[AI Usage] Permission check:', {
+        console.log('[AI Settings] Permission check:', {
             canViewAiUsage,
+            canEditCompanySettings,
+            is_current_user_owner,
+            canEditViaPermission,
             tenantRole: auth?.tenant_role,
             rolePermissions: auth?.role_permissions,
             directPermissions: auth?.permissions
         })
-    }, [canViewAiUsage, auth])
+    }, [canViewAiUsage, canEditCompanySettings, is_current_user_owner, canEditViaPermission, auth])
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
     const [selectedNewOwner, setSelectedNewOwner] = useState(null)
     const [initiatingTransfer, setInitiatingTransfer] = useState(false)
-    const [aiUsageData, setAiUsageData] = useState(null)
-    const [loadingAiUsage, setLoadingAiUsage] = useState(false)
-    const [aiUsageError, setAiUsageError] = useState(null)
+    const [slugCheckStatus, setSlugCheckStatus] = useState(null) // 'checking', 'available', 'taken', 'invalid'
+    const [slugCheckMessage, setSlugCheckMessage] = useState('')
+    const [isCheckingSlug, setIsCheckingSlug] = useState(false)
     const { data, setData, put, processing, errors } = useForm({
         name: tenant.name || '',
+        slug: tenant.slug || '',
         timezone: tenant.timezone || 'UTC',
     })
+
+    // Utility function to generate slug from company name
+    const generateSlugFromName = (name) => {
+        return name
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '') // Remove special characters except spaces and hyphens
+            .replace(/\s+/g, '-') // Replace spaces with hyphens
+            .replace(/-+/g, '-') // Replace multiple hyphens with single hyphen
+            .replace(/^-|-$/g, '') // Remove leading/trailing hyphens
+    }
+
+    // Check slug availability (debounced)
+    const checkSlugAvailability = useCallback(
+        debounce(async (slug) => {
+            if (!slug || slug === tenant.slug) {
+                setSlugCheckStatus(null)
+                setSlugCheckMessage('')
+                setIsCheckingSlug(false)
+                return
+            }
+
+            // Basic validation
+            if (slug.length < 3) {
+                setSlugCheckStatus('invalid')
+                setSlugCheckMessage('Slug must be at least 3 characters long')
+                setIsCheckingSlug(false)
+                return
+            }
+
+            if (!/^[a-z0-9-]+$/.test(slug)) {
+                setSlugCheckStatus('invalid')
+                setSlugCheckMessage('Slug can only contain lowercase letters, numbers, and hyphens')
+                setIsCheckingSlug(false)
+                return
+            }
+
+            if (slug.startsWith('-') || slug.endsWith('-')) {
+                setSlugCheckStatus('invalid')
+                setSlugCheckMessage('Slug cannot start or end with a hyphen')
+                setIsCheckingSlug(false)
+                return
+            }
+
+            setIsCheckingSlug(true)
+            setSlugCheckStatus('checking')
+            setSlugCheckMessage('Checking availability...')
+
+            try {
+                const response = await window.axios.get('/app/api/companies/check-slug', { 
+                    params: { slug } 
+                })
+                if (response.data.available) {
+                    setSlugCheckStatus('available')
+                    setSlugCheckMessage('✓ Available')
+                } else {
+                    setSlugCheckStatus('taken')
+                    setSlugCheckMessage('✗ Already taken')
+                }
+            } catch (error) {
+                console.error('Error checking slug:', error)
+                setSlugCheckStatus('invalid')
+                setSlugCheckMessage('Error checking availability')
+            } finally {
+                setIsCheckingSlug(false)
+            }
+        }, 500),
+        [tenant.slug]
+    )
+
+    // Handle company name change - auto-generate slug if it hasn't been manually edited
+    const [hasManuallyEditedSlug, setHasManuallyEditedSlug] = useState(false)
+
+    const handleNameChange = (name) => {
+        setData('name', name)
+        
+        // Auto-generate slug only if user hasn't manually edited it
+        if (!hasManuallyEditedSlug && name.trim()) {
+            const newSlug = generateSlugFromName(name.trim())
+            setData('slug', newSlug)
+            checkSlugAvailability(newSlug)
+        }
+    }
+
+    const handleSlugChange = (slug) => {
+        setHasManuallyEditedSlug(true)
+        setData('slug', slug)
+        checkSlugAvailability(slug)
+    }
 
     // Handle hash navigation on mount and hash change
     useEffect(() => {
@@ -52,69 +151,8 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         return () => window.removeEventListener('hashchange', handleHashChange)
     }, [])
 
-    // Fetch AI usage data when AI Usage section is active
-    useEffect(() => {
-        console.log('[AI Usage] useEffect triggered', {
-            activeSection,
-            canViewAiUsage,
-            hasData: !!aiUsageData,
-            isLoading: loadingAiUsage
-        })
-        
-        // Only fetch if:
-        // 1. AI Usage section is active
-        // 2. User has permission
-        // 3. Data hasn't been loaded yet
-        // 4. Not currently loading
-        if (activeSection === 'ai-usage' && canViewAiUsage) {
-            if (!aiUsageData && !loadingAiUsage) {
-                console.log('[AI Usage] Starting fetch...')
-                setLoadingAiUsage(true)
-                setAiUsageError(null) // Clear any previous errors
-                
-                // Use axios to fetch AI usage data
-                window.axios.get('/app/api/companies/ai-usage')
-                    .then(response => {
-                        console.log('[AI Usage] Response received:', response.data)
-                        const data = response.data
-                        // Validate data structure
-                        if (data && data.status) {
-                            setAiUsageData(data)
-                            setAiUsageError(null)
-                        } else {
-                            const errorMsg = 'Invalid data structure received from server'
-                            console.error('[AI Usage] Invalid data structure:', data)
-                            setAiUsageError(errorMsg)
-                        }
-                        setLoadingAiUsage(false)
-                    })
-                    .catch(err => {
-                        console.error('[AI Usage] Error fetching:', err)
-                        console.error('[AI Usage] Error response:', err.response)
-                        // Extract error message from axios error response
-                        const errorMsg = err.response?.data?.message 
-                            || err.response?.data?.error 
-                            || err.message 
-                            || `Failed to fetch AI usage data: ${err.response?.status || 'Unknown error'}`
-                        console.error('[AI Usage] Setting error:', errorMsg)
-                        setAiUsageError(errorMsg)
-                        setLoadingAiUsage(false)
-                    })
-            } else {
-                console.log('[AI Usage] Skipping fetch - already have data or loading:', {
-                    hasData: !!aiUsageData,
-                    isLoading: loadingAiUsage
-                })
-            }
-        }
-    }, [activeSection, canViewAiUsage, aiUsageData, loadingAiUsage])
 
     const handleSectionClick = (sectionId) => {
-        console.log('[AI Usage] Section clicked:', sectionId, {
-            canViewAiUsage,
-            hasData: !!aiUsageData,
-            isLoading: loadingAiUsage
-        })
         setActiveSection(sectionId)
         window.location.hash = sectionId
         const element = document.getElementById(sectionId)
@@ -123,49 +161,16 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                 element.scrollIntoView({ behavior: 'smooth', block: 'start' })
             }, 100)
         }
-        // If clicking AI Usage, trigger fetch immediately
-        if (sectionId === 'ai-usage' && canViewAiUsage) {
-            if (!aiUsageData && !loadingAiUsage) {
-                console.log('[AI Usage] Triggering fetch from click handler...')
-                setLoadingAiUsage(true)
-                setAiUsageError(null)
-                
-                window.axios.get('/app/api/companies/ai-usage')
-                    .then(response => {
-                        console.log('[AI Usage] Response received (from click):', response.data)
-                        const data = response.data
-                        if (data && data.status) {
-                            setAiUsageData(data)
-                            setAiUsageError(null)
-                        } else {
-                            const errorMsg = 'Invalid data structure received from server'
-                            console.error('[AI Usage] Invalid data structure:', data)
-                            setAiUsageError(errorMsg)
-                        }
-                        setLoadingAiUsage(false)
-                    })
-                    .catch(err => {
-                        console.error('[AI Usage] Error fetching (from click):', err)
-                        console.error('[AI Usage] Error response:', err.response)
-                        const errorMsg = err.response?.data?.message 
-                            || err.response?.data?.error 
-                            || err.message 
-                            || `Failed to fetch AI usage data: ${err.response?.status || 'Unknown error'}`
-                        console.error('[AI Usage] Setting error:', errorMsg)
-                        setAiUsageError(errorMsg)
-                        setLoadingAiUsage(false)
-                    })
-            } else {
-                console.log('[AI Usage] Click handler skipping fetch:', {
-                    hasData: !!aiUsageData,
-                    isLoading: loadingAiUsage
-                })
-            }
-        }
     }
 
     const submit = (e) => {
         e.preventDefault()
+        
+        // Prevent submission if slug is not available
+        if (slugCheckStatus === 'taken' || slugCheckStatus === 'invalid' || isCheckingSlug) {
+            return
+        }
+        
         put('/app/companies/settings', {
             preserveScroll: true,
         })
@@ -286,6 +291,32 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     Metadata
                                 </button>
                             )}
+                            {canEditCompanySettings && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSectionClick('ai-settings')}
+                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                        activeSection === 'ai-settings'
+                                            ? 'border-indigo-500 text-indigo-600'
+                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }`}
+                                >
+                                    AI Settings
+                                </button>
+                            )}
+                            {canEditCompanySettings && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSectionClick('tag-quality')}
+                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                        activeSection === 'tag-quality'
+                                            ? 'border-indigo-500 text-indigo-600'
+                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }`}
+                                >
+                                    Tag Quality
+                                </button>
+                            )}
                             {canViewAiUsage && (
                                 <button
                                     type="button"
@@ -350,10 +381,59 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                             id="name"
                                             required
                                             value={data.name}
-                                            onChange={(e) => setData('name', e.target.value)}
+                                            onChange={(e) => handleNameChange(e.target.value)}
                                             className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                         />
                                         {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label htmlFor="slug" className="block text-sm font-medium leading-6 text-gray-900">
+                                        Company URL Slug
+                                    </label>
+                                    <div className="mt-2">
+                                        <div className="flex">
+                                            <span className="inline-flex items-center rounded-l-md border border-r-0 border-gray-300 bg-gray-50 px-3 text-gray-500 sm:text-sm">
+                                                https://
+                                            </span>
+                                            <input
+                                                type="text"
+                                                name="slug"
+                                                id="slug"
+                                                required
+                                                value={data.slug}
+                                                onChange={(e) => handleSlugChange(e.target.value)}
+                                                className="block w-full min-w-0 flex-1 rounded-none border-0 py-1.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                placeholder="your-company-name"
+                                            />
+                                            <span className="inline-flex items-center rounded-r-md border border-l-0 border-gray-300 bg-gray-50 px-3 text-gray-500 sm:text-sm">
+                                                .jackpot.local
+                                            </span>
+                                        </div>
+                                        
+                                        {/* Slug status indicator */}
+                                        {(slugCheckStatus || isCheckingSlug) && (
+                                            <div className={`mt-2 flex items-center text-sm ${
+                                                slugCheckStatus === 'available' ? 'text-green-600' :
+                                                slugCheckStatus === 'taken' ? 'text-red-600' :
+                                                slugCheckStatus === 'invalid' ? 'text-red-600' :
+                                                'text-gray-500'
+                                            }`}>
+                                                {isCheckingSlug && (
+                                                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                    </svg>
+                                                )}
+                                                {slugCheckMessage}
+                                            </div>
+                                        )}
+                                        
+                                        <p className="mt-2 text-sm text-gray-500">
+                                            This will be your unique company URL. Can only contain lowercase letters, numbers, and hyphens.
+                                        </p>
+                                        {errors.slug && <p className="mt-2 text-sm text-red-600">{errors.slug}</p>}
                                     </div>
                                 </div>
 
@@ -399,7 +479,7 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                 <div className="flex justify-end">
                                     <button
                                         type="submit"
-                                        disabled={processing}
+                                        disabled={processing || slugCheckStatus === 'taken' || slugCheckStatus === 'invalid' || isCheckingSlug}
                                         className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
                                     >
                                         Save Changes
@@ -735,6 +815,42 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                         </div>
                     )}
 
+                    {/* AI Settings */}
+                    {canEditCompanySettings && (
+                        <div id="ai-settings" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    {/* Left: Header */}
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Configure AI tagging behavior and controls</p>
+                                    </div>
+                                    {/* Right: Content */}
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <AiTaggingSettings canEdit={canEditCompanySettings} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tag Quality */}
+                    {canEditCompanySettings && (
+                        <div id="tag-quality" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="px-6 py-6">
+                                    <div className="mb-4">
+                                        <h2 className="text-lg font-semibold text-gray-900">Tag Quality & Trust Metrics</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Understand how AI-generated tags perform and identify areas for improvement
+                                        </p>
+                                    </div>
+                                    <TagQuality canView={canEditCompanySettings} />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* AI Usage */}
                     {canViewAiUsage && (
                         <div id="ai-usage" className="mb-12 scroll-mt-8">
@@ -747,159 +863,7 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     </div>
                                     {/* Right: Content */}
                                     <div className="lg:col-span-2 px-6 py-6">
-                                        {loadingAiUsage ? (
-                                            <div className="flex items-center justify-center py-8">
-                                                <div className="text-sm text-gray-500">Loading usage data...</div>
-                                            </div>
-                                        ) : aiUsageData ? (
-                                            <div className="space-y-6">
-                                                {/* Current Month Info */}
-                                                <div className="rounded-md bg-gray-50 p-4">
-                                                    <p className="text-sm text-gray-600">
-                                                        <span className="font-medium">Current Period:</span> {aiUsageData.current_month} 
-                                                        {' '}({new Date(aiUsageData.month_start).toLocaleDateString()} - {new Date(aiUsageData.month_end).toLocaleDateString()})
-                                                    </p>
-                                                </div>
-
-                                                {/* Usage Stats */}
-                                                <div className="space-y-4">
-                                                    {['tagging', 'suggestions'].map((feature) => {
-                                                        const featureData = aiUsageData.status[feature]
-                                                        if (!featureData) return null
-
-                                                        const isUnlimited = featureData.is_unlimited
-                                                        const isDisabled = featureData.is_disabled
-                                                        const isExceeded = featureData.is_exceeded
-                                                        const usage = featureData.usage || 0
-                                                        const cap = featureData.cap || 0
-                                                        const remaining = featureData.remaining
-                                                        const percentage = featureData.percentage || 0
-
-                                                        const featureLabel = feature === 'tagging' ? 'AI Tagging' : 'AI Suggestions'
-
-                                                        return (
-                                                            <div key={feature} className="border border-gray-200 rounded-lg p-4">
-                                                                <div className="flex items-center justify-between mb-3">
-                                                                    <h3 className="text-sm font-semibold text-gray-900">{featureLabel}</h3>
-                                                                    {isExceeded && (
-                                                                        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20">
-                                                                            Cap Exceeded
-                                                                        </span>
-                                                                    )}
-                                                                    {isDisabled && (
-                                                                        <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-600/20">
-                                                                            Disabled
-                                                                        </span>
-                                                                    )}
-                                                                    {isUnlimited && (
-                                                                        <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                                                                            Unlimited
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-
-                                                                <div className="space-y-2">
-                                                                    <div className="flex items-center justify-between text-sm">
-                                                                        <span className="text-gray-600">Usage</span>
-                                                                        <span className="font-medium text-gray-900">
-                                                                            {usage.toLocaleString()} {isUnlimited ? '' : `of ${cap.toLocaleString()}`}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    {!isUnlimited && !isDisabled && (
-                                                                        <>
-                                                                            <div className="flex items-center justify-between text-sm">
-                                                                                <span className="text-gray-600">Remaining</span>
-                                                                                <span className={`font-medium ${remaining === 0 ? 'text-red-600' : 'text-gray-900'}`}>
-                                                                                    {remaining !== null ? remaining.toLocaleString() : 'N/A'}
-                                                                                </span>
-                                                                            </div>
-                                                                            <div className="w-full bg-gray-200 rounded-full h-2">
-                                                                                <div
-                                                                                    className={`h-2 rounded-full transition-all ${
-                                                                                        isExceeded
-                                                                                            ? 'bg-red-600'
-                                                                                            : percentage >= 80
-                                                                                            ? 'bg-yellow-500'
-                                                                                            : 'bg-indigo-600'
-                                                                                    }`}
-                                                                                    style={{ width: `${Math.min(100, percentage)}%` }}
-                                                                                ></div>
-                                                                            </div>
-                                                                            <div className="text-xs text-gray-500 text-right">
-                                                                                {percentage.toFixed(1)}% used
-                                                                            </div>
-                                                                        </>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            </div>
-                                        ) : aiUsageError ? (
-                                            <div className="rounded-md bg-red-50 border border-red-200 p-4">
-                                                <div className="flex">
-                                                    <div className="flex-shrink-0">
-                                                        <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                                                        </svg>
-                                                    </div>
-                                                    <div className="ml-3">
-                                                        <h3 className="text-sm font-medium text-red-800">Error Loading AI Usage</h3>
-                                                        <div className="mt-2 text-sm text-red-700">
-                                                            <p>{aiUsageError}</p>
-                                                        </div>
-                                                        <div className="mt-4">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setAiUsageData(null)
-                                                                    setAiUsageError(null)
-                                                                    setLoadingAiUsage(false)
-                                                                }}
-                                                                className="text-sm font-medium text-red-800 hover:text-red-900 underline"
-                                                            >
-                                                                Try again
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="rounded-md bg-yellow-50 p-4">
-                                                <div className="flex items-start">
-                                                    <div className="flex-shrink-0">
-                                                        <svg className="h-5 w-5 text-yellow-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                                                        </svg>
-                                                    </div>
-                                                    <div className="ml-3 flex-1">
-                                                        <h3 className="text-sm font-medium text-yellow-800">Unable to load AI usage data</h3>
-                                                        <p className="mt-2 text-sm text-yellow-700">
-                                                            The AI usage data could not be loaded. Please check your browser console for errors or try again.
-                                                        </p>
-                                                        <div className="mt-4">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setAiUsageData(null)
-                                                                    setAiUsageError(null)
-                                                                    setLoadingAiUsage(false)
-                                                                    // Force a re-fetch by triggering the effect
-                                                                    const currentSection = activeSection
-                                                                    setActiveSection('')
-                                                                    setTimeout(() => setActiveSection(currentSection), 10)
-                                                                }}
-                                                                className="text-sm font-medium text-yellow-800 hover:text-yellow-900 underline"
-                                                            >
-                                                                Try again
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
+                                        <AiUsagePanel canView={canViewAiUsage} />
                                     </div>
                                 </div>
                             </div>

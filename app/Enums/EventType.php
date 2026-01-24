@@ -86,6 +86,10 @@ class EventType
     public const ASSET_AI_TAGGING_COMPLETED = 'asset.ai_tagging.completed';
     public const ASSET_AI_TAGGING_REGENERATED = 'asset.ai_tagging.regenerated';
     
+    // AI Tag Auto-Apply events (Phase J.2.2)
+    public const ASSET_AI_TAGS_AUTO_APPLIED = 'asset.ai_tags.auto_applied';
+    public const ASSET_AI_TAG_AUTO_APPLY_FAILED = 'asset.ai_tag_auto_apply.failed';
+    
     // Legacy: System tagging (kept for backward compatibility)
     public const ASSET_SYSTEM_TAGGING_COMPLETED = 'asset.system_tagging.completed';
     

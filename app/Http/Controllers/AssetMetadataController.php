@@ -2890,18 +2890,30 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Tag suggestion not found'], 404);
         }
 
-        // Check if tag already exists (avoid duplicates)
+        // Phase J.2.1: Normalize tag to canonical form
+        $tagNormalizationService = app(\App\Services\TagNormalizationService::class);
+        $canonicalTag = $tagNormalizationService->normalize($candidate->tag, $tenant);
+
+        // If normalization results in blocked/invalid tag, reject the acceptance
+        if ($canonicalTag === null) {
+            return response()->json([
+                'message' => 'Tag cannot be accepted (blocked or invalid after normalization)',
+                'original_tag' => $candidate->tag,
+            ], 422);
+        }
+
+        // Check if canonical tag already exists (avoid duplicates)
         $existingTag = DB::table('asset_tags')
             ->where('asset_id', $asset->id)
-            ->where('tag', $candidate->tag)
+            ->where('tag', $canonicalTag) // Check against canonical form
             ->first();
 
-        DB::transaction(function () use ($asset, $candidate, $candidateId, $user, $existingTag) {
+        DB::transaction(function () use ($asset, $candidate, $candidateId, $user, $existingTag, $canonicalTag) {
             if (!$existingTag) {
-                // Create tag in asset_tags table
+                // Create tag in asset_tags table with canonical form
                 DB::table('asset_tags')->insert([
                     'asset_id' => $asset->id,
-                    'tag' => $candidate->tag,
+                    'tag' => $canonicalTag, // Store canonical form
                     'source' => 'ai', // Tag was AI-generated, user accepted it
                     'confidence' => $candidate->confidence,
                     'created_at' => now(),
@@ -2920,11 +2932,15 @@ class AssetMetadataController extends Controller
         Log::info('[AssetMetadataController] AI tag suggestion accepted', [
             'asset_id' => $asset->id,
             'candidate_id' => $candidateId,
-            'tag' => $candidate->tag,
+            'original_tag' => $candidate->tag,
+            'canonical_tag' => $canonicalTag,
             'user_id' => $user->id,
         ]);
 
-        return response()->json(['message' => 'Tag accepted']);
+        return response()->json([
+            'message' => 'Tag accepted',
+            'canonical_tag' => $canonicalTag,
+        ]);
     }
 
     /**
@@ -2967,21 +2983,58 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Tag suggestion not found'], 404);
         }
 
-        // Mark candidate as dismissed
-        DB::table('asset_tag_candidates')
-            ->where('id', $candidateId)
-            ->update([
-                'dismissed_at' => now(),
-                'updated_at' => now(),
-            ]);
+        // Phase J.2.1: Normalize tag to canonical form for dismissal
+        $tagNormalizationService = app(\App\Services\TagNormalizationService::class);
+        $canonicalTag = $tagNormalizationService->normalize($candidate->tag, $tenant);
+
+        DB::transaction(function () use ($asset, $candidateId, $canonicalTag, $candidate, $tagNormalizationService, $tenant) {
+            // Mark the specific candidate as dismissed
+            DB::table('asset_tag_candidates')
+                ->where('id', $candidateId)
+                ->update([
+                    'dismissed_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+            // Phase J.2.1: Also dismiss any other unresolved candidates that normalize to the same canonical form
+            if ($canonicalTag !== null) {
+                $allCandidates = DB::table('asset_tag_candidates')
+                    ->where('asset_id', $asset->id)
+                    ->where('producer', 'ai')
+                    ->whereNull('resolved_at')
+                    ->whereNull('dismissed_at')
+                    ->get();
+
+                $candidatesToDismiss = [];
+                foreach ($allCandidates as $otherCandidate) {
+                    $otherCanonical = $tagNormalizationService->normalize($otherCandidate->tag, $tenant);
+                    if ($otherCanonical === $canonicalTag) {
+                        $candidatesToDismiss[] = $otherCandidate->id;
+                    }
+                }
+
+                if (!empty($candidatesToDismiss)) {
+                    DB::table('asset_tag_candidates')
+                        ->whereIn('id', $candidatesToDismiss)
+                        ->update([
+                            'dismissed_at' => now(),
+                            'updated_at' => now(),
+                        ]);
+                }
+            }
+        });
 
         Log::info('[AssetMetadataController] AI tag suggestion dismissed', [
             'asset_id' => $asset->id,
             'candidate_id' => $candidateId,
-            'tag' => $candidate->tag,
+            'original_tag' => $candidate->tag,
+            'canonical_tag' => $canonicalTag,
             'user_id' => $user->id,
         ]);
 
-        return response()->json(['message' => 'Tag dismissed']);
+        return response()->json([
+            'message' => 'Tag dismissed',
+            'canonical_tag' => $canonicalTag,
+        ]);
     }
 }

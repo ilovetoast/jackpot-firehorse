@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Tenant;
 use App\Services\AiUsageService;
+use App\Services\AiTagPolicyService;
 use App\Services\BillingService;
 use App\Services\CompanyCostService;
+use App\Services\TagQualityMetricsService;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +23,8 @@ class CompanyController extends Controller
     public function __construct(
         protected BillingService $billingService,
         protected AiUsageService $aiUsageService,
+        protected AiTagPolicyService $aiTagPolicyService,
+        protected TagQualityMetricsService $tagQualityMetricsService,
         protected CompanyCostService $companyCostService
     ) {
     }
@@ -238,6 +242,32 @@ class CompanyController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'slug' => [
+                'required',
+                'string',
+                'min:3',
+                'max:50',
+                'regex:/^[a-z0-9-]+$/',
+                'not_regex:/^-/',
+                'not_regex:/-$/',
+                function ($attribute, $value, $fail) use ($tenant) {
+                    // Check if slug is taken by another tenant
+                    $existingTenant = Tenant::where('slug', $value)
+                        ->where('id', '!=', $tenant->id)
+                        ->exists();
+                    
+                    if ($existingTenant) {
+                        $fail('This slug is already taken by another company.');
+                    }
+                    
+                    // Check against reserved slugs
+                    $reservedSlugs = config('subdomain.reserved_slugs', []);
+                    
+                    if (in_array($value, $reservedSlugs, true)) {
+                        $fail('This slug is reserved and cannot be used.');
+                    }
+                }
+            ],
             'timezone' => 'required|string|max:255',
         ]);
 
@@ -856,6 +886,82 @@ class CompanyController extends Controller
     }
 
     /**
+     * Check if a company slug is available.
+     *
+     * GET /api/companies/check-slug?slug=company-name
+     *
+     * @return JsonResponse
+     */
+    public function checkSlugAvailability(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (!$tenant || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+                return response()->json(['error' => 'Unauthorized'], 403);
+            }
+
+            // Check if user has permission to edit company settings
+            if (!$user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+                return response()->json(['error' => 'You do not have permission to check slug availability.'], 403);
+            }
+
+            $validated = $request->validate([
+                'slug' => [
+                    'required',
+                    'string',
+                    'min:3',
+                    'max:50',
+                    'regex:/^[a-z0-9-]+$/',
+                    'not_regex:/^-/',
+                    'not_regex:/-$/',
+                ],
+            ]);
+
+            $slug = $validated['slug'];
+
+            // Check if slug is taken by another tenant
+            $existingTenant = Tenant::where('slug', $slug)
+                ->where('id', '!=', $tenant->id)
+                ->exists();
+
+            // Check against reserved slugs from configuration
+            $reservedSlugs = config('subdomain.reserved_slugs', []);
+            $isReserved = in_array($slug, $reservedSlugs, true);
+
+            return response()->json([
+                'available' => !$existingTenant && !$isReserved,
+                'slug' => $slug,
+                'reason' => $existingTenant ? 'taken' : ($isReserved ? 'reserved' : null)
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'available' => false,
+                'slug' => $request->input('slug'),
+                'reason' => 'invalid',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Error checking slug availability', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'slug' => $request->input('slug'),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'available' => false,
+                'slug' => $request->input('slug'),
+                'reason' => 'error',
+                'error' => 'Failed to check slug availability. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
      * Get AI usage status for the current tenant.
      *
      * GET /api/companies/ai-usage
@@ -905,6 +1011,263 @@ class CompanyController extends Controller
             return response()->json([
                 'error' => 'Failed to load AI usage data. Please try again later.',
                 'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Phase J.2.5: Get AI Tag Settings
+     * 
+     * Admin-only endpoint to get current AI tagging policy settings.
+     *
+     * @return JsonResponse
+     */
+    public function getAiSettings(): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (!$tenant) {
+                return response()->json(['error' => 'Tenant context not found'], 400);
+            }
+
+            // Check if user is owner or admin (tenant-based, not site-based)
+            $currentOwner = $tenant->owner();
+            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+                return response()->json(['error' => 'You do not have permission to view AI settings.'], 403);
+            }
+
+            $settings = $this->aiTagPolicyService->getTenantSettings($tenant);
+
+            return response()->json([
+                'settings' => $settings,
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error fetching AI settings', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to load AI settings. Please try again later.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Phase J.2.5: Update AI Tag Settings
+     * 
+     * Admin-only endpoint to update AI tagging policy settings.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function updateAiSettings(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (!$tenant) {
+                return response()->json(['error' => 'Tenant context not found'], 400);
+            }
+
+            // Check if user is owner or admin (tenant-based, not site-based)
+            $currentOwner = $tenant->owner();
+            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+                return response()->json(['error' => 'You do not have permission to update AI settings.'], 403);
+            }
+
+            $validated = $request->validate([
+                'disable_ai_tagging' => 'boolean',
+                'enable_ai_tag_suggestions' => 'boolean',
+                'enable_ai_tag_auto_apply' => 'boolean',
+                'ai_auto_tag_limit_mode' => 'in:best_practices,custom',
+                'ai_auto_tag_limit_value' => 'nullable|integer|min:1|max:50',
+            ]);
+
+            // Update settings via the policy service
+            $updatedSettings = $this->aiTagPolicyService->updateTenantSettings($tenant, $validated);
+
+            \Log::info('[CompanyController] AI settings updated', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'settings' => $validated,
+            ]);
+
+            return response()->json([
+                'message' => 'AI settings updated successfully',
+                'settings' => $updatedSettings,
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Error updating AI settings', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to update AI settings. Please try again later.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Phase J.2.6: Get Tag Quality Metrics Summary
+     * 
+     * Admin-only endpoint for tag quality analytics.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getTagQualityMetrics(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (!$tenant) {
+                return response()->json(['error' => 'Tenant context not found'], 400);
+            }
+
+            // Check if user is owner or admin (tenant-based)
+            $currentOwner = $tenant->owner();
+            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+                return response()->json(['error' => 'You do not have permission to view tag quality metrics.'], 403);
+            }
+
+            $timeRange = $request->input('time_range', now()->format('Y-m'));
+
+            // Get all metrics
+            $summary = $this->tagQualityMetricsService->getSummaryMetrics($tenant, $timeRange);
+            $tagMetrics = $this->tagQualityMetricsService->getTagMetrics($tenant, $timeRange, 20);
+            $confidenceMetrics = $this->tagQualityMetricsService->getConfidenceMetrics($tenant, $timeRange);
+            $trustSignals = $this->tagQualityMetricsService->getTrustSignals($tenant, $timeRange);
+
+            return response()->json([
+                'summary' => $summary,
+                'tags' => $tagMetrics,
+                'confidence' => $confidenceMetrics,
+                'trust_signals' => $trustSignals,
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error fetching tag quality metrics', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to load tag quality metrics. Please try again later.',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Phase J.2.6: Export Tag Quality Metrics as CSV
+     * 
+     * Admin-only endpoint for exporting metrics data.
+     *
+     * @param Request $request
+     * @return \Symfony\Component\HttpFoundation\StreamedResponse
+     */
+    public function exportTagQualityMetrics(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            $tenant = app('tenant');
+
+            if (!$tenant) {
+                return response()->json(['error' => 'Tenant context not found'], 400);
+            }
+
+            // Check if user is owner or admin (tenant-based)
+            $currentOwner = $tenant->owner();
+            $isCurrentUserOwner = $currentOwner && $currentOwner->id === $user->id;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            if (!$isCurrentUserOwner && !in_array($tenantRole, ['owner', 'admin'])) {
+                return response()->json(['error' => 'You do not have permission to export tag quality metrics.'], 403);
+            }
+
+            $timeRange = $request->input('time_range', now()->format('Y-m'));
+            $tagMetrics = $this->tagQualityMetricsService->getTagMetrics($tenant, $timeRange, 1000);
+
+            $filename = "tag-quality-metrics-{$tenant->slug}-{$timeRange}.csv";
+
+            return response()->streamDownload(function () use ($tagMetrics) {
+                $output = fopen('php://output', 'w');
+                
+                // CSV headers
+                fputcsv($output, [
+                    'Tag',
+                    'Total Generated',
+                    'Accepted',
+                    'Dismissed',
+                    'Acceptance Rate',
+                    'Dismissal Rate',
+                    'Avg Confidence',
+                    'Avg Confidence (Accepted)',
+                    'Avg Confidence (Dismissed)',
+                    'Trust Signals',
+                ]);
+
+                // CSV data
+                foreach ($tagMetrics['tags'] as $tag) {
+                    fputcsv($output, [
+                        $tag['tag'],
+                        $tag['total_generated'],
+                        $tag['accepted'],
+                        $tag['dismissed'],
+                        number_format($tag['acceptance_rate'] * 100, 1) . '%',
+                        number_format($tag['dismissal_rate'] * 100, 1) . '%',
+                        $tag['avg_confidence'] ? number_format($tag['avg_confidence'], 3) : '',
+                        $tag['avg_confidence_accepted'] ? number_format($tag['avg_confidence_accepted'], 3) : '',
+                        $tag['avg_confidence_dismissed'] ? number_format($tag['avg_confidence_dismissed'], 3) : '',
+                        implode(', ', $tag['trust_signals'] ?? []),
+                    ]);
+                }
+
+                fclose($output);
+            }, $filename, [
+                'Content-Type' => 'text/csv',
+                'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error exporting tag quality metrics', [
+                'tenant_id' => app('tenant')?->id,
+                'user_id' => Auth::id(),
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to export tag quality metrics. Please try again later.',
             ], 500);
         }
     }
