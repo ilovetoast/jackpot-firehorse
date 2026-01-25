@@ -815,8 +815,9 @@ class AssetMetadataController extends Controller
                 continue;
             }
 
-            // Phase B3: Exclude fields that should not appear in edit view
+            // Phase B3: Exclude fields that should not appear in Quick View (drawer and details modal)
             // For automatic/readonly fields, respect show_on_edit setting (can be toggled in UI)
+            // show_on_edit controls visibility in both AssetDrawer and AssetDetailsModal
             $showOnEdit = $field['show_on_edit'] ?? true;
             $populationMode = $field['population_mode'] ?? 'manual';
             $isReadonly = ($field['readonly'] ?? false) || ($populationMode === 'automatic');
@@ -1034,14 +1035,13 @@ class AssetMetadataController extends Controller
         }
 
         // Build response with all fields from schema
-        // Filter by show_on_edit (respects user's toggle in metadata management UI)
+        // AssetDetailsModal is a "source of truth" - shows ALL fields regardless of Quick View setting
+        // Only respects category enablement (the big blue toggle), not show_on_edit checkbox
+        // This allows users to see all metadata in the details modal even if hidden from drawer
         $allFields = [];
         foreach ($schema['fields'] ?? [] as $field) {
-            // Skip fields that should not appear in edit/drawer view
-            $showOnEdit = $field['show_on_edit'] ?? true;
-            if (!$showOnEdit) {
-                continue; // Hidden from edit/drawer UI
-            }
+            // Don't filter by show_on_edit here - modal shows everything
+            // Category filtering is already handled by MetadataSchemaResolver (is_visible check)
 
             $fieldId = $field['field_id'];
             $currentValue = $fieldValues[$fieldId] ?? null;

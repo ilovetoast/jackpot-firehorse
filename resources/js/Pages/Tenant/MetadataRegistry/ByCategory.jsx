@@ -233,8 +233,9 @@ export default function ByCategoryView({
         if (!canManageVisibility) return
 
         const newValue = !currentValue
+        // Quick View = show_on_edit (controls visibility in drawer and details modal)
         const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
-        const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Edit' : 'Filter'
+        const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Quick View' : 'Filter'
 
         // Store current selected category to restore after reload
         const currentCategoryId = selectedCategoryIdRef.current
@@ -1005,7 +1006,7 @@ function FieldRow({
                                     disabled={!canManage}
                                     className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                 />
-                                <span>Edit</span>
+                                <span>Quick View</span>
                             </label>
                             <label className="flex items-center gap-1.5 cursor-pointer">
                                 <input
@@ -1117,7 +1118,7 @@ function AutomatedFieldRow({
                             />
                             <span className="text-xs text-gray-400">Upload</span>
                         </label>
-                        {/* Show in Edit - Functional */}
+                        {/* Show in Quick View - Functional */}
                         <label className="flex items-center gap-1.5 cursor-pointer">
                             <input
                                 type="checkbox"
@@ -1126,7 +1127,7 @@ function AutomatedFieldRow({
                                 disabled={!canManage}
                                 className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             />
-                            <span className="text-xs text-gray-500">Edit</span>
+                            <span className="text-xs text-gray-500">Quick View</span>
                         </label>
                         {/* Filter - Functional */}
                         <label className="flex items-center gap-1.5 cursor-pointer">

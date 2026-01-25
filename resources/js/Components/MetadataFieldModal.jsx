@@ -914,9 +914,9 @@ export default function MetadataFieldModal({
                                             </div>
                                             <div className="ml-3 text-sm leading-6">
                                                 <label htmlFor="show_on_edit" className="font-medium text-gray-900">
-                                                    Show on Edit
+                                                    Quick View
                                                 </label>
-                                                <p className="text-gray-500">Display this field when editing assets</p>
+                                                <p className="text-gray-500">Display this field in the asset drawer and details modal</p>
                                             </div>
                                         </div>
                                         <div className="relative flex items-start">

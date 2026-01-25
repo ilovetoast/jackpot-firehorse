@@ -308,7 +308,7 @@ export default function CreateTenantMetadataField({ categories = [], preselected
                                         onChange={(e) => setFormData({ ...formData, show_on_edit: e.target.checked })}
                                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                     />
-                                    <span className="ml-2 text-sm text-gray-700">Show on Edit</span>
+                                    <span className="ml-2 text-sm text-gray-700">Quick View</span>
                                 </label>
                                 <label className="flex items-center">
                                     <input
