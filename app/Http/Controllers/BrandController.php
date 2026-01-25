@@ -502,6 +502,9 @@ class BrandController extends Controller
                 'plan_allows' => in_array($currentPlan, ['pro', 'enterprise']),
             ],
             'can_edit_system_categories' => $canEditSystemCategories,
+            // Phase M-2: Pass tenant settings to check if company metadata approval is enabled
+            'tenant_settings' => $tenant->settings ?? [],
+            'current_plan' => $currentPlan,
         ]);
     }
 
@@ -532,6 +535,7 @@ class BrandController extends Controller
             'accent_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings' => 'nullable|array',
+            'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
         ]);
 
         // Handle logo file upload
@@ -576,6 +580,17 @@ class BrandController extends Controller
         } else {
             // Keep existing icon_bg_color if not provided
             $validated['icon_bg_color'] = $brand->icon_bg_color;
+        }
+
+        // Phase M-2: Handle settings separately (merge with existing)
+        $settings = $validated['settings'] ?? [];
+        unset($validated['settings']);
+        
+        if (!empty($settings)) {
+            // Merge settings with existing settings
+            $currentSettings = $brand->settings ?? [];
+            $mergedSettings = array_merge($currentSettings, $settings);
+            $validated['settings'] = $mergedSettings;
         }
 
         try {

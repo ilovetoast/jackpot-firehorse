@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\FeatureGate;
 use App\Services\PlanService;
 
 /**
@@ -11,17 +13,21 @@ use App\Services\PlanService;
  *
  * Phase 8: Determines if metadata approval is required and if a user can approve.
  *
+ * Phase M-2: Extended with company + brand level gating.
+ *
  * Rules:
  * - Deterministic and side-effect free
  * - Never mutates data
  * - Plan-gated (Pro plans or feature flag)
  * - Permission-based (checks metadata.bypass_approval permission)
  * - Computed/system metadata NEVER requires approval
+ * - Phase M-2: Company + brand settings must both be enabled
  */
 class MetadataApprovalResolver
 {
     public function __construct(
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected FeatureGate $featureGate
     ) {
     }
 
@@ -30,6 +36,7 @@ class MetadataApprovalResolver
      *
      * @param Tenant $tenant
      * @return bool True if approval is enabled, false otherwise
+     * @deprecated Use isApprovalEnabledForBrand() instead (Phase M-2)
      */
     public function isApprovalEnabled(Tenant $tenant): bool
     {
@@ -46,32 +53,64 @@ class MetadataApprovalResolver
     }
 
     /**
+     * Phase M-2: Check if metadata approval workflow is enabled for company and brand.
+     *
+     * @param Tenant $company
+     * @param Brand $brand
+     * @return bool True if approval is enabled, false otherwise
+     */
+    public function isApprovalEnabledForBrand(Tenant $company, Brand $brand): bool
+    {
+        return $this->featureGate->metadataApprovalEnabled($company, $brand);
+    }
+
+    /**
      * Check if a metadata value requires approval.
      *
      * @param string $source Metadata source ('user', 'ai', 'system', 'computed')
      * @param Tenant $tenant
      * @param User|null $user Optional user to check for bypass_approval permission
+     * @param Brand|null $brand Optional brand for Phase M-2 gating (required for user edits)
      * @return bool True if approval is required, false otherwise
      */
-    public function requiresApproval(string $source, Tenant $tenant, ?User $user = null): bool
+    public function requiresApproval(string $source, Tenant $tenant, ?User $user = null, ?Brand $brand = null): bool
     {
-        // Approval must be enabled first
-        if (!$this->isApprovalEnabled($tenant)) {
+        // Phase M-1: System, automatic, and computed metadata NEVER require approval
+        if (in_array($source, ['system', 'automatic', 'computed'])) {
             return false;
         }
 
-        // Computed and system metadata NEVER require approval
-        if (in_array($source, ['system', 'computed'])) {
-            return false;
+        // AI metadata always requires review (proposal-based, regardless of settings)
+        if ($source === 'ai') {
+            return true;
         }
 
-        // If user has bypass_approval permission, no approval required
-        if ($user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval')) {
-            return false;
+        // Phase M-2: For user edits, check company + brand settings
+        if ($source === 'user') {
+            // If brand is provided, use Phase M-2 gating
+            if ($brand) {
+                // Check if metadata approval is enabled for company + brand
+                if (!$this->featureGate->metadataApprovalEnabled($tenant, $brand)) {
+                    // Feature disabled - edits apply immediately (respecting permissions)
+                    return false;
+                }
+            } else {
+                // Fallback to old behavior if brand not provided (backward compatibility)
+                if (!$this->isApprovalEnabled($tenant)) {
+                    return false;
+                }
+            }
+
+            // If user has bypass_approval permission, no approval required
+            if ($user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval')) {
+                return false;
+            }
+
+            // User edits require approval when feature is enabled
+            return true;
         }
 
-        // User edits and AI suggestions require approval when enabled
-        return in_array($source, ['user', 'ai']);
+        return false;
     }
 
     /**

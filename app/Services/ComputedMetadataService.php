@@ -585,6 +585,7 @@ class ComputedMetadataService
                     'value' => $value,
                 ]);
                 
+                // Phase M-1: System and automatic metadata always auto-approve
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field->id,
@@ -592,7 +593,7 @@ class ComputedMetadataService
                     'source' => 'system',
                     'confidence' => 0.95, // System-computed values are highly confident
                     'producer' => 'system', // System-computed values are from system
-                    'approved_at' => $isAutomaticField ? null : now(), // Automatic fields don't require approval
+                    'approved_at' => now(), // Phase M-1: System metadata always auto-approves
                     'approved_by' => null,
                     'created_at' => now(),
                     'updated_at' => now(),

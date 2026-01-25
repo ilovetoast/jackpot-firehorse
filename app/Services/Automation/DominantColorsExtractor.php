@@ -287,7 +287,7 @@ class DominantColorsExtractor
             ]);
         } else {
             // Create new record
-            // CRITICAL: Automatic fields do NOT require approval - approved_at should be NULL
+            // Phase M-1: Automatic metadata always auto-approves
             $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $field->id,
@@ -295,7 +295,7 @@ class DominantColorsExtractor
                 'source' => 'automatic',
                 'confidence' => 0.95, // System-computed values are highly confident
                 'producer' => 'system',
-                'approved_at' => null, // Automatic fields are authoritative without approval
+                'approved_at' => now(), // Phase M-1: Automatic metadata always auto-approves
                 'approved_by' => null,
                 'created_at' => now(),
                 'updated_at' => now(),

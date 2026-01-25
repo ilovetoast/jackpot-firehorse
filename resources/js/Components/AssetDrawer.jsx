@@ -1082,7 +1082,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 )}
 
                 {/* Phase 8: Pending Metadata Approval */}
-                {displayAsset?.id && (
+                {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
+                {auth?.metadata_approval_features?.metadata_approval_enabled && displayAsset?.id && (
                     <PendingMetadataList assetId={displayAsset.id} />
                 )}
 

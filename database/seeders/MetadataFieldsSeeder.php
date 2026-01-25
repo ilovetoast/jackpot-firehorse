@@ -414,15 +414,16 @@ class MetadataFieldsSeeder extends Seeder
         ];
 
         foreach ($automaticFields as $fieldKey) {
-            // Only dominant_colors should have show_on_edit enabled by default
-            $showOnEdit = $fieldKey === 'dominant_colors';
+            // All automatic fields should be visible in edit/drawer view (read-only display)
+            // Users can see system-computed values like orientation, color_space, resolution_class, and dominant_colors
+            $showOnEdit = true;
             
             DB::table('metadata_fields')
                 ->where('key', $fieldKey)
                 ->update([
                     'population_mode' => 'automatic',
                     'show_on_upload' => false, // Hidden from upload form
-                    'show_on_edit' => $showOnEdit, // Only dominant_colors enabled by default
+                    'show_on_edit' => $showOnEdit, // Visible in drawer with "Auto" label (read-only)
                     'show_in_filters' => true, // Available in grid filters
                     'readonly' => true, // Read-only for users (system can populate)
                     'updated_at' => now(),

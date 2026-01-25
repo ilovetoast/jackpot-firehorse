@@ -313,7 +313,8 @@ class DashboardController extends Controller
             })->filter()->values();
         }
         
-        // Get pending AI suggestions count (metadata candidates + tag candidates)
+        // Phase M-1: Get pending AI suggestions count (ONLY candidates, not asset_metadata)
+        // Metadata approval is asset-centric and inline - no separate queue
         // Only count items for assets in the current brand
         $pendingMetadataCount = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
@@ -321,6 +322,7 @@ class DashboardController extends Controller
             ->where('assets.brand_id', $brand->id)
             ->whereNull('asset_metadata_candidates.resolved_at')
             ->whereNull('asset_metadata_candidates.dismissed_at')
+            ->where('asset_metadata_candidates.producer', 'ai') // Phase M-1: Only AI candidates
             ->count();
             
         $pendingTagCount = DB::table('asset_tag_candidates')
@@ -332,15 +334,9 @@ class DashboardController extends Controller
             ->whereNull('asset_tag_candidates.dismissed_at')
             ->count();
             
-        $pendingMetadataPendingCount = DB::table('asset_metadata')
-            ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
-            ->where('assets.tenant_id', $tenant->id)
-            ->where('assets.brand_id', $brand->id)
-            ->whereNull('asset_metadata.approved_at')
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
-            ->count();
-            
-        $totalPendingCount = $pendingMetadataCount + $pendingTagCount + $pendingMetadataPendingCount;
+        // Phase M-1: Exclude asset_metadata.approved_at IS NULL from pending count
+        // Metadata is reviewed inline during asset review, not as separate suggestions
+        $totalPendingCount = $pendingMetadataCount + $pendingTagCount;
         
         // Phase L.5.1: Count unpublished assets (waiting to be published)
         // Only visible to users with metadata.bypass_approval (full viewing privileges)
@@ -462,7 +458,7 @@ class DashboardController extends Controller
                 'total' => $totalPendingCount,
                 'metadata_candidates' => $pendingMetadataCount,
                 'tag_candidates' => $pendingTagCount,
-                'pending_metadata' => $pendingMetadataPendingCount,
+                // Phase M-1: pending_metadata excluded - metadata approval is asset-centric
             ],
             'unpublished_assets_count' => $unpublishedAssetsCount, // Phase L.5.1: Count of unpublished assets
         ]);

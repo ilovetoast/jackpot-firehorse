@@ -415,6 +415,15 @@ class HandleInertiaRequests extends Middleware
                     'approval_summaries_enabled' => false,
                     'required_plan' => 'Pro',
                 ],
+                // Phase M-2: Metadata approval feature flags (company + brand gated)
+                'metadata_approval_features' => $tenant && $activeBrand ? (function () use ($tenant, $activeBrand) {
+                    $featureGate = app(FeatureGate::class);
+                    return [
+                        'metadata_approval_enabled' => $featureGate->metadataApprovalEnabled($tenant, $activeBrand),
+                    ];
+                })() : [
+                    'metadata_approval_enabled' => false,
+                ],
             ],
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
         ];

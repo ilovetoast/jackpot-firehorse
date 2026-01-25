@@ -649,10 +649,13 @@ class AssetMetadataController extends Controller
             ->toArray();
         
         // Build query: Include automatic fields regardless of approved_at, require approved_at for others
+        // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
+        // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
+        // This prevents someone from "optimizing" it away later.
         $currentMetadataRows = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
-            ->whereIn('asset_metadata.source', ['user', 'automatic', 'ai', 'manual_override'])
+            ->whereIn('asset_metadata.source', ['user', 'automatic', 'ai', 'manual_override', 'system'])
             ->where(function($query) use ($automaticFieldIds) {
                 // Automatic fields: include if value exists (no approval required)
                 if (!empty($automaticFieldIds)) {
@@ -941,6 +944,9 @@ class AssetMetadataController extends Controller
             ->toArray();
         
         // Build query: Include automatic fields regardless of approved_at, require approved_at for others
+        // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
+        // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
+        // This prevents someone from "optimizing" it away later.
         $currentMetadataRows = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
@@ -1227,7 +1233,8 @@ class AssetMetadataController extends Controller
         $normalizedValues = $this->normalizeValue($field, $newValue);
 
         // Phase 8: Check if approval is required (unless user has bypass_approval permission)
-        $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant, $user);
+        // Phase M-2: Pass brand for company + brand level gating
+        $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
 
         // Phase B5: Determine source based on override intent for hybrid fields
         $isHybrid = $populationMode === 'hybrid';
@@ -2741,13 +2748,9 @@ class AssetMetadataController extends Controller
         }
 
         // Check if approval is required
-        $requiresApproval = $this->approvalResolver->requiresApproval(
-            $field->id,
-            $userRole,
-            $tenant->id,
-            $brand->id,
-            $category->id
-        );
+        // Phase M-2: Pass brand for company + brand level gating
+        // When applying AI suggestion, it becomes a user edit, so source is 'user'
+        $requiresApproval = $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
 
         // Write to asset_metadata
         DB::transaction(function () use ($asset, $field, $suggestion, $user, $requiresApproval) {
@@ -3163,10 +3166,12 @@ class AssetMetadataController extends Controller
      *
      * GET /api/pending-ai-suggestions
      *
-     * Returns a consolidated list of:
+     * Phase M-1: Returns a consolidated list of:
      * - Tag candidates (from asset_tag_candidates)
-     * - Metadata candidates (from asset_metadata_candidates)
-     * - Pending metadata (from asset_metadata with approved_at = null)
+     * - Metadata candidates (from asset_metadata_candidates, AI only)
+     * 
+     * Note: Pending metadata from asset_metadata table is excluded.
+     * Metadata approval is asset-centric and reviewed inline during asset review.
      *
      * @return JsonResponse
      */
@@ -3213,7 +3218,8 @@ class AssetMetadataController extends Controller
             $assetIds[] = $candidate->asset_id;
         }
 
-        // 2. Get metadata candidates
+        // 2. Get metadata candidates (AI only)
+        // Phase M-1: Only AI candidates are shown as suggestions
         $metadataCandidates = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
             ->join('metadata_fields', 'asset_metadata_candidates.metadata_field_id', '=', 'metadata_fields.id')
@@ -3221,6 +3227,7 @@ class AssetMetadataController extends Controller
             ->where('assets.brand_id', $brand->id)
             ->whereNull('asset_metadata_candidates.resolved_at')
             ->whereNull('asset_metadata_candidates.dismissed_at')
+            ->where('asset_metadata_candidates.producer', 'ai') // Phase M-1: Only AI candidates
             ->select(
                 'asset_metadata_candidates.id',
                 'asset_metadata_candidates.asset_id',
@@ -3261,37 +3268,9 @@ class AssetMetadataController extends Controller
             }
         }
 
-        // 3. Get pending metadata (unapproved)
-        // CRITICAL: Only include AI fields (population_mode = 'ai')
-        // Automatic/system fields never require approval and must be excluded
-        $pendingMetadata = DB::table('asset_metadata')
-            ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
-            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('assets.tenant_id', $tenant->id)
-            ->where('assets.brand_id', $brand->id)
-            ->whereNull('asset_metadata.approved_at')
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
-            ->where('metadata_fields.population_mode', 'ai') // Only AI fields require approval
-            ->select(
-                'asset_metadata.id',
-                'asset_metadata.asset_id',
-                'asset_metadata.metadata_field_id',
-                'asset_metadata.value_json',
-                'asset_metadata.confidence',
-                'asset_metadata.source',
-                'metadata_fields.key as field_key',
-                'metadata_fields.system_label as field_label',
-                'metadata_fields.type as field_type',
-                'assets.title as asset_title',
-                'assets.original_filename as asset_filename',
-                'assets.thumbnail_status',
-                'assets.metadata'
-            )
-            ->get();
-
-        foreach ($pendingMetadata as $pending) {
-            $assetIds[] = $pending->asset_id;
-        }
+        // Phase M-1: Exclude asset_metadata.approved_at IS NULL from suggestions
+        // Metadata approval is asset-centric and inline - no separate queue
+        // Pending metadata is reviewed during asset review, not as separate suggestions
 
         // Load all assets in bulk to avoid N+1 queries
         $assetIds = array_unique($assetIds);
@@ -3342,46 +3321,8 @@ class AssetMetadataController extends Controller
             ];
         }
 
-        // Get options for pending metadata fields
-        $pendingFieldIds = $pendingMetadata->pluck('metadata_field_id')->unique();
-        $pendingOptionsMap = [];
-        if ($pendingFieldIds->isNotEmpty()) {
-            $pendingOptions = DB::table('metadata_options')
-                ->whereIn('metadata_field_id', $pendingFieldIds)
-                ->select('metadata_field_id', 'value', 'system_label as display_label')
-                ->get()
-                ->groupBy('metadata_field_id');
-
-            foreach ($pendingOptions as $fieldId => $opts) {
-                $pendingOptionsMap[$fieldId] = $opts->map(fn($opt) => [
-                    'value' => $opt->value,
-                    'display_label' => $opt->display_label,
-                ])->toArray();
-            }
-        }
-
-        // Process pending metadata
-        foreach ($pendingMetadata as $pending) {
-            $asset = $assets->get($pending->asset_id);
-            $thumbnailUrl = $this->getThumbnailUrl($asset);
-            $value = json_decode($pending->value_json, true);
-            
-            $items[] = [
-                'id' => $pending->id,
-                'asset_id' => $pending->asset_id,
-                'type' => 'pending_metadata',
-                'value' => $value,
-                'field_key' => $pending->field_key,
-                'field_label' => $pending->field_label,
-                'field_type' => $pending->field_type,
-                'confidence' => $pending->confidence ? (float) $pending->confidence : null,
-                'source' => $pending->source,
-                'options' => $pendingOptionsMap[$pending->metadata_field_id] ?? [],
-                'asset_title' => $pending->asset_title,
-                'asset_filename' => $pending->asset_filename,
-                'thumbnail_url' => $thumbnailUrl,
-            ];
-        }
+        // Phase M-1: Pending metadata from asset_metadata table is excluded
+        // Metadata is reviewed inline during asset review, not as separate suggestions
 
         // Sort by confidence descending (highest first), then by created_at
         usort($items, function ($a, $b) {
@@ -3426,9 +3367,24 @@ class AssetMetadataController extends Controller
         }
 
         // Fall back to final thumbnail if available
+        // Use 'large' for better quality in modal, fall back to 'medium' if large not available
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             $thumbnails = $metadata['thumbnails'] ?? [];
+            
+            // Prefer large thumbnail for better quality in modal
+            if (!empty($thumbnails) && isset($thumbnails['large'])) {
+                $url = route('assets.thumbnail.final', [
+                    'asset' => $asset->id,
+                    'style' => 'large',
+                ]);
+                if ($thumbnailVersion) {
+                    $url .= '?v=' . $thumbnailVersion;
+                }
+                return $url;
+            }
+            
+            // Fall back to medium if large not available
             if (!empty($thumbnails) && isset($thumbnails['medium'])) {
                 $url = route('assets.thumbnail.final', [
                     'asset' => $asset->id,

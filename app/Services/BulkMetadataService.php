@@ -439,9 +439,11 @@ class BulkMetadataService
             // Persist each value
             foreach ($normalizedValues as $value) {
                 // Check if approval is required (unless user has bypass_approval permission)
+                // Phase M-2: Pass brand for company + brand level gating
                 $tenant = \App\Models\Tenant::find($asset->tenant_id);
+                $brand = \App\Models\Brand::find($asset->brand_id);
                 $user = $userId ? \App\Models\User::find($userId) : null;
-                $requiresApproval = $tenant && $this->approvalResolver->requiresApproval('user', $tenant, $user);
+                $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
 
                 // Create new asset_metadata row
                 // Phase B7: Bulk user edits have confidence = 1.0 and producer = 'user'

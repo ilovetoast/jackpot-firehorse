@@ -197,12 +197,14 @@ class CompanyController extends Controller
             ];
         }
 
+        // Phase M-2: Include tenant settings
         return Inertia::render('Companies/Settings', [
             'tenant' => [
                 'id' => $tenant->id,
                 'name' => $tenant->name,
                 'slug' => $tenant->slug,
                 'timezone' => $tenant->timezone ?? 'UTC',
+                'settings' => $tenant->settings ?? [],
             ],
             'billing' => [
                 'current_plan' => $currentPlan,
@@ -269,9 +271,20 @@ class CompanyController extends Controller
                 }
             ],
             'timezone' => 'required|string|max:255',
+            'settings' => 'nullable|array',
+            'settings.enable_metadata_approval' => 'nullable|boolean', // Phase M-2
         ]);
 
+        // Phase M-2: Handle settings separately
+        $settings = $validated['settings'] ?? [];
+        unset($validated['settings']);
+        
+        // Merge settings with existing settings
+        $currentSettings = $tenant->settings ?? [];
+        $mergedSettings = array_merge($currentSettings, $settings);
+        
         $tenant->update($validated);
+        $tenant->update(['settings' => $mergedSettings]);
 
         return $this->backWithSuccess('Updated');
     }

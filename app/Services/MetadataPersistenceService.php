@@ -122,9 +122,11 @@ class MetadataPersistenceService
                     // Check if approval is required
                     // Upload-time metadata is auto-approved (user explicitly set it during upload)
                     // Post-upload edits require approval if workflow is enabled (unless user has bypass_approval permission)
+                    // Phase M-2: Pass brand for company + brand level gating
                     $tenant = \App\Models\Tenant::find($asset->tenant_id);
+                    $brand = \App\Models\Brand::find($asset->brand_id);
                     $user = $userId ? \App\Models\User::find($userId) : null;
-                    $requiresApproval = !$autoApprove && $tenant && $this->approvalResolver->requiresApproval('user', $tenant, $user);
+                    $requiresApproval = !$autoApprove && $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
 
                     // Insert asset_metadata row
                     // Phase B7: User-uploaded metadata has confidence = 1.0 and producer = 'user'

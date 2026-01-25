@@ -253,13 +253,13 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                     {/* Asset info with thumbnail */}
                                     <div className="mb-3 pb-3 border-b border-gray-200">
                                         <div className="flex items-start gap-3">
-                                            {/* Thumbnail */}
+                                            {/* Thumbnail - larger size for better quality */}
                                             {currentItem.thumbnail_url ? (
                                                 <div className="flex-shrink-0">
                                                     <img
                                                         src={currentItem.thumbnail_url}
                                                         alt={currentItem.asset_title || currentItem.asset_filename || 'Asset'}
-                                                        className="w-16 h-16 object-cover rounded border border-gray-200"
+                                                        className="w-32 h-32 object-cover rounded border border-gray-200"
                                                         onError={(e) => {
                                                             // Hide image if it fails to load
                                                             e.target.style.display = 'none'
@@ -267,7 +267,7 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                                     />
                                                 </div>
                                             ) : (
-                                                <div className="flex-shrink-0 w-16 h-16 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
+                                                <div className="flex-shrink-0 w-32 h-32 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
                                                     <span className="text-xs text-gray-400">No image</span>
                                                 </div>
                                             )}

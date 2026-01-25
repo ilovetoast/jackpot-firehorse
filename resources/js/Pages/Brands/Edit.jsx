@@ -497,7 +497,7 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, private_category_limits, can_edit_system_categories }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, private_category_limits, can_edit_system_categories, tenant_settings, current_plan }) {
     const { auth } = usePage().props
     const [cropModalOpen, setCropModalOpen] = useState(false)
     const [iconCropModalOpen, setIconCropModalOpen] = useState(false)
@@ -553,7 +553,10 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         secondary_color: brand.secondary_color || '',
         accent_color: brand.accent_color || '',
         nav_color: brand.nav_color || brand.primary_color || '',
-        settings: brand.settings || {},
+        settings: {
+            ...(brand.settings || {}),
+            metadata_approval_enabled: brand.settings?.metadata_approval_enabled ?? false, // Phase M-2
+        },
     })
 
     const submit = (e) => {
@@ -1262,6 +1265,39 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </div>
                                     {errors.nav_color && <p className="mt-2 text-sm text-red-600">{errors.nav_color}</p>}
                                 </div>
+
+                                {/* Phase M-2: Metadata Approval Toggle */}
+                                {['pro', 'enterprise'].includes(current_plan) && tenant_settings?.enable_metadata_approval && (
+                                    <div className="border-t border-gray-200 pt-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex-1">
+                                                <label htmlFor="metadata_approval_enabled" className="block text-sm font-medium leading-6 text-gray-900">
+                                                    Enable metadata approval for this brand
+                                                </label>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    Metadata approval is available for this plan and can be enabled per brand. When enabled, metadata edits by contributors and viewers will require approval from brand managers or admins.
+                                                </p>
+                                            </div>
+                                            <div className="ml-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setData('settings.metadata_approval_enabled', !data.settings?.metadata_approval_enabled)}
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                        data.settings?.metadata_approval_enabled ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    }`}
+                                                    role="switch"
+                                                    aria-checked={data.settings?.metadata_approval_enabled}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                            data.settings?.metadata_approval_enabled ? 'translate-x-5' : 'translate-x-0'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                     </div>
                                 </div>
                             </div>

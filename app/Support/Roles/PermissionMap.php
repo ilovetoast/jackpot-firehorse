@@ -210,9 +210,11 @@ class PermissionMap
             ),
 
             // Brand Manager: Manage brand settings (can approve assets)
+            // Phase M-1: Brand Manager edits bypass approval (asset-centric workflow)
             'brand_manager' => array_merge(
                 $brandManagementPermissions,
                 [
+                    'metadata.bypass_approval', // Phase M-1: Brand Manager edits bypass approval
                     'metadata.suggestions.view',
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',

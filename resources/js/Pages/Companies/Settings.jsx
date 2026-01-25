@@ -38,6 +38,9 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         name: tenant.name || '',
         slug: tenant.slug || '',
         timezone: tenant.timezone || 'UTC',
+        settings: {
+            enable_metadata_approval: tenant.settings?.enable_metadata_approval ?? false, // Phase M-2
+        },
     })
 
     // Utility function to generate slug from company name
@@ -462,6 +465,39 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                         {errors.timezone && <p className="mt-2 text-sm text-red-600">{errors.timezone}</p>}
                                     </div>
                                 </div>
+
+                                {/* Phase M-2: Metadata Approval Toggle */}
+                                {['pro', 'enterprise'].includes(billing.current_plan) && (
+                                    <div className="border-t border-gray-200 pt-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex-1">
+                                                <label htmlFor="enable_metadata_approval" className="block text-sm font-medium leading-6 text-gray-900">
+                                                    Enable metadata approval workflows
+                                                </label>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    When enabled, metadata edits by contributors and viewers will require approval from brand managers or admins.
+                                                </p>
+                                            </div>
+                                            <div className="ml-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setData('settings.enable_metadata_approval', !data.settings?.enable_metadata_approval)}
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                        data.settings?.enable_metadata_approval ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    }`}
+                                                    role="switch"
+                                                    aria-checked={data.settings?.enable_metadata_approval}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                            data.settings?.enable_metadata_approval ? 'translate-x-5' : 'translate-x-0'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {errors.error && (
                                     <div className="rounded-md bg-red-50 p-4">
