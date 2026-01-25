@@ -65,33 +65,19 @@ class BrandPolicy
             return $hasPermission;
         }
 
-        // For regular users, they MUST be assigned to the brand via brand_user pivot table
-        // This is the source of truth - if they're not in brand_user, they can't access the brand
-        $hasBrandAssignment = $user->brands()->where('brands.id', $brand->id)->exists();
+        // Phase MI-1: For regular users, they MUST have active brand membership
+        // Use activeBrandMembership to verify active status (removed_at IS NULL)
+        $membership = $user->activeBrandMembership($brand);
         
-        \Log::info('BrandPolicy::view() - brand assignment check', [
+        \Log::info('BrandPolicy::view() - active membership check', [
             'user_id' => $user->id,
             'brand_id' => $brand->id,
-            'has_brand_assignment' => $hasBrandAssignment,
+            'has_active_membership' => $membership !== null,
+            'membership_role' => $membership['role'] ?? null,
         ]);
         
-        // Also check the database directly for debugging
-        $pivotRecord = \DB::table('brand_user')
-            ->where('user_id', $user->id)
-            ->where('brand_id', $brand->id)
-            ->first();
-        
-        \Log::info('BrandPolicy::view() - direct DB check', [
-            'user_id' => $user->id,
-            'brand_id' => $brand->id,
-            'pivot_record' => $pivotRecord ? [
-                'id' => $pivotRecord->id,
-                'role' => $pivotRecord->role,
-            ] : null,
-        ]);
-        
-        if (!$hasBrandAssignment) {
-            \Log::warning('BrandPolicy::view() - User does not have brand assignment', [
+        if (!$membership) {
+            \Log::warning('BrandPolicy::view() - User does not have active brand membership', [
                 'user_id' => $user->id,
                 'user_email' => $user->email,
                 'brand_id' => $brand->id,
@@ -137,9 +123,9 @@ class BrandPolicy
             return $user->hasPermissionForTenant($brand->tenant, 'brand_settings.manage');
         }
 
-        // For regular users, they MUST be assigned to the brand via brand_user pivot table
-        // This is the source of truth - if they're not in brand_user, they can't manage the brand
-        if (!$user->brands()->where('brands.id', $brand->id)->exists()) {
+        // Phase MI-1: For regular users, they MUST have active brand membership
+        $membership = $user->activeBrandMembership($brand);
+        if (!$membership) {
             return false;
         }
 

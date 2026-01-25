@@ -482,6 +482,10 @@ class UploadCompletionService
                                !in_array(strtolower($mimeType), ['image/avif']); // AVIF excluded (not supported yet)
                 $initialThumbnailStatus = $isImageFile ? \App\Enums\ThumbnailStatus::PENDING : null;
                 
+                // Phase AF-1: Check if user requires approval for this brand
+                // Default to not_required, will be updated after creation if needed
+                $initialApprovalStatus = \App\Enums\ApprovalStatus::NOT_REQUIRED;
+                
                 $asset = Asset::create([
                     'tenant_id' => $uploadSession->tenant_id,
                     'brand_id' => $targetBrandId,
@@ -500,6 +504,8 @@ class UploadCompletionService
                     // Prevents false "completed" states that cause UI to skip processing/icon states
                     // Ensures new uploads behave the same as existing assets
                     'thumbnail_status' => $initialThumbnailStatus,
+                    // Phase AF-1: Set initial approval_status (will be updated after creation if user requires approval)
+                    'approval_status' => $initialApprovalStatus,
                 ]);
                 
                 Log::info('[UploadCompletionService] Asset::create() succeeded', [
@@ -664,6 +670,51 @@ class UploadCompletionService
                     'category_id' => $categoryId,
                     'user_id' => $userId,
                 ]);
+            }
+
+            // Phase AF-1: Check brand_user.requires_approval flag
+            // Phase MI-1: Only check active membership (removed_at IS NULL)
+            // Phase AF-5: Gate approval workflow based on plan feature
+            // This is separate from category-based approval (which is locked phase)
+            // Approval is required ONLY if uploader.brand_user.requires_approval === true AND approvals.enabled = true
+            if ($userId !== null && $targetBrandId !== null) {
+                $user = \App\Models\User::find($userId);
+                $brand = \App\Models\Brand::find($targetBrandId);
+                $tenant = $brand?->tenant;
+                
+                // Phase AF-5: Check if approvals are enabled for tenant plan
+                $featureGate = app(\App\Services\FeatureGate::class);
+                $approvalsEnabled = $tenant && $featureGate->approvalsEnabled($tenant);
+                
+                // Phase MI-1: Use activeBrandMembership to get requires_approval flag
+                $membership = $user ? $user->activeBrandMembership($brand) : null;
+                $requiresApproval = $approvalsEnabled && $membership && ($membership['requires_approval'] ?? false);
+                
+                    if ($requiresApproval) {
+                        // User requires approval - set approval_status to pending
+                        $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
+                        // Asset remains unpublished until approved
+                        $asset->published_at = null;
+                        $asset->published_by_id = null;
+                        // Status remains VISIBLE (approval doesn't change visibility status, just approval_status)
+                        $asset->save();
+                        
+                        // Phase AF-2: Record submitted action
+                        $commentService = app(\App\Services\AssetApprovalCommentService::class);
+                        $commentService->recordSubmitted($asset, $user);
+                        
+                        // Phase AF-3: Notify approvers
+                        $notificationService = app(\App\Services\ApprovalNotificationService::class);
+                        $notificationService->notifyOnSubmitted($asset, $user);
+                        
+                        Log::info('[UploadCompletionService] Asset requires approval (brand_user.requires_approval=true)', [
+                            'asset_id' => $asset->id,
+                            'user_id' => $userId,
+                            'brand_id' => $targetBrandId,
+                            'approval_status' => 'pending',
+                        ]);
+                    }
+                // If not required, approval_status already set to NOT_REQUIRED during creation
             }
 
             // Update upload session status and uploaded size (transition already validated above)

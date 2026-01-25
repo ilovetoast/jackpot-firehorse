@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
@@ -216,6 +217,13 @@ class Asset extends Model
         'archived_at',
         'archived_by_id',
         'expires_at',
+        'approval_status',
+        'approved_at',
+        'approved_by_user_id',
+        'rejected_at',
+        'rejection_reason',
+        'approval_summary', // Phase AF-6
+        'approval_summary_generated_at', // Phase AF-6
     ];
 
     /**
@@ -237,6 +245,10 @@ class Asset extends Model
             'published_at' => 'datetime',
             'archived_at' => 'datetime',
             'expires_at' => 'datetime',
+            'approval_status' => ApprovalStatus::class,
+            'approved_at' => 'datetime',
+            'rejected_at' => 'datetime',
+            'approval_summary_generated_at' => 'datetime', // Phase AF-6
         ];
     }
 
@@ -358,6 +370,16 @@ class Asset extends Model
     public function archivedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'archived_by_id');
+    }
+
+    /**
+     * Get the user who approved this asset.
+     * 
+     * Phase AF-1: Asset approval workflow.
+     */
+    public function approvedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by_user_id');
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -65,17 +66,20 @@ class HandleInertiaRequests extends Middleware
                     $tenantRole = $user->getRoleForTenant($tenant);
                     $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
                     
+                    // Phase MI-1: Verify user has active brand membership (unless owner/admin)
                     if (! $isTenantOwnerOrAdmin) {
-                        $hasBrandAccess = $user->brands()
-                            ->where('brands.id', $activeBrand->id)
-                            ->where('tenant_id', $tenant->id)
-                            ->exists();
+                        $membership = $user->activeBrandMembership($activeBrand);
+                        $hasBrandAccess = $membership !== null;
                         
                         if (! $hasBrandAccess) {
-                            // User doesn't have access - find a brand they do have access to
-                            $userBrand = $user->brands()
-                                ->where('tenant_id', $tenant->id)
-                                ->first();
+                            // User doesn't have active membership - find a brand they do have access to
+                            $userBrand = null;
+                            foreach ($tenant->brands as $brand) {
+                                if ($user->activeBrandMembership($brand)) {
+                                    $userBrand = $brand;
+                                    break;
+                                }
+                            }
                             
                             if ($userBrand) {
                                 $activeBrand = $userBrand;
@@ -141,13 +145,14 @@ class HandleInertiaRequests extends Middleware
                     $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
                 }
                 
-                // Get brands the user has access to (via brand_user pivot table) for this tenant
+                // Phase MI-1: Get brands the user has active membership for (removed_at IS NULL)
                 $userBrandIds = [];
                 if ($user) {
-                    $userBrandIds = $user->brands()
-                        ->where('tenant_id', $tenant->id)
-                        ->pluck('brands.id')
-                        ->toArray();
+                    foreach ($tenant->brands as $brand) {
+                        if ($user->activeBrandMembership($brand)) {
+                            $userBrandIds[] = $brand->id;
+                        }
+                    }
                 }
                 
                 // Get all brands for the tenant
@@ -395,6 +400,21 @@ class HandleInertiaRequests extends Middleware
                 'roles' => $roles,
                 'tenant_role' => $tenantRole, // Current tenant-specific role
                 'role_permissions' => $rolePermissions, // Mapping of role names to permission arrays
+                // Phase AF-5: Approval feature flags (plan-gated)
+                'approval_features' => $tenant ? (function () use ($tenant) {
+                    $featureGate = app(FeatureGate::class);
+                    return [
+                        'approvals_enabled' => $featureGate->approvalsEnabled($tenant),
+                        'notifications_enabled' => $featureGate->notificationsEnabled($tenant),
+                        'approval_summaries_enabled' => $featureGate->approvalSummariesEnabled($tenant),
+                        'required_plan' => $featureGate->approvalsEnabled($tenant) ? null : $featureGate->getRequiredPlanName($tenant),
+                    ];
+                })() : [
+                    'approvals_enabled' => false,
+                    'notifications_enabled' => false,
+                    'approval_summaries_enabled' => false,
+                    'required_plan' => 'Pro',
+                ],
             ],
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
         ];

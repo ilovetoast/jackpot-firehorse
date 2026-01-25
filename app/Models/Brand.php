@@ -118,10 +118,15 @@ class Brand extends Model
 
     /**
      * Get the users that belong to this brand.
+     * 
+     * Phase MI-1: This relationship includes all pivots (active and removed).
+     * Filter by removed_at IS NULL for active memberships only.
      */
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class)->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(User::class)
+            ->withPivot('role', 'requires_approval', 'removed_at')
+            ->withTimestamps();
     }
 
     /**

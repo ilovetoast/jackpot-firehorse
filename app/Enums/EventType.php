@@ -62,6 +62,8 @@ class EventType
     public const ASSET_PUBLISHED = 'asset.published';
     public const ASSET_UNPUBLISHED = 'asset.unpublished';
     public const ASSET_PENDING_APPROVAL = 'asset.pending_approval'; // Phase L.5.1: Category-based approval
+    public const ASSET_APPROVED = 'asset.approved'; // Phase AF-1: Brand-user approval workflow
+    public const ASSET_REJECTED = 'asset.rejected'; // Phase AF-1: Brand-user approval workflow
     public const ASSET_ARCHIVED = 'asset.archived';
     public const ASSET_UNARCHIVED = 'asset.unarchived';
     public const ASSET_VERSION_ADDED = 'asset.version_added';
@@ -239,6 +241,8 @@ class EventType
             self::ASSET_PUBLISHED,
             self::ASSET_UNPUBLISHED,
             self::ASSET_PENDING_APPROVAL,
+            self::ASSET_APPROVED,
+            self::ASSET_REJECTED,
             self::ASSET_ARCHIVED,
             self::ASSET_UNARCHIVED,
             self::ASSET_VERSION_ADDED,

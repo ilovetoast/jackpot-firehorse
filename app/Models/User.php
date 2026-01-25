@@ -7,6 +7,7 @@ use App\Enums\EventType;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\DB;
@@ -97,10 +98,15 @@ class User extends Authenticatable
 
     /**
      * Get the brands that this user belongs to.
+     * 
+     * Phase MI-1: This relationship includes all pivots (active and removed).
+     * Use activeBrandMembership() or filter by removed_at IS NULL for active memberships.
      */
     public function brands(): BelongsToMany
     {
-        return $this->belongsToMany(Brand::class)->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(Brand::class)
+            ->withPivot('role', 'requires_approval', 'removed_at')
+            ->withTimestamps();
     }
 
     /**
@@ -158,9 +164,17 @@ class User extends Authenticatable
      * @param bool $bypassOwnerCheck If true, allows owner role assignment (for ownership transfers)
      * @return void
      * @throws \App\Exceptions\CannotAssignOwnerRoleException If trying to assign owner role and current user is not platform super-owner
+     * @throws \InvalidArgumentException If role is invalid
      */
     public function setRoleForTenant(Tenant $tenant, string $role, bool $bypassOwnerCheck = false): void
     {
+        // Validate role using RoleRegistry
+        if (!\App\Support\Roles\RoleRegistry::isValidTenantRole($role)) {
+            throw new \InvalidArgumentException(
+                "Invalid tenant role: {$role}. Valid roles are: " . implode(', ', \App\Support\Roles\RoleRegistry::tenantRoles())
+            );
+        }
+        
         // Prevent direct owner role assignment - must use ownership transfer workflow
         if (strtolower($role) === 'owner' && !$bypassOwnerCheck) {
             // Allow if tenant has no owner (initial setup case)
@@ -222,56 +236,129 @@ class User extends Authenticatable
     /**
      * Get valid brand roles.
      * 
+     * @deprecated Use RoleRegistry::brandRoles() instead
      * @return array<string> Valid brand role names
      */
     public static function getValidBrandRoles(): array
     {
-        return ['admin', 'brand_manager', 'contributor', 'viewer'];
+        return \App\Support\Roles\RoleRegistry::brandRoles();
+    }
+
+    /**
+     * Phase MI-1: Get active brand membership information.
+     * 
+     * Centralizes brand membership resolution with integrity checks.
+     * Verifies tenant membership, brand_user existence, and active status.
+     * 
+     * @param Brand $brand
+     * @return array{role: string|null, requires_approval: bool}|null Returns null if no active membership
+     */
+    public function activeBrandMembership(Brand $brand): ?array
+    {
+        $tenant = $brand->tenant;
+        
+        // Verify tenant membership first
+        if (!$this->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return null;
+        }
+        
+        // Query for active brand_user pivot (removed_at IS NULL)
+        $pivot = DB::table('brand_user')
+            ->where('user_id', $this->id)
+            ->where('brand_id', $brand->id)
+            ->whereNull('removed_at') // Phase MI-1: Only active memberships
+            ->first();
+        
+        if (!$pivot) {
+            return null;
+        }
+        
+        $role = $pivot->role ?? null;
+        
+        // Validate role - if invalid, log warning and return null
+        // NO automatic conversion - invalid roles should be fixed manually
+        if ($role && !\App\Support\Roles\RoleRegistry::isValidBrandRole($role)) {
+            \Log::warning('[User] Invalid brand role detected in database', [
+                'user_id' => $this->id,
+                'brand_id' => $brand->id,
+                'invalid_role' => $role,
+            ]);
+            return null; // Return null for invalid roles
+        }
+        
+        return [
+            'role' => $role,
+            'requires_approval' => (bool) ($pivot->requires_approval ?? false),
+        ];
     }
 
     /**
      * Get the user's role for a specific brand.
+     * 
+     * Phase MI-1: Now uses activeBrandMembership for integrity.
      */
     public function getRoleForBrand(Brand $brand): ?string
     {
-        // Query the pivot table directly to get the role
-        // This ensures we always get the latest role value from the database
-        $pivot = DB::table('brand_user')
-            ->where('user_id', $this->id)
-            ->where('brand_id', $brand->id)
-            ->first();
-        
-        $role = $pivot?->role ?? null;
-        
-        // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-        // This handles any legacy data that might have 'owner' as a brand role
-        if ($role === 'owner') {
-            // Update the database directly to avoid recursion
-            DB::table('brand_user')
-                ->where('user_id', $this->id)
-                ->where('brand_id', $brand->id)
-                ->update(['role' => 'admin']);
-            return 'admin';
-        }
-        
-        return $role;
+        $membership = $this->activeBrandMembership($brand);
+        return $membership['role'] ?? null;
     }
 
     /**
      * Set the user's role for a specific brand.
+     * 
+     * Phase MI-1: Handles soft-deleted pivots by restoring them.
+     * Prevents duplicate active memberships.
+     * NO automatic conversion - invalid roles must be validated before calling this method.
+     * Use RoleRegistry::validateBrandRoleAssignment() to validate before calling.
      */
     public function setRoleForBrand(Brand $brand, string $role): void
     {
-        // Prevent 'owner' from being a brand role - convert to 'admin' instead
-        // Owner is only valid at the tenant level, not brand level
-        if ($role === 'owner') {
-            $role = 'admin';
+        // Validate role using RoleRegistry - throw exception if invalid
+        if (!\App\Support\Roles\RoleRegistry::isValidBrandRole($role)) {
+            throw new \InvalidArgumentException(
+                "Invalid brand role: {$role}. Valid roles are: " . implode(', ', \App\Support\Roles\RoleRegistry::brandRoles())
+            );
         }
         
-        if ($this->brands()->where('brands.id', $brand->id)->exists()) {
-            $this->brands()->updateExistingPivot($brand->id, ['role' => $role]);
+        // Phase MI-1: Check for existing pivot (including soft-deleted)
+        $existingPivot = DB::table('brand_user')
+            ->where('user_id', $this->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+        
+        // Phase MI-1: Guard against duplicate active memberships
+        // If another active membership exists (shouldn't happen, but defensive check)
+        $activeCount = DB::table('brand_user')
+            ->where('user_id', $this->id)
+            ->where('brand_id', $brand->id)
+            ->whereNull('removed_at')
+            ->count();
+        
+        if ($activeCount > 0 && (!$existingPivot || $existingPivot->removed_at !== null)) {
+            // Another active membership exists - this is a data integrity issue
+            \Log::error('[User::setRoleForBrand] Duplicate active membership detected', [
+                'user_id' => $this->id,
+                'brand_id' => $brand->id,
+                'active_count' => $activeCount,
+            ]);
+            throw new \RuntimeException('Duplicate active brand membership detected. Please run diagnostic command to fix.');
+        }
+        
+        if ($existingPivot) {
+            // Pivot exists - update it and clear removed_at if it was soft-deleted
+            DB::table('brand_user')
+                ->where('id', $existingPivot->id)
+                ->update([
+                    'role' => $role,
+                    'removed_at' => null, // Phase MI-1: Restore if soft-deleted
+                    'updated_at' => now(),
+                ]);
         } else {
-            $this->brands()->attach($brand->id, ['role' => $role]);
+            // No pivot exists - create new one
+            $this->brands()->attach($brand->id, [
+                'role' => $role,
+                'removed_at' => null, // Explicitly set to null for new pivots
+            ]);
         }
     }
 
@@ -292,13 +379,14 @@ class User extends Authenticatable
             return $this->hasPermissionForTenant($tenant, $permission);
         }
         
-        // Check if user is assigned to this brand
-        if (!$this->brands()->where('brands.id', $brand->id)->exists()) {
+        // Phase MI-1: Check active brand membership
+        $membership = $this->activeBrandMembership($brand);
+        if (!$membership) {
             return false;
         }
         
         // Get brand role and check permissions
-        $brandRole = $this->getRoleForBrand($brand);
+        $brandRole = $membership['role'];
         if (!$brandRole) {
             return false;
         }
@@ -413,5 +501,13 @@ class User extends Authenticatable
     public function sendPasswordResetNotification($token): void
     {
         $this->notify(new \App\Notifications\ResetPasswordNotification($token));
+    }
+
+    /**
+     * Phase AF-3: Get notifications for this user.
+     */
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(\App\Models\Notification::class);
     }
 }

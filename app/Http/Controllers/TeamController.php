@@ -10,6 +10,7 @@ use App\Models\TenantInvitation;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\PlanService;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -76,12 +77,12 @@ class TeamController extends Controller
             // Capitalize first letter for display
             $roleDisplay = ucfirst($role);
             
-            // Get brand assignments for this user in this tenant
-            // Query directly from brand_user table to ensure we catch ALL records (including any orphaned ones)
-            // This is the source of truth - we query the database directly, not through relationships
+            // Phase MI-1: Get brand assignments for this user in this tenant (active memberships only)
+            // Query directly from brand_user table - filter to active memberships (removed_at IS NULL)
             $brandUserRecords = DB::table('brand_user')
                 ->where('user_id', $member->id)
                 ->whereIn('brand_id', $tenantBrandIds)
+                ->whereNull('removed_at') // Phase MI-1: Only active memberships
                 ->get();
             
             \Log::info('TeamController - Querying brand_user for member', [
@@ -119,16 +120,16 @@ class TeamController extends Controller
                 }
                 
                 $brandRole = $pivot->role ?? 'viewer';
-                // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-                if ($brandRole === 'owner') {
-                    $brandRole = 'admin';
-                    // Update the database to reflect this change
-                    $member->setRoleForBrand($brand, 'admin');
-                }
-                // Convert 'member' to 'viewer' for brand roles (member is tenant-level only)
-                if ($brandRole === 'member') {
+                // Validate brand role - if invalid, default to viewer
+                // NO automatic conversion - invalid roles should be fixed manually
+                if (!RoleRegistry::isValidBrandRole($brandRole)) {
+                    \Log::warning('[TeamController] Invalid brand role detected, defaulting to viewer', [
+                        'user_id' => $member->id,
+                        'brand_id' => $brand->id,
+                        'invalid_role' => $brandRole,
+                    ]);
                     $brandRole = 'viewer';
-                    // Update the database to reflect this change
+                    // Update the database to fix invalid role
                     $member->setRoleForBrand($brand, 'viewer');
                 }
                 
@@ -187,12 +188,14 @@ class TeamController extends Controller
                 }
                 
                 $brandRole = $pivot->role ?? 'viewer';
-                // Convert 'owner' to 'admin' for brand roles (owner is tenant-level only)
-                if ($brandRole === 'owner') {
-                    $brandRole = 'admin';
-                }
-                // Convert 'member' to 'viewer' for brand roles (member is tenant-level only)
-                if ($brandRole === 'member') {
+                // Validate brand role - if invalid, default to viewer
+                // NO automatic conversion - invalid roles should be fixed manually
+                if (!RoleRegistry::isValidBrandRole($brandRole)) {
+                    \Log::warning('[TeamController] Invalid brand role detected in orphaned record, defaulting to viewer', [
+                        'user_id' => $pivot->user_id,
+                        'brand_id' => $pivot->brand_id,
+                        'invalid_role' => $brandRole,
+                    ]);
                     $brandRole = 'viewer';
                 }
                 
@@ -237,13 +240,13 @@ class TeamController extends Controller
             ];
         });
 
-        // Get tenant roles from database (reliable source)
-        // These match TenantRoleSeeder: owner, admin, member
-        // Note: 'owner' role is NOT selectable during invitation - ownership must be transferred via ownership transfer process
-        $tenantRoles = [
-            ['value' => 'member', 'label' => 'Member'],
-            ['value' => 'admin', 'label' => 'Admin'],
-        ];
+        // Get assignable tenant roles from RoleRegistry (excludes owner)
+        $tenantRoles = collect(RoleRegistry::assignableTenantRoles())->map(function ($role) {
+            return [
+                'value' => $role,
+                'label' => ucfirst($role),
+            ];
+        })->values()->toArray();
 
         // Convert to array and ensure proper serialization for Inertia
         $membersArray = $allMembers->map(function ($member) {
@@ -384,8 +387,19 @@ class TeamController extends Controller
             ]);
         }
 
+        // Validate using RoleRegistry
         $validated = $request->validate([
-            'role' => 'required|string|in:owner,admin,member',
+            'role' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    try {
+                        RoleRegistry::validateTenantRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
         ]);
 
         // Get old role for logging
@@ -462,19 +476,27 @@ class TeamController extends Controller
         }
 
         // Verify the user is assigned to this brand
-        if (! $user->brands()->where('brands.id', $brand->id)->exists()) {
+        // Phase MI-1: Check active brand membership
+        if (! $user->activeBrandMembership($brand)) {
             abort(404, 'User is not assigned to this brand.');
         }
 
+        // Validate using RoleRegistry - no automatic conversion
         $validated = $request->validate([
-            'role' => 'required|string|in:admin,brand_manager,contributor,viewer',
+            'role' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    try {
+                        RoleRegistry::validateBrandRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
         ]);
 
-        // Prevent owner from being a brand role - convert to admin if owner is attempted
         $brandRole = $validated['role'];
-        if ($brandRole === 'owner') {
-            $brandRole = 'admin';
-        }
 
         // Get old role for logging
         $oldRole = $user->getRoleForBrand($brand);
@@ -516,34 +538,37 @@ class TeamController extends Controller
             abort(403, 'Only administrators and owners can invite team members.');
         }
 
+        // Validate using RoleRegistry - no automatic conversion
         $validated = $request->validate([
             'email' => 'required|email|max:255',
-            'role' => 'nullable|string|in:admin,member',
+            'role' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if ($value === null) {
+                        return; // Nullable, skip validation
+                    }
+                    try {
+                        RoleRegistry::validateTenantRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
             'brands' => 'required|array|min:1',
             'brands.*.brand_id' => 'required|exists:brands,id',
-            'brands.*.role' => 'required|string|in:admin,brand_manager,contributor,viewer',
+            'brands.*.role' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    try {
+                        RoleRegistry::validateBrandRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
         ]);
-
-        // Prevent owner role from being assigned during invitation
-        // Ownership must be transferred via the ownership transfer process
-        if ($validated['role'] === 'owner') {
-            return back()->withErrors([
-                'role' => 'Owner role cannot be assigned during invitation. Please use the ownership transfer process in Company Settings.',
-            ]);
-        }
-
-        // Prevent owner and member from being assigned as brand roles
-        // Owner is tenant-level only -> convert to admin
-        // Member is tenant-level only -> convert to viewer
-        foreach ($validated['brands'] as &$brandAssignment) {
-            if ($brandAssignment['role'] === 'owner') {
-                $brandAssignment['role'] = 'admin';
-            }
-            if ($brandAssignment['role'] === 'member') {
-                $brandAssignment['role'] = 'viewer';
-            }
-        }
-        unset($brandAssignment);
 
         // Verify all brands belong to this tenant
         $brandIds = collect($validated['brands'])->pluck('brand_id')->unique();
@@ -583,14 +608,13 @@ class TeamController extends Controller
             'tenant' => $tenant->id,
         ]);
 
-        // Determine tenant role (use provided role or default to first brand role or 'member')
-        // Note: 'member' is a valid tenant role, but not a valid brand role
-        // Note: 'owner' role cannot be assigned during invitation - must use ownership transfer process
-        $tenantRole = $validated['role'] ?? ($validated['brands'][0]['role'] ?? 'member');
-        // If tenant role came from brand role and it's not a valid tenant role, default to member
-        // Note: 'owner' is excluded - cannot be assigned during invitation
-        if (!in_array($tenantRole, ['admin', 'member'])) {
-            $tenantRole = 'member';
+        // Determine tenant role (use provided role or default to 'member')
+        // Default to 'member' if no role provided
+        $tenantRole = $validated['role'] ?? 'member';
+        
+        // Ensure tenant role is valid and assignable (RoleRegistry validation already ensured this)
+        if (!RoleRegistry::isAssignableTenantRole($tenantRole)) {
+            $tenantRole = 'member'; // Fallback to member if somehow invalid
         }
 
         // Store invitation in database

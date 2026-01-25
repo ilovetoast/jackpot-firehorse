@@ -91,6 +91,19 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         // Company slug availability checking
         Route::get('/api/companies/check-slug', [\App\Http\Controllers\CompanyController::class, 'checkSlugAvailability'])->name('companies.check-slug');
         
+        // Role API endpoints (canonical role lists for frontend)
+        Route::get('/api/roles/tenant', [\App\Http\Controllers\RoleController::class, 'tenantRoles'])->name('api.roles.tenant');
+        Route::get('/api/roles/brand', [\App\Http\Controllers\RoleController::class, 'brandRoles'])->name('api.roles.brand');
+        Route::get('/api/roles/brand/approvers', [\App\Http\Controllers\RoleController::class, 'brandApproverRoles'])->name('api.roles.brand.approvers');
+        
+        // Permission API endpoints (canonical permission mappings for frontend)
+        Route::get('/api/permissions/tenant', [\App\Http\Controllers\RoleController::class, 'tenantPermissions'])->name('api.permissions.tenant');
+        Route::get('/api/permissions/brand', [\App\Http\Controllers\RoleController::class, 'brandPermissions'])->name('api.permissions.brand');
+        
+        // Phase AF-3: Notification API endpoints
+        Route::get('/api/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])->name('api.notifications.index');
+        Route::post('/api/notifications/{notification}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('api.notifications.read');
+        
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
         Route::get('/api/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getRegistry'])->name('tenant.metadata.registry.api');
@@ -385,6 +398,15 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::put('/brands/{brand}/users/{user}/role', [\App\Http\Controllers\BrandController::class, 'updateUserRole'])->name('brands.users.update-role');
             Route::delete('/brands/{brand}/users/{user}', [\App\Http\Controllers\BrandController::class, 'removeUser'])->name('brands.users.remove');
             Route::post('/brands/{brand}/invitations/{invitation}/resend', [\App\Http\Controllers\BrandController::class, 'resendInvitation'])->name('brands.invitations.resend');
+            
+            // Phase AF-1: Asset approval workflow
+            Route::get('/brands/{brand}/approvals', [\App\Http\Controllers\BrandController::class, 'approvals'])->name('brands.approvals');
+            Route::get('/api/brands/{brand}/approvals', [\App\Http\Controllers\AssetApprovalController::class, 'index'])->name('api.brands.approvals');
+            Route::post('/brands/{brand}/assets/{asset}/approve', [\App\Http\Controllers\AssetApprovalController::class, 'approve'])->name('brands.assets.approve');
+            Route::post('/brands/{brand}/assets/{asset}/reject', [\App\Http\Controllers\AssetApprovalController::class, 'reject'])->name('brands.assets.reject');
+            // Phase AF-2: Re-submission and comments
+            Route::post('/brands/{brand}/assets/{asset}/resubmit', [\App\Http\Controllers\AssetApprovalController::class, 'resubmit'])->name('brands.assets.resubmit');
+            Route::get('/brands/{brand}/assets/{asset}/approval-history', [\App\Http\Controllers\AssetApprovalController::class, 'history'])->name('brands.assets.approval-history');
 
             // Category routes (tenant-scoped)
             // DISABLED: Category management moved to brands pages

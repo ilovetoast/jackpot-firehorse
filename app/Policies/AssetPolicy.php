@@ -39,7 +39,8 @@ class AssetPolicy
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
-                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                // Phase MI-1: Check active brand membership
+                if (!$user->activeBrandMembership($asset->brand)) {
                     return false;
                 }
             }
@@ -177,7 +178,8 @@ class AssetPolicy
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
-                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                // Phase MI-1: Check active brand membership
+                if (!$user->activeBrandMembership($asset->brand)) {
                     return false;
                 }
             }
@@ -223,7 +225,8 @@ class AssetPolicy
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
-                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                // Phase MI-1: Check active brand membership
+                if (!$user->activeBrandMembership($asset->brand)) {
                     return false;
                 }
             }
@@ -275,7 +278,8 @@ class AssetPolicy
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
-                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                // Phase MI-1: Check active brand membership
+                if (!$user->activeBrandMembership($asset->brand)) {
                     return false;
                 }
             }
@@ -327,7 +331,8 @@ class AssetPolicy
             
             // Tenant admins/owners have access to all brands
             if (!in_array($tenantRole, ['admin', 'owner'])) {
-                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                // Phase MI-1: Check active brand membership
+                if (!$user->activeBrandMembership($asset->brand)) {
                     return false;
                 }
             }

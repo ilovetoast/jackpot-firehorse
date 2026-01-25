@@ -43,7 +43,7 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -55,6 +55,7 @@ import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
 import AssetDetailsModal from './AssetDetailsModal'
 import CollapsibleSection from './CollapsibleSection'
+import ApprovalHistory from './ApprovalHistory'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
@@ -86,6 +87,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Publish confirmation modal state
     const [showPublishModal, setShowPublishModal] = useState(false)
     const [publishLoading, setPublishLoading] = useState(false)
+    // Phase AF-2: Resubmit state
+    const [showResubmitModal, setShowResubmitModal] = useState(false)
+    const [resubmitComment, setResubmitComment] = useState('')
+    const [resubmitLoading, setResubmitLoading] = useState(false)
     
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
@@ -868,6 +873,27 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 Expired
                             </span>
                         )}
+                        {/* Phase AF-1: Approval badges */}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'pending' && (
+                            <>
+                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                    Pending Approval
+                                </span>
+                                {/* Phase AF-4: Aging label */}
+                                {displayAsset.aging_label && (
+                                    <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
+                                        {displayAsset.aging_label}
+                                    </span>
+                                )}
+                            </>
+                        )}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && displayAsset.approval_capable && (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-red-100 text-red-700 border border-red-300">
+                                Rejected
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -967,6 +993,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </button>
                             )}
                             
+                            {/* Phase AF-2: Resubmit button - show if asset is rejected and user is uploader or admin */}
+                            {/* Phase AF-5: Only show if approvals are enabled */}
+                            {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && (
+                                (displayAsset.uploaded_by?.id === auth?.user?.id) || 
+                                (auth?.user?.brand_role === 'admin') || 
+                                (auth?.user?.tenant_role === 'admin' || auth?.user?.tenant_role === 'owner')
+                            ) && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowResubmitModal(true)}
+                                    className="w-full inline-flex items-center justify-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2"
+                                >
+                                    <ArrowUturnLeftIcon className="h-4 w-4 mr-2" />
+                                    Resubmit for Approval
+                                </button>
+                            )}
+                            
                             <div className="grid grid-cols-2 gap-2">
                                 <button
                                     type="button"
@@ -1043,6 +1086,42 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     <PendingMetadataList assetId={displayAsset.id} />
                 )}
 
+                {/* Phase AF-2: Approval History */}
+                {/* Phase AF-5: Only show approval history if approvals are enabled */}
+                {auth?.approval_features?.approvals_enabled && displayAsset?.id && (displayAsset.approval_status === 'pending' || displayAsset.approval_status === 'rejected' || displayAsset.approval_status === 'approved') && (
+                    <div className="border-t border-gray-200">
+                        <CollapsibleSection title="Approval History" defaultExpanded={false}>
+                            {/* Phase AF-6: Approval Summary (AI-generated) */}
+                            {auth?.approval_features?.approval_summaries_enabled && displayAsset?.approval_summary && (
+                                <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-start">
+                                        <div className="flex-shrink-0">
+                                            <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                            </svg>
+                                        </div>
+                                        <div className="ml-3 flex-1">
+                                            <h4 className="text-sm font-medium text-blue-900 mb-1">Summary</h4>
+                                            <p className="text-sm text-blue-800 whitespace-pre-wrap">{displayAsset.approval_summary}</p>
+                                            {displayAsset.approval_summary_generated_at && (
+                                                <p className="mt-2 text-xs text-blue-600">
+                                                    Generated {new Date(displayAsset.approval_summary_generated_at).toLocaleDateString('en-US', {
+                                                        year: 'numeric',
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        hour: 'numeric',
+                                                        minute: '2-digit',
+                                                    })}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            <ApprovalHistory asset={displayAsset} brand={auth?.activeBrand} />
+                        </CollapsibleSection>
+                    </div>
+                )}
 
                 {/* Buttons moved up to analytics section */}
 
@@ -1151,6 +1230,56 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </dt>
                                 <dd className="text-sm font-semibold text-gray-900">
                                     {formatDate(displayAsset.expires_at)}
+                                </dd>
+                            </div>
+                        )}
+                        {/* Phase AF-1: Approval information (read-only) */}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'approved' && displayAsset.approved_at && (
+                            <div className="flex justify-between">
+                                <dt className="text-sm text-gray-500">Approved on</dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    {formatDate(displayAsset.approved_at)}
+                                    {displayAsset.approved_by && (
+                                        <span className="ml-2 text-xs font-normal text-gray-500">
+                                            by {displayAsset.approved_by.name || 'Unknown'}
+                                        </span>
+                                    )}
+                                </dd>
+                            </div>
+                        )}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && displayAsset.rejected_at && displayAsset.approval_capable && (
+                            <div className="flex justify-between">
+                                <dt className="text-sm text-gray-500">Rejected on</dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    {formatDate(displayAsset.rejected_at)}
+                                    {displayAsset.rejection_reason && (
+                                        <span className="ml-2 text-xs font-normal text-gray-500">
+                                            ({displayAsset.rejection_reason})
+                                        </span>
+                                    )}
+                                </dd>
+                            </div>
+                        )}
+                        {/* Phase AF-4: Pending aging information */}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'pending' && displayAsset.pending_since && (
+                            <div className="flex justify-between">
+                                <dt className="text-sm text-gray-500">Awaiting approval for</dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    {displayAsset.pending_days !== null && displayAsset.pending_days >= 0 ? (
+                                        <>
+                                            {displayAsset.pending_days} {displayAsset.pending_days === 1 ? 'day' : 'days'}
+                                            {displayAsset.pending_days >= 7 && (
+                                                <span className="ml-2 text-xs font-normal text-amber-600">
+                                                    (7+ days)
+                                                </span>
+                                            )}
+                                        </>
+                                    ) : (
+                                        'Less than 1 day'
+                                    )}
                                 </dd>
                             </div>
                         )}
@@ -1643,6 +1772,106 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 />
             )}
             
+            {/* Phase AF-2: Resubmit Modal */}
+            {/* Phase AF-5: Only show if approvals are enabled */}
+            {auth?.approval_features?.approvals_enabled && showResubmitModal && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowResubmitModal(false)} />
+                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                            <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
+                                <button
+                                    type="button"
+                                    className="rounded-md bg-white text-gray-400 hover:text-gray-500"
+                                    onClick={() => {
+                                        setShowResubmitModal(false)
+                                        setResubmitComment('')
+                                    }}
+                                >
+                                    <XMarkIcon className="h-6 w-6" />
+                                </button>
+                            </div>
+                            <div className="sm:flex sm:items-start">
+                                <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">
+                                        Resubmit Asset for Approval
+                                    </h3>
+                                    <div className="mt-2">
+                                        <label htmlFor="resubmit-comment" className="block text-sm font-medium text-gray-700 mb-2">
+                                            Comment (optional)
+                                        </label>
+                                        <textarea
+                                            id="resubmit-comment"
+                                            rows={4}
+                                            value={resubmitComment}
+                                            onChange={(e) => setResubmitComment(e.target.value)}
+                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
+                                            placeholder="Add a comment explaining changes or addressing feedback..."
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse gap-2">
+                                <button
+                                    type="button"
+                                    disabled={resubmitLoading}
+                                    onClick={async () => {
+                                        setResubmitLoading(true)
+                                        try {
+                                            const response = await window.axios.post(
+                                                `/app/brands/${auth?.activeBrand?.id}/assets/${displayAsset.id}/resubmit`,
+                                                { comment: resubmitComment || null }
+                                            )
+                                            
+                                            if (response.data && response.data.message) {
+                                                setToastMessage('Asset resubmitted successfully.')
+                                                setToastType('success')
+                                                setTimeout(() => {
+                                                    setToastMessage(null)
+                                                }, 5000)
+                                                
+                                                setShowResubmitModal(false)
+                                                setResubmitComment('')
+                                                
+                                                setTimeout(() => {
+                                                    router.reload({ preserveState: true, preserveScroll: true })
+                                                }, 500)
+                                            }
+                                        } catch (err) {
+                                            console.error('Failed to resubmit asset:', err)
+                                            let errorMessage = 'Failed to resubmit asset.'
+                                            if (err.response) {
+                                                errorMessage = err.response.data?.error || err.response.data?.message || errorMessage
+                                            }
+                                            setToastMessage(errorMessage)
+                                            setToastType('error')
+                                            setTimeout(() => {
+                                                setToastMessage(null)
+                                            }, 5000)
+                                        } finally {
+                                            setResubmitLoading(false)
+                                        }
+                                    }}
+                                    className="inline-flex w-full justify-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500 sm:ml-3 sm:w-auto disabled:opacity-50"
+                                >
+                                    {resubmitLoading ? 'Resubmitting...' : 'Resubmit'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowResubmitModal(false)
+                                        setResubmitComment('')
+                                    }}
+                                    className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Toast Notification */}
             {toastMessage && (
                 <div className="fixed top-4 right-4 z-50 max-w-md w-full">

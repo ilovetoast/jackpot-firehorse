@@ -15,6 +15,7 @@ use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -245,11 +246,12 @@ class SiteAdminController extends Controller
                 $isOwner = $tenant->isOwner($user);
                 $isDisabledByPlanLimit = $isOwner ? false : $user->isDisabledByPlanLimit($tenant);
                 
-                // Load brand assignments efficiently
+                // Phase MI-1: Load brand assignments efficiently (active memberships only)
                 $brandIds = $tenant->brands()->pluck('id');
                 $userBrandRoles = DB::table('brand_user')
                     ->where('user_id', $user->id)
                     ->whereIn('brand_id', $brandIds)
+                    ->whereNull('removed_at') // Phase MI-1: Only active memberships
                     ->pluck('role', 'brand_id')
                     ->toArray();
                 
@@ -2021,8 +2023,18 @@ class SiteAdminController extends Controller
             abort(403, 'Only site owners can access this page.');
         }
 
+        // Validate using RoleRegistry - only tenant roles for company role permissions
         $validated = $request->validate([
-            'role_id' => 'required|string|in:owner,admin,brand_manager,member',
+            'role_id' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    // Only tenant roles are valid for company role permissions
+                    if (!RoleRegistry::isValidTenantRole($value)) {
+                        $fail("Invalid tenant role: {$value}. Valid roles are: " . implode(', ', RoleRegistry::tenantRoles()));
+                    }
+                },
+            ],
             'permissions' => 'required|array',
         ]);
 

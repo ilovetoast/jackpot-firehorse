@@ -39,16 +39,79 @@ export default function AdminPermissions({
         { id: 'site_compliance', name: 'Site Compliance', icon: '' },
     ]
 
-    // Order roles by hierarchy: Owner > Admin > Brand Manager > Manager > Contributor > Uploader > Viewer > Member
-    const defaultCompanyRoles = company_roles || [
-        { id: 'owner', name: 'Owner', icon: '👑' },
-        { id: 'admin', name: 'Admin', icon: '' },
-        { id: 'brand_manager', name: 'Brand Manager', icon: '' },
-        { id: 'manager', name: 'Manager', icon: '' },
-        { id: 'contributor', name: 'Contributor', icon: '' },
-        { id: 'uploader', name: 'Uploader', icon: '' },
-        { id: 'viewer', name: 'Viewer', icon: '' },
-        { id: 'member', name: 'Member', icon: '' }, // Deprecated
+    // Load tenant and brand roles from API (canonical source)
+    const [tenantRoles, setTenantRoles] = useState([])
+    const [brandRoles, setBrandRoles] = useState([])
+    const [tenantRolePermissions, setTenantRolePermissions] = useState({})
+    const [brandRolePermissions, setBrandRolePermissions] = useState({})
+    const [loadingRoles, setLoadingRoles] = useState(true)
+
+    // Load roles and permissions from API on mount
+    useEffect(() => {
+        const loadRoles = async () => {
+            try {
+                // Load tenant roles and permissions
+                const tenantRes = await fetch('/app/api/permissions/tenant')
+                const tenantData = await tenantRes.json()
+                setTenantRoles(tenantData.roles || [])
+                
+                // Build tenant role permissions map
+                const tenantPerms = {}
+                tenantData.roles?.forEach(roleData => {
+                    tenantPerms[roleData.role] = roleData.permissions.reduce((acc, perm) => {
+                        acc[perm] = true
+                        return acc
+                    }, {})
+                })
+                setTenantRolePermissions(tenantPerms)
+
+                // Load brand roles and permissions
+                const brandRes = await fetch('/app/api/permissions/brand')
+                const brandData = await brandRes.json()
+                setBrandRoles(brandData.roles || [])
+                
+                // Build brand role permissions map
+                const brandPerms = {}
+                brandData.roles?.forEach(roleData => {
+                    brandPerms[roleData.role] = roleData.permissions.reduce((acc, perm) => {
+                        acc[perm] = true
+                        return acc
+                    }, {})
+                })
+                setBrandRolePermissions(brandPerms)
+
+                // Merge API permissions into state (for display, backend props take precedence for actual values)
+                setCompanyPermissionsState(prev => ({
+                    ...prev,
+                    ...tenantPerms,
+                    ...brandPerms,
+                }))
+
+                setLoadingRoles(false)
+            } catch (error) {
+                console.error('Failed to load roles from API:', error)
+                // Fallback to props if API fails
+                setTenantRoles(company_roles?.filter(r => r.id !== 'owner' && !r.id.startsWith('site_')) || [])
+                setBrandRoles([])
+                setLoadingRoles(false)
+            }
+        }
+
+        loadRoles()
+    }, [])
+
+    // Fallback to props for backward compatibility (legacy roles not in API)
+    const defaultCompanyRoles = company_roles || []
+    
+    // Combine API-loaded tenant roles with legacy roles from props (for backward compatibility)
+    // Filter out owner (never shown) and site roles
+    const allCompanyRoles = [
+        ...tenantRoles.map(r => ({ id: r.role, name: r.role.charAt(0).toUpperCase() + r.role.slice(1), icon: '' })),
+        ...defaultCompanyRoles.filter(r => 
+            r.id !== 'owner' && 
+            !r.id.startsWith('site_') && 
+            !tenantRoles.find(tr => tr.role === r.id)
+        )
     ]
 
     // Default permission assignments (from PermissionSeeder)
@@ -237,9 +300,14 @@ export default function AdminPermissions({
         ...(site_permissions || []).filter(p => !Object.values(sitePermissionGroups).some(g => g.permissions.includes(p))),
     ]
 
-    // State for permissions (loaded from backend props)
+    // State for permissions (loaded from backend props and API)
     const [sitePermissionsState, setSitePermissionsState] = useState(site_role_permissions || {})
-    const [companyPermissionsState, setCompanyPermissionsState] = useState(company_role_permissions || {})
+    const [companyPermissionsState, setCompanyPermissionsState] = useState(() => {
+        // Merge API-loaded permissions with backend props
+        const merged = { ...company_role_permissions }
+        // API permissions will be merged in useEffect after loading
+        return merged
+    })
 
     // Sync state when props update (after save)
     useEffect(() => {
@@ -328,8 +396,11 @@ export default function AdminPermissions({
     const handleSaveCompanyRoles = () => {
         setSaving(true)
         
-        // Save all company roles (except owner)
-        const rolesToSave = defaultCompanyRoles.filter((role) => role.id !== 'owner')
+        // Save all company roles (except owner and site roles)
+        const rolesToSave = allCompanyRoles.filter((role) => 
+            role.id !== 'owner' && 
+            !role.id.startsWith('site_')
+        )
         
         if (rolesToSave.length === 0) {
             setSaving(false)
@@ -764,13 +835,23 @@ export default function AdminPermissions({
     }
 
     const renderCompanyPermissionsTable = () => {
+        // Filter out owner and site roles, use API-loaded roles
+        const rolesToDisplay = allCompanyRoles.filter(r => 
+            r.id !== 'owner' && 
+            !r.id.startsWith('site_')
+        )
+
+        if (loadingRoles) {
+            return <div className="text-center py-8 text-gray-500">Loading roles...</div>
+        }
+
         return (
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead>
                         <tr>
                             <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Permission</th>
-                            {defaultCompanyRoles.map((role) => (
+                            {rolesToDisplay.map((role) => (
                                 <th key={role.id} className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">
                                     <div className="flex items-center justify-center gap-1">
                                         {role.icon && <span>{role.icon}</span>}
@@ -784,7 +865,7 @@ export default function AdminPermissions({
                         {(company_permissions || []).map((permission) => (
                             <tr key={permission}>
                                 <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{formatPermissionName(permission)}</td>
-                                {defaultCompanyRoles.map((role) => {
+                                {rolesToDisplay.map((role) => {
                                     const isChecked = companyPermissionsState[role.id]?.[permission] ?? false
                                     const isDefault = isDefaultPermission(role.id, permission, false)
                                     return (

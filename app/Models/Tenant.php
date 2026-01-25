@@ -152,7 +152,8 @@ class Tenant extends Model
         
         if ($firstUser) {
             // Update the database to fix the discrepancy
-            $firstUser->setRoleForTenant($this, 'owner');
+            // Use bypassOwnerCheck=true since this is internal data integrity fix
+            $firstUser->setRoleForTenant($this, 'owner', true);
             return $firstUser;
         }
         

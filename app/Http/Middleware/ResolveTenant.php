@@ -79,35 +79,18 @@ class ResolveTenant
                 ->first();
             
             if ($brand && $user) {
-                // Verify user has access to this brand (unless owner/admin)
+                // Phase MI-1: Verify user has active brand membership (unless owner/admin)
                 if (! $isTenantOwnerOrAdmin) {
-                    $hasBrandAccess = $user->brands()
-                        ->where('brands.id', $brand->id)
-                        ->where('tenant_id', $tenant->id)
-                        ->exists();
+                    $membership = $user->activeBrandMembership($brand);
+                    $hasBrandAccess = $membership !== null;
                     
-                    \Log::info('ResolveTenant - Brand access check', [
+                    \Log::info('ResolveTenant - Active membership check', [
                         'user_id' => $user->id,
                         'user_email' => $user->email,
                         'brand_id' => $brand->id,
                         'brand_name' => $brand->name,
-                        'has_brand_access' => $hasBrandAccess,
+                        'has_active_membership' => $hasBrandAccess,
                         'tenant_role' => $tenantRole,
-                    ]);
-                    
-                    // Also check the database directly for debugging
-                    $pivotRecord = \DB::table('brand_user')
-                        ->where('user_id', $user->id)
-                        ->where('brand_id', $brand->id)
-                        ->first();
-                    
-                    \Log::info('ResolveTenant - Direct DB check', [
-                        'user_id' => $user->id,
-                        'brand_id' => $brand->id,
-                        'pivot_record' => $pivotRecord ? [
-                            'id' => $pivotRecord->id,
-                            'role' => $pivotRecord->role,
-                        ] : null,
                     ]);
                     
                     if (! $hasBrandAccess) {
@@ -117,17 +100,21 @@ class ResolveTenant
                             'brand_id' => $brand->id,
                             'brand_name' => $brand->name,
                         ]);
-                        // User doesn't have access to this brand - reset to a brand they do have access to
-                        $userBrand = $user->brands()
-                            ->where('tenant_id', $tenant->id)
-                            ->first();
+                        // Phase MI-1: User doesn't have active membership - find a brand they do have access to
+                        $userBrand = null;
+                        foreach ($tenant->brands as $tenantBrand) {
+                            if ($user->activeBrandMembership($tenantBrand)) {
+                                $userBrand = $tenantBrand;
+                                break;
+                            }
+                        }
                         
                         if ($userBrand) {
                             $brand = $userBrand;
                             // Update session with accessible brand
                             session(['brand_id' => $brand->id]);
                         } else {
-                            // User has no brand access - redirect to error page
+                            // User has no active brand membership - redirect to error page
                             // Don't allow access to default brand if user isn't assigned to any brand
                             // Clear the brand_id from session to prevent loop
                             session()->forget('brand_id');
@@ -145,17 +132,21 @@ class ResolveTenant
                 }
             }
         } else {
-            // No brand in session, try to use a brand the user has access to
+            // Phase MI-1: No brand in session, try to use a brand the user has active membership for
             if ($user && ! $isTenantOwnerOrAdmin) {
-                $userBrand = $user->brands()
-                    ->where('tenant_id', $tenant->id)
-                    ->first();
+                $userBrand = null;
+                foreach ($tenant->brands as $tenantBrand) {
+                    if ($user->activeBrandMembership($tenantBrand)) {
+                        $userBrand = $tenantBrand;
+                        break;
+                    }
+                }
                 
                 if ($userBrand) {
                     $brand = $userBrand;
                     session(['brand_id' => $brand->id]);
                 } else {
-                    // User has no brand access - redirect to error page
+                    // User has no active brand membership - redirect to error page
                     // Don't allow access to default brand if user isn't assigned to any brand
                     // Clear the brand_id from session to prevent loop
                     session()->forget('brand_id');

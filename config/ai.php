@@ -238,6 +238,17 @@ return [
                 // No specific permissions required (system-triggered)
             ],
         ],
+        'approval_summarizer' => [
+            'name' => 'Approval Summarizer',
+            'description' => 'Generates neutral summaries of approval feedback history',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Phase AF-6: Tenant-scoped agent - runs automatically during approval actions
+                // No specific permissions required (system-triggered, read-only)
+            ],
+        ],
     ],
 
     /*

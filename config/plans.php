@@ -30,6 +30,11 @@ return [
         'features' => [
             'basic_asset_types',
         ],
+        'approval_features' => [
+            'approvals.enabled' => false,
+            'notifications.enabled' => false,
+            'approval_summaries.enabled' => false,
+        ],
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 50,
@@ -63,6 +68,11 @@ return [
         ],
         'features' => [
             'all_asset_types',
+        ],
+        'approval_features' => [
+            'approvals.enabled' => false,
+            'notifications.enabled' => false,
+            'approval_summaries.enabled' => false,
         ],
         'download_features' => [
             'download_links_limited' => true,
@@ -101,6 +111,11 @@ return [
             'advanced_features',
             'access_to_more_roles',
             'edit_system_categories',
+        ],
+        'approval_features' => [
+            'approvals.enabled' => true,
+            'notifications.enabled' => true,
+            'approval_summaries.enabled' => true,
         ],
         'download_features' => [
             'download_links_limited' => true,
@@ -141,6 +156,11 @@ return [
             'custom_integrations',
             'access_to_more_roles',
             'edit_system_categories',
+        ],
+        'approval_features' => [
+            'approvals.enabled' => true,
+            'notifications.enabled' => true,
+            'approval_summaries.enabled' => true,
         ],
         'download_features' => [
             'download_links_limited' => false,

@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Support\Roles\PermissionMap;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -126,53 +128,33 @@ class PermissionSeeder extends Seeder
         }
 
         // Create and assign permissions to company roles
-        // Note: 'member' role is deprecated - will be migrated to 'contributor'
+        // Use PermissionMap for canonical roles from RoleRegistry
+        $tenantPermissions = PermissionMap::tenantPermissions();
+        
+        // Owner: ALL permissions (full access) - from PermissionMap
         $owner = Role::firstOrCreate(['name' => 'owner', 'guard_name' => 'web']);
+        $owner->syncPermissions($tenantPermissions['owner']);
+
+        // Admin: All Manager permissions + governance permissions - from PermissionMap
         $admin = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
+        $admin->syncPermissions($tenantPermissions['admin']);
+
+        // Member: Basic company membership - from PermissionMap
+        $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']);
+        $member->syncPermissions($tenantPermissions['member']);
+
+        // Legacy roles (kept for backward compatibility, not in RoleRegistry)
         $manager = Role::firstOrCreate(['name' => 'manager', 'guard_name' => 'web']);
         $contributor = Role::firstOrCreate(['name' => 'contributor', 'guard_name' => 'web']);
         $uploader = Role::firstOrCreate(['name' => 'uploader', 'guard_name' => 'web']);
         $viewer = Role::firstOrCreate(['name' => 'viewer', 'guard_name' => 'web']);
         $brandManager = Role::firstOrCreate(['name' => 'brand_manager', 'guard_name' => 'web']);
-        $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web']); // Deprecated - kept for migration
 
-        // Owner: ALL permissions (full access)
-        // Includes all company, asset, metadata, tag, and governance permissions
-        $owner->syncPermissions(array_merge(
-            $companyPermissions,
-            $assetPermissions,
-            $metadataPermissions,
-            $tagPermissions,
-            $governancePermissions,
-            [
-                'tickets.create',
-                'tickets.reply',
-                'tickets.view_tenant',
-                'tickets.view_any',
-                'ai.usage.view', // View AI usage status
-                'assets.ai_metadata.regenerate', // Phase I: AI metadata regeneration
-            ]
-        ));
-
-        // Admin: All Manager permissions + governance permissions
-        // Includes metadata governance: registry.view, system.visibility.manage, tenant.visibility.manage, tenant.field.create, tenant.field.manage
-        $admin->syncPermissions(array_merge(
-            $companyPermissions,
-            $assetPermissions,
-            $metadataPermissions,
-            $tagPermissions,
-            $governancePermissions,
-            [
-                'tickets.create',
-                'tickets.reply',
-                'tickets.view_tenant',
-                'tickets.view_any',
-                'ai.usage.view', // View AI usage status
-                'assets.ai_metadata.regenerate', // Phase I: AI metadata regeneration
-            ]
-        ));
+        // Legacy roles - use PermissionMap for canonical brand roles where applicable
+        $brandPermissions = PermissionMap::brandPermissions();
 
         // Manager: All Contributor permissions + bypass approval + override automatic + bulk edit + suggestions
+        // Legacy role - keep existing behavior
         $manager->syncPermissions(array_merge(
             $companyPermissions,
             $assetPermissions,
@@ -188,71 +170,31 @@ class PermissionSeeder extends Seeder
                 'metadata.suggestions.apply',
                 'metadata.suggestions.dismiss',
             ]
-            // Note: Tickets permissions removed per standard DAM role definition
-            // Tickets can be added separately if needed for specific tenants
         ));
 
-        // Contributor: View, download, upload + set on upload + edit post upload + review candidates + tags
-        // Upload metadata is auto-approved for contributors
-        $contributor->syncPermissions(array_merge(
-            $assetPermissions,
-            $tagPermissions,
-            [
-                'metadata.set_on_upload',
-                'metadata.edit_post_upload',
-                'metadata.review_candidates',
-            ]
-            // Note: Tickets permissions removed per standard DAM role definition
-            // Tickets can be added separately if needed for specific tenants
-        ));
+        // Contributor: Use PermissionMap for canonical brand role
+        $contributor->syncPermissions($brandPermissions['contributor']);
 
         // Uploader: View, download, upload + set metadata on upload
+        // Legacy role - keep existing behavior
         $uploader->syncPermissions(array_merge(
             $assetPermissions,
             [
                 'metadata.set_on_upload',
             ]
-            // Note: Tickets permissions removed per standard DAM role definition
-            // Tickets can be added separately if needed for specific tenants
         ));
 
-        // Viewer: View and download only (minimal permissions)
-        $viewer->syncPermissions([
-            'asset.view',
-            'asset.download',
-            // Note: Tickets permissions removed per standard DAM role definition
-            // Tickets can be added separately if needed for specific tenants
-        ]);
+        // Viewer: Use PermissionMap for canonical brand role
+        $viewer->syncPermissions($brandPermissions['viewer']);
 
-        // Brand Manager: Legacy role - keep existing permissions + suggestions
-        $brandManager->syncPermissions([
-            'brand_settings.manage',
-            'brand_categories.manage',
-            'billing.view',
-            'assets.retry_thumbnails',
-            'metadata.suggestions.view',
-            'metadata.suggestions.apply',
-            'metadata.suggestions.dismiss',
-            'tickets.create',
-            'tickets.reply',
-            'tickets.view_tenant',
-        ]);
+        // Brand Manager: Use PermissionMap for canonical brand role
+        $brandManager->syncPermissions($brandPermissions['brand_manager']);
 
-        // Member: Deprecated - map to Contributor permissions for backward compatibility
-        // This will be migrated to 'contributor' role in a migration
-        $member->syncPermissions(array_merge(
-            $assetPermissions,
-            [
-                'metadata.set_on_upload',
-                'metadata.edit_post_upload',
-                'metadata.review_candidates',
-            ],
-            [
-                'tickets.create',
-                'tickets.reply',
-                'tickets.view_tenant',
-            ]
-        ));
+        // Note: Brand 'admin' role also exists as Spatie role for backward compatibility
+        // It gets permissions from PermissionMap::brandPermissions()['admin']
+        $brandAdmin = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
+        // Don't sync here - 'admin' is already synced above as tenant role
+        // Brand admin permissions are handled via brand_user.role string, not Spatie role
 
         // Create and assign permissions to site roles
         $siteOwner = Role::firstOrCreate(['name' => 'site_owner', 'guard_name' => 'web']);

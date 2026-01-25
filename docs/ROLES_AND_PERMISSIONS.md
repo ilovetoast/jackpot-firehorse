@@ -2,11 +2,12 @@
 
 ## Overview
 
-The Jackpot DAM uses a two-tier role system:
-- **Tenant/Company Roles**: Control what a user can do at the company level (Spatie roles)
-- **Brand Roles**: Control what a user can do for a specific brand's assets (stored as strings)
+The Jackpot DAM uses a **canonical role system** with three completely separate role layers:
+1. **Site-wide roles** (site_owner, site_admin, site_support, site_engineering, site_compliance)
+2. **Tenant/Company Roles**: Control what a user can do at the company level (Spatie roles)
+3. **Brand Roles**: Control what a user can do for a specific brand's assets (stored as strings)
 
-These roles are **separate and independent**. A user can have different roles at different levels.
+These layers **MUST NOT leak into each other**. All role lists come from a single registry (`RoleRegistry`).
 
 ---
 
@@ -27,10 +28,12 @@ Tenant roles are Spatie roles assigned via the `tenant_user` pivot table.
 ### Important Notes
 
 - **Owner** is tenant-level only - cannot be assigned as a brand role
-- **Owner** cannot be assigned during invitation - ownership must be transferred via the ownership transfer process in Company Settings
+- **Owner** cannot be assigned during invitation or via UI - ownership must be transferred via the ownership transfer process in Company Settings
+- **Owner** can only be assigned via ownership transfer flow or by platform super-owner (user ID 1) for initial setup
 - **Member** is tenant-level only - cannot be assigned as a brand role
 - Tenant roles control company-wide permissions (billing, team management, brand settings, etc.)
 - Tenant roles are managed via Spatie Permission package
+- All role validation uses `RoleRegistry` - no hardcoded arrays
 
 ### Tenant Role Permissions
 
@@ -66,6 +69,8 @@ Brand roles are stored as strings in the `brand_user.role` column (NOT Spatie ro
 - A user can have different brand roles for different brands
 - **Member** is NOT a valid brand role (it's tenant-level only)
 - **Owner** is NOT a valid brand role (it's tenant-level only)
+- All role validation uses `RoleRegistry` - no hardcoded arrays
+- Invalid role assignments return 422 errors - NO automatic conversion
 
 ### Brand Role Permissions
 
@@ -143,41 +148,74 @@ These are separate from tenant roles and control access to the admin dashboard a
 
 ### Validation Rules
 
+**All role validation uses RoleRegistry** - no hardcoded arrays:
+
 **Tenant Role Validation**:
 ```php
-'role' => 'required|string|in:owner,admin,member'
+use App\Support\Roles\RoleRegistry;
+
+'role' => [
+    'required',
+    'string',
+    function ($attribute, $value, $fail) {
+        try {
+            RoleRegistry::validateTenantRoleAssignment($value);
+        } catch (\InvalidArgumentException $e) {
+            $fail($e->getMessage());
+        }
+    },
+]
 ```
 
 **Brand Role Validation**:
 ```php
-'role' => 'required|string|in:admin,brand_manager,contributor,viewer'
+use App\Support\Roles\RoleRegistry;
+
+'role' => [
+    'required',
+    'string',
+    function ($attribute, $value, $fail) {
+        try {
+            RoleRegistry::validateBrandRoleAssignment($value);
+        } catch (\InvalidArgumentException $e) {
+            $fail($e->getMessage());
+        }
+    },
+]
 ```
 
-### Automatic Conversions
+### NO Automatic Conversions
 
-The system automatically converts invalid role assignments:
+**Invalid role assignments return 422 errors** - NO silent conversion.
 
-- **Owner → Admin**: If 'owner' is attempted as a brand role, it's converted to 'admin'
-- **Member → Viewer**: If 'member' is attempted as a brand role, it's converted to 'viewer'
+- Attempting to assign 'owner' as a brand role returns a 422 error
+- Attempting to assign 'member' as a brand role returns a 422 error
+- Attempting to assign 'owner' via UI/invite returns a 422 error
 
-These conversions happen in:
-- `BrandController.php`
-- `TeamController.php`
-- `SiteAdminController.php`
-- Frontend components (BrandRoleSelector, UserInviteForm, etc.)
+All validation is centralized in `RoleRegistry`.
 
 ---
 
 ## Frontend Components
 
+### Role Loading
+
+**Frontend must load roles from API endpoints** - no hardcoded lists:
+
+- `GET /api/roles/tenant` - Returns assignable tenant roles (excludes owner)
+- `GET /api/roles/brand` - Returns all brand roles
+- `GET /api/roles/brand/approvers` - Returns brand approver roles
+
+Owner is never included in frontend responses.
+
 ### BrandRoleSelector Component
 
 Located in `resources/js/Components/BrandRoleSelector.jsx`
 
-- Provides dropdown for selecting brand roles
+- Must load roles from `/api/roles/brand` endpoint
 - Only shows valid brand roles: Viewer, Contributor, Brand Manager, Admin
-- Automatically converts 'member' to 'viewer' if somehow passed
 - Default role: 'viewer'
+- NO automatic conversion - invalid roles return 422 errors
 
 ### Team Management Pages
 
@@ -210,6 +248,7 @@ $user->getRoleForTenant($tenant) // Returns: 'owner', 'admin', 'member', or null
 - **New users**: Default to 'member' at tenant level
 - **Brand assignments**: Default to 'viewer' at brand level
 - **No brand role**: User cannot access brand assets (unless tenant role grants access)
+- **Tenant creator**: Automatically assigned as 'owner' (seeder/initial setup only)
 
 ---
 
@@ -233,23 +272,37 @@ Tenant-level roles have been simplified to keep only essential roles:
 - **Migration**: Any users with `support` or `compliance` tenant roles should be migrated to appropriate brand-scoped roles or removed
 - **Note**: Site-level roles (`site_support`, `site_compliance`) remain unchanged (separate from tenant roles)
 
-### Owner Role Assignment
+### Owner Role Protection
 
-The `owner` role cannot be assigned during team member invitation:
+The `owner` role is **strictly protected**:
 
-- **Invitation**: Only `admin` and `member` roles can be assigned when inviting new team members
-- **Ownership Transfer**: Ownership must be transferred via the ownership transfer process in Company Settings
-- **Security**: This ensures ownership changes require explicit confirmation from the current owner
-- **Process**: The ownership transfer process requires email confirmation from both the current owner and the new owner
+- **Never selectable in UI**: Owner does not appear in dropdowns
+- **Cannot be assigned via API**: Returns 422 error if attempted
+- **Cannot be assigned during invitation**: Returns 422 error if attempted
+- **Only assignable via**: 
+  - Ownership transfer flow (requires email confirmation from both parties)
+  - Platform super-owner (user ID 1) for initial setup only
+  - Seeder/initial setup (bypassOwnerCheck=true)
 
-### Member Role Migration
+### Approval-Required Uploads
 
-The 'member' role was previously available as both a tenant and brand role. This has been corrected:
+**Approval-required uploads are NOT a role** - they are a capability flag:
 
-- **Before**: 'member' could be assigned at both tenant and brand levels
-- **After**: 'member' is tenant-level only; brand roles use 'viewer' instead
+- **Capability**: `brand_user.requires_approval` (boolean)
+- **Not a role**: This is a separate flag, not a role assignment
+- **Approval rules**: 
+  - `admin` and `brand_manager` roles can approve assets
+  - `contributor` and `viewer` roles cannot approve
+  - Use `RoleRegistry::brandApproverRoles()` to check if a role can approve
 
-Existing brand assignments with 'member' should be migrated to 'viewer'.
+### Member Role (Tenant-Level Only)
+
+The 'member' role is **tenant-level only**:
+
+- **Valid at**: Tenant/company level only
+- **Invalid at**: Brand level (returns 422 error if attempted)
+- **Brand default**: 'viewer' is used for brand assignments
+- **No migration needed**: Existing invalid assignments will return errors and must be fixed manually
 
 ---
 
@@ -263,7 +316,36 @@ Existing brand assignments with 'member' should be migrated to 'viewer'.
 
 ---
 
+## Canonical Role Registry
+
+**All role lists come from a single registry** - `App\Support\Roles\RoleRegistry`:
+
+- `RoleRegistry::tenantRoles()` - All tenant roles (including owner)
+- `RoleRegistry::assignableTenantRoles()` - Assignable tenant roles (excludes owner)
+- `RoleRegistry::brandRoles()` - All brand roles
+- `RoleRegistry::brandApproverRoles()` - Brand roles that can approve assets
+
+**Validation methods**:
+- `RoleRegistry::validateTenantRoleAssignment($role)` - Validates and throws if invalid/not assignable
+- `RoleRegistry::validateBrandRoleAssignment($role)` - Validates and throws if invalid
+
+**NO hardcoded role arrays** - all validation must use RoleRegistry.
+
+## Why Site Roles Are Not in PermissionMap
+
+Site roles operate at the platform level and are not tenant- or brand-scoped. They are intentionally excluded from `RoleRegistry` and `PermissionMap` to prevent scope leakage into tenant UIs, seeders, and APIs.
+
+This prevents:
+- Future "helpful" refactors that accidentally include site roles in tenant contexts
+- Cursor/AI hallucinating site roles into tenant/brand APIs
+- Human confusion six months from now about why site roles appear in tenant dropdowns
+
+Site roles (`site_owner`, `site_admin`, `site_support`, `site_engineering`, `site_compliance`) are managed separately in `PermissionSeeder` and are only accessible via the site admin dashboard.
+
 ## Related Files
+
+- **Role Registry**:
+  - `app/Support/Roles/RoleRegistry.php` - Single source of truth for all roles
 
 - **Seeders**:
   - `database/seeders/RoleSeeder.php`
@@ -273,14 +355,19 @@ Existing brand assignments with 'member' should be migrated to 'viewer'.
 - **Controllers**:
   - `app/Http/Controllers/TeamController.php`
   - `app/Http/Controllers/BrandController.php`
-  - `app/Http/Controllers/SiteAdminController.php`
+  - `app/Http/Controllers/RoleController.php` - API endpoints for frontend role loading
+
+- **API Endpoints**:
+  - `GET /api/roles/tenant` - Assignable tenant roles (excludes owner)
+  - `GET /api/roles/brand` - All brand roles
+  - `GET /api/roles/brand/approvers` - Brand approver roles
 
 - **Frontend Components**:
-  - `resources/js/Components/BrandRoleSelector.jsx`
-  - `resources/js/Pages/Companies/Team.jsx`
-  - `resources/js/Pages/Brands/Index.jsx`
+  - `resources/js/Components/BrandRoleSelector.jsx` - Must load from API
+  - `resources/js/Pages/Companies/Team.jsx` - Must load from API
+  - `resources/js/Pages/Brands/Index.jsx` - Must load from API
 
 - **Models**:
-  - `app/Models/User.php` (HasRoles trait)
+  - `app/Models/User.php` - Uses RoleRegistry for validation
   - `app/Models/Tenant.php`
   - `app/Models/Brand.php`

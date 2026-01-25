@@ -3,6 +3,7 @@ import { useForm, Link, router, usePage } from '@inertiajs/react'
 import AppBrandLogo from './AppBrandLogo'
 import PermissionGate from './PermissionGate'
 import Avatar from './Avatar'
+import NotificationBell from './NotificationBell'
 
 export default function AppNav({ brand, tenant }) {
     const { auth } = usePage().props
@@ -430,6 +431,9 @@ export default function AppNav({ brand, tenant }) {
                         )}
                     </div>
                     <div className="flex items-center gap-4">
+                        {/* Phase AF-3: Notification Bell */}
+                        <NotificationBell textColor={textColor} />
+                        
                         {/* User Menu */}
                         <div className="relative ml-3">
                             <div>

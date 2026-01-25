@@ -1059,19 +1059,52 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                 )}
                                             </div>
                                         )}
-                                        {/* Phase M: Expiration date display (read-only) */}
-                                        {asset?.expires_at && (
-                                            <div className="text-sm text-gray-600">
-                                                <span className="font-medium text-gray-900">
-                                                    {new Date(asset.expires_at) < new Date() ? 'Expired on:' : 'Expires on:'}
-                                                </span>{' '}
-                                                {new Date(asset.expires_at).toLocaleDateString('en-US', {
-                                                    year: 'numeric',
-                                                    month: 'long',
-                                                    day: 'numeric',
-                                                })}
-                                            </div>
-                                        )}
+                        {/* Phase M: Expiration date display (read-only) */}
+                        {asset?.expires_at && (
+                            <div className="text-sm text-gray-600">
+                                <span className="font-medium text-gray-900">
+                                    {new Date(asset.expires_at) < new Date() ? 'Expired on:' : 'Expires on:'}
+                                </span>{' '}
+                                {new Date(asset.expires_at).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                })}
+                            </div>
+                        )}
+                        {/* Phase AF-1: Approval information (read-only) */}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && asset?.approval_status === 'approved' && asset?.approved_at && (
+                            <div className="text-sm text-gray-600">
+                                <span className="font-medium text-gray-900">Approved on:</span>{' '}
+                                {new Date(asset.approved_at).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                })}
+                                {asset.approved_by && (
+                                    <span className="ml-2 text-gray-500">
+                                        by {asset.approved_by.name || 'Unknown'}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                        {/* Phase AF-5: Only show if approvals are enabled */}
+                        {auth?.approval_features?.approvals_enabled && asset?.approval_status === 'rejected' && asset?.rejected_at && asset?.approval_capable && (
+                            <div className="text-sm text-gray-600">
+                                <span className="font-medium text-gray-900">Rejected on:</span>{' '}
+                                {new Date(asset.rejected_at).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                })}
+                                {asset.rejection_reason && (
+                                    <div className="mt-1 text-gray-500">
+                                        Reason: {asset.rejection_reason}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                                     </div>
                                 </div>
 

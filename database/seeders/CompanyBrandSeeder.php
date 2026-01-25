@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -90,7 +91,8 @@ class CompanyBrandSeeder extends Seeder
         ]);
 
         // Attach user 1 to the initial company as owner
-        $initialUser->tenants()->syncWithoutDetaching([$initialCompany->id => ['role' => 'owner']]);
+        // Use bypassOwnerCheck=true since this is seeder (initial setup)
+        $initialUser->setRoleForTenant($initialCompany, 'owner', true);
         // make Site Owner role
         $initialUser->assignRole('site_owner');
 
@@ -169,8 +171,14 @@ class CompanyBrandSeeder extends Seeder
                 $tenant->update(['name' => $companyName]);
             }
 
-            // Attach secondary user to every company
-            $secondaryUser->tenants()->syncWithoutDetaching([$tenant->id]);
+            // Attach secondary user to every company with default role = member
+            // Use RoleRegistry to ensure canonical role
+            $secondaryUser->setRoleForTenant($tenant, 'member');
+            
+            // Assign secondary user to all brands with default brand role = viewer
+            foreach ($tenant->brands as $brand) {
+                $secondaryUser->setRoleForBrand($brand, 'viewer');
+            }
 
             // Get the first brand name we want
             $firstBrandName = $brandNames[0];

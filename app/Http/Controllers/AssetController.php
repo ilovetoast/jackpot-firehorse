@@ -6,8 +6,11 @@ use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\Category;
+use App\Models\User;
 use App\Services\AiMetadataConfidenceService;
+use App\Services\ApprovalAgingService;
 use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
@@ -15,6 +18,7 @@ use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use App\Support\Roles\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -218,6 +222,12 @@ class AssetController extends Controller
                     $query->whereNull('expires_at')
                           ->orWhere('expires_at', '>', now());
                 })
+                ->where(function ($query) {
+                    // Phase AF-1: Exclude pending and rejected assets
+                    $query->where('approval_status', 'not_required')
+                          ->orWhere('approval_status', 'approved')
+                          ->orWhereNull('approval_status'); // Handle legacy assets
+                })
                 ->whereNull('deleted_at')
                 ->whereNotNull('metadata')
                 ->whereRaw('JSON_EXTRACT(metadata, "$.category_id") IS NOT NULL')
@@ -260,6 +270,12 @@ class AssetController extends Controller
                 // Phase M: Exclude expired assets
                 $query->whereNull('expires_at')
                       ->orWhere('expires_at', '>', now());
+            })
+            ->where(function ($query) {
+                // Phase AF-1: Exclude pending and rejected assets
+                $query->where('approval_status', 'not_required')
+                      ->orWhere('approval_status', 'approved')
+                      ->orWhereNull('approval_status'); // Handle legacy assets
             })
             ->whereNull('deleted_at')
             ->count();
@@ -433,6 +449,16 @@ class AssetController extends Controller
                       ->orWhere('expires_at', '>', now());
             });
         }
+
+        // Phase AF-1: Exclude pending and rejected assets from main grid
+        // Pending assets are visible only in approval queue
+        // Rejected assets never appear in main grid
+        // Note: This applies to default view only - approval queue uses separate endpoint
+        $assetsQuery->where(function ($query) {
+            $query->where('approval_status', 'not_required')
+                  ->orWhere('approval_status', 'approved')
+                  ->orWhereNull('approval_status'); // Handle legacy assets without approval_status
+        });
 
         // Exclude soft-deleted assets only
         $assetsQuery->whereNull('deleted_at');
@@ -916,6 +942,19 @@ class AssetController extends Controller
                     }
                 }
 
+                // Phase AF-1: Get approval info
+                $approvedByUser = null;
+                if ($asset->approved_by_user_id) {
+                    $approvedByUser = \App\Models\User::find($asset->approved_by_user_id);
+                }
+
+                // Phase AF-4: Get aging metrics for pending assets
+                $agingMetrics = null;
+                if ($asset->approval_status === \App\Enums\ApprovalStatus::PENDING) {
+                    $agingService = app(ApprovalAgingService::class);
+                    $agingMetrics = $agingService->getAgingMetrics($asset);
+                }
+
                 return [
                     'id' => $asset->id,
                     'title' => $title,
@@ -937,6 +976,26 @@ class AssetController extends Controller
                     'published_by' => $publishedBy, // User who published the asset
                     'archived_at' => $asset->archived_at?->toIso8601String(),
                     'archived_by' => $archivedBy, // User who archived the asset
+                    // Phase AF-1: Approval workflow fields
+                    'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? 'not_required'),
+                    'approval_required' => $asset->approval_status === \App\Enums\ApprovalStatus::PENDING,
+                    'approved_at' => $asset->approved_at?->toIso8601String(),
+                    'approved_by' => $approvedByUser ? [
+                        'id' => $approvedByUser->id,
+                        'name' => $approvedByUser->name,
+                        'email' => $approvedByUser->email,
+                    ] : null,
+                    'rejected_at' => $asset->rejected_at?->toIso8601String(),
+                    'rejection_reason' => $asset->rejection_reason,
+                    'approval_capable' => $this->isApprovalCapable($user, $brand), // Current user can approve
+                    // Phase AF-6: Approval summary (AI-generated)
+                    'approval_summary' => $asset->approval_summary,
+                    'approval_summary_generated_at' => $asset->approval_summary_generated_at?->toISOString(),
+                    // Phase AF-4: Aging metrics (only for pending assets)
+                    'pending_since' => $agingMetrics['pending_since'] ?? null,
+                    'pending_days' => $agingMetrics['pending_days'] ?? null,
+                    'last_action_at' => $agingMetrics['last_action_at'] ?? null,
+                    'aging_label' => $agingMetrics['aging_label'] ?? null,
                     'source_dimensions' => $sourceDimensions, // Source image dimensions (width x height) if available
                     // Thumbnail URLs - distinct paths prevent cache confusion
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
@@ -1513,6 +1572,21 @@ class AssetController extends Controller
      *
      * @return \Aws\S3\S3Client
      */
+    /**
+     * Check if current user is approval_capable for the brand.
+     * 
+     * Phase AF-1: Approval authority derived from PermissionMap.
+     */
+    protected function isApprovalCapable(?User $user, ?Brand $brand): bool
+    {
+        if (!$user || !$brand) {
+            return false;
+        }
+
+        $brandRole = $user->getRoleForBrand($brand);
+        return $brandRole && PermissionMap::canApproveAssets($brandRole);
+    }
+
     protected function createS3ClientForVerification(): \Aws\S3\S3Client
     {
         if (!class_exists(\Aws\S3\S3Client::class)) {
@@ -2073,7 +2147,8 @@ class AssetController extends Controller
             $hasPermission = $user->hasPermissionForTenant($tenant, 'asset.publish');
             $tenantRole = $user->getRoleForTenant($tenant);
             $isTenantAdminOrOwner = in_array($tenantRole, ['admin', 'owner']);
-            $isAssignedToBrand = $asset->brand_id ? $user->brands()->where('brands.id', $asset->brand_id)->exists() : true;
+            // Phase MI-1: Check active brand membership
+            $isAssignedToBrand = $asset->brand_id ? ($user->activeBrandMembership($asset->brand) !== null) : true;
             
             $message = 'You do not have permission to publish this asset.';
             if (!$hasPermission && !$isTenantAdminOrOwner) {

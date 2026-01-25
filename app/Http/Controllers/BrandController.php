@@ -9,8 +9,11 @@ use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\BrandService;
 use App\Services\CategoryService;
+use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use App\Support\Roles\PermissionMap;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -57,7 +60,8 @@ class BrandController extends Controller
         $tenantUsers = $tenant->users;
         
         // Order brands: default first, then by name (same as in HandleInertiaRequests)
-        $orderedBrands = $brands->load(['categories', 'users', 'invitations'])
+        // Phase MI-1: Load users but we'll filter to active memberships in the map
+        $orderedBrands = $brands->load(['categories', 'invitations'])
             ->sortBy([['is_default', 'desc'], ['name', 'asc']])
             ->values();
         
@@ -67,9 +71,11 @@ class BrandController extends Controller
                 // Index is 0-based, so index >= maxBrands means it's beyond the limit
                 $isDisabled = $brandLimitExceeded && ($index >= $maxBrands);
                 
-                // Get users not yet assigned to this brand
-                // Get users not yet assigned to this brand
-                $assignedUserIds = $brand->users->pluck('id')->toArray();
+                // Phase MI-1: Get users with active membership only
+                $assignedUserIds = $brand->users()
+                    ->wherePivotNull('removed_at')
+                    ->pluck('users.id')
+                    ->toArray();
                 $availableUsers = $tenantUsers->reject(fn ($user) => in_array($user->id, $assignedUserIds))->map(fn ($user) => [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
@@ -115,15 +121,19 @@ class BrandController extends Controller
                         'upgrade_available' => $category->upgrade_available ?? false,
                         'system_version' => $category->system_version,
                     ]),
-                    'users' => $brand->users->map(fn ($user) => [
-                        'id' => $user->id,
-                        'first_name' => $user->first_name,
-                        'last_name' => $user->last_name,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'avatar_url' => $user->avatar_url,
-                        'role' => $user->pivot->role,
-                    ]),
+                    // Phase MI-1: Filter to only active memberships (removed_at IS NULL)
+                    'users' => $brand->users()
+                        ->wherePivotNull('removed_at')
+                        ->get()
+                        ->map(fn ($user) => [
+                            'id' => $user->id,
+                            'first_name' => $user->first_name,
+                            'last_name' => $user->last_name,
+                            'name' => $user->name,
+                            'email' => $user->email,
+                            'avatar_url' => $user->avatar_url,
+                            'role' => $user->pivot->role,
+                        ]),
                     'available_users' => $availableUsers->values(),
                     'pending_invitations' => $pendingInvitations,
                 ];
@@ -185,7 +195,8 @@ class BrandController extends Controller
         $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
 
         // Verify user has access to this brand (via brand_user pivot table) OR is tenant owner/admin
-        if (! $isTenantOwnerOrAdmin && ! $user->brands()->where('brands.id', $brand->id)->exists()) {
+        // Phase MI-1: Check active membership
+        if (! $isTenantOwnerOrAdmin && ! $user->activeBrandMembership($brand)) {
             abort(403, 'You do not have access to this brand.');
         }
 
@@ -401,15 +412,18 @@ class BrandController extends Controller
         $currentCategoryCount = $brand->categories()->custom()->count();
         $canCreateCategory = $this->categoryService->canCreate($tenant, $brand);
 
-        // Get brand users and their roles for access control UI
-        $brandUsers = $brand->users()->get()->map(function ($user) use ($brand) {
-            return [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->getRoleForBrand($brand) ?? 'member',
-            ];
-        });
+        // Phase MI-1: Get brand users with active membership only
+        $brandUsers = $brand->users()
+            ->wherePivotNull('removed_at')
+            ->get()
+            ->map(function ($user) use ($brand) {
+                return [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->getRoleForBrand($brand) ?? 'viewer',
+                ];
+            });
 
         // Get all valid brand roles dynamically (not hardcoded)
         // Show all valid brand roles so they can be assigned even if no users have them yet
@@ -625,10 +639,13 @@ class BrandController extends Controller
         // Get users in the company
         $tenantUsers = $tenant->users;
         
-        // Get users already assigned to this brand
-        $assignedUserIds = $brand->users->pluck('id')->toArray();
+        // Phase MI-1: Get users with active membership only
+        $assignedUserIds = $brand->users()
+            ->wherePivotNull('removed_at')
+            ->pluck('users.id')
+            ->toArray();
         
-        // Filter to available users
+        // Phase MI-1: Filter to available users (exclude those with active membership)
         $availableUsers = $tenantUsers->reject(fn ($user) => in_array($user->id, $assignedUserIds))->map(fn ($user) => [
             'id' => $user->id,
             'first_name' => $user->first_name,
@@ -659,9 +676,23 @@ class BrandController extends Controller
             abort(403, 'You do not have permission to invite users to brands.');
         }
 
+        // Validate using RoleRegistry
         $validated = $request->validate([
             'email' => 'required|email|max:255',
-            'role' => 'nullable|string|in:admin,brand_manager,contributor,viewer',
+            'role' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if ($value === null) {
+                        return; // Nullable, skip validation
+                    }
+                    try {
+                        RoleRegistry::validateBrandRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
         ]);
 
         // Check if user is already on the brand
@@ -689,7 +720,7 @@ class BrandController extends Controller
         $invitation = BrandInvitation::create([
             'brand_id' => $brand->id,
             'email' => $validated['email'],
-            'role' => $validated['role'] ?? 'member',
+            'role' => $validated['role'] ?? 'viewer',
             'token' => $token,
             'invited_by' => $authUser->id,
             'sent_at' => now(),
@@ -713,7 +744,7 @@ class BrandController extends Controller
             brand: $brand,
             metadata: [
                 'email' => $validated['email'],
-                'role' => $validated['role'] ?? 'member',
+                'role' => $validated['role'] ?? 'viewer',
                 'brand_id' => $brand->id,
                 'brand_name' => $brand->name,
             ]
@@ -745,23 +776,41 @@ class BrandController extends Controller
             abort(403, 'User does not belong to this company.');
         }
 
-        // Check if user is already on the brand
-        if ($brand->users()->where('users.id', $user->id)->exists()) {
+        // Phase MI-1: Check for existing pivot (including soft-deleted)
+        $existingPivot = DB::table('brand_user')
+            ->where('user_id', $user->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+        
+        // Check if user already has active membership
+        $activeMembership = $user->activeBrandMembership($brand);
+        if ($activeMembership) {
             return back()->withErrors([
-                'user' => 'This user is already a member of this brand.',
+                'user' => 'This user is already an active member of this brand.',
             ]);
         }
 
+        // Validate using RoleRegistry
         $validated = $request->validate([
-            'role' => 'nullable|string|in:admin,brand_manager,contributor,viewer',
+            'role' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if ($value === null) {
+                        return; // Nullable, skip validation
+                    }
+                    try {
+                        RoleRegistry::validateBrandRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
         ]);
 
-        // Add user to brand with role (default to viewer, member is tenant-level only)
+        // Phase MI-1: Add user to brand with role (default to viewer)
+        // setRoleForBrand handles soft-deleted pivot restoration
         $brandRole = $validated['role'] ?? 'viewer';
-        // Convert 'member' to 'viewer' if somehow passed (member is tenant-level only)
-        if ($brandRole === 'member') {
-            $brandRole = 'viewer';
-        }
         $user->setRoleForBrand($brand, $brandRole);
 
         // Mark any pending invitations as accepted
@@ -778,7 +827,7 @@ class BrandController extends Controller
             actor: $authUser,
             brand: $brand,
             metadata: [
-                'role' => $validated['role'] ?? 'member',
+                'role' => $validated['role'] ?? 'viewer',
             ]
         );
 
@@ -808,15 +857,22 @@ class BrandController extends Controller
             abort(404, 'User is not a member of this brand.');
         }
 
+        // Validate using RoleRegistry - no automatic conversion
         $validated = $request->validate([
-            'role' => 'required|string|in:admin,brand_manager,contributor,viewer',
+            'role' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    try {
+                        RoleRegistry::validateBrandRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
         ]);
 
-        // Prevent owner from being a brand role - convert to admin if owner is attempted
         $brandRole = $validated['role'];
-        if ($brandRole === 'owner') {
-            $brandRole = 'admin';
-        }
 
         // Update role
         $brand->users()->updateExistingPivot($user->id, ['role' => $brandRole]);
@@ -829,7 +885,7 @@ class BrandController extends Controller
             actor: $authUser,
             brand: $brand,
             metadata: [
-                'role' => $validated['role'],
+                'role' => $validated['role'] ?? 'viewer',
             ]
         );
 
@@ -854,13 +910,21 @@ class BrandController extends Controller
             abort(403, 'You do not have permission to manage brand users.');
         }
 
-        // Verify user is on the brand
-        if (! $brand->users()->where('users.id', $user->id)->exists()) {
-            abort(404, 'User is not a member of this brand.');
+        // Phase MI-1: Verify user has active membership
+        $membership = $user->activeBrandMembership($brand);
+        if (!$membership) {
+            abort(404, 'User is not an active member of this brand.');
         }
 
-        // Remove user from brand
-        $brand->users()->detach($user->id);
+        // Phase MI-1: Soft delete - set removed_at instead of deleting pivot
+        DB::table('brand_user')
+            ->where('user_id', $user->id)
+            ->where('brand_id', $brand->id)
+            ->whereNull('removed_at') // Only update active memberships
+            ->update([
+                'removed_at' => now(),
+                'updated_at' => now(),
+            ]);
 
         // Log activity
         ActivityRecorder::record(
@@ -918,5 +982,41 @@ class BrandController extends Controller
         Mail::to($invitation->email)->send(new InviteMember($tenant, $authUser, $inviteUrl));
 
         return back()->with('success', 'Invitation resent successfully.');
+    }
+
+    /**
+     * Show the approval queue page.
+     * 
+     * Phase AF-1: Approval workflow page for pending assets.
+     */
+    public function approvals(Brand $brand): Response
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        // Phase AF-5: Gate approval queue access based on plan feature
+        $featureGate = app(FeatureGate::class);
+        if (!$featureGate->approvalsEnabled($tenant)) {
+            $requiredPlan = $featureGate->getRequiredPlanName($tenant);
+            abort(403, "Approval workflows require {$requiredPlan} plan or higher. Please upgrade your plan to access approval features.");
+        }
+
+        // Check if user is approval_capable for this brand
+        $brandRole = $user->getRoleForBrand($brand);
+        if (!$brandRole || !PermissionMap::canApproveAssets($brandRole)) {
+            abort(403, 'You do not have permission to view the approval queue.');
+        }
+
+        return Inertia::render('Brands/Approvals', [
+            'brand' => [
+                'id' => $brand->id,
+                'name' => $brand->name,
+            ],
+        ]);
     }
 }
