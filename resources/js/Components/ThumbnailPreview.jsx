@@ -269,7 +269,13 @@ export default function ThumbnailPreview({
                     ref={imgRef}
                     src={lockedUrl}
                     alt={alt}
-                    className="w-full h-full object-cover"
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    className={`w-full h-full ${
+                        asset?.category?.slug === 'logos' 
+                            ? 'object-contain' 
+                            : 'object-cover'
+                    }`}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0,
@@ -318,7 +324,13 @@ export default function ThumbnailPreview({
                     ref={imgRef}
                     src={lockedUrl}
                     alt={alt}
-                    className="w-full h-full object-cover"
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    className={`w-full h-full ${
+                        asset?.category?.slug === 'logos' 
+                            ? 'object-contain' 
+                            : 'object-cover'
+                    }`}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0.5,
@@ -413,7 +425,13 @@ export default function ThumbnailPreview({
                     ref={imgRef}
                     src={lockedUrl}
                     alt={alt}
-                    className="w-full h-full object-cover"
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    className={`w-full h-full ${
+                        asset?.category?.slug === 'logos' 
+                            ? 'object-contain' 
+                            : 'object-cover'
+                    }`}
                     loading="eager"
                     style={{
                         opacity: imageLoaded ? 1 : 0.5,

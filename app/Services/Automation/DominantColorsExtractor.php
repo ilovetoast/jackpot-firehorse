@@ -3,20 +3,23 @@
 namespace App\Services\Automation;
 
 use App\Models\Asset;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Dominant Colors Extractor Service
  *
  * Extracts the top 3 dominant colors from color analysis cluster data
- * and persists them as hex + RGB values in asset.metadata['dominant_colors'].
+ * and persists them as a system automated metadata field (dominant_colors).
  *
  * Rules:
  * - Only processes image assets
  * - Uses existing _color_analysis cluster data
  * - Filters clusters by coverage >= 10%
  * - Returns max 3 colors, sorted by coverage descending
- * - Read-only, not filterable, not shown in UI
+ * - Writes to asset_metadata table (metadata field)
+ * - Source: 'automatic' (system-populated)
+ * - Read-only, filterable, shown in UI
  */
 class DominantColorsExtractor
 {
@@ -40,6 +43,10 @@ class DominantColorsExtractor
     {
         // Only process image assets
         if (!$this->isImageAsset($asset)) {
+            Log::debug('[DominantColorsExtractor] Skipping - not an image asset', [
+                'asset_id' => $asset->id,
+                'mime_type' => $asset->mime_type,
+            ]);
             return;
         }
 
@@ -48,10 +55,21 @@ class DominantColorsExtractor
         
         if ($dominantColors === null) {
             // No cluster data available or extraction failed
+            Log::debug('[DominantColorsExtractor] No dominant colors extracted', [
+                'asset_id' => $asset->id,
+                'reason' => 'extractDominantColors returned null',
+            ]);
             return;
         }
 
-        // Persist to asset.metadata
+        if (empty($dominantColors)) {
+            Log::debug('[DominantColorsExtractor] Empty dominant colors array', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Persist to asset_metadata table
         $this->persistDominantColors($asset, $dominantColors);
     }
 
@@ -66,9 +84,19 @@ class DominantColorsExtractor
         $metadata = $asset->metadata ?? [];
         
         // Check if color analysis data exists
-        if (!isset($metadata['_color_analysis']['clusters']) || !is_array($metadata['_color_analysis']['clusters'])) {
-            Log::debug('[DominantColorsExtractor] No color analysis cluster data found', [
+        if (!isset($metadata['_color_analysis'])) {
+            Log::warning('[DominantColorsExtractor] No _color_analysis data found in asset metadata', [
                 'asset_id' => $asset->id,
+                'metadata_keys' => array_keys($metadata),
+            ]);
+            return null;
+        }
+        
+        if (!isset($metadata['_color_analysis']['clusters']) || !is_array($metadata['_color_analysis']['clusters'])) {
+            Log::warning('[DominantColorsExtractor] No color analysis cluster data found', [
+                'asset_id' => $asset->id,
+                'has_color_analysis' => isset($metadata['_color_analysis']),
+                'color_analysis_keys' => isset($metadata['_color_analysis']) ? array_keys($metadata['_color_analysis']) : [],
             ]);
             return null;
         }
@@ -208,21 +236,85 @@ class DominantColorsExtractor
     }
 
     /**
-     * Persist dominant colors to asset.metadata.
+     * Persist dominant colors to asset_metadata table (metadata field).
      *
      * @param Asset $asset
-     * @param array $colors Array of color objects
+     * @param array $colors Array of color objects with hex, rgb, coverage
      * @return void
      */
     protected function persistDominantColors(Asset $asset, array $colors): void
     {
-        $metadata = $asset->metadata ?? [];
-        $metadata['dominant_colors'] = $colors;
-        
-        $asset->update(['metadata' => $metadata]);
+        // Get the dominant_colors metadata field
+        $field = DB::table('metadata_fields')
+            ->where('key', 'dominant_colors')
+            ->where('scope', 'system')
+            ->first();
 
-        Log::info('[DominantColorsExtractor] Dominant colors persisted', [
+        if (!$field) {
+            Log::warning('[DominantColorsExtractor] dominant_colors metadata field not found', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Check if metadata record already exists
+        $existing = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $field->id)
+            ->where('source', 'automatic')
+            ->first();
+
+        if ($existing) {
+            // Update existing record
+            // CRITICAL: Automatic fields do NOT require approval - approved_at should be NULL
+            DB::table('asset_metadata')
+                ->where('id', $existing->id)
+                ->update([
+                    'value_json' => json_encode($colors),
+                    'confidence' => 0.95, // System-computed values are highly confident
+                    'approved_at' => null, // Automatic fields are authoritative without approval
+                    'updated_at' => now(),
+                ]);
+
+            // Create audit history entry
+            DB::table('asset_metadata_history')->insert([
+                'asset_metadata_id' => $existing->id,
+                'old_value_json' => $existing->value_json,
+                'new_value_json' => json_encode($colors),
+                'source' => 'automatic',
+                'changed_by' => null,
+                'created_at' => now(),
+            ]);
+        } else {
+            // Create new record
+            // CRITICAL: Automatic fields do NOT require approval - approved_at should be NULL
+            $assetMetadataId = DB::table('asset_metadata')->insertGetId([
+                'asset_id' => $asset->id,
+                'metadata_field_id' => $field->id,
+                'value_json' => json_encode($colors),
+                'source' => 'automatic',
+                'confidence' => 0.95, // System-computed values are highly confident
+                'producer' => 'system',
+                'approved_at' => null, // Automatic fields are authoritative without approval
+                'approved_by' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Create audit history entry
+            DB::table('asset_metadata_history')->insert([
+                'asset_metadata_id' => $assetMetadataId,
+                'old_value_json' => null,
+                'new_value_json' => json_encode($colors),
+                'source' => 'automatic',
+                'changed_by' => null,
+                'created_at' => now(),
+            ]);
+        }
+
+        Log::info('[DominantColorsExtractor] Dominant colors persisted to metadata field', [
             'asset_id' => $asset->id,
+            'field_id' => $field->id,
             'colors_count' => count($colors),
         ]);
     }

@@ -33,6 +33,8 @@ export default function AssetGrid({
     primaryColor = '#6366f1',
     selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
     onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
+    isPendingApprovalMode = false, // Phase L.6.2: Approval inbox mode
+    onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
 }) {
     // Console log assets when they change
     useEffect(() => {
@@ -61,6 +63,8 @@ export default function AssetGrid({
                     primaryColor={primaryColor}
                     isBulkSelected={selectedAssetIds.includes(asset.id)} // Phase 2 – Step 7
                     onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null} // Phase 2 – Step 7
+                    isPendingApprovalMode={isPendingApprovalMode} // Phase L.6.2
+                    onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null} // Phase L.6.2
                 />
             ))}
         </AssetGridContainer>

@@ -15,7 +15,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isPendingApprovalMode = false, onAssetApproved = null }) {
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
         // First try explicit file_extension field
@@ -181,6 +181,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     return (
         <div
             onClick={handleClick}
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
             className={`group relative bg-white rounded-lg border overflow-hidden transition-all duration-200 cursor-pointer ${
                 isSelected 
                     ? 'border-2' 
@@ -224,10 +226,31 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
 
                 {/* File type badge overlay - top right - Conditionally hidden based on showInfo prop */}
                 {showInfo && (
-                    <div className="absolute top-2 right-2">
+                    <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                         <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                             {fileExtension}
                         </span>
+                        
+                        {/* Phase L.4: Lifecycle Indicators (read-only, subtle badges) */}
+                        {/* Archived badge takes precedence */}
+                        {asset.archived_at && (
+                            <span className="inline-flex items-center rounded-md bg-gray-700/80 backdrop-blur-sm px-2 py-0.5 text-xs font-medium text-white">
+                                Archived
+                            </span>
+                        )}
+                        {/* Unpublished badge - only show if not archived */}
+                        {!asset.archived_at && !asset.published_at && (
+                            <div className="inline-flex items-center gap-1.5">
+                                <span className="inline-flex items-center rounded-md bg-yellow-600/80 backdrop-blur-sm px-2 py-0.5 text-xs font-medium text-white">
+                                    Unpublished
+                                </span>
+                                {(asset.category_name || asset.category?.name) && (
+                                    <span className="text-xs text-white/70 font-normal">
+                                        {asset.category_name || asset.category?.name}
+                                    </span>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -240,6 +263,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     >
                         {asset.title || asset.original_filename || 'Untitled Asset'}
                     </h3>
+                </div>
+            )}
+            
+            {/* Phase L.6.2: Visual indicator for unpublished assets - user clicks asset to open drawer */}
+            {isPendingApprovalMode && (
+                <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-10 pointer-events-none">
+                    <div className="bg-yellow-100 border-2 border-yellow-400 rounded-lg px-3 py-2 shadow-lg">
+                        <span className="text-xs font-medium text-yellow-800">Click to view & publish</span>
+                    </div>
                 </div>
             )}
         </div>

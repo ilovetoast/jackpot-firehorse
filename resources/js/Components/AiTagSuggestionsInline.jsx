@@ -208,7 +208,7 @@ export default function AiTagSuggestionsInline({ assetId }) {
 
     if (loading) {
         return (
-            <div className="px-6 py-4 border-t border-gray-200">
+            <div className="px-4 py-4 border-t border-gray-200">
                 <div className="text-sm text-gray-500">Loading AI tag suggestions...</div>
             </div>
         )
@@ -219,7 +219,7 @@ export default function AiTagSuggestionsInline({ assetId }) {
     }
 
     return (
-        <div className="px-6 py-4 border-t border-gray-200">
+        <div className="px-4 py-4 border-t border-gray-200">
             <div className="flex items-center gap-2 mb-4">
                 <SparklesIcon className="h-5 w-5 text-indigo-500" />
                 <h3 className="text-sm font-semibold text-gray-900">AI Suggested Tags</h3>

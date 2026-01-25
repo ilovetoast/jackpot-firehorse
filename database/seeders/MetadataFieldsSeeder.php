@@ -294,8 +294,8 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
         ]);
 
-        // Quality Rating (internal only)
-        $this->getOrCreateField([
+        // Quality Rating (user-editable rating field)
+        $qualityRatingId = $this->getOrCreateField([
             'key' => 'quality_rating',
             'system_label' => 'Quality Rating',
             'type' => 'rating',
@@ -306,8 +306,43 @@ class MetadataFieldsSeeder extends Seeder
             'is_user_editable' => true,
             'is_ai_trainable' => false,
             'is_upload_visible' => false, // Rating fields excluded from upload
-            'is_internal_only' => true,
+            'is_internal_only' => false, // Changed to false - users can edit ratings
         ]);
+        
+        // Update existing quality_rating field to ensure is_internal_only is false
+        DB::table('metadata_fields')
+            ->where('key', 'quality_rating')
+            ->update([
+                'is_internal_only' => false,
+                'is_user_editable' => true,
+                'type' => 'rating',
+                'updated_at' => now(),
+            ]);
+
+        // Starred Asset (boolean, user-editable, applied to all categories)
+        $this->getOrCreateField([
+            'key' => 'starred',
+            'system_label' => 'Starred',
+            'type' => 'boolean',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'internal',
+            'is_filterable' => false,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => false, // Starred is set post-upload
+            'is_internal_only' => false,
+        ]);
+        
+        // Update existing starred field to ensure correct configuration
+        DB::table('metadata_fields')
+            ->where('key', 'starred')
+            ->update([
+                'type' => 'boolean',
+                'is_user_editable' => true,
+                'is_internal_only' => false,
+                'updated_at' => now(),
+            ]);
 
         // Scene Classification (regular metadata field with AI suggestions)
         $sceneClassificationId = $this->getOrCreateField([
@@ -337,6 +372,24 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'urban', 'system_label' => 'Urban'],
             ['value' => 'abstract', 'system_label' => 'Abstract'],
         ]);
+
+        // Dominant Colors (system automated field - multiselect with JSON values)
+        // Stores rich color data: [{hex, rgb, coverage}, ...]
+        // No predefined options - colors are dynamically extracted
+        $this->getOrCreateField([
+            'key' => 'dominant_colors',
+            'system_label' => 'Dominant Colors',
+            'type' => 'multiselect', // Multi-value field for color array
+            'applies_to' => 'image', // Only applies to image assets
+            'scope' => 'system',
+            'group_key' => 'technical',
+            'is_filterable' => true, // Filterable via color tiles
+            'is_user_editable' => false, // Read-only (system populated)
+            'is_ai_trainable' => false,
+            'is_upload_visible' => false, // Hidden from upload form
+            'is_internal_only' => false, // Visible in UI
+            'ai_eligible' => false, // Not AI eligible (system calculated)
+        ]);
     }
 
     /**
@@ -357,15 +410,19 @@ class MetadataFieldsSeeder extends Seeder
             'orientation',
             'color_space',
             'resolution_class',
+            'dominant_colors', // System automated - extracted from color analysis
         ];
 
         foreach ($automaticFields as $fieldKey) {
+            // Only dominant_colors should have show_on_edit enabled by default
+            $showOnEdit = $fieldKey === 'dominant_colors';
+            
             DB::table('metadata_fields')
                 ->where('key', $fieldKey)
                 ->update([
                     'population_mode' => 'automatic',
                     'show_on_upload' => false, // Hidden from upload form
-                    'show_on_edit' => true, // Visible in edit (readonly)
+                    'show_on_edit' => $showOnEdit, // Only dominant_colors enabled by default
                     'show_in_filters' => true, // Available in grid filters
                     'readonly' => true, // Read-only for users (system can populate)
                     'updated_at' => now(),
@@ -399,6 +456,9 @@ class MetadataFieldsSeeder extends Seeder
                     'is_primary' => true, // Primary field for Photography category
                     'ai_eligible' => true, // AI suggestions enabled for Photography category
                 ],
+                'logos' => [
+                    'enabled' => false, // Disabled for Logos category
+                ],
             ],
             'expiration_date' => [
                 'photography' => [
@@ -410,7 +470,7 @@ class MetadataFieldsSeeder extends Seeder
             'scene_classification' => [
                 'photography' => [
                     'enabled' => true,
-                    'is_primary' => false,
+                    'is_primary' => true, // Primary field for Photography category
                     'ai_eligible' => true, // AI suggestions enabled for Photography category
                 ],
             ],
@@ -513,7 +573,8 @@ class MetadataFieldsSeeder extends Seeder
                 // - usage_rights: only photography
                 // - logo_type: only logos
                 // - scene_classification: only photography
-                $fieldsToRestrict = ['expiration_date', 'usage_rights', 'logo_type', 'scene_classification'];
+                // - photo_type: only photography (disabled for logos)
+                $fieldsToRestrict = ['expiration_date', 'usage_rights', 'logo_type', 'scene_classification', 'photo_type'];
                 
                 foreach ($fieldsToRestrict as $fieldKey) {
                     $field = DB::table('metadata_fields')

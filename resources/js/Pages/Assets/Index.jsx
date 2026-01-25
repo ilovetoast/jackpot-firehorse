@@ -432,6 +432,35 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         }
     }, [handleOpenUploadDialog])
 
+    // Phase L.6.2: Detect pending publication or unpublished mode from URL
+    const [isPendingApprovalMode, setIsPendingApprovalMode] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search)
+            const lifecycle = urlParams.get('lifecycle')
+            return lifecycle === 'pending_approval' || lifecycle === 'unpublished'
+        }
+        return false
+    })
+    
+    // Update when URL changes (e.g., when filter is toggled)
+    useEffect(() => {
+        const checkUrl = () => {
+            if (typeof window !== 'undefined') {
+                const urlParams = new URLSearchParams(window.location.search)
+                const lifecycle = urlParams.get('lifecycle')
+                setIsPendingApprovalMode(lifecycle === 'pending_approval' || lifecycle === 'unpublished')
+            }
+        }
+        
+        // Check on mount and when page props change (Inertia reloads)
+        checkUrl()
+        
+        // Also check periodically in case URL changes without Inertia navigation
+        const interval = setInterval(checkUrl, 500)
+        
+        return () => clearInterval(interval)
+    }, [])
+    
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
     const isLightColor = (color) => {
@@ -507,7 +536,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                     )}
                                                 </button>
                                             )}
-                                            {/* Show all categories */}
+                                            {/* Show all categories - filterActiveCategories already filters out hidden categories */}
                                             {filterActiveCategories(categories)
                                                 .map((category) => {
                                                     const isSelected = selectedCategoryId === category.id && selectedCategoryId !== null && selectedCategoryId !== undefined
@@ -722,6 +751,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 : [...prev, assetId]
                                         )
                                     }) : null}
+                                    isPendingApprovalMode={isPendingApprovalMode}
+                                    onAssetApproved={(assetId) => {
+                                        // Remove approved asset from local state
+                                        setLocalAssets((prev) => prev.filter(a => a.id !== assetId))
+                                    }}
                                 />
                             ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">

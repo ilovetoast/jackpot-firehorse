@@ -8,6 +8,7 @@ use App\Enums\ThumbnailStatus;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Log;
@@ -210,6 +211,11 @@ class Asset extends Model
         'thumbnail_started_at',
         'thumbnail_retry_count',
         'thumbnail_last_retry_at',
+        'published_at',
+        'published_by_id',
+        'archived_at',
+        'archived_by_id',
+        'expires_at',
     ];
 
     /**
@@ -228,6 +234,9 @@ class Asset extends Model
             'thumbnail_started_at' => 'datetime',
             'thumbnail_retry_count' => 'integer',
             'thumbnail_last_retry_at' => 'datetime',
+            'published_at' => 'datetime',
+            'archived_at' => 'datetime',
+            'expires_at' => 'datetime',
         ];
     }
 
@@ -274,6 +283,44 @@ class Asset extends Model
     }
 
     /**
+     * Check if asset is published.
+     *
+     * An asset is considered published if published_at is not null.
+     *
+     * @return bool True if asset has been published
+     */
+    public function isPublished(): bool
+    {
+        return $this->published_at !== null;
+    }
+
+    /**
+     * Check if asset is archived.
+     *
+     * An asset is considered archived if archived_at is not null.
+     *
+     * @return bool True if asset has been archived
+     */
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    /**
+     * Check if asset is expired.
+     *
+     * Phase M: Asset expiration (time-based access control).
+     * An asset is expired if expires_at is not null and is in the past.
+     * This is derived state - no enum or workflow state required.
+     *
+     * @return bool True if asset has expired
+     */
+    public function isExpired(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->isPast();
+    }
+
+    /**
      * Get the tenant that owns this asset.
      */
     public function tenant(): BelongsTo
@@ -295,6 +342,22 @@ class Asset extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Get the user who published this asset.
+     */
+    public function publishedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'published_by_id');
+    }
+
+    /**
+     * Get the user who archived this asset.
+     */
+    public function archivedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'archived_by_id');
     }
 
     /**

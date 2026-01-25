@@ -313,6 +313,48 @@ class DashboardController extends Controller
             })->filter()->values();
         }
         
+        // Get pending AI suggestions count (metadata candidates + tag candidates)
+        // Only count items for assets in the current brand
+        $pendingMetadataCount = DB::table('asset_metadata_candidates')
+            ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->whereNull('asset_metadata_candidates.resolved_at')
+            ->whereNull('asset_metadata_candidates.dismissed_at')
+            ->count();
+            
+        $pendingTagCount = DB::table('asset_tag_candidates')
+            ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('asset_tag_candidates.producer', 'ai')
+            ->whereNull('asset_tag_candidates.resolved_at')
+            ->whereNull('asset_tag_candidates.dismissed_at')
+            ->count();
+            
+        $pendingMetadataPendingCount = DB::table('asset_metadata')
+            ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->whereNull('asset_metadata.approved_at')
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
+            ->count();
+            
+        $totalPendingCount = $pendingMetadataCount + $pendingTagCount + $pendingMetadataPendingCount;
+        
+        // Phase L.5.1: Count unpublished assets (waiting to be published)
+        // Only visible to users with metadata.bypass_approval (full viewing privileges)
+        $unpublishedAssetsCount = 0;
+        if ($user->hasPermissionForTenant($tenant, 'metadata.bypass_approval')) {
+            $unpublishedAssetsCount = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', \App\Enums\AssetType::ASSET)
+                ->whereNull('published_at') // Unpublished
+                ->whereNull('archived_at') // Not archived
+                ->whereNull('deleted_at') // Not deleted
+                ->count();
+        }
+        
         // Get recent company activity (last 5) - only if user has permission
         $recentActivity = null;
         if ($user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
@@ -416,6 +458,13 @@ class DashboardController extends Controller
             'most_downloaded_assets' => $mostDownloadedAssets,
             'ai_usage' => $aiUsageData, // Tenant-scoped AI usage (shared across all brands)
             'recent_activity' => $recentActivity, // Recent company activity (permission-gated)
+            'pending_ai_suggestions' => [
+                'total' => $totalPendingCount,
+                'metadata_candidates' => $pendingMetadataCount,
+                'tag_candidates' => $pendingTagCount,
+                'pending_metadata' => $pendingMetadataPendingCount,
+            ],
+            'unpublished_assets_count' => $unpublishedAssetsCount, // Phase L.5.1: Count of unpublished assets
         ]);
     }
 

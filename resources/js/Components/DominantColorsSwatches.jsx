@@ -2,13 +2,14 @@
  * Dominant Colors Swatches Component
  *
  * Displays dominant image colors as small, read-only color squares (swatches).
- * Uses existing asset.metadata['dominant_colors'] data.
+ * Reads from dominant_colors metadata field (asset.metadata.fields.dominant_colors).
  *
  * Features:
  * - Read-only display (no edit, no filter)
  * - Up to 3 color swatches
  * - Tooltip with hex and coverage percentage
  * - Graceful empty state (renders nothing if data missing)
+ * - Colors ordered by coverage descending
  */
 
 export default function DominantColorsSwatches({ dominantColors }) {
@@ -17,9 +18,16 @@ export default function DominantColorsSwatches({ dominantColors }) {
         return null;
     }
 
+    // Sort colors by coverage descending (if not already sorted)
+    const sortedColors = [...dominantColors].sort((a, b) => {
+        const coverageA = a.coverage ?? 0;
+        const coverageB = b.coverage ?? 0;
+        return coverageB - coverageA;
+    });
+
     return (
         <div className="flex items-center gap-2">
-            {dominantColors.map((color, index) => {
+            {sortedColors.map((color, index) => {
                 // Validate color object structure
                 if (!color || !color.hex || !Array.isArray(color.rgb) || color.rgb.length < 3) {
                     return null;

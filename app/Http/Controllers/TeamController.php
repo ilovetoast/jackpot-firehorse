@@ -118,12 +118,18 @@ class TeamController extends Controller
                     return null;
                 }
                 
-                $brandRole = $pivot->role ?? 'member';
+                $brandRole = $pivot->role ?? 'viewer';
                 // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
                 if ($brandRole === 'owner') {
                     $brandRole = 'admin';
                     // Update the database to reflect this change
                     $member->setRoleForBrand($brand, 'admin');
+                }
+                // Convert 'member' to 'viewer' for brand roles (member is tenant-level only)
+                if ($brandRole === 'member') {
+                    $brandRole = 'viewer';
+                    // Update the database to reflect this change
+                    $member->setRoleForBrand($brand, 'viewer');
                 }
                 
                 \Log::info('TeamController - Brand assignment found', [
@@ -180,10 +186,14 @@ class TeamController extends Controller
                     return null;
                 }
                 
-                $brandRole = $pivot->role ?? 'member';
-                // Convert 'owner' to 'admin' for brand roles
+                $brandRole = $pivot->role ?? 'viewer';
+                // Convert 'owner' to 'admin' for brand roles (owner is tenant-level only)
                 if ($brandRole === 'owner') {
                     $brandRole = 'admin';
+                }
+                // Convert 'member' to 'viewer' for brand roles (member is tenant-level only)
+                if ($brandRole === 'member') {
+                    $brandRole = 'viewer';
                 }
                 
                 return [
@@ -227,6 +237,14 @@ class TeamController extends Controller
             ];
         });
 
+        // Get tenant roles from database (reliable source)
+        // These match TenantRoleSeeder: owner, admin, member
+        // Note: 'owner' role is NOT selectable during invitation - ownership must be transferred via ownership transfer process
+        $tenantRoles = [
+            ['value' => 'member', 'label' => 'Member'],
+            ['value' => 'admin', 'label' => 'Admin'],
+        ];
+
         // Convert to array and ensure proper serialization for Inertia
         $membersArray = $allMembers->map(function ($member) {
             // Ensure brand_assignments is an array, not a Collection
@@ -269,6 +287,7 @@ class TeamController extends Controller
             ],
             'members' => $membersArray,
             'brands' => $brands,
+            'tenant_roles' => $tenantRoles,
             'current_user_count' => $currentUserCount,
             'max_users' => $maxUsers,
             'user_limit_reached' => $userLimitReached,
@@ -366,7 +385,7 @@ class TeamController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'required|string|in:owner,admin,member,brand_manager',
+            'role' => 'required|string|in:owner,admin,member',
         ]);
 
         // Get old role for logging
@@ -448,7 +467,7 @@ class TeamController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'required|string|in:admin,member,brand_manager',
+            'role' => 'required|string|in:admin,brand_manager,contributor,viewer',
         ]);
 
         // Prevent owner from being a brand role - convert to admin if owner is attempted
@@ -499,16 +518,29 @@ class TeamController extends Controller
 
         $validated = $request->validate([
             'email' => 'required|email|max:255',
-            'role' => 'nullable|string|in:owner,admin,member,brand_manager',
+            'role' => 'nullable|string|in:admin,member',
             'brands' => 'required|array|min:1',
             'brands.*.brand_id' => 'required|exists:brands,id',
-            'brands.*.role' => 'required|string|in:admin,member,brand_manager',
+            'brands.*.role' => 'required|string|in:admin,brand_manager,contributor,viewer',
         ]);
 
-        // Prevent owner from being assigned as a brand role - convert to admin
+        // Prevent owner role from being assigned during invitation
+        // Ownership must be transferred via the ownership transfer process
+        if ($validated['role'] === 'owner') {
+            return back()->withErrors([
+                'role' => 'Owner role cannot be assigned during invitation. Please use the ownership transfer process in Company Settings.',
+            ]);
+        }
+
+        // Prevent owner and member from being assigned as brand roles
+        // Owner is tenant-level only -> convert to admin
+        // Member is tenant-level only -> convert to viewer
         foreach ($validated['brands'] as &$brandAssignment) {
             if ($brandAssignment['role'] === 'owner') {
                 $brandAssignment['role'] = 'admin';
+            }
+            if ($brandAssignment['role'] === 'member') {
+                $brandAssignment['role'] = 'viewer';
             }
         }
         unset($brandAssignment);
@@ -552,7 +584,14 @@ class TeamController extends Controller
         ]);
 
         // Determine tenant role (use provided role or default to first brand role or 'member')
+        // Note: 'member' is a valid tenant role, but not a valid brand role
+        // Note: 'owner' role cannot be assigned during invitation - must use ownership transfer process
         $tenantRole = $validated['role'] ?? ($validated['brands'][0]['role'] ?? 'member');
+        // If tenant role came from brand role and it's not a valid tenant role, default to member
+        // Note: 'owner' is excluded - cannot be assigned during invitation
+        if (!in_array($tenantRole, ['admin', 'member'])) {
+            $tenantRole = 'member';
+        }
 
         // Store invitation in database
         $invitation = TenantInvitation::create([

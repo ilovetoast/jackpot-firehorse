@@ -443,8 +443,13 @@ class ComputedMetadataService
             }
         }
 
-        // Unknown color space - return null (do not write)
-        return null;
+        // Fallback: Default to sRGB if color space cannot be determined
+        // Most images are sRGB by default, and this ensures color_space is always populated
+        // This is a reasonable default for automatic metadata
+        Log::debug('[ComputedMetadataService] Color space not found in EXIF, defaulting to sRGB', [
+            'exif_keys' => array_keys($exif),
+        ]);
+        return 'srgb';
     }
 
     /**
@@ -567,15 +572,27 @@ class ComputedMetadataService
                 }
 
                 // Create new asset_metadata row
-                // Phase B7: System-computed metadata has producer = 'system' and high confidence
+                // CRITICAL: Check if this is an automatic field - automatic fields do NOT require approval
+                $fieldDef = DB::table('metadata_fields')->where('id', $field->id)->first();
+                $isAutomaticField = $fieldDef && ($fieldDef->population_mode === 'automatic');
+                
+                Log::debug('[ComputedMetadataService] Writing metadata field', [
+                    'asset_id' => $asset->id,
+                    'field_key' => $fieldKey,
+                    'field_id' => $field->id,
+                    'population_mode' => $fieldDef->population_mode ?? 'manual',
+                    'is_automatic' => $isAutomaticField,
+                    'value' => $value,
+                ]);
+                
                 $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                     'asset_id' => $asset->id,
                     'metadata_field_id' => $field->id,
                     'value_json' => json_encode($value),
                     'source' => 'system',
-                    'confidence' => 0.95, // Phase B7: System-computed values are highly confident
-                    'producer' => 'system', // Phase B7: System-computed values are from system
-                    'approved_at' => now(), // System values are auto-approved
+                    'confidence' => 0.95, // System-computed values are highly confident
+                    'producer' => 'system', // System-computed values are from system
+                    'approved_at' => $isAutomaticField ? null : now(), // Automatic fields don't require approval
                     'approved_by' => null,
                     'created_at' => now(),
                     'updated_at' => now(),

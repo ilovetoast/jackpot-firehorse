@@ -115,27 +115,64 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             }
         }
 
-        if (empty($fieldsToPopulate)) {
+        // Compute metadata values (if any fields to populate)
+        $metadataValues = [];
+        if (!empty($fieldsToPopulate)) {
+            $metadataValues = $this->computeMetadataValues($asset, $fieldsToPopulate);
+            
+            if (empty($metadataValues)) {
+                Log::info('[PopulateAutomaticMetadataJob] No metadata values computed', [
+                    'asset_id' => $asset->id,
+                ]);
+            }
+        } else {
             Log::info('[PopulateAutomaticMetadataJob] No automatic/hybrid fields to populate', [
                 'asset_id' => $asset->id,
             ]);
-            return;
-        }
-
-        // Compute metadata values
-        $metadataValues = $this->computeMetadataValues($asset, $fieldsToPopulate);
-
-        if (empty($metadataValues)) {
-            Log::info('[PopulateAutomaticMetadataJob] No metadata values computed', [
-                'asset_id' => $asset->id,
-            ]);
-            return;
         }
 
         // Run color analysis for dominant colors extraction (for image assets)
+        // CRITICAL: This runs regardless of whether other fields need populating
+        // because dominant_colors is a system automatic field that should always be extracted
         $colorAnalysisResult = null;
-        if ($this->determineAssetType($asset) === 'image') {
-            $colorAnalysisResult = $colorService->analyze($asset);
+        $assetType = $this->determineAssetType($asset);
+        if ($assetType === 'image') {
+            Log::info('[PopulateAutomaticMetadataJob] Running color analysis for image asset', [
+                'asset_id' => $asset->id,
+                'mime_type' => $asset->mime_type,
+                'filename' => $asset->original_filename,
+            ]);
+            
+            try {
+                $colorAnalysisResult = $colorService->analyze($asset);
+                
+                if ($colorAnalysisResult === null) {
+                    Log::warning('[PopulateAutomaticMetadataJob] Color analysis returned null', [
+                        'asset_id' => $asset->id,
+                        'mime_type' => $asset->mime_type,
+                        'has_storage_bucket' => $asset->storageBucket !== null,
+                        'has_storage_path' => !empty($asset->storage_root_path),
+                    ]);
+                } else {
+                    Log::info('[PopulateAutomaticMetadataJob] Color analysis completed', [
+                        'asset_id' => $asset->id,
+                        'clusters_count' => count($colorAnalysisResult['internal']['clusters'] ?? []),
+                        'buckets_count' => count($colorAnalysisResult['buckets'] ?? []),
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::error('[PopulateAutomaticMetadataJob] Color analysis failed with exception', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                // Continue - don't fail the entire job if color analysis fails
+            }
+        } else {
+            Log::debug('[PopulateAutomaticMetadataJob] Skipping color analysis - not an image asset', [
+                'asset_id' => $asset->id,
+                'asset_type' => $assetType,
+            ]);
         }
 
         // Persist internal color analysis data (for dominant colors extraction)
@@ -146,7 +183,23 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             $asset->refresh();
             
             // Extract and persist dominant colors from cluster data
-            $dominantColorsExtractor->extractAndPersist($asset);
+            Log::info('[PopulateAutomaticMetadataJob] Extracting dominant colors', [
+                'asset_id' => $asset->id,
+            ]);
+            
+            try {
+                $dominantColorsExtractor->extractAndPersist($asset);
+                Log::info('[PopulateAutomaticMetadataJob] Dominant colors extraction completed', [
+                    'asset_id' => $asset->id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('[PopulateAutomaticMetadataJob] Dominant colors extraction failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                // Don't fail the entire job if dominant colors extraction fails
+            }
             
             // Log color analysis completion to activity timeline
             ActivityRecorder::logAsset($asset, EventType::ASSET_COLOR_ANALYSIS_COMPLETED, [
@@ -154,10 +207,19 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 'buckets_count' => count($colorAnalysisResult['buckets']),
                 'clusters_count' => count($colorAnalysisResult['internal']['clusters'] ?? []),
             ]);
+        } else {
+            Log::info('[PopulateAutomaticMetadataJob] Skipping dominant colors extraction - no color analysis result', [
+                'asset_id' => $asset->id,
+                'asset_type' => $this->determineAssetType($asset),
+            ]);
         }
 
         // Write metadata values (respects manual overrides)
-        $results = $writer->writeMetadata($asset, $metadataValues);
+        // Only write if we have values to write
+        $results = ['written' => [], 'skipped' => []];
+        if (!empty($metadataValues)) {
+            $results = $writer->writeMetadata($asset, $metadataValues);
+        }
         
         // Note: We don't log activity here because:
         // - System metadata generation is already logged by ComputedMetadataJob (ASSET_SYSTEM_METADATA_GENERATED)

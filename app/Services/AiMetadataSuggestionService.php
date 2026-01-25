@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Services\AiUsageService;
+use App\Services\MetadataVisibilityResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -50,11 +51,17 @@ class AiMetadataSuggestionService
     /**
      * @param AiMetadataConfidenceService $confidenceService
      * @param AiUsageService $usageService
+     * @param MetadataVisibilityResolver|null $visibilityResolver Visibility resolver (resolved from container if not provided)
      */
     public function __construct(
         protected AiMetadataConfidenceService $confidenceService,
-        protected AiUsageService $usageService
+        protected AiUsageService $usageService,
+        protected ?MetadataVisibilityResolver $visibilityResolver = null
     ) {
+        // Resolve visibility resolver from container if not provided
+        if ($this->visibilityResolver === null) {
+            $this->visibilityResolver = app(MetadataVisibilityResolver::class);
+        }
     }
     /**
      * Generate suggestions for an asset based on AI metadata candidates.
@@ -514,27 +521,28 @@ class AiMetadataSuggestionService
             return false;
         }
 
-        // Get the category to find system_category_id
+        // Get the category
         $category = \App\Models\Category::find($categoryId);
-        if (!$category || !$category->system_category_id) {
-            // Category doesn't exist or has no system_category_id - field is enabled by default
+        if (!$category) {
+            // Category doesn't exist - field is enabled by default
             return true;
         }
 
-        // Table structure: metadata_field_category_visibility uses:
-        // - system_category_id (not category_id) - references system_category templates
-        // - is_visible (false = suppressed, true = visible)
-        // - System-scoped only (no tenant_id column)
-        
-        // Check if field is suppressed for this system category
-        $isSuppressed = DB::table('metadata_field_category_visibility')
-            ->where('metadata_field_id', $fieldId)
-            ->where('system_category_id', $category->system_category_id)
-            ->where('is_visible', false) // is_visible = false means suppressed
-            ->exists();
-        
-        // Absence of row = visible by default, presence with is_visible=false = suppressed
-        return !$isSuppressed;
+        // Get tenant for visibility check
+        $tenant = \App\Models\Tenant::find($asset->tenant_id);
+        if (!$tenant) {
+            // Tenant doesn't exist - field is enabled by default
+            return true;
+        }
+
+        // Use MetadataVisibilityResolver to check if field is visible for this category
+        // This checks both system-level and tenant-level visibility overrides
+        $fieldDefinition = [
+            'field_id' => $fieldId,
+            'key' => $field->key,
+        ];
+
+        return $this->visibilityResolver->isFieldVisible($fieldDefinition, $category, $tenant);
     }
 
     /**

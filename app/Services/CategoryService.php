@@ -18,6 +18,11 @@ use Illuminate\Support\Str;
  *
  * Handles business logic for category creation, updates, and deletion.
  * Ensures plan limits are enforced and system categories are protected.
+ *
+ * Important: is_locked is site admin only
+ * - Tenants cannot set or change is_locked
+ * - Only site administrators can manage lock status
+ * - This field is hidden from tenant UI and rejected in validation
  */
 class CategoryService
 {
@@ -76,8 +81,13 @@ class CategoryService
         $data['tenant_id'] = $tenant->id;
         $data['brand_id'] = $brand->id;
         $data['is_system'] = false; // User-created categories are never system
-        $data['is_locked'] = false; // User-created categories are never locked
+        $data['is_locked'] = false; // User-created categories are never locked (is_locked is site admin only)
         $data['is_hidden'] = $data['is_hidden'] ?? false; // Default to visible
+        
+        // Prevent tenants from setting is_locked (site admin only)
+        if (isset($data['is_locked']) && $data['is_locked'] === true) {
+            throw new \Exception('Lock status can only be managed by site administrators.');
+        }
         
         // Validate private category requirements
         $isPrivate = $data['is_private'] ?? false;
@@ -139,22 +149,60 @@ class CategoryService
      */
     public function update(Category $category, array $data): Category
     {
-        // Prevent updates to locked categories
-        if ($category->is_locked) {
-            throw new \Exception('Cannot update locked categories.');
-        }
-
         // System categories can only be updated if plan has edit_system_categories feature
         if ($category->is_system) {
             $tenant = $category->tenant;
             if (! $this->planService->hasFeature($tenant, 'edit_system_categories')) {
                 throw new \Exception('Cannot update system categories. Upgrade to Pro or Enterprise plan to edit system categories.');
             }
+            
+            // System categories are immutable - only allow hide changes
+            // is_locked is site admin only and cannot be changed by tenants
+            // Prevent changing name, slug, icon, or other immutable fields
+            $allowedFieldsForSystem = ['is_hidden'];
+            $requestedFields = array_keys($data);
+            $disallowedFields = array_diff($requestedFields, $allowedFieldsForSystem);
+            
+            if (!empty($disallowedFields)) {
+                throw new \Exception('System categories are immutable. Only hide settings can be changed. Lock status is managed by site administrators only.');
+            }
+            
+            // Explicitly prevent tenants from setting is_locked
+            if (isset($data['is_locked'])) {
+                throw new \Exception('Lock status can only be managed by site administrators.');
+            }
+        }
+
+        // For system categories with edit permission, allow hide updates even if locked
+        // is_locked cannot be changed by tenants (site admin only)
+        // For custom locked categories, only allow is_hidden updates
+        if ($category->is_locked) {
+            if ($category->is_system && $this->planService->hasFeature($category->tenant, 'edit_system_categories')) {
+                // System categories: only allow is_hidden updates (is_locked is site admin only)
+                $allowedFieldsForLockedSystem = ['is_hidden'];
+                $isUpdatingOnlyAllowedFields = empty(array_diff(array_keys($data), $allowedFieldsForLockedSystem));
+                if (!$isUpdatingOnlyAllowedFields) {
+                    throw new \Exception('Cannot update locked system categories. Only hide settings can be changed. Lock status is managed by site administrators only.');
+                }
+            } else {
+                // Custom locked categories: only allow is_hidden updates
+                $allowedFieldsForLocked = ['is_hidden'];
+                $isUpdatingOnlyAllowedFields = empty(array_diff(array_keys($data), $allowedFieldsForLocked));
+                if (!$isUpdatingOnlyAllowedFields) {
+                    throw new \Exception('Cannot update locked categories.');
+                }
+            }
         }
 
         // Prevent changing is_system flag
         if (isset($data['is_system'])) {
             unset($data['is_system']);
+        }
+        
+        // Prevent tenants from setting is_locked (site admin only)
+        // This check applies to both system and custom categories
+        if (isset($data['is_locked'])) {
+            throw new \Exception('Lock status can only be managed by site administrators.');
         }
 
         // Validate private category requirements if is_private is being set/changed

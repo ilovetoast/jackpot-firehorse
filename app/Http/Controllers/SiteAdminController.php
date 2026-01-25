@@ -414,13 +414,12 @@ class SiteAdminController extends Controller
         $hasAccessToBrandManager = $planService->hasAccessToBrandManagerRole($tenant);
         
         // Tenant roles can include owner
+        // Tenant/Company roles only (brand_manager is a brand role, not a tenant role)
+        // Note: Only Owner, Admin, and Member are tenant-level roles. All other roles are brand-scoped.
         $allowedTenantRoles = ['owner', 'admin', 'member'];
-        if ($hasAccessToBrandManager) {
-            $allowedTenantRoles[] = 'brand_manager';
-        }
         
         // Brand roles cannot include owner
-        $allowedBrandRoles = ['admin', 'member'];
+            $allowedBrandRoles = ['admin', 'contributor', 'viewer'];
         if ($hasAccessToBrandManager) {
             $allowedBrandRoles[] = 'brand_manager';
         }
@@ -433,10 +432,15 @@ class SiteAdminController extends Controller
             'brands.*.role' => 'required|string|in:' . implode(',', $allowedBrandRoles),
         ]);
         
-        // Prevent owner from being assigned as a brand role - convert to admin
+        // Prevent owner and member from being assigned as brand roles
+        // Owner is tenant-level only -> convert to admin
+        // Member is tenant-level only -> convert to viewer
         foreach ($validated['brands'] as &$brandAssignment) {
             if ($brandAssignment['role'] === 'owner') {
                 $brandAssignment['role'] = 'admin';
+            }
+            if ($brandAssignment['role'] === 'member') {
+                $brandAssignment['role'] = 'viewer';
             }
         }
         unset($brandAssignment);
@@ -461,8 +465,14 @@ class SiteAdminController extends Controller
             ]);
         }
 
-        // Determine tenant role (use provided role or default to first brand role or 'member')
-        $tenantRole = $validated['role'] ?? ($validated['brands'][0]['role'] ?? 'member');
+        // Determine tenant role (use provided role or default to 'member')
+        // Note: 'member' is a valid tenant role, but not a valid brand role
+        $tenantRole = $validated['role'] ?? 'member';
+        // If tenant role came from brand role and it's not a valid tenant role, default to member
+        // Note: Only Owner, Admin, and Member are tenant-level roles
+        if (!in_array($tenantRole, ['owner', 'admin', 'member'])) {
+            $tenantRole = 'member';
+        }
 
         // Add user to company with role in pivot table
         $tenant->users()->attach($user->id, ['role' => $tenantRole]);
@@ -699,7 +709,7 @@ class SiteAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,compliance',
+            'role' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
         ]);
 
         // CRITICAL: Only user ID 1 can have site_owner role
@@ -707,13 +717,13 @@ class SiteAdminController extends Controller
             return redirect()->back()->withErrors(['role' => 'Only user ID 1 can have the site_owner role.']);
         }
 
-        // Get old site roles for logging
+        // Get old site roles for logging (include both 'compliance' and 'site_compliance' for backward compatibility)
         $oldSiteRoles = $user->getRoleNames()->filter(function ($role) {
-            return in_array($role, ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance']);
+            return in_array($role, ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance', 'site_compliance']);
         })->toArray();
         
-        // Remove existing site roles
-        $user->removeRole(['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance']);
+        // Remove existing site roles (include both 'compliance' and 'site_compliance' for backward compatibility)
+        $user->removeRole(['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance', 'site_compliance']);
         
         // Assign the new site role
         $user->assignRole($validated['role']);
@@ -1567,7 +1577,7 @@ class SiteAdminController extends Controller
             ['id' => 'site_admin', 'name' => 'Site Admin', 'icon' => ''],
             ['id' => 'site_support', 'name' => 'Site Support', 'icon' => ''],
             ['id' => 'site_engineering', 'name' => 'Site Engineering', 'icon' => ''],
-            ['id' => 'compliance', 'name' => 'Compliance', 'icon' => ''],
+            ['id' => 'site_compliance', 'name' => 'Site Compliance', 'icon' => ''],
         ];
 
         // Get company roles (all tenant-level roles from database)
@@ -1950,7 +1960,7 @@ class SiteAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'role_id' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,compliance',
+            'role_id' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
             'permissions' => 'required|array',
         ]);
 

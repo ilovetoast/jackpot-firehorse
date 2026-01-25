@@ -26,11 +26,13 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
+import DominantColorsFilter from './DominantColorsFilter'
+import { usePermission } from '../hooks/usePermission'
 
 /**
  * Secondary Filter Bar Component
@@ -54,6 +56,136 @@ export default function AssetGridSecondaryFilters({
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
+    
+    // Phase L.5.1: Check permissions for lifecycle filters
+    // Pending Publication (pending_approval) requires asset.publish
+    // Unpublished requires metadata.bypass_approval
+    // Archived requires asset.archive
+    const { hasPermission: canPublish } = usePermission('asset.publish')
+    const { hasPermission: canBypassApproval } = usePermission('metadata.bypass_approval')
+    const { hasPermission: canArchive } = usePermission('asset.archive')
+    
+    // Phase L.5.1: Lifecycle filter state (all three filters)
+    const [pendingPublicationFilter, setPendingPublicationFilter] = useState(false)
+    const [unpublishedFilter, setUnpublishedFilter] = useState(false)
+    const [archivedFilter, setArchivedFilter] = useState(false)
+    
+    // Check URL for lifecycle filters on mount
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search)
+        const lifecycle = urlParams.get('lifecycle')
+        setPendingPublicationFilter(lifecycle === 'pending_approval')
+        setUnpublishedFilter(lifecycle === 'unpublished')
+        setArchivedFilter(lifecycle === 'archived')
+    }, [])
+    
+    // Sync with URL changes
+    useEffect(() => {
+        const handleUrlChange = () => {
+            const urlParams = new URLSearchParams(window.location.search)
+            const lifecycle = urlParams.get('lifecycle')
+            setPendingPublicationFilter(lifecycle === 'pending_approval')
+            setUnpublishedFilter(lifecycle === 'unpublished')
+            setArchivedFilter(lifecycle === 'archived')
+        }
+        
+        // Listen for URL changes
+        window.addEventListener('popstate', handleUrlChange)
+        // Also check periodically in case URL changes without popstate
+        const interval = setInterval(() => {
+            const urlParams = new URLSearchParams(window.location.search)
+            const lifecycle = urlParams.get('lifecycle')
+            const newPending = lifecycle === 'pending_approval'
+            const newUnpublished = lifecycle === 'unpublished'
+            const newArchived = lifecycle === 'archived'
+            if (newPending !== pendingPublicationFilter) {
+                setPendingPublicationFilter(newPending)
+            }
+            if (newUnpublished !== unpublishedFilter) {
+                setUnpublishedFilter(newUnpublished)
+            }
+            if (newArchived !== archivedFilter) {
+                setArchivedFilter(newArchived)
+            }
+        }, 200)
+        
+        return () => {
+            window.removeEventListener('popstate', handleUrlChange)
+            clearInterval(interval)
+        }
+    }, [pendingPublicationFilter, unpublishedFilter, archivedFilter])
+    
+    // Handle pending publication filter toggle
+    const handlePendingPublicationFilterToggle = () => {
+        const urlParams = new URLSearchParams(window.location.search)
+        const newFilterState = !pendingPublicationFilter
+        
+        // Only one lifecycle filter can be active at a time
+        if (newFilterState) {
+            urlParams.set('lifecycle', 'pending_approval')
+            setPendingPublicationFilter(true)
+            setUnpublishedFilter(false)
+            setArchivedFilter(false)
+        } else {
+            urlParams.delete('lifecycle')
+            setPendingPublicationFilter(false)
+        }
+        
+        // Update URL and reload assets
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets'],
+        })
+    }
+    
+    // Handle unpublished filter toggle
+    const handleUnpublishedFilterToggle = () => {
+        const urlParams = new URLSearchParams(window.location.search)
+        const newFilterState = !unpublishedFilter
+        
+        // Only one lifecycle filter can be active at a time
+        if (newFilterState) {
+            urlParams.set('lifecycle', 'unpublished')
+            setPendingPublicationFilter(false)
+            setUnpublishedFilter(true)
+            setArchivedFilter(false)
+        } else {
+            urlParams.delete('lifecycle')
+            setUnpublishedFilter(false)
+        }
+        
+        // Update URL and reload assets
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets'],
+        })
+    }
+    
+    // Handle archived filter toggle
+    const handleArchivedFilterToggle = () => {
+        const urlParams = new URLSearchParams(window.location.search)
+        const newFilterState = !archivedFilter
+        
+        // Only one lifecycle filter can be active at a time
+        if (newFilterState) {
+            urlParams.set('lifecycle', 'archived')
+            setPendingPublicationFilter(false)
+            setUnpublishedFilter(false)
+            setArchivedFilter(true)
+        } else {
+            urlParams.delete('lifecycle')
+            setArchivedFilter(false)
+        }
+        
+        // Update URL and reload assets
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets'],
+        })
+    }
     
     // Normalize filter config using existing helper
     // This ensures consistent shape from potentially inconsistent Inertia props
@@ -254,10 +386,11 @@ export default function AssetGridSecondaryFilters({
         })
     }
     
-    // Count active filters
-    const activeFilterCount = Object.values(filters).filter(
+    // Count active filters (including lifecycle filters)
+    const metadataFilterCount = Object.values(filters).filter(
         (f) => f && f.value !== null && f.value !== '' && (!Array.isArray(f.value) || f.value.length > 0)
     ).length
+    const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0)
     
     // Always render the "More filters" bar container
     // Content changes based on category, but bar persists
@@ -303,6 +436,61 @@ export default function AssetGridSecondaryFilters({
             {/* Expandable Container (inline expansion - pushes content down) */}
             {isExpanded && (
                 <div className="px-4 py-4 sm:px-6 border-t border-gray-200">
+                    {/* Phase L.5.1: Lifecycle Filters - All three filters */}
+                    {/* SECURITY: Only available to users with appropriate permissions */}
+                    {(canPublish || canBypassApproval || canArchive) && (
+                        <div className="mb-4 pb-4 border-b border-gray-200">
+                            <label className="text-xs font-medium text-gray-700 mb-2 block">Lifecycle</label>
+                            <div className="flex flex-col gap-2">
+                                {/* Pending Publication filter - requires asset.publish */}
+                                {canPublish && (
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={pendingPublicationFilter}
+                                            onChange={handlePendingPublicationFilterToggle}
+                                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                                        />
+                                        <span className="text-sm text-gray-700 flex items-center gap-1.5">
+                                            <ClockIcon className="h-4 w-4 text-gray-400" />
+                                            Pending Publication
+                                        </span>
+                                    </label>
+                                )}
+                                {/* Unpublished filter - requires metadata.bypass_approval */}
+                                {canBypassApproval && (
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={unpublishedFilter}
+                                            onChange={handleUnpublishedFilterToggle}
+                                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                                        />
+                                        <span className="text-sm text-gray-700 flex items-center gap-1.5">
+                                            <ClockIcon className="h-4 w-4 text-gray-400" />
+                                            Unpublished
+                                        </span>
+                                    </label>
+                                )}
+                                {/* Archived filter - requires asset.archive */}
+                                {canArchive && (
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={archivedFilter}
+                                            onChange={handleArchivedFilterToggle}
+                                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                                        />
+                                        <span className="text-sm text-gray-700 flex items-center gap-1.5">
+                                            <ArchiveBoxIcon className="h-4 w-4 text-gray-400" />
+                                            Archived
+                                        </span>
+                                    </label>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                    
                     {/* Active Filters (if any) */}
                     {activeFilterCount > 0 && (
                         <div className="mb-4">
@@ -310,6 +498,43 @@ export default function AssetGridSecondaryFilters({
                                 <span className="text-xs font-medium text-gray-700">Active Filters</span>
                             </div>
                             <div className="flex flex-wrap gap-2">
+                                {/* Phase L.5.1: Show lifecycle filter chips if active */}
+                                {pendingPublicationFilter && (
+                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-yellow-50 text-yellow-700 rounded">
+                                        <span>Pending Publication</span>
+                                        <button
+                                            type="button"
+                                            onClick={handlePendingPublicationFilterToggle}
+                                            className="text-yellow-600 hover:text-yellow-800"
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                )}
+                                {unpublishedFilter && (
+                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-yellow-50 text-yellow-700 rounded">
+                                        <span>Unpublished</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleUnpublishedFilterToggle}
+                                            className="text-yellow-600 hover:text-yellow-800"
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                )}
+                                {archivedFilter && (
+                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-50 text-gray-700 rounded">
+                                        <span>Archived</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleArchivedFilterToggle}
+                                            className="text-gray-600 hover:text-gray-800"
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                )}
                                 {Object.entries(filters).map(([fieldKey, filter]) => {
                                     if (!filter || filter.value === null || filter.value === '') {
                                         return null
@@ -464,33 +689,49 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         onChange(operator, newValue)
     }
     
+    // Special handling for dominant_colors - hide operator dropdown, show only color swatches
+    const isDominantColors = (fieldKey === 'dominant_colors')
+    
     return (
         <div className="space-y-1">
             <label className="block text-xs font-medium text-gray-700">
                 {field.display_label || field.label}
             </label>
-            <div className="flex items-center gap-2">
-                {field.operators && field.operators.length > 1 && (
-                    <select
-                        value={operator}
-                        onChange={handleOperatorChange}
-                        className="flex-shrink-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                        {field.operators.map((op) => (
-                            <option key={op.value} value={op.value}>
-                                {op.label}
-                            </option>
-                        ))}
-                    </select>
-                )}
+            {/* For dominant_colors, render swatches directly without operator dropdown */}
+            {isDominantColors ? (
                 <FilterValueInput
                     field={field}
                     operator={operator}
                     value={value}
                     filteredOptions={filteredOptions}
+                    availableValues={availableValues}
                     onChange={handleValueChange}
                 />
-            </div>
+            ) : (
+                <div className="flex items-center gap-2">
+                    {field.operators && field.operators.length > 1 && (
+                        <select
+                            value={operator}
+                            onChange={handleOperatorChange}
+                            className="flex-shrink-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            {field.operators.map((op) => (
+                                <option key={op.value} value={op.value}>
+                                    {op.label}
+                                </option>
+                            ))}
+                        </select>
+                    )}
+                    <FilterValueInput
+                        field={field}
+                        operator={operator}
+                        value={value}
+                        filteredOptions={filteredOptions}
+                        availableValues={availableValues}
+                        onChange={handleValueChange}
+                    />
+                </div>
+            )}
         </div>
     )
 }
@@ -501,8 +742,24 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
  * Renders the appropriate input based on field type.
  * Uses filteredOptions to only show options that exist in available_values.
  */
-function FilterValueInput({ field, operator, value, onChange, filteredOptions = null }) {
+function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, availableValues = [] }) {
     const fieldType = field.type || 'text'
+    const fieldKey = field.field_key || field.key
+    
+    // Special handling for dominant_colors field - render color tiles
+    if (fieldKey === 'dominant_colors') {
+        // availableValues for dominant_colors will be an array of color objects: [{hex, rgb, coverage}, ...]
+        // The backend extracts individual color objects from the multiselect arrays
+        // Pass availableValues directly - DominantColorsFilter handles both formats
+        return (
+            <DominantColorsFilter
+                value={value}
+                onChange={onChange}
+                availableValues={availableValues}
+                compact={true}
+            />
+        )
+    }
     
     // Use filteredOptions if provided and non-empty, otherwise fall back to field.options
     // filteredOptions is null when not provided (use all options)

@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react'
 import { PencilIcon, LockClosedIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
+import StarRating from './StarRating'
 
 export default function AssetMetadataDisplay({ assetId }) {
     const [fields, setFields] = useState([])
@@ -82,7 +83,13 @@ export default function AssetMetadataDisplay({ assetId }) {
 
     // Check if field has a value
     const hasValue = (value) => {
-        return value !== null && value !== undefined && value !== ''
+        if (value === null || value === undefined) return false
+        if (value === '') return false
+        // For arrays, check if they have any elements
+        if (Array.isArray(value)) return value.length > 0
+        // For objects, check if they have any keys
+        if (typeof value === 'object') return Object.keys(value).length > 0
+        return true
     }
 
     // Get label for a value from options
@@ -101,6 +108,12 @@ export default function AssetMetadataDisplay({ assetId }) {
             return null // Return null instead of "Not set" text
         }
 
+        // Special handling for dominant_colors - return null, handled separately in render
+        const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
+        if (isDominantColors) {
+            return null // Don't format, will be handled by dominantColorsArray check
+        }
+
         if (field.type === 'multiselect' && Array.isArray(value)) {
             // Look up labels for each value
             const labels = value.map(v => {
@@ -113,6 +126,7 @@ export default function AssetMetadataDisplay({ assetId }) {
         if (field.type === 'select') {
             // Look up label for the value
             const label = getLabelForValue(field.options || [], value)
+            // Always return a string - use label if found, otherwise use the value itself
             return label || String(value)
         }
 
@@ -156,9 +170,66 @@ export default function AssetMetadataDisplay({ assetId }) {
                                 return false;
                             }
                             return true;
+                        }).sort((a, b) => {
+                            // Sort: non-auto fields first, auto fields last
+                            const aIsAuto = a.readonly || a.population_mode === 'automatic'
+                            const bIsAuto = b.readonly || b.population_mode === 'automatic'
+                            
+                            if (aIsAuto && !bIsAuto) return 1  // a is auto, b is not - a goes after b
+                            if (!aIsAuto && bIsAuto) return -1 // a is not auto, b is - a goes before b
+                            return 0 // Both same type, maintain original order
                         }).map((field) => {
                             const fieldHasValue = hasValue(field.current_value)
+                            const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
+                            const isRating = field.type === 'rating' || field.key === 'quality_rating' || field.field_key === 'quality_rating'
+                            
+                            // For dominant_colors, check if we have a valid array
+                            let dominantColorsArray = null
+                            if (isDominantColors && field.current_value) {
+                                if (Array.isArray(field.current_value) && field.current_value.length > 0) {
+                                    dominantColorsArray = field.current_value
+                                }
+                            }
+                            
                             const formattedValue = formatValue(field, field.current_value)
+                            
+                            // For automatic fields, if formattedValue is null but we have a value, use the raw value
+                            const isAutoField = field.readonly || field.population_mode === 'automatic'
+                            
+                            // Always try to display the value if it exists
+                            // For automatic fields, show the value even if formatting didn't work
+                            let displayValue = formattedValue
+                            
+                            // If no formatted value but we have a raw value, try to format it
+                            if (!displayValue && field.current_value !== null && field.current_value !== undefined && !dominantColorsArray && !isRating) {
+                                const rawValue = field.current_value
+                                
+                                // Skip empty strings
+                                if (rawValue === '') {
+                                    displayValue = null
+                                } else if (field.type === 'select' && field.options && field.options.length > 0) {
+                                    // Try to find the label from options
+                                    const label = getLabelForValue(field.options, rawValue)
+                                    displayValue = label || String(rawValue)
+                                } else if (Array.isArray(rawValue)) {
+                                    // For arrays, join them
+                                    displayValue = rawValue.map(v => String(v)).join(', ')
+                                } else {
+                                    // For other types, convert to string
+                                    displayValue = String(rawValue)
+                                }
+                            }
+                            
+                            // Show fields if:
+                            // 1. They have a value (displayValue or dominantColorsArray)
+                            // 2. They are rating fields (so users can add ratings)
+                            // 3. They are not automatic/readonly fields (automatic fields only show if they have values)
+                            // For editable fields, show them even without values so users can add them
+                            const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly)
+                            
+                            if (!shouldShow) {
+                                return null;
+                            }
                             
                             return (
                                 <div 
@@ -170,7 +241,10 @@ export default function AssetMetadataDisplay({ assetId }) {
                                         <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
                                             <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
                                                 {field.display_label}
-                                                {field.has_pending && (
+                                                {/* Defensive guard: Only show pending badge for non-automatic fields */}
+                                                {field.has_pending && 
+                                                 field.population_mode !== 'automatic' &&
+                                                 !field.readonly && (
                                                     <span
                                                         className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
                                                         title="This field has pending changes awaiting approval"
@@ -178,27 +252,69 @@ export default function AssetMetadataDisplay({ assetId }) {
                                                         Pending
                                                     </span>
                                                 )}
-                                                {/* Phase B2: Show readonly indicator for automatic fields */}
-                                                {(field.readonly || field.population_mode === 'automatic') && (
-                                                    <span
-                                                        className="inline-flex items-center gap-1 text-xs text-gray-500"
-                                                        title="This field is automatically populated and cannot be edited"
-                                                    >
-                                                        <LockClosedIcon className="h-3 w-3" />
-                                                        <span className="italic">Auto</span>
-                                                    </span>
-                                                )}
                                             </span>
                                         </dt>
-                                        {/* Only show the value if there is one */}
-                                        {formattedValue && (
+                                        {/* Show the value if there is one, or nothing if no value */}
+                                        {(displayValue || dominantColorsArray || isRating) ? (
                                             <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                                {formattedValue}
+                                                {/* Special handling for rating fields - show star rating with direct save */}
+                                                {isRating ? (
+                                                    <StarRating
+                                                        value={field.current_value}
+                                                        onChange={async (newValue) => {
+                                                            // Save rating directly without modal
+                                                            try {
+                                                                const response = await fetch(`/app/assets/${assetId}/metadata/edit`, {
+                                                                    method: 'POST',
+                                                                    headers: {
+                                                                        'Content-Type': 'application/json',
+                                                                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                                    },
+                                                                    credentials: 'same-origin',
+                                                                    body: JSON.stringify({
+                                                                        metadata_field_id: field.metadata_field_id,
+                                                                        value: newValue,
+                                                                    }),
+                                                                })
+
+                                                                if (!response.ok) {
+                                                                    const data = await response.json()
+                                                                    throw new Error(data.message || 'Failed to save rating')
+                                                                }
+
+                                                                // Update local state
+                                                                setFields(prevFields => 
+                                                                    prevFields.map(f => 
+                                                                        f.metadata_field_id === field.metadata_field_id
+                                                                            ? { ...f, current_value: newValue }
+                                                                            : f
+                                                                    )
+                                                                )
+                                                            } catch (err) {
+                                                                console.error('[AssetMetadataDisplay] Failed to save rating', err)
+                                                                // Optionally show error toast/notification
+                                                            }
+                                                        }}
+                                                        editable={!field.readonly && field.population_mode !== 'automatic' && field.can_edit !== false}
+                                                        maxStars={5}
+                                                        size="md"
+                                                    />
+                                                ) : dominantColorsArray ? (
+                                                    <DominantColorsSwatches dominantColors={dominantColorsArray} />
+                                                ) : (
+                                                    displayValue
+                                                )}
                                             </dd>
-                                        )}
+                                        ) : null}
                                     </div>
-                                    {/* Phase B2: Hide edit button for readonly fields */}
-                                    {!(field.readonly || field.population_mode === 'automatic') && (
+                                    {/* Show "Auto" badge where edit button would be for readonly/automatic fields */}
+                                    {/* For rating fields, don't show edit button - rating is clickable directly */}
+                                    {isRating ? null : (field.readonly || field.population_mode === 'automatic') ? (
+                                        <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 inline-flex items-center gap-1 text-xs text-gray-500">
+                                            <LockClosedIcon className="h-3 w-3" />
+                                            <span className="italic">Auto</span>
+                                        </div>
+                                    ) : (
                                         <button
                                             type="button"
                                             onClick={() => {

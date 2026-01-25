@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
 use App\Listeners\ProcessAssetOnUpload;
+use App\Listeners\SendAssetPendingApprovalNotification;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\OpenAIProvider;
 use Illuminate\Support\Facades\Event;
@@ -44,5 +46,6 @@ class AppServiceProvider extends ServiceProvider
 
         // Register event listeners
         Event::listen(AssetUploaded::class, ProcessAssetOnUpload::class);
+        Event::listen(AssetPendingApproval::class, SendAssetPendingApprovalNotification::class);
     }
 }

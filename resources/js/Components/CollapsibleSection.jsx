@@ -22,7 +22,11 @@ export default function CollapsibleSection({
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-inset"
             >
-                <h3 className="text-sm font-medium text-gray-900">{title}</h3>
+                {typeof title === 'string' ? (
+                    <h3 className="text-sm font-medium text-gray-900">{title}</h3>
+                ) : (
+                    <div className="text-sm font-medium text-gray-900">{title}</div>
+                )}
                 {isExpanded ? (
                     <ChevronUpIcon className="h-4 w-4 text-gray-500" />
                 ) : (

@@ -74,17 +74,38 @@ export default function MetadataCandidateReview({ assetId }) {
         setShowConfirmApprove(null)
 
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+            if (!csrfToken) {
+                throw new Error('CSRF token not found. Please refresh the page.')
+            }
+
             const response = await fetch(`/app/metadata/candidates/${candidateId}/approve`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
                 },
                 credentials: 'same-origin',
+                body: JSON.stringify({
+                    _token: csrfToken,
+                }),
             })
 
             if (!response.ok) {
-                const data = await response.json()
+                // Handle 419 CSRF token mismatch
+                if (response.status === 419) {
+                    throw new Error('Session expired. Please refresh the page and try again.')
+                }
+                
+                let data
+                try {
+                    data = await response.json()
+                } catch (e) {
+                    // Response might not be JSON
+                    throw new Error(`Failed to approve candidate (${response.status})`)
+                }
                 throw new Error(data.message || 'Failed to approve candidate')
             }
 
@@ -110,17 +131,37 @@ export default function MetadataCandidateReview({ assetId }) {
         setShowConfirmReject(null)
 
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+            if (!csrfToken) {
+                throw new Error('CSRF token not found. Please refresh the page.')
+            }
+
             const response = await fetch(`/app/metadata/candidates/${candidateId}/reject`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
                 },
                 credentials: 'same-origin',
+                body: JSON.stringify({
+                    _token: csrfToken,
+                }),
             })
 
             if (!response.ok) {
-                const data = await response.json()
+                // Handle 419 CSRF token mismatch
+                if (response.status === 419) {
+                    throw new Error('Session expired. Please refresh the page and try again.')
+                }
+                
+                let data
+                try {
+                    data = await response.json()
+                } catch (e) {
+                    throw new Error(`Failed to reject candidate (${response.status})`)
+                }
                 throw new Error(data.message || 'Failed to reject candidate')
             }
 
@@ -145,17 +186,37 @@ export default function MetadataCandidateReview({ assetId }) {
         setProcessing((prev) => new Set(prev).add(candidateId))
 
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+            if (!csrfToken) {
+                throw new Error('CSRF token not found. Please refresh the page.')
+            }
+
             const response = await fetch(`/app/metadata/candidates/${candidateId}/defer`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
                 },
                 credentials: 'same-origin',
+                body: JSON.stringify({
+                    _token: csrfToken,
+                }),
             })
 
             if (!response.ok) {
-                const data = await response.json()
+                // Handle 419 CSRF token mismatch
+                if (response.status === 419) {
+                    throw new Error('Session expired. Please refresh the page and try again.')
+                }
+                
+                let data
+                try {
+                    data = await response.json()
+                } catch (e) {
+                    throw new Error(`Failed to defer candidate (${response.status})`)
+                }
                 throw new Error(data.message || 'Failed to defer candidate')
             }
 

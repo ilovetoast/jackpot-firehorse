@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { router } from '@inertiajs/react'
 import {
     Bars3Icon,
@@ -39,6 +39,7 @@ export default function ByCategoryView({
     customFieldsLimit = null
 }) {
     const [selectedCategoryId, setSelectedCategoryId] = useState(null)
+    const selectedCategoryIdRef = useRef(null) // Persist selected category across reloads
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [loadingFields, setLoadingFields] = useState(new Set())
     const [draggedFieldId, setDraggedFieldId] = useState(null)
@@ -47,6 +48,18 @@ export default function ByCategoryView({
     const [modalOpen, setModalOpen] = useState(false)
     const [editingField, setEditingField] = useState(null)
     const [loadingFieldData, setLoadingFieldData] = useState(false)
+
+    // Sync ref with state
+    useEffect(() => {
+        selectedCategoryIdRef.current = selectedCategoryId
+    }, [selectedCategoryId])
+
+    // Restore selected category after reload
+    useEffect(() => {
+        if (selectedCategoryIdRef.current && !selectedCategoryId) {
+            setSelectedCategoryId(selectedCategoryIdRef.current)
+        }
+    }, [selectedCategoryId])
 
     const { system_fields: systemFields = [], tenant_fields = [] } = registry || {}
     const allFields = [...systemFields, ...tenant_fields]
@@ -223,6 +236,9 @@ export default function ByCategoryView({
         const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
         const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Edit' : 'Filter'
 
+        // Store current selected category to restore after reload
+        const currentCategoryId = selectedCategoryIdRef.current
+
         try {
             const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
                 method: 'POST',
@@ -243,11 +259,23 @@ export default function ByCategoryView({
                 setTimeout(() => setSuccessMessage(null), 3000)
                 
                 // Silently reload registry in background without page refresh
+                // Use preserveState to keep selected category and scroll position
                 router.reload({ 
                     only: ['registry'],
                     preserveState: true,
                     preserveScroll: true,
+                    onSuccess: () => {
+                        // Restore selected category after reload
+                        if (currentCategoryId) {
+                            setTimeout(() => {
+                                setSelectedCategoryId(currentCategoryId)
+                            }, 0)
+                        }
+                    }
                 })
+            } else {
+                setSuccessMessage('Failed to update visibility')
+                setTimeout(() => setSuccessMessage(null), 3000)
             }
         } catch (error) {
             console.error('Failed to update visibility:', error)
@@ -262,6 +290,25 @@ export default function ByCategoryView({
         if (!canManageVisibility || !categoryId) return
 
         const newValue = !currentValue
+
+        // Optimistically update local state immediately
+        setFieldCategoryData(prev => {
+            const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+            const updatedOverrides = {
+                ...fieldData.overrides,
+                [categoryId]: {
+                    ...fieldData.overrides[categoryId],
+                    is_primary: newValue,
+                }
+            }
+            return {
+                ...prev,
+                [fieldId]: {
+                    ...fieldData,
+                    overrides: updatedOverrides,
+                }
+            }
+        })
 
         try {
             const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
@@ -282,17 +329,51 @@ export default function ByCategoryView({
                 // Show success message
                 setSuccessMessage(`Primary filter ${newValue ? 'enabled' : 'disabled'} for this category`)
                 setTimeout(() => setSuccessMessage(null), 3000)
-                
-                // Silently reload registry in background without page refresh
-                router.reload({ 
-                    only: ['registry'],
-                    preserveState: true,
-                    preserveScroll: true,
+                // No reload needed - state already updated optimistically
+            } else {
+                // Revert on error
+                setFieldCategoryData(prev => {
+                    const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                    const updatedOverrides = {
+                        ...fieldData.overrides,
+                        [categoryId]: {
+                            ...fieldData.overrides[categoryId],
+                            is_primary: currentValue,
+                        }
+                    }
+                    return {
+                        ...prev,
+                        [fieldId]: {
+                            ...fieldData,
+                            overrides: updatedOverrides,
+                        }
+                    }
                 })
+                setSuccessMessage('Failed to update primary filter placement')
+                setTimeout(() => setSuccessMessage(null), 3000)
             }
         } catch (error) {
             console.error('Failed to update primary filter placement:', error)
-            setSuccessMessage(null)
+            // Revert on error
+            setFieldCategoryData(prev => {
+                const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                const updatedOverrides = {
+                    ...fieldData.overrides,
+                    [categoryId]: {
+                        ...fieldData.overrides[categoryId],
+                        is_primary: currentValue,
+                    }
+                }
+                return {
+                    ...prev,
+                    [fieldId]: {
+                        ...fieldData,
+                        overrides: updatedOverrides,
+                    }
+                }
+            })
+            setSuccessMessage('Failed to update primary filter placement')
+            setTimeout(() => setSuccessMessage(null), 3000)
         }
     }
 
@@ -691,7 +772,7 @@ export default function ByCategoryView({
                                         System Automated Fields
                                     </h3>
                                     <p className="mt-1 text-xs text-gray-500">
-                                        These fields are automatically filled by the system. Upload is disabled, but you can control filter visibility and disable them per category.
+                                        These fields are automatically filled by the system. Upload is disabled, but you can control edit visibility, filter visibility, and disable them per category.
                                     </p>
                                 </div>
                                 <div className="divide-y divide-gray-200">
@@ -1008,6 +1089,7 @@ function AutomatedFieldRow({
 }) {
     const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
     const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
+    const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? false
 
     return (
         <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-100/50 transition-colors">
@@ -1022,7 +1104,7 @@ function AutomatedFieldRow({
                     </span>
                 )}
                 
-                {/* Upload/Filter Checkboxes - Only visible when enabled */}
+                {/* Upload/Edit/Filter Checkboxes - Only visible when enabled */}
                 {isEnabled && (
                     <div className="flex items-center gap-3 ml-auto">
                         {/* Upload - Always disabled/greyed out for automated fields */}
@@ -1034,6 +1116,17 @@ function AutomatedFieldRow({
                                 className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-not-allowed"
                             />
                             <span className="text-xs text-gray-400">Upload</span>
+                        </label>
+                        {/* Show in Edit - Functional */}
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={effectiveEdit}
+                                onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                disabled={!canManage}
+                                className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            />
+                            <span className="text-xs text-gray-500">Edit</span>
                         </label>
                         {/* Filter - Functional */}
                         <label className="flex items-center gap-1.5 cursor-pointer">

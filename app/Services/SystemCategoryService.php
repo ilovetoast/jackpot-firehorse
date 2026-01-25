@@ -404,6 +404,8 @@ class SystemCategoryService
         }
 
         // Create category from template (latest version)
+        // Note: is_locked is set to true for system categories and is site admin only
+        // Tenants cannot change is_locked - it can only be modified by site administrators
         return Category::create([
             'tenant_id' => $brand->tenant_id,
             'brand_id' => $brand->id,
@@ -412,7 +414,7 @@ class SystemCategoryService
             'slug' => $template->slug,
             'icon' => $template->icon,
             'is_system' => true,
-            'is_locked' => true, // System categories are locked
+            'is_locked' => true, // System categories are locked by default (site admin only)
             'is_private' => false, // System categories are never private
             'is_hidden' => $template->is_hidden,
             'system_category_id' => $template->id,

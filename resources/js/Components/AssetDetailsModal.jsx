@@ -16,7 +16,7 @@
  * @param {Function} props.onClose - Callback when modal should close
  */
 import { useEffect, useState, useRef } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
@@ -33,11 +33,22 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const { auth } = usePage().props
     const { hasPermission: canRegenerateAiMetadata } = usePermission('assets.ai_metadata.regenerate')
     const { hasPermission: canRegenerateThumbnailsAdmin } = usePermission('assets.regenerate_thumbnails_admin')
+    const { hasPermission: canPublish } = usePermission('asset.publish')
+    const { hasPermission: canUnpublish } = usePermission('asset.unpublish')
+    const { hasPermission: canArchive } = usePermission('asset.archive')
+    const { hasPermission: canRestore } = usePermission('asset.restore')
     
     // For troubleshooting: Also allow owners/admins even if permission check fails
     const tenantRole = auth?.tenant_role || null
     const isOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
     const canRegenerateAiMetadataForTroubleshooting = canRegenerateAiMetadata || isOwnerOrAdmin
+    
+    // Tenant admins/owners typically have all asset permissions, so allow them to see lifecycle actions
+    // This is a fallback in case permissions aren't properly assigned to the role
+    const canPublishWithFallback = canPublish || isOwnerOrAdmin
+    const canUnpublishWithFallback = canUnpublish || isOwnerOrAdmin
+    const canArchiveWithFallback = canArchive || isOwnerOrAdmin
+    const canRestoreWithFallback = canRestore || isOwnerOrAdmin
     
     // System Metadata Regeneration state
     const [regeneratingSystemMetadata, setRegeneratingSystemMetadata] = useState(false)
@@ -66,6 +77,31 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     // Remove preview state
     const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
     const [removePreviewError, setRemovePreviewError] = useState(null)
+    
+    // Actions dropdown state
+    const [showActionsDropdown, setShowActionsDropdown] = useState(false)
+    const actionsDropdownRef = useRef(null)
+    
+    // Lifecycle actions state
+    const [publishing, setPublishing] = useState(false)
+    const [unpublishing, setUnpublishing] = useState(false)
+    const [archiving, setArchiving] = useState(false)
+    const [restoring, setRestoring] = useState(false)
+    const [lifecycleError, setLifecycleError] = useState(null)
+    
+    // Close actions dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (actionsDropdownRef.current && !actionsDropdownRef.current.contains(event.target)) {
+                setShowActionsDropdown(false)
+            }
+        }
+        
+        if (showActionsDropdown) {
+            document.addEventListener('mousedown', handleClickOutside)
+            return () => document.removeEventListener('mousedown', handleClickOutside)
+        }
+    }, [showActionsDropdown])
     
     // Available thumbnail styles
     const availableThumbnailStyles = [
@@ -327,6 +363,110 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
         }
     }
     
+    // Handle Publish
+    const handlePublish = async () => {
+        if (!asset?.id || !canPublish) return
+        
+        setPublishing(true)
+        setLifecycleError(null)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${asset.id}/publish`)
+            
+            if (response.status === 200) {
+                // Refresh page to get updated asset data
+                router.reload({ 
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                throw new Error(response.data?.message || 'Failed to publish asset')
+            }
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || err.message || 'Failed to publish asset'
+            setLifecycleError(errorMessage)
+            setPublishing(false)
+        }
+    }
+    
+    // Handle Unpublish
+    const handleUnpublish = async () => {
+        if (!asset?.id || !canUnpublish) return
+        
+        setUnpublishing(true)
+        setLifecycleError(null)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${asset.id}/unpublish`)
+            
+            if (response.status === 200) {
+                // Refresh page to get updated asset data
+                router.reload({ 
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                throw new Error(response.data?.message || 'Failed to unpublish asset')
+            }
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || err.message || 'Failed to unpublish asset'
+            setLifecycleError(errorMessage)
+            setUnpublishing(false)
+        }
+    }
+    
+    // Handle Archive
+    const handleArchive = async () => {
+        if (!asset?.id || !canArchive) return
+        
+        setArchiving(true)
+        setLifecycleError(null)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${asset.id}/archive`)
+            
+            if (response.status === 200) {
+                // Refresh page to get updated asset data
+                router.reload({ 
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                throw new Error(response.data?.message || 'Failed to archive asset')
+            }
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || err.message || 'Failed to archive asset'
+            setLifecycleError(errorMessage)
+            setArchiving(false)
+        }
+    }
+    
+    // Handle Restore
+    const handleRestore = async () => {
+        if (!asset?.id || !canRestore) return
+        
+        setRestoring(true)
+        setLifecycleError(null)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${asset.id}/restore`)
+            
+            if (response.status === 200) {
+                // Refresh page to get updated asset data
+                router.reload({ 
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                throw new Error(response.data?.message || 'Failed to restore asset')
+            }
+        } catch (err) {
+            const errorMessage = err.response?.data?.message || err.message || 'Failed to restore asset'
+            setLifecycleError(errorMessage)
+            setRestoring(false)
+        }
+    }
+    
     // Handle Thumbnail Regeneration
     const handleRegenerateThumbnails = async () => {
         if (!asset?.id || !canRegenerateThumbnailsAdmin || selectedThumbnailStyles.length === 0) return
@@ -462,18 +602,204 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
             <div className="flex min-h-full items-center justify-center p-4">
                 <div className="relative transform overflow-hidden rounded-lg bg-white shadow-xl transition-all w-full max-w-4xl max-h-[90vh] flex flex-col">
                     {/* Header */}
-                    <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                        <h3 id="modal-title" className="text-lg font-semibold text-gray-900">
-                            Asset Details - {asset?.title || asset?.original_filename || 'Asset'}
-                        </h3>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        >
-                            <span className="sr-only">Close</span>
-                            <XMarkIcon className="h-6 w-6" aria-hidden="true" />
-                        </button>
+                    <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 id="modal-title" className="text-lg font-semibold text-gray-900">
+                                Asset Details - {asset?.title || asset?.original_filename || 'Asset'}
+                            </h3>
+                            <div className="flex items-center gap-3">
+                                {/* Lifecycle Error Message */}
+                                {lifecycleError && (
+                                    <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">
+                                        {lifecycleError}
+                                    </div>
+                                )}
+                                
+                            {/* Actions Dropdown */}
+                            {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin || canPublishWithFallback || canUnpublishWithFallback || canArchiveWithFallback || canRestoreWithFallback) && (
+                                    <div className="relative" ref={actionsDropdownRef}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowActionsDropdown(!showActionsDropdown)}
+                                        className="inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                                    >
+                                        Actions
+                                        <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform ${showActionsDropdown ? 'rotate-180' : ''}`} />
+                                    </button>
+                                    
+                                    {/* Dropdown menu */}
+                                    {showActionsDropdown && (
+                                        <div className="absolute right-0 z-10 mt-2 w-56 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                                            <div className="py-1">
+                                                {/* Lifecycle Actions Section */}
+                                                {(canPublishWithFallback || canUnpublishWithFallback || canArchiveWithFallback || canRestoreWithFallback) && (
+                                                    <>
+                                                        {/* Publish */}
+                                                        {canPublishWithFallback && !asset?.published_at && !asset?.archived_at && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setShowActionsDropdown(false)
+                                                                    handlePublish()
+                                                                }}
+                                                                disabled={publishing || unpublishing || archiving || restoring}
+                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                            >
+                                                                <CheckCircleIcon className={`h-4 w-4 ${publishing ? 'animate-spin' : ''}`} />
+                                                                Publish
+                                                            </button>
+                                                        )}
+                                                        
+                                                        {/* Unpublish */}
+                                                        {canUnpublishWithFallback && asset?.published_at && !asset?.archived_at && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setShowActionsDropdown(false)
+                                                                    handleUnpublish()
+                                                                }}
+                                                                disabled={publishing || unpublishing || archiving || restoring}
+                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                            >
+                                                                <XCircleIcon className={`h-4 w-4 ${unpublishing ? 'animate-spin' : ''}`} />
+                                                                Unpublish
+                                                            </button>
+                                                        )}
+                                                        
+                                                        {/* Archive */}
+                                                        {canArchiveWithFallback && !asset?.archived_at && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setShowActionsDropdown(false)
+                                                                    handleArchive()
+                                                                }}
+                                                                disabled={publishing || unpublishing || archiving || restoring}
+                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                            >
+                                                                <ArchiveBoxIcon className={`h-4 w-4 ${archiving ? 'animate-spin' : ''}`} />
+                                                                Archive
+                                                            </button>
+                                                        )}
+                                                        
+                                                        {/* Restore */}
+                                                        {canRestoreWithFallback && asset?.archived_at && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setShowActionsDropdown(false)
+                                                                    handleRestore()
+                                                                }}
+                                                                disabled={publishing || unpublishing || archiving || restoring}
+                                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                            >
+                                                                <ArrowUturnLeftIcon className={`h-4 w-4 ${restoring ? 'animate-spin' : ''}`} />
+                                                                Restore
+                                                            </button>
+                                                        )}
+                                                        
+                                                        {/* Divider if there are other actions */}
+                                                        {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin) && (
+                                                            <div className="border-t border-gray-200 my-1" />
+                                                        )}
+                                                    </>
+                                                )}
+                                                
+                                                {/* System Metadata Regeneration */}
+                                                {canRegenerateAiMetadataForTroubleshooting && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowActionsDropdown(false)
+                                                            handleRegenerateSystemMetadata()
+                                                        }}
+                                                        disabled={regeneratingSystemMetadata}
+                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                    >
+                                                        <ArrowPathIcon className={`h-4 w-4 ${regeneratingSystemMetadata ? 'animate-spin' : ''}`} />
+                                                        Regenerate System Metadata
+                                                    </button>
+                                                )}
+                                                
+                                                {/* AI Metadata Regeneration */}
+                                                {canRegenerateAiMetadataForTroubleshooting && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowActionsDropdown(false)
+                                                            handleRegenerateAiMetadata()
+                                                        }}
+                                                        disabled={regeneratingAiMetadata}
+                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                    >
+                                                        <ArrowPathIcon className={`h-4 w-4 ${regeneratingAiMetadata ? 'animate-spin' : ''}`} />
+                                                        Regenerate AI Metadata
+                                                    </button>
+                                                )}
+                                                
+                                                {/* AI Tagging Regeneration */}
+                                                {canRegenerateAiMetadataForTroubleshooting && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowActionsDropdown(false)
+                                                            handleRegenerateAiTagging()
+                                                        }}
+                                                        disabled={regeneratingAiTagging}
+                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                    >
+                                                        <ArrowPathIcon className={`h-4 w-4 ${regeneratingAiTagging ? 'animate-spin' : ''}`} />
+                                                        Regenerate AI Tagging
+                                                    </button>
+                                                )}
+                                                
+                                                {/* Remove Preview */}
+                                                {supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split('.').pop()) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowActionsDropdown(false)
+                                                            handleRemovePreview()
+                                                        }}
+                                                        disabled={removePreviewLoading}
+                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                    >
+                                                        <TrashIcon className={`h-4 w-4 ${removePreviewLoading ? 'animate-spin' : ''}`} />
+                                                        Remove Preview
+                                                    </button>
+                                                )}
+                                                
+                                                {/* Thumbnail Management */}
+                                                {canRegenerateThumbnailsAdmin && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowActionsDropdown(false)
+                                                            setShowThumbnailManagement(!showThumbnailManagement)
+                                                        }}
+                                                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                                    >
+                                                        <ArrowPathIcon className="h-4 w-4" />
+                                                        Thumbnail Management
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                    </div>
+                                )}
+                                
+                                {/* Close button */}
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <span className="sr-only">Close</span>
+                                    <XMarkIcon className="h-6 w-6" aria-hidden="true" />
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Content */}
@@ -495,7 +821,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                             <div className="space-y-6">
                                 {/* Preview */}
                                 <div>
-                                    <h4 className="text-sm font-medium text-gray-900 mb-3">Preview</h4>
+                                    <h4 className="text-sm font-medium text-gray-900 mb-3 hidden">Preview</h4>
                                     <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200" style={{ aspectRatio: '16/9', minHeight: '200px' }}>
                                         {asset?.id && (
                                             <ThumbnailPreview
@@ -507,241 +833,151 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                         )}
                                     </div>
                                     
-                                    {/* Action Buttons Section - Under Preview */}
-                                    {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin) && (
-                                        <div className="mt-4 space-y-3">
-                                            {/* System Metadata Regeneration */}
-                                            {canRegenerateAiMetadataForTroubleshooting && (
-                                                <div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleRegenerateSystemMetadata}
-                                                        disabled={regeneratingSystemMetadata}
-                                                        className="inline-flex items-center rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        {regeneratingSystemMetadata ? (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                                                Regenerating...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2" />
-                                                                Regenerate System Metadata
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                    {systemMetadataSuccess && (
-                                                        <p className="mt-2 text-sm text-green-600">System metadata regeneration queued successfully</p>
-                                                    )}
-                                                    {systemMetadataError && (
-                                                        <p className="mt-2 text-sm text-red-600">{systemMetadataError}</p>
-                                                    )}
-                                                    <p className="mt-1 text-xs text-gray-500">Orientation, Color Space, Resolution Class</p>
-                                                </div>
-                                            )}
-                                            
-                                            {/* AI Metadata Regeneration */}
-                                            {canRegenerateAiMetadataForTroubleshooting && (
-                                                <div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleRegenerateAiMetadata}
-                                                        disabled={regeneratingAiMetadata}
-                                                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        {regeneratingAiMetadata ? (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                                                Regenerating...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2" />
-                                                                Regenerate AI Metadata
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                    {aiMetadataSuccess && (
-                                                        <p className="mt-2 text-sm text-green-600">AI metadata regeneration queued successfully</p>
-                                                    )}
-                                                    {aiMetadataError && (
-                                                        <p className="mt-2 text-sm text-red-600">{aiMetadataError}</p>
-                                                    )}
-                                                    <p className="mt-1 text-xs text-gray-500">Photo Type and other AI-eligible fields</p>
-                                                </div>
-                                            )}
-                                            
-                                            {/* AI Tagging Regeneration */}
-                                            {canRegenerateAiMetadataForTroubleshooting && (
-                                                <div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleRegenerateAiTagging}
-                                                        disabled={regeneratingAiTagging}
-                                                        className="inline-flex items-center rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        {regeneratingAiTagging ? (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                                                Regenerating...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2" />
-                                                                Regenerate AI Tagging
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                    {aiTaggingSuccess && (
-                                                        <p className="mt-2 text-sm text-green-600">AI tagging regeneration queued successfully</p>
-                                                    )}
-                                                    {aiTaggingError && (
-                                                        <p className="mt-2 text-sm text-red-600">{aiTaggingError}</p>
-                                                    )}
-                                                    <p className="mt-1 text-xs text-gray-500">General/freeform tags (not yet fully implemented)</p>
-                                                </div>
-                                            )}
-                                            
-                                            {/* Remove Preview */}
-                                            {/* Show button if asset supports thumbnails (backend will handle if none exist) */}
-                                            {supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split('.').pop()) && (
-                                                <div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleRemovePreview}
-                                                        disabled={removePreviewLoading}
-                                                        className="inline-flex items-center rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        {removePreviewLoading ? (
-                                                            <>
-                                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                                                Removing...
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <TrashIcon className="h-4 w-4 mr-2" />
-                                                                Remove Preview
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                    {removePreviewError && (
-                                                        <p className="mt-2 text-sm text-red-600">{removePreviewError}</p>
-                                                    )}
-                                                    <p className="mt-1 text-xs text-gray-500">Remove preview thumbnails to force the file type icon to display instead</p>
-                                                </div>
-                                            )}
-                                            
-                                            {/* Thumbnail Management */}
-                                            {canRegenerateThumbnailsAdmin && (
-                                                <div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowThumbnailManagement(!showThumbnailManagement)}
-                                                        className="w-full px-4 py-2 flex items-center justify-between text-left text-sm font-medium text-gray-700 bg-white rounded-md border border-gray-300 shadow-sm hover:bg-gray-50"
-                                                    >
-                                                        <span>Thumbnail Management</span>
-                                                        <ChevronDownIcon className={`h-4 w-4 text-gray-500 transition-transform ${showThumbnailManagement ? 'rotate-180' : ''}`} />
-                                                    </button>
+                                    {/* Success/Error Messages */}
+                                    {systemMetadataSuccess && (
+                                        <div className="mt-4 rounded-md bg-green-50 p-3">
+                                            <p className="text-sm text-green-800">System metadata regeneration queued successfully</p>
+                                        </div>
+                                    )}
+                                    {systemMetadataError && (
+                                        <div className="mt-4 rounded-md bg-red-50 p-3">
+                                            <p className="text-sm text-red-800">{systemMetadataError}</p>
+                                        </div>
+                                    )}
+                                    {aiMetadataSuccess && (
+                                        <div className="mt-4 rounded-md bg-green-50 p-3">
+                                            <p className="text-sm text-green-800">AI metadata regeneration queued successfully</p>
+                                        </div>
+                                    )}
+                                    {aiMetadataError && (
+                                        <div className="mt-4 rounded-md bg-red-50 p-3">
+                                            <p className="text-sm text-red-800">{aiMetadataError}</p>
+                                        </div>
+                                    )}
+                                    {aiTaggingSuccess && (
+                                        <div className="mt-4 rounded-md bg-green-50 p-3">
+                                            <p className="text-sm text-green-800">AI tagging regeneration queued successfully</p>
+                                        </div>
+                                    )}
+                                    {aiTaggingError && (
+                                        <div className="mt-4 rounded-md bg-red-50 p-3">
+                                            <p className="text-sm text-red-800">{aiTaggingError}</p>
+                                        </div>
+                                    )}
+                                    {removePreviewError && (
+                                        <div className="mt-4 rounded-md bg-red-50 p-3">
+                                            <p className="text-sm text-red-800">{removePreviewError}</p>
+                                        </div>
+                                    )}
+                                    
+                                    {/* Thumbnail Management Section */}
+                                    {showThumbnailManagement && canRegenerateThumbnailsAdmin && (
+                                        <div className="mt-4">
+                                            <div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowThumbnailManagement(false)}
+                                                    className="w-full px-4 py-2 flex items-center justify-between text-left text-sm font-medium text-gray-700 bg-white rounded-md border border-gray-300 shadow-sm hover:bg-gray-50"
+                                                >
+                                                    <span>Thumbnail Management</span>
+                                                    <ChevronDownIcon className="h-4 w-4 text-gray-500 transition-transform rotate-180" />
+                                                </button>
                                                     
-                                                    {showThumbnailManagement && (
-                                                        <div className="mt-2 p-4 bg-white border border-gray-200 rounded-md">
-                                                            <div className="relative" ref={thumbnailDropdownRef}>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setShowThumbnailDropdown(!showThumbnailDropdown)}
-                                                                    disabled={regeneratingThumbnails}
-                                                                    className="inline-flex items-center justify-between w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                >
-                                                                    <span>
-                                                                        {regeneratingThumbnails ? 'Regenerating...' : 'Regenerate Thumbnails'}
-                                                                    </span>
-                                                                    <ChevronDownIcon className={`h-4 w-4 ml-2 transition-transform ${showThumbnailDropdown ? 'rotate-180' : ''}`} />
-                                                                </button>
-                                                                
-                                                                {/* Dropdown menu */}
-                                                                {showThumbnailDropdown && !regeneratingThumbnails && (
-                                                                    <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-                                                                        <div className="py-2 px-3">
-                                                                            <p className="text-xs font-medium text-gray-700 mb-2">Select styles to regenerate:</p>
-                                                                            
-                                                                            <div className="space-y-2">
-                                                                                {availableThumbnailStyles.map((style) => (
-                                                                                    <label
-                                                                                        key={style.name}
-                                                                                        className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                                                                                    >
-                                                                                        <input
-                                                                                            type="checkbox"
-                                                                                            checked={selectedThumbnailStyles.includes(style.name)}
-                                                                                            onChange={(e) => {
-                                                                                                if (e.target.checked) {
-                                                                                                    setSelectedThumbnailStyles([...selectedThumbnailStyles, style.name])
-                                                                                                } else {
-                                                                                                    setSelectedThumbnailStyles(selectedThumbnailStyles.filter(s => s !== style.name))
-                                                                                                }
-                                                                                            }}
-                                                                                            className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                                                                        />
-                                                                                        <div className="flex-1">
-                                                                                            <div className="text-xs font-medium text-gray-900">{style.label}</div>
-                                                                                            <div className="text-xs text-gray-500">{style.description}</div>
-                                                                                        </div>
-                                                                                    </label>
-                                                                                ))}
-                                                                            </div>
-                                                                            
-                                                                            {/* Force ImageMagick option */}
-                                                                            <div className="mt-3 pt-3 border-t border-gray-200">
-                                                                                <label className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={forceImageMagick}
-                                                                                        onChange={(e) => setForceImageMagick(e.target.checked)}
-                                                                                        className="mt-0.5"
-                                                                                    />
-                                                                                    <div className="flex-1">
-                                                                                        <div className="text-xs font-medium text-gray-900">Force ImageMagick</div>
-                                                                                        <div className="text-xs text-gray-500">Bypass file type checks (testing only)</div>
-                                                                                    </div>
-                                                                                </label>
-                                                                            </div>
-                                                                            
-                                                                            {thumbnailError && (
-                                                                                <div className="mt-3 bg-red-50 border border-red-200 rounded-md p-2">
-                                                                                    <p className="text-xs text-red-800">{thumbnailError}</p>
+                                                <div className="mt-2 p-4 bg-white border border-gray-200 rounded-md">
+                                                    <div className="relative" ref={thumbnailDropdownRef}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowThumbnailDropdown(!showThumbnailDropdown)}
+                                                            disabled={regeneratingThumbnails}
+                                                            className="inline-flex items-center justify-between w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            <span>
+                                                                {regeneratingThumbnails ? 'Regenerating...' : 'Regenerate Thumbnails'}
+                                                            </span>
+                                                            <ChevronDownIcon className={`h-4 w-4 ml-2 transition-transform ${showThumbnailDropdown ? 'rotate-180' : ''}`} />
+                                                        </button>
+                                                        
+                                                        {/* Dropdown menu */}
+                                                        {showThumbnailDropdown && !regeneratingThumbnails && (
+                                                            <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                                                                <div className="py-2 px-3">
+                                                                    <p className="text-xs font-medium text-gray-700 mb-2">Select styles to regenerate:</p>
+                                                                    
+                                                                    <div className="space-y-2">
+                                                                        {availableThumbnailStyles.map((style) => (
+                                                                            <label
+                                                                                key={style.name}
+                                                                                className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                                                                            >
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={selectedThumbnailStyles.includes(style.name)}
+                                                                                    onChange={(e) => {
+                                                                                        if (e.target.checked) {
+                                                                                            setSelectedThumbnailStyles([...selectedThumbnailStyles, style.name])
+                                                                                        } else {
+                                                                                            setSelectedThumbnailStyles(selectedThumbnailStyles.filter(s => s !== style.name))
+                                                                                        }
+                                                                                    }}
+                                                                                    className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                                                                                />
+                                                                                <div className="flex-1">
+                                                                                    <div className="text-xs font-medium text-gray-900">{style.label}</div>
+                                                                                    <div className="text-xs text-gray-500">{style.description}</div>
                                                                                 </div>
-                                                                            )}
-                                                                            
-                                                                            <div className="mt-3 flex justify-end gap-2">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => setShowThumbnailDropdown(false)}
-                                                                                    className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                                                                                >
-                                                                                    Cancel
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={handleRegenerateThumbnails}
-                                                                                    disabled={selectedThumbnailStyles.length === 0}
-                                                                                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                                >
-                                                                                    Regenerate Selected
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
+                                                                            </label>
+                                                                        ))}
                                                                     </div>
-                                                                )}
+                                                                    
+                                                                    {/* Force ImageMagick option */}
+                                                                    <div className="mt-3 pt-3 border-t border-gray-200">
+                                                                        <label className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={forceImageMagick}
+                                                                                onChange={(e) => setForceImageMagick(e.target.checked)}
+                                                                                className="mt-0.5"
+                                                                            />
+                                                                            <div className="flex-1">
+                                                                                <div className="text-xs font-medium text-gray-900">Force ImageMagick</div>
+                                                                                <div className="text-xs text-gray-500">Bypass file type checks (testing only)</div>
+                                                                            </div>
+                                                                        </label>
+                                                                    </div>
+                                                                    
+                                                                    {thumbnailError && (
+                                                                        <div className="mt-3 bg-red-50 border border-red-200 rounded-md p-2">
+                                                                            <p className="text-xs text-red-800">{thumbnailError}</p>
+                                                                        </div>
+                                                                    )}
+                                                                    
+                                                                    <div className="mt-3 flex justify-end gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setShowThumbnailDropdown(false)}
+                                                                            className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={handleRegenerateThumbnails}
+                                                                            disabled={selectedThumbnailStyles.length === 0}
+                                                                            className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        >
+                                                                            Regenerate Selected
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                            
-                                                            <p className="mt-2 text-xs text-gray-500">
-                                                                Site roles can regenerate specific thumbnail styles for troubleshooting or testing new file types.
-                                                            </p>
-                                                        </div>
-                                                    )}
+                                                        )}
+                                                    </div>
+                                                    
+                                                    <p className="mt-2 text-xs text-gray-500">
+                                                        Site roles can regenerate specific thumbnail styles for troubleshooting or testing new file types.
+                                                    </p>
                                                 </div>
-                                            )}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -754,15 +990,92 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                     </div>
                                 )}
 
-                                {/* Dominant Colors */}
-                                {asset?.metadata?.dominant_colors && Array.isArray(asset.metadata.dominant_colors) && asset.metadata.dominant_colors.length > 0 && (
-                                    <div>
-                                        <h4 className="text-sm font-medium text-gray-900 mb-2">Dominant Colors</h4>
-                                        <div className="text-sm text-gray-700">
-                                            <DominantColorsSwatches dominantColors={asset.metadata.dominant_colors} />
+                                {/* Phase L.4: Lifecycle Information (read-only) */}
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-900 mb-2">Lifecycle</h4>
+                                    <div className="space-y-2">
+                                        {/* Lifecycle Badges */}
+                                        <div className="flex flex-wrap gap-2">
+                                            {/* Show all lifecycle badges independently */}
+                                            {/* Archived badge - show if archived */}
+                                            {asset?.archived_at && (
+                                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
+                                                    Archived
+                                                </span>
+                                            )}
+                                            {/* Published badge - show if published (regardless of archived status) */}
+                                            {asset?.published_at && (
+                                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-green-100 text-green-700 border border-green-300">
+                                                    Published
+                                                </span>
+                                            )}
+                                            {/* Unpublished badge - show if not published (regardless of archived status) */}
+                                            {!asset?.published_at && (
+                                                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                                    Unpublished
+                                                </span>
+                                            )}
                                         </div>
+                                        
+                                        {/* Lifecycle Details */}
+                                        {/* Show all lifecycle details independently */}
+                                        {asset?.published_at && (
+                                            <div className="text-sm text-gray-600">
+                                                <span className="font-medium text-gray-900">Published:</span>{' '}
+                                                {new Date(asset.published_at).toLocaleDateString('en-US', {
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric',
+                                                })}
+                                                {asset.published_by && (
+                                                    <span className="ml-2 text-gray-500">
+                                                        by {asset.published_by.name || `${asset.published_by.first_name || ''} ${asset.published_by.last_name || ''}`.trim() || 'Unknown'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {!asset?.published_at && (
+                                            <div className="text-sm text-gray-600">
+                                                <span className="font-medium text-gray-900">Unpublished</span>
+                                                {asset?.category?.name && (
+                                                    <span className="ml-2 text-gray-500">
+                                                        ({asset.category.name})
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {asset?.archived_at && (
+                                            <div className="text-sm text-gray-600">
+                                                <span className="font-medium text-gray-900">Archived:</span>{' '}
+                                                {new Date(asset.archived_at).toLocaleDateString('en-US', {
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric',
+                                                })}
+                                                {asset.archived_by && (
+                                                    <span className="ml-2 text-gray-500">
+                                                        by {asset.archived_by.name || `${asset.archived_by.first_name || ''} ${asset.archived_by.last_name || ''}`.trim() || 'Unknown'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {/* Phase M: Expiration date display (read-only) */}
+                                        {asset?.expires_at && (
+                                            <div className="text-sm text-gray-600">
+                                                <span className="font-medium text-gray-900">
+                                                    {new Date(asset.expires_at) < new Date() ? 'Expired on:' : 'Expires on:'}
+                                                </span>{' '}
+                                                {new Date(asset.expires_at).toLocaleDateString('en-US', {
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric',
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
-                                )}
+                                </div>
+
+                                {/* Dominant Colors standalone section removed - now displayed as a metadata field in "All Metadata Fields" */}
 
                                 {/* Metadata Fields */}
                                 <div>
@@ -777,8 +1090,29 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                     (field.readonly ? ' (read-only)' : '') +
                                                     (field.is_ai_related ? ' (AI-related)' : '');
                                                 
-                                                const fieldHasValue = hasValue(field.current_value, field.type)
-                                                const formattedValue = formatValue(field.current_value, field.type)
+                                                // Special handling for dominant_colors - show color swatches
+                                                const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
+                                                
+                                                // For dominant_colors, check if we have valid color objects
+                                                let dominantColorsArray = null
+                                                if (isDominantColors && Array.isArray(field.current_value) && field.current_value.length > 0) {
+                                                    const validColors = field.current_value.filter(color => 
+                                                        color && 
+                                                        color.hex && 
+                                                        Array.isArray(color.rgb) && 
+                                                        color.rgb.length >= 3
+                                                    )
+                                                    if (validColors.length > 0) {
+                                                        dominantColorsArray = validColors
+                                                    }
+                                                }
+                                                
+                                                const fieldHasValue = isDominantColors 
+                                                    ? !!dominantColorsArray 
+                                                    : hasValue(field.current_value, field.type)
+                                                const formattedValue = isDominantColors 
+                                                    ? null // Don't format, will show swatches
+                                                    : formatValue(field.current_value, field.type)
                                                 
                                                 return (
                                                     <div
@@ -789,16 +1123,24 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                             <div className="text-sm text-gray-900">
                                                                 <span className="text-gray-500">{field.display_label}</span>
                                                                 <span className="text-gray-400 text-xs ml-1">({typeLabel})</span>
-                                                                {formattedValue && (
+                                                                {(formattedValue || dominantColorsArray) && (
                                                                     <>
                                                                         <span className="text-gray-400 mx-2">:</span>
                                                                         <span className="font-semibold text-gray-900">
-                                                                            {formattedValue}
+                                                                            {dominantColorsArray ? (
+                                                                                <DominantColorsSwatches dominantColors={dominantColorsArray} />
+                                                                            ) : (
+                                                                                formattedValue
+                                                                            )}
                                                                         </span>
                                                                     </>
                                                                 )}
                                                             </div>
-                                                            {field.metadata && (field.metadata.approved_at || field.metadata.confidence !== null) && (
+                                                            {/* Defensive guard: Only show approval UI for non-automatic fields */}
+                                                            {field.metadata && 
+                                                             field.population_mode !== 'automatic' &&
+                                                             !field.readonly &&
+                                                             (field.metadata.approved_at || field.metadata.confidence !== null) && (
                                                                 <div className="mt-1 text-xs text-gray-400">
                                                                     {field.metadata.approved_at && (
                                                                         <span>
@@ -813,8 +1155,18 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        <div className="ml-3 flex-shrink-0">
+                                                        <div className="ml-3 flex-shrink-0 flex items-center gap-2">
                                                             {getSourceBadge(field)}
+                                                            {/* Show "Auto" badge for readonly/automatic fields */}
+                                                            {(field.readonly || field.population_mode === 'automatic') && (
+                                                                <span
+                                                                    className="inline-flex items-center gap-1 text-xs text-gray-500"
+                                                                    title="This field is automatically populated and cannot be edited"
+                                                                >
+                                                                    <LockClosedIcon className="h-3 w-3" />
+                                                                    <span className="italic">Auto</span>
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 );

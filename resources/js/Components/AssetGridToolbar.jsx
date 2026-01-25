@@ -25,9 +25,11 @@
  * @param {React.ReactNode} props.moreFiltersContent - Optional more filters section content
  * @param {boolean} props.showMoreFilters - Whether to show the more filters section
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import { InformationCircleIcon } from '@heroicons/react/24/outline'
+import { usePermission } from '../hooks/usePermission'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -45,6 +47,11 @@ export default function AssetGridToolbar({
     moreFiltersContent = null, // More filters section content
     showMoreFilters = false, // Whether to show more filters section
 }) {
+    const pageProps = usePage().props
+    const { auth } = pageProps
+    
+    // Lifecycle filters moved to "More filters" section (AssetGridSecondaryFilters)
+    
     // Static filter chip placeholders (non-functional)
     const filterChips = ['Nature', 'Space', 'Color-grading', 'Amsterdam', 'Summer']
     const [isSearchFocused, setIsSearchFocused] = useState(false)
@@ -146,6 +153,8 @@ export default function AssetGridToolbar({
                                 assetType="image"
                                 compact={true}
                             />
+                            
+                            {/* Lifecycle filters moved to "More filters" section */}
                         </div>
                     </div>
 

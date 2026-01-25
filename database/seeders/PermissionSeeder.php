@@ -31,6 +31,10 @@ class PermissionSeeder extends Seeder
             'asset.view',
             'asset.download',
             'asset.upload',
+            'asset.publish',
+            'asset.unpublish',
+            'asset.archive',
+            'asset.restore',
         ];
 
         // DAM Metadata permissions (tenant-scoped)
@@ -255,7 +259,7 @@ class PermissionSeeder extends Seeder
         $siteAdmin = Role::firstOrCreate(['name' => 'site_admin', 'guard_name' => 'web']);
         $siteSupport = Role::firstOrCreate(['name' => 'site_support', 'guard_name' => 'web']);
         $siteEngineering = Role::firstOrCreate(['name' => 'site_engineering', 'guard_name' => 'web']);
-        $compliance = Role::firstOrCreate(['name' => 'compliance', 'guard_name' => 'web']);
+        $siteCompliance = Role::firstOrCreate(['name' => 'site_compliance', 'guard_name' => 'web']);
 
         // Site Owner has all site permissions by default
         $siteOwner->syncPermissions($sitePermissions);
@@ -302,8 +306,8 @@ class PermissionSeeder extends Seeder
             'assets.regenerate_thumbnails_admin',
         ]);
         
-        // Compliance: View-only access (including AI Dashboard, AI Budgets, and Metadata Registry view-only)
-        $compliance->syncPermissions([
+        // Site Compliance: View-only access (including AI Dashboard, AI Budgets, and Metadata Registry view-only)
+        $siteCompliance->syncPermissions([
             'tickets.view_staff',
             'tickets.view_engineering',
             'tickets.view_audit_log',
@@ -311,5 +315,9 @@ class PermissionSeeder extends Seeder
             'ai.budgets.view',
             'metadata.registry.view',
         ]);
+
+        // Note: Tenant-level 'compliance' role has been removed.
+        // Keep only: Owner, Admin, Member for tenant-level roles.
+        // All other roles should be brand-scoped.
     }
 }

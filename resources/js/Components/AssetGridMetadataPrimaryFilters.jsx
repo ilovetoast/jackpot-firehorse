@@ -55,6 +55,7 @@ import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters } from '../utils/filterVisibilityRules'
 import TagPrimaryFilter from './TagPrimaryFilter'
+import DominantColorsFilter from './DominantColorsFilter'
 
 /**
  * Primary Metadata Filter Bar Component
@@ -380,12 +381,10 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     return (
         <div className="flex-shrink-0">
-            {/* Show label for Photo Type even in compact mode, hide for others */}
-            {(!compact || fieldKey === 'photo_type' || fieldKey === 'type' || (field.display_label && field.display_label.toLowerCase().includes('photo'))) && (
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                    {field.display_label || field.label}
-                </label>
-            )}
+            {/* Always show label for primary filters */}
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+                {field.display_label || field.label || fieldKey}
+            </label>
             <div className="flex items-center gap-2">
                 {field.operators && field.operators.length > 1 && (
                     <select
@@ -438,6 +437,28 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                 tenantId={tenantId}
                 placeholder="Filter by tags..."
                 compact={true}
+            />
+        )
+    }
+    
+    // Special handling for dominant_colors field - render color tiles
+    if (fieldKey === 'dominant_colors') {
+        // Extract color arrays from availableValues
+        // availableValues for dominant_colors will be arrays of color objects
+        const colorArrays = useMemo(() => {
+            if (!availableValues || !Array.isArray(availableValues)) {
+                return []
+            }
+            // availableValues is an array of color arrays: [[{hex, rgb, coverage}, ...], ...]
+            return availableValues.filter(Array.isArray)
+        }, [availableValues])
+        
+        return (
+            <DominantColorsFilter
+                value={value}
+                onChange={onChange}
+                availableValues={colorArrays}
+                compact={compact}
             />
         )
     }

@@ -15,13 +15,15 @@ import {
     CogIcon,
     CheckCircleIcon,
     ArrowUpCircleIcon,
-    BeakerIcon
+    BeakerIcon,
+    ExclamationCircleIcon
 } from '@heroicons/react/24/outline'
 import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
+import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0 }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
@@ -335,6 +337,36 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     </div>
+
+                    {/* Phase L.5.1: Unpublished Assets Tile */}
+                    {unpublished_assets_count > 0 && (
+                        <Link
+                            href="/app/assets?lifecycle=unpublished"
+                            className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200 hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer"
+                        >
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                    <ExclamationCircleIcon className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+                                </div>
+                                <div className="ml-5 w-0 flex-1">
+                                    <dt className="text-sm font-medium text-gray-500 truncate">Waiting to be Published</dt>
+                                    <dd className="mt-1">
+                                        <div className="flex items-baseline">
+                                            <span className="text-2xl font-semibold tracking-tight text-gray-900">
+                                                {unpublished_assets_count.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-gray-500">Click to view unpublished assets</p>
+                                    </dd>
+                                </div>
+                            </div>
+                        </Link>
+                    )}
+
+                    {/* Pending AI Suggestions Tile */}
+                    {pending_ai_suggestions && (
+                        <PendingAiSuggestionsTile pendingCount={pending_ai_suggestions.total || 0} />
+                    )}
 
                     {/* AI Tagging Card - Only show if user has permission and data is available */}
                     {ai_usage && (

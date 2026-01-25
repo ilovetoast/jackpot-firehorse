@@ -43,7 +43,7 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -54,7 +54,6 @@ import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
 import AssetDetailsModal from './AssetDetailsModal'
-import DominantColorsSwatches from './DominantColorsSwatches'
 import CollapsibleSection from './CollapsibleSection'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
@@ -62,6 +61,7 @@ import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 import { useAssetMetrics } from '../hooks/useAssetMetrics'
 
 export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null }) {
+    const { auth } = usePage().props
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
     const [showZoomModal, setShowZoomModal] = useState(false)
@@ -83,6 +83,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [generateTimeoutId, setGenerateTimeoutId] = useState(null)
     // Details modal state
     const [showDetailsModal, setShowDetailsModal] = useState(false)
+    // Publish confirmation modal state
+    const [showPublishModal, setShowPublishModal] = useState(false)
+    const [publishLoading, setPublishLoading] = useState(false)
+    
+    // Toast notification state
+    const [toastMessage, setToastMessage] = useState(null)
+    const [toastType, setToastType] = useState('success')
     
     // Phase 3.1: Get assets with thumbnail support for carousel (images and PDFs)
     const imageAssets = useMemo(() => {
@@ -245,6 +252,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 setActivityLoading(false)
             })
     }, [asset])
+
+    // Dominant colors are now displayed as a metadata field, no longer needed in File Information
 
     // Focus trap on mobile (when drawer is full-width)
     useEffect(() => {
@@ -475,9 +484,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
     // Check if user has permission to generate/retry thumbnails
     const { hasPermission: canRetryThumbnails } = usePermission('assets.retry_thumbnails')
-    
-    const { auth } = usePage().props
-    
+    const { hasPermission: canPublish } = usePermission('asset.publish')
 
     // Check if asset can have thumbnail generated (for previously skipped assets)
     // IMPORTANT: This is for existing assets that were skipped but are now supported
@@ -751,21 +758,25 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         >
             {/* Header */}
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200">
-                <div className="px-6 py-4 flex items-center justify-between">
-                    <h2 id="drawer-title" className="text-lg font-semibold text-gray-900 truncate pr-4">
-                        {displayAsset.title || displayAsset.original_filename || 'Asset Details'}
-                    </h2>
-                    <button
-                        ref={closeButtonRef}
-                        type="button"
-                        onClick={onClose}
-                        className="flex-shrink-0 rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        aria-label="Close drawer"
-                    >
-                        <XMarkIcon className="h-6 w-6" aria-hidden="true" />
-                    </button>
+                <div className="px-6 py-4">
+                    <div className="flex items-center justify-between">
+                        <h2 id="drawer-title" className="text-lg font-semibold text-gray-900 truncate pr-4">
+                            {displayAsset.title || displayAsset.original_filename || 'Asset Details'}
+                        </h2>
+                        <button
+                            ref={closeButtonRef}
+                            type="button"
+                            onClick={onClose}
+                            className="flex-shrink-0 rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            aria-label="Close drawer"
+                        >
+                            <XMarkIcon className="h-6 w-6" aria-hidden="true" />
+                        </button>
+                    </div>
+                    
+                    {/* Phase L.4: Lifecycle Badges (read-only indicators) */}
+                    {/* Lifecycle badges moved to below preview image */}
                 </div>
-                
             </div>
 
             {/* Content */}
@@ -836,6 +847,28 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             )}
                         </div>
                     </div>
+                    
+                    {/* Lifecycle badges - Unpublished, Archived, and Expired */}
+                    <div className="flex flex-wrap gap-2">
+                        {/* Unpublished badge */}
+                        {!displayAsset.archived_at && !displayAsset.published_at && (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                Unpublished
+                            </span>
+                        )}
+                        {/* Archived badge */}
+                        {displayAsset.archived_at && (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
+                                Archived
+                            </span>
+                        )}
+                        {/* Phase M: Expired badge - show only when expired */}
+                        {displayAsset.expires_at && new Date(displayAsset.expires_at) < new Date() && (
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-red-100 text-red-700 border border-red-300">
+                                Expired
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 {/* Analytics/Metrics & Action Buttons */}
@@ -859,24 +892,100 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     
                     {/* Action Buttons */}
                     {displayAsset?.id && (
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowDetailsModal(true)}
-                                className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-                            >
-                                <EyeIcon className="h-4 w-4 mr-2" />
-                                Details
-                            </button>
-                            <a
-                                href={`/app/assets/${displayAsset.id}/download`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                            >
-                                <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                                Download
-                            </a>
+                        <div className="space-y-2">
+                            {/* Publish button - show if unpublished and not archived */}
+                            {canPublish && !displayAsset.published_at && !displayAsset.archived_at && (
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            // Use axios directly since the endpoint returns JSON, not Inertia response
+                                            const response = await window.axios.post(`/app/assets/${displayAsset.id}/publish`)
+                                            
+                                            if (response.data && response.data.message) {
+                                                // Format success message with timestamp and user
+                                                const publishedAt = response.data.published_at 
+                                                    ? new Date(response.data.published_at).toLocaleString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        year: 'numeric',
+                                                        hour: 'numeric',
+                                                        minute: '2-digit',
+                                                        hour12: true
+                                                    })
+                                                    : 'now'
+                                                
+                                                const userName = auth?.user?.name || auth?.user?.email || 'You'
+                                                
+                                                setToastMessage(`Approved at: ${publishedAt} by: ${userName}`)
+                                                setToastType('success')
+                                                
+                                                // Auto-hide toast after 8 seconds (longer to account for reload)
+                                                setTimeout(() => {
+                                                    setToastMessage(null)
+                                                }, 8000)
+                                                
+                                                // Delay reload slightly to ensure toast is visible
+                                                setTimeout(() => {
+                                                    router.reload({ preserveState: true, preserveScroll: true })
+                                                }, 500)
+                                            }
+                                        } catch (err) {
+                                            console.error('Failed to approve asset:', err)
+                                            
+                                            // Extract error message from response
+                                            let errorMessage = 'You do not have permission to publish this asset.'
+                                            
+                                            if (err.response) {
+                                                if (err.response.status === 403) {
+                                                    errorMessage = err.response.data?.message || 
+                                                                  'You do not have permission to publish this asset. Please check that you have the "asset.publish" permission and are assigned to this brand.'
+                                                } else if (err.response.status === 404) {
+                                                    errorMessage = 'Asset not found.'
+                                                } else {
+                                                    errorMessage = err.response.data?.message || 
+                                                                  err.response.data?.error || 
+                                                                  `Failed to publish asset (${err.response.status}).`
+                                                }
+                                            } else if (err.message) {
+                                                errorMessage = err.message
+                                            }
+                                            
+                                            setToastMessage(errorMessage)
+                                            setToastType('error')
+                                            
+                                            // Auto-hide error toast after 8 seconds
+                                            setTimeout(() => {
+                                                setToastMessage(null)
+                                            }, 8000)
+                                        }
+                                    }}
+                                    className="w-full inline-flex items-center justify-center rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                                >
+                                    <CheckCircleIcon className="h-4 w-4 mr-2" />
+                                    Publish
+                                </button>
+                            )}
+                            
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowDetailsModal(true)}
+                                    className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                                >
+                                    <EyeIcon className="h-4 w-4 mr-2" />
+                                    Details
+                                </button>
+                                <a
+                                    href={`/app/assets/${displayAsset.id}/download`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                >
+                                    <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
+                                    Download
+                                </a>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -896,7 +1005,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 {/* Tags and Metadata */}
                 {displayAsset?.id && (
                     <div className="border-t border-gray-200">
-                        <CollapsibleSection title="Metadata" defaultExpanded={true}>
+                        <CollapsibleSection 
+                            title="Metadata"
+                            defaultExpanded={true}
+                        >
+                            {/* Category as first line */}
+                            {categoryName && categoryName !== 'Uncategorized' && (
+                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap mb-2 md:mb-3">
+                                    <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                        <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
+                                            Category
+                                        </span>
+                                    </dt>
+                                    <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
+                                        {categoryName}
+                                    </dd>
+                                </div>
+                            )}
                             <AssetMetadataDisplay assetId={displayAsset.id} />
                             {/* Tags at bottom of metadata */}
                             <div className="mt-4 pt-4 border-t border-gray-100">
@@ -923,7 +1048,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
                 {/* File Information */}
                 <div className="border-t border-gray-200">
-                    <CollapsibleSection title="File Information" defaultExpanded={true}>
+                    <CollapsibleSection title="File Information" defaultExpanded={false}>
                     
                     {/* Created By - moved below preview, at top of file info */}
                     {/* Use displayAsset (with live updates) instead of prop asset */}
@@ -990,6 +1115,45 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 {categoryName}
                             </dd>
                         </div>
+                        
+                        {/* Phase L.4: Lifecycle Information (read-only) */}
+                        {displayAsset.published_at && (
+                            <div className="flex justify-between">
+                                <dt className="text-sm text-gray-500">Published</dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    {formatDate(displayAsset.published_at)}
+                                    {displayAsset.published_by && (
+                                        <span className="ml-2 text-xs font-normal text-gray-500">
+                                            by {displayAsset.published_by.name || `${displayAsset.published_by.first_name || ''} ${displayAsset.published_by.last_name || ''}`.trim() || 'Unknown'}
+                                        </span>
+                                    )}
+                                </dd>
+                            </div>
+                        )}
+                        {displayAsset.archived_at && (
+                            <div className="flex justify-between">
+                                <dt className="text-sm text-gray-500">Archived</dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    {formatDate(displayAsset.archived_at)}
+                                    {displayAsset.archived_by && (
+                                        <span className="ml-2 text-xs font-normal text-gray-500">
+                                            by {displayAsset.archived_by.name || `${displayAsset.archived_by.first_name || ''} ${displayAsset.archived_by.last_name || ''}`.trim() || 'Unknown'}
+                                        </span>
+                                    )}
+                                </dd>
+                            </div>
+                        )}
+                        {/* Phase M: Expiration date display (read-only) */}
+                        {displayAsset.expires_at && (
+                            <div className="flex justify-between">
+                                <dt className="text-sm text-gray-500">
+                                    {new Date(displayAsset.expires_at) < new Date() ? 'Expired on' : 'Expires on'}
+                                </dt>
+                                <dd className="text-sm font-semibold text-gray-900">
+                                    {formatDate(displayAsset.expires_at)}
+                                </dd>
+                            </div>
+                        )}
                         {/* File Dimensions - if available from source */}
                         {(() => {
                             // Priority 1: Check source_dimensions (from original image file)
@@ -1045,15 +1209,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             return null
                         })()}
                         
-                        {/* Dominant Colors - file info, not metadata */}
-                        {displayAsset?.metadata?.dominant_colors && Array.isArray(displayAsset.metadata.dominant_colors) && displayAsset.metadata.dominant_colors.length > 0 && (
-                            <div className="flex justify-between items-center">
-                                <dt className="text-sm text-gray-500">Dominant Colors</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
-                                    <DominantColorsSwatches dominantColors={displayAsset.metadata.dominant_colors} />
-                                </dd>
-                            </div>
-                        )}
+                        {/* Dominant Colors removed from File Information - now displayed as a metadata field */}
                         {displayAsset.original_filename && (
                             <div>
                                 <dt className="text-sm text-gray-500 mb-1">Filename</dt>
@@ -1214,7 +1370,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
                 {/* Asset Timeline */}
                 <div className="border-t border-gray-200">
-                    <CollapsibleSection title="Timeline" defaultExpanded={true}>
+                    <CollapsibleSection title="Timeline" defaultExpanded={false}>
                         <AssetTimeline 
                             events={activityEvents} 
                             loading={activityLoading}
@@ -1363,6 +1519,121 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 </div>
             )}
 
+            {/* Publish Confirmation Modal */}
+            {showPublishModal && (
+                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center mb-4">
+                            <CheckCircleIcon className="h-6 w-6 text-green-600 mr-3" />
+                            <h3 className="text-lg font-semibold text-gray-900">Publish Asset</h3>
+                        </div>
+                        
+                        <p className="text-sm text-gray-600 mb-4">
+                            Are you sure you want to publish this asset? Once published, it will be visible to all users with access to this brand.
+                        </p>
+                        
+                        <div className="flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowPublishModal(false)
+                                }}
+                                disabled={publishLoading}
+                                className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    setPublishLoading(true)
+                                    try {
+                                        const response = await window.axios.post(`/app/assets/${displayAsset.id}/publish`)
+                                        
+                                        if (response.data && response.data.message) {
+                                            // Format success message with timestamp and user
+                                            const publishedAt = response.data.published_at 
+                                                ? new Date(response.data.published_at).toLocaleString('en-US', {
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    year: 'numeric',
+                                                    hour: 'numeric',
+                                                    minute: '2-digit',
+                                                    hour12: true
+                                                })
+                                                : 'now'
+                                            
+                                            const userName = auth?.user?.name || auth?.user?.email || 'You'
+                                            
+                                            setToastMessage(`Published at: ${publishedAt} by: ${userName}`)
+                                            setToastType('success')
+                                            
+                                            // Auto-hide toast after 8 seconds (longer to account for reload)
+                                            setTimeout(() => {
+                                                setToastMessage(null)
+                                            }, 8000)
+                                            
+                                            // Close modal
+                                            setShowPublishModal(false)
+                                            
+                                            // Delay reload slightly to ensure toast is visible
+                                            setTimeout(() => {
+                                                router.reload({ preserveState: true, preserveScroll: true })
+                                            }, 500)
+                                        }
+                                    } catch (err) {
+                                        console.error('Failed to publish asset:', err)
+                                        
+                                        // Extract error message from response
+                                        let errorMessage = 'You do not have permission to publish this asset.'
+                                        
+                                        if (err.response) {
+                                            // Server returned an error response
+                                            if (err.response.status === 403) {
+                                                errorMessage = err.response.data?.message || 
+                                                              'You do not have permission to publish this asset. Please check that you have the "asset.publish" permission and are assigned to this brand.'
+                                            } else if (err.response.status === 404) {
+                                                errorMessage = 'Asset not found.'
+                                            } else {
+                                                errorMessage = err.response.data?.message || 
+                                                              err.response.data?.error || 
+                                                              `Failed to publish asset (${err.response.status}).`
+                                            }
+                                        } else if (err.message) {
+                                            errorMessage = err.message
+                                        }
+                                        
+                                        setToastMessage(errorMessage)
+                                        setToastType('error')
+                                        
+                                        // Auto-hide error toast after 8 seconds
+                                        setTimeout(() => {
+                                            setToastMessage(null)
+                                        }, 8000)
+                                    } finally {
+                                        setPublishLoading(false)
+                                    }
+                                }}
+                                disabled={publishLoading}
+                                className="inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-600 disabled:opacity-50"
+                            >
+                                {publishLoading ? (
+                                    <>
+                                        <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
+                                        Publishing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <CheckIcon className="h-4 w-4 mr-2" />
+                                        Publish
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Asset Details Modal */}
             {displayAsset && (
                 <AssetDetailsModal
@@ -1370,6 +1641,52 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     isOpen={showDetailsModal}
                     onClose={() => setShowDetailsModal(false)}
                 />
+            )}
+            
+            {/* Toast Notification */}
+            {toastMessage && (
+                <div className="fixed top-4 right-4 z-50 max-w-md w-full">
+                    <div className={`rounded-lg border p-4 shadow-lg ${
+                        toastType === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
+                        toastType === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' :
+                        toastType === 'info' ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                        'bg-green-50 border-green-200 text-green-800'
+                    }`}>
+                        <div className="flex items-start">
+                            <div className="flex-shrink-0">
+                                {toastType === 'error' ? (
+                                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                                    </svg>
+                                ) : (
+                                    <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div className="ml-3 flex-1">
+                                <p className="text-sm font-medium">{toastMessage}</p>
+                            </div>
+                            <div className="ml-4 flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setToastMessage(null)}
+                                    className={`inline-flex rounded-md p-1.5 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                        toastType === 'error' ? 'text-red-500 hover:bg-red-100 focus:ring-red-600' :
+                                        toastType === 'warning' ? 'text-yellow-500 hover:bg-yellow-100 focus:ring-yellow-600' :
+                                        toastType === 'info' ? 'text-blue-500 hover:bg-blue-100 focus:ring-blue-600' :
+                                        'text-green-500 hover:bg-green-100 focus:ring-green-600'
+                                    }`}
+                                >
+                                    <span className="sr-only">Dismiss</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )

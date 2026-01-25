@@ -36,7 +36,7 @@ export default function AdminPermissions({
         { id: 'site_admin', name: 'Site Admin', icon: '' },
         { id: 'site_support', name: 'Site Support', icon: '' },
         { id: 'site_engineering', name: 'Site Engineering', icon: '' },
-        { id: 'compliance', name: 'Compliance', icon: '' },
+        { id: 'site_compliance', name: 'Site Compliance', icon: '' },
     ]
 
     // Order roles by hierarchy: Owner > Admin > Brand Manager > Manager > Contributor > Uploader > Viewer > Member
@@ -96,7 +96,7 @@ export default function AdminPermissions({
             'tickets.link_diagnostic',
             'tickets.view_sla',
         ],
-        compliance: [
+        site_compliance: [
             'tickets.view_staff',
             'tickets.view_engineering',
             'tickets.view_audit_log',

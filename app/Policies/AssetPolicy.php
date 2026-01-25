@@ -127,4 +127,212 @@ class AssetPolicy
 
         return true;
     }
+
+    /**
+     * Determine if the user can publish the asset.
+     *
+     * Phase L.2 — Asset Publication
+     * Users can publish assets if they:
+     * - Belong to the tenant
+     * - Have 'asset.publish' permission for the tenant
+     * - Asset is not archived
+     * - Asset is not failed
+     */
+    public function publish(User $user, Asset $asset): bool
+    {
+        // User must belong to the tenant
+        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+            return false;
+        }
+
+        // Check permission for publishing assets
+        $tenant = $asset->tenant;
+        
+        // Check tenant-level permission first
+        $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.publish');
+        
+        // If no tenant permission, check brand-level permission (if asset has a brand)
+        if (!$hasTenantPermission && $asset->brand_id) {
+            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.publish');
+        }
+        
+        if (!$hasTenantPermission) {
+            return false;
+        }
+
+        // Cannot publish archived assets
+        if ($asset->isArchived()) {
+            return false;
+        }
+
+        // Cannot publish failed assets
+        if ($asset->status === \App\Enums\AssetStatus::FAILED) {
+            return false;
+        }
+
+        // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
+        if ($asset->brand_id) {
+            $brand = $asset->brand;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            // Tenant admins/owners have access to all brands
+            if (!in_array($tenantRole, ['admin', 'owner'])) {
+                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determine if the user can unpublish the asset.
+     *
+     * Phase L.2 — Asset Publication
+     * Users can unpublish assets if they:
+     * - Belong to the tenant
+     * - Have 'asset.unpublish' permission for the tenant
+     */
+    public function unpublish(User $user, Asset $asset): bool
+    {
+        // User must belong to the tenant
+        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+            return false;
+        }
+
+        // Check permission for unpublishing assets
+        $tenant = $asset->tenant;
+        
+        // Check tenant-level permission first
+        $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.unpublish');
+        
+        // If no tenant permission, check brand-level permission (if asset has a brand)
+        if (!$hasTenantPermission && $asset->brand_id) {
+            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.unpublish');
+        }
+        
+        if (!$hasTenantPermission) {
+            return false;
+        }
+
+        // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
+        if ($asset->brand_id) {
+            $brand = $asset->brand;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            // Tenant admins/owners have access to all brands
+            if (!in_array($tenantRole, ['admin', 'owner'])) {
+                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determine if the user can archive the asset.
+     *
+     * Phase L.3 — Asset Archive & Restore
+     * Users can archive assets if they:
+     * - Belong to the tenant
+     * - Have 'asset.archive' permission for the tenant
+     * - Asset is not failed
+     */
+    public function archive(User $user, Asset $asset): bool
+    {
+        // User must belong to the tenant
+        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+            return false;
+        }
+
+        // Check permission for archiving assets
+        $tenant = $asset->tenant;
+        
+        // Check tenant-level permission first
+        $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.archive');
+        
+        // If no tenant permission, check brand-level permission (if asset has a brand)
+        if (!$hasTenantPermission && $asset->brand_id) {
+            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.archive');
+        }
+        
+        if (!$hasTenantPermission) {
+            return false;
+        }
+
+        // Cannot archive failed assets
+        if ($asset->status === \App\Enums\AssetStatus::FAILED) {
+            return false;
+        }
+
+        // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
+        if ($asset->brand_id) {
+            $brand = $asset->brand;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            // Tenant admins/owners have access to all brands
+            if (!in_array($tenantRole, ['admin', 'owner'])) {
+                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determine if the user can restore the asset.
+     *
+     * Phase L.3 — Asset Archive & Restore
+     * Users can restore assets if they:
+     * - Belong to the tenant
+     * - Have 'asset.restore' permission for the tenant
+     * - Asset is not failed
+     */
+    public function restore(User $user, Asset $asset): bool
+    {
+        // User must belong to the tenant
+        if (! $user->tenants()->where('tenants.id', $asset->tenant_id)->exists()) {
+            return false;
+        }
+
+        // Check permission for restoring assets
+        $tenant = $asset->tenant;
+        
+        // Check tenant-level permission first
+        $hasTenantPermission = $user->hasPermissionForTenant($tenant, 'asset.restore');
+        
+        // If no tenant permission, check brand-level permission (if asset has a brand)
+        if (!$hasTenantPermission && $asset->brand_id) {
+            $hasTenantPermission = $user->hasPermissionForBrand($asset->brand, 'asset.restore');
+        }
+        
+        if (!$hasTenantPermission) {
+            return false;
+        }
+
+        // Cannot restore failed assets
+        if ($asset->status === \App\Enums\AssetStatus::FAILED) {
+            return false;
+        }
+
+        // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)
+        if ($asset->brand_id) {
+            $brand = $asset->brand;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            
+            // Tenant admins/owners have access to all brands
+            if (!in_array($tenantRole, ['admin', 'owner'])) {
+                if (!$user->brands()->where('brands.id', $asset->brand_id)->exists()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
 }

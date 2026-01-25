@@ -15,6 +15,7 @@
  * - Templates (categories with no ID or ID === 0)
  * - Deleted system categories (where template_exists === false)
  * - Soft-deleted categories (where deleted_at is set)
+ * - Hidden categories (where is_hidden === true) - hidden categories should not appear in navigation
  * 
  * @param {Array} categories - Array of category objects
  * @returns {Array} Filtered array of active categories
@@ -38,6 +39,13 @@ export function filterActiveCategories(categories) {
         // Filter out deleted system categories (template no longer exists)
         // This matches the backend Category::isActive() logic
         if (category.is_system && category.template_exists === false) {
+            return false;
+        }
+
+        // Filter out hidden categories - hidden categories should not appear in navigation sidebar
+        // (They can still be managed on the brand edit page, but not selected in the sidebar)
+        // Handle both boolean true and string "true" cases for defensive programming
+        if (category.is_hidden === true || category.is_hidden === 'true' || category.is_hidden === 1) {
             return false;
         }
 

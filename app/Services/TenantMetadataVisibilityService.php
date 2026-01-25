@@ -146,13 +146,20 @@ class TenantMetadataVisibilityService
      */
     public function suppressForCategory(Tenant $tenant, int $fieldId, Category $category): void
     {
-        // Check if suppression already exists
-        $existing = DB::table('metadata_field_visibility')
+        // Categories are brand-specific, so create brand-specific suppression records
+        $brandId = $category->brand_id;
+        
+        // Check if suppression already exists (brand-specific or tenant-level)
+        $existingQuery = DB::table('metadata_field_visibility')
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
-            ->whereNull('brand_id')
-            ->where('category_id', $category->id)
-            ->first();
+            ->where('category_id', $category->id);
+        
+        if ($brandId) {
+            $existing = $existingQuery->where('brand_id', $brandId)->first();
+        } else {
+            $existing = $existingQuery->whereNull('brand_id')->first();
+        }
 
         if ($existing) {
             // Update to ensure hidden
@@ -169,7 +176,7 @@ class TenantMetadataVisibilityService
             DB::table('metadata_field_visibility')->insert([
                 'metadata_field_id' => $fieldId,
                 'tenant_id' => $tenant->id,
-                'brand_id' => null,
+                'brand_id' => $brandId, // Use category's brand_id
                 'category_id' => $category->id,
                 'is_hidden' => true,
                 'is_upload_hidden' => true,
@@ -181,6 +188,7 @@ class TenantMetadataVisibilityService
 
         Log::info('Tenant metadata field suppressed for category', [
             'tenant_id' => $tenant->id,
+            'brand_id' => $brandId,
             'field_id' => $fieldId,
             'category_id' => $category->id,
         ]);
@@ -196,15 +204,25 @@ class TenantMetadataVisibilityService
      */
     public function unsuppressForCategory(Tenant $tenant, int $fieldId, Category $category): void
     {
-        DB::table('metadata_field_visibility')
+        // Categories are brand-specific, so delete brand-specific suppression records
+        $brandId = $category->brand_id;
+        
+        $query = DB::table('metadata_field_visibility')
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
-            ->whereNull('brand_id')
-            ->where('category_id', $category->id)
-            ->delete();
+            ->where('category_id', $category->id);
+        
+        if ($brandId) {
+            $query->where('brand_id', $brandId);
+        } else {
+            $query->whereNull('brand_id');
+        }
+        
+        $query->delete();
 
         Log::info('Tenant metadata field unsuppressed for category', [
             'tenant_id' => $tenant->id,
+            'brand_id' => $brandId,
             'field_id' => $fieldId,
             'category_id' => $category->id,
         ]);
@@ -217,16 +235,22 @@ class TenantMetadataVisibilityService
      * @param int $fieldId
      * @return array Array of category IDs where field is suppressed
      */
-    public function getSuppressedCategories(Tenant $tenant, int $fieldId): array
+    public function getSuppressedCategories(Tenant $tenant, int $fieldId, ?int $brandId = null): array
     {
-        return DB::table('metadata_field_visibility')
+        $query = DB::table('metadata_field_visibility')
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
-            ->whereNull('brand_id')
             ->whereNotNull('category_id')
-            ->where('is_hidden', true)
-            ->pluck('category_id')
-            ->toArray();
+            ->where('is_hidden', true);
+        
+        // Check brand-specific records if brand is provided, otherwise check tenant-level
+        if ($brandId !== null) {
+            $query->where('brand_id', $brandId);
+        } else {
+            $query->whereNull('brand_id');
+        }
+        
+        return $query->pluck('category_id')->toArray();
     }
 
     /**
@@ -258,12 +282,27 @@ class TenantMetadataVisibilityService
         }
 
         // Check category-specific suppression
-        $suppression = DB::table('metadata_field_visibility')
+        // Categories are brand-specific, so check brand-specific records first, then tenant-level
+        $suppressionQuery = DB::table('metadata_field_visibility')
             ->where('metadata_field_id', $fieldId)
             ->where('tenant_id', $tenant->id)
-            ->whereNull('brand_id')
             ->where('category_id', $category->id)
-            ->where('is_hidden', true)
+            ->where('is_hidden', true);
+        
+        // If category has a brand, check brand-specific records first
+        if ($category->brand_id) {
+            $suppression = $suppressionQuery
+                ->where('brand_id', $category->brand_id)
+                ->exists();
+            
+            if ($suppression) {
+                return false;
+            }
+        }
+        
+        // Also check tenant-level suppression (brand_id is NULL)
+        $suppression = $suppressionQuery
+            ->whereNull('brand_id')
             ->exists();
 
         // If suppressed for this category, not visible

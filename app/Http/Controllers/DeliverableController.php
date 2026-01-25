@@ -39,16 +39,24 @@ class DeliverableController extends Controller
         }
 
         // Get only deliverable categories for the brand
+        // IMPORTANT: Always get ALL categories (including hidden) to check for existence
+        // We'll filter hidden categories later when building the response, but we need
+        // to know if a category exists (even if hidden) to avoid adding templates
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('asset_type', AssetType::DELIVERABLE);
 
-        // If user does not have 'manage categories' permission, filter out hidden categories
+        // Don't filter hidden categories here - we need them to check template existence
+        // Hidden categories will be filtered in the response building below
+        $allCategoriesIncludingHidden = $query->get();
+        
+        // Filter out hidden categories for users without 'manage categories' permission
+        // This is for the final response, but we keep allCategoriesIncludingHidden for template checking
         if (! $user || ! $user->can('manage categories')) {
-            $query->visible();
+            $categories = $allCategoriesIncludingHidden->filter(fn($cat) => !$cat->is_hidden)->values();
+        } else {
+            $categories = $allCategoriesIncludingHidden;
         }
-
-        $categories = $query->get();
 
         // Filter out private categories that the user doesn't have access to
         // Use CategoryPolicy to check access for each category
@@ -101,8 +109,10 @@ class DeliverableController extends Controller
         }
 
         // Add system templates that don't have matching brand categories
+        // IMPORTANT: Check against allCategoriesIncludingHidden, not $categories
+        // This ensures we don't add a template if the category exists but is hidden
         foreach ($systemTemplates as $template) {
-            $exists = $categories->contains(function ($category) use ($template) {
+            $exists = $allCategoriesIncludingHidden->contains(function ($category) use ($template) {
                 return $category->slug === $template->slug;
             });
 

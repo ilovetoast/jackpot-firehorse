@@ -1548,7 +1548,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                                                                                     <option value="site_admin">Site Admin</option>
                                                                                     <option value="site_support">Site Support</option>
                                                                                     <option value="site_engineering">Site Engineering</option>
-                                                                                    <option value="compliance">Compliance</option>
+                                                                                    <option value="site_compliance">Site Compliance</option>
                                                                                 </select>
                                                                             </div>
                                                                         </div>

@@ -244,6 +244,7 @@ class BulkMetadataService
      * @param int $tenantId
      * @param int $brandId
      * @param int $userId
+     * @param string|null $userRole Optional user role for permission checks
      * @return array Execution results
      */
     public function execute(
@@ -252,7 +253,8 @@ class BulkMetadataService
         array $metadataValues,
         int $tenantId,
         int $brandId,
-        int $userId
+        int $userId,
+        ?string $userRole = null
     ): array {
         // Validate operation type
         if (!in_array($operationType, ['add', 'replace', 'clear'], true)) {
@@ -321,6 +323,7 @@ class BulkMetadataService
      * @param int $tenantId
      * @param int $brandId
      * @param int $userId
+     * @param string|null $userRole Optional user role for permission checks
      * @return void
      */
     protected function executeAsset(
@@ -329,7 +332,8 @@ class BulkMetadataService
         array $metadataValues,
         int $tenantId,
         int $brandId,
-        int $userId
+        int $userId,
+        ?string $userRole = null
     ): void {
         // Load category
         $category = null;

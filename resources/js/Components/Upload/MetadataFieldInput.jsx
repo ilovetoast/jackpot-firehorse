@@ -11,6 +11,7 @@
 
 import { isFieldSatisfied } from '../../utils/metadataValidation'
 import TagInputUnified from '../TagInputUnified'
+import StarRating from '../StarRating'
 import { usePage } from '@inertiajs/react'
 
 /**
@@ -316,6 +317,29 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                     </div>
                     {hasError && (
                         <p className="mt-1 text-xs text-red-600">At least one option must be selected.</p>
+                    )}
+                </div>
+            )
+
+        case 'rating':
+            return (
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {field.display_label}
+                        {isRequired && <span className="text-red-500 ml-1">*</span>}
+                        {isRequired && !hasError && (
+                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
+                        )}
+                    </label>
+                    <StarRating
+                        value={value || 0}
+                        onChange={handleChange}
+                        editable={!isDisabled}
+                        maxStars={5}
+                        size="md"
+                    />
+                    {hasError && (
+                        <p className="mt-1 text-xs text-red-600">This field is required.</p>
                     )}
                 </div>
             )

@@ -18,7 +18,8 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
-            RoleSeeder::class,
+            RoleSeeder::class, // Creates Spatie roles (tenant-level and legacy)
+            TenantRoleSeeder::class, // Ensures tenant roles are properly seeded (owner, admin, member)
             PermissionSeeder::class,
             SystemCategoryTemplateSeeder::class, // Seed system category templates first
             NotificationTemplateSeeder::class, // Seed notification templates

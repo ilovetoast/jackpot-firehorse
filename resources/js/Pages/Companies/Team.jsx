@@ -7,7 +7,7 @@ import Avatar from '../../Components/Avatar'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 
-export default function Team({ tenant, members, brands = [], current_user_count, max_users, user_limit_reached }) {
+export default function Team({ tenant, members, brands = [], tenant_roles = [], current_user_count, max_users, user_limit_reached }) {
     const { auth } = usePage().props
     const [showInviteModal, setShowInviteModal] = useState(false)
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
@@ -143,14 +143,24 @@ export default function Team({ tenant, members, brands = [], current_user_count,
     const getRoleColors = (role) => {
         const roleLower = role?.toLowerCase()
         // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-        const normalizedRole = roleLower === 'owner' ? 'admin' : roleLower
+        // Convert 'member' to 'viewer' for brand roles (member is tenant-level only)
+        let normalizedRole = roleLower
+        if (roleLower === 'owner') {
+            normalizedRole = 'admin'
+        } else if (roleLower === 'member') {
+            normalizedRole = 'viewer'
+        }
         const colors = {
+            // Tenant roles
             owner: 'bg-orange-100 text-orange-800 border-orange-200',
             admin: 'bg-purple-100 text-purple-800 border-purple-200',
-            brand_manager: 'bg-blue-100 text-blue-800 border-blue-200',
             member: 'bg-gray-100 text-gray-800 border-gray-200',
+            // Brand roles
+            brand_manager: 'bg-blue-100 text-blue-800 border-blue-200',
+            contributor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+            viewer: 'bg-gray-100 text-gray-800 border-gray-200',
         }
-        return colors[normalizedRole] || colors.member
+        return colors[normalizedRole] || colors.viewer || colors.member
     }
 
     return (
@@ -239,7 +249,6 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                                             >
                                                                 <option value="owner">👑 Owner</option>
                                                                 <option value="admin">Admin</option>
-                                                                <option value="brand_manager">Brand Manager</option>
                                                                 <option value="member">Member</option>
                                                             </select>
                                                             <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
@@ -290,14 +299,19 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                                                         <>
                                                                             <div className="relative inline-flex items-center">
                                                                                 <select
-                                                                                    value={ba.role?.toLowerCase() || 'member'}
-                                                                                    onChange={(e) => handleBrandRoleChange(member.id, ba.id, e.target.value)}
+                                                                                    value={ba.role?.toLowerCase() === 'member' ? 'viewer' : (ba.role?.toLowerCase() || 'viewer')}
+                                                                                    onChange={(e) => {
+                                                                                        // Convert 'member' to 'viewer' if somehow selected (member is tenant-level only)
+                                                                                        const role = e.target.value === 'member' ? 'viewer' : e.target.value;
+                                                                                        handleBrandRoleChange(member.id, ba.id, role);
+                                                                                    }}
                                                                                     disabled={isUpdating}
                                                                                     className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
                                                                                 >
-                                                                                    <option value="admin">Admin</option>
+                                                                                    <option value="viewer">Viewer</option>
+                                                                                    <option value="contributor">Contributor</option>
                                                                                     <option value="brand_manager">Brand Manager</option>
-                                                                                    <option value="member">Member</option>
+                                                                                    <option value="admin">Admin</option>
                                                                                 </select>
                                                                                 <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
@@ -397,13 +411,23 @@ export default function Team({ tenant, members, brands = [], current_user_count,
                                                 onChange={(e) => setData('role', e.target.value)}
                                                 className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                             >
-                                                <option value="member">Member</option>
-                                                <option value="admin">Admin</option>
-                                                <option value="brand_manager">Brand Manager</option>
-                                                <option value="owner">Owner</option>
+                                                {tenant_roles && tenant_roles.length > 0 ? (
+                                                    tenant_roles.map((role) => (
+                                                        <option key={role.value} value={role.value}>
+                                                            {role.label}
+                                                        </option>
+                                                    ))
+                                                ) : (
+                                                    // Fallback to hardcoded list if backend doesn't provide roles
+                                                    // Note: 'owner' is NOT included - ownership must be transferred via ownership transfer process
+                                                    <>
+                                                        <option value="member">Member</option>
+                                                        <option value="admin">Admin</option>
+                                                    </>
+                                                )}
                                             </select>
                                             <p className="mt-1 text-xs text-gray-500">
-                                                Note: Owner role is for company-level only. Brand roles will default to Admin for owners.
+                                                Note: Owner role cannot be assigned during invitation. Use the ownership transfer process in Company Settings to transfer ownership.
                                             </p>
                                             {errors.role && (
                                                 <p className="mt-1 text-sm text-red-600">{errors.role}</p>

@@ -411,21 +411,16 @@ class BrandController extends Controller
             ];
         });
 
-        // Get unique brand roles from brand_user table
-        $brandRoles = \DB::table('brand_user')
-            ->where('brand_id', $brand->id)
-            ->whereNotNull('role')
-            ->distinct()
-            ->pluck('role')
-            ->unique()
-            ->values()
-            ->toArray();
+        // Get all valid brand roles dynamically (not hardcoded)
+        // Show all valid brand roles so they can be assigned even if no users have them yet
+        $brandRoles = \App\Models\User::getValidBrandRoles();
 
         // Get plan info for private categories
         $currentPlan = $this->planService->getCurrentPlan($tenant);
         $canCreatePrivateCategory = $this->planService->canCreatePrivateCategory($tenant, $brand);
         $maxPrivateCategories = $this->planService->getMaxPrivateCategories($tenant);
         $currentPrivateCount = $brand->categories()->custom()->where('is_private', true)->count();
+        $canEditSystemCategories = $this->planService->hasFeature($tenant, 'edit_system_categories');
 
         return Inertia::render('Brands/Edit', [
             'brand' => [
@@ -468,6 +463,7 @@ class BrandController extends Controller
                     'is_system' => $category->is_system,
                     'is_private' => $category->is_private,
                     'is_locked' => $category->is_locked,
+                    'is_hidden' => $category->is_hidden,
                     'upgrade_available' => $category->upgrade_available ?? false,
                     'deletion_available' => $category->deletion_available ?? false,
                     'system_version' => $category->system_version,
@@ -491,6 +487,7 @@ class BrandController extends Controller
                 'can_create' => $canCreatePrivateCategory,
                 'plan_allows' => in_array($currentPlan, ['pro', 'enterprise']),
             ],
+            'can_edit_system_categories' => $canEditSystemCategories,
         ]);
     }
 
@@ -664,7 +661,7 @@ class BrandController extends Controller
 
         $validated = $request->validate([
             'email' => 'required|email|max:255',
-            'role' => 'nullable|string|in:admin,member,brand_manager',
+            'role' => 'nullable|string|in:admin,brand_manager,contributor,viewer',
         ]);
 
         // Check if user is already on the brand
@@ -756,11 +753,16 @@ class BrandController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'nullable|string|in:admin,member,brand_manager',
+            'role' => 'nullable|string|in:admin,brand_manager,contributor,viewer',
         ]);
 
-        // Add user to brand with role
-        $user->setRoleForBrand($brand, $validated['role'] ?? 'member');
+        // Add user to brand with role (default to viewer, member is tenant-level only)
+        $brandRole = $validated['role'] ?? 'viewer';
+        // Convert 'member' to 'viewer' if somehow passed (member is tenant-level only)
+        if ($brandRole === 'member') {
+            $brandRole = 'viewer';
+        }
+        $user->setRoleForBrand($brand, $brandRole);
 
         // Mark any pending invitations as accepted
         $brand->invitations()
@@ -807,7 +809,7 @@ class BrandController extends Controller
         }
 
         $validated = $request->validate([
-            'role' => 'required|string|in:admin,member,brand_manager',
+            'role' => 'required|string|in:admin,brand_manager,contributor,viewer',
         ]);
 
         // Prevent owner from being a brand role - convert to admin if owner is attempted

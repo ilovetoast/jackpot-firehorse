@@ -26,17 +26,26 @@ use Illuminate\Support\Str;
  * Category Types:
  * - System Categories (is_system = true): Auto-created defaults (Logos, Photography, Graphics)
  *   - Cannot be deleted
- *   - Cannot be updated (locked)
+ *   - Cannot be renamed or have icon changed (immutable)
+ *   - Can be hidden (Enterprise/Pro plans only)
+ *   - is_locked is site admin only (cannot be set/changed by tenants)
  *   - Exist for every brand
  * - Custom Categories (is_system = false): User-created categories
  *   - Subject to plan limits
  *   - Can be deleted/updated by authorized users
+ *   - is_locked is site admin only (cannot be set/changed by tenants)
  *   - Deletions are soft-deleted (deleted_at timestamp) for versioning and potential restoration
  *
  * Visibility:
  * - Private (is_private = true): Only visible to authorized users
  * - Hidden (is_hidden = true): Filtered from default views, requires special permissions
  * - Public (is_private = false, is_hidden = false): Visible to all brand users
+ *
+ * Lock Status:
+ * - is_locked (true): Prevents category updates/deletion (except is_hidden for system categories)
+ *   - Site admin only: Only site administrators can set or change is_locked
+ *   - Tenants cannot see or edit this field
+ *   - Used to protect categories from accidental modification
  */
 class Category extends Model
 {
@@ -67,6 +76,7 @@ class Category extends Model
         'is_private',
         'is_locked',
         'is_hidden',
+        'requires_approval', // Phase L.5: Category-based approval rules
         'order',
         'system_category_id',
         'system_version',
@@ -87,6 +97,7 @@ class Category extends Model
             'is_private' => 'boolean',
             'is_locked' => 'boolean',
             'is_hidden' => 'boolean',
+            'requires_approval' => 'boolean', // Phase L.5: Category-based approval rules
             'upgrade_available' => 'boolean',
             'deletion_available' => 'boolean',
         ];
@@ -381,5 +392,15 @@ class Category extends Model
         }
 
         return false;
+    }
+
+    /**
+     * Phase L.5.1: Check if this category requires approval before publishing.
+     *
+     * @return bool
+     */
+    public function requiresApproval(): bool
+    {
+        return $this->requires_approval === true;
     }
 }

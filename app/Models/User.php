@@ -189,14 +189,15 @@ class User extends Authenticatable
     }
 
     /**
-     * Get all site-wide roles (roles that contain 'site' in the name, plus 'compliance').
-     * Site-wide roles are: site_owner, site_admin, site_support, site_engineering, compliance
+     * Get all site-wide roles (roles that contain 'site' in the name, plus 'site_compliance').
+     * Site-wide roles are: site_owner, site_admin, site_support, site_engineering, site_compliance
+     * Note: Tenant-level roles are: owner, admin, member. All other roles are brand-scoped.
      * Returns array_values() to ensure it's a proper array, not an object with numeric keys
      */
     public function getSiteRoles(): array
     {
         $allRoles = $this->getRoleNames()->toArray();
-        $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance'];
+        $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'site_compliance'];
         
         $filtered = array_filter(
             $allRoles,
@@ -216,6 +217,16 @@ class User extends Authenticatable
             ->whereNotNull('tenant_user.role')
             ->pluck('tenant_user.role', 'tenants.id')
             ->toArray();
+    }
+
+    /**
+     * Get valid brand roles.
+     * 
+     * @return array<string> Valid brand role names
+     */
+    public static function getValidBrandRoles(): array
+    {
+        return ['admin', 'brand_manager', 'contributor', 'viewer'];
     }
 
     /**

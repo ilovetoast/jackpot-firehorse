@@ -134,24 +134,48 @@ class MetadataFilterService
         // This ensures compatibility with both storage methods
         $query->where(function ($q) use ($fieldId, $fieldKey, $fieldType, $operator, $value) {
             // Option 1: Check asset_metadata table (preferred - normalized storage)
-            $q->whereExists(function ($subQ) use ($fieldId, $fieldType, $operator, $value) {
+            // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
+            // They should be included in filters regardless of approved_at
+            
+            // Get population_mode for this field
+            $fieldDef = DB::table('metadata_fields')->where('id', $fieldId)->first();
+            $populationMode = $fieldDef->population_mode ?? 'manual';
+            $isAutomatic = $populationMode === 'automatic';
+            
+            $q->whereExists(function ($subQ) use ($fieldId, $fieldKey, $fieldType, $operator, $value, $isAutomatic) {
                 $subQ->select(DB::raw(1))
                     ->from('asset_metadata as am')
                     ->whereColumn('am.asset_id', 'assets.id')
                     ->where('am.metadata_field_id', $fieldId)
-                    ->whereIn('am.source', ['user', 'system', 'ai', 'manual_override']) // Include all approved sources
-                    ->whereNotNull('am.approved_at')
-                    ->whereRaw("am.approved_at = (
-                        SELECT MAX(approved_at)
+                    ->whereIn('am.source', ['user', 'system', 'ai', 'manual_override', 'automatic']); // Include all sources including automatic
+                
+                // For automatic fields, don't require approved_at
+                // For other fields, require approved_at and get the latest approved value
+                if ($isAutomatic) {
+                    // Automatic fields: include if value exists (no approval required)
+                    // Get the most recent value (by created_at or id)
+                    $subQ->whereRaw("am.id = (
+                        SELECT MAX(id)
                         FROM asset_metadata
                         WHERE asset_id = am.asset_id
                         AND metadata_field_id = ?
-                        AND source IN ('user', 'system', 'ai', 'manual_override')
-                        AND approved_at IS NOT NULL
+                        AND source IN ('user', 'system', 'ai', 'manual_override', 'automatic')
                     )", [$fieldId]);
+                } else {
+                    // Non-automatic fields: require approval
+                    $subQ->whereNotNull('am.approved_at')
+                        ->whereRaw("am.approved_at = (
+                            SELECT MAX(approved_at)
+                            FROM asset_metadata
+                            WHERE asset_id = am.asset_id
+                            AND metadata_field_id = ?
+                            AND source IN ('user', 'system', 'ai', 'manual_override')
+                            AND approved_at IS NOT NULL
+                        )", [$fieldId]);
+                }
                 
                 // Apply operator-specific filtering on the value_json
-                $this->applyOperatorFilter($subQ, $fieldType, $operator, $value);
+                $this->applyOperatorFilter($subQ, $fieldType, $operator, $value, $fieldKey);
             });
             
             // Option 2: Check metadata JSON column (legacy/fallback)
@@ -210,9 +234,10 @@ class MetadataFilterService
      * @param string $fieldType
      * @param string $operator
      * @param mixed $value
+     * @param string|null $fieldKey Optional field key for special handling (e.g., dominant_colors)
      * @return void
      */
-    protected function applyOperatorFilter($query, string $fieldType, string $operator, $value): void
+    protected function applyOperatorFilter($query, string $fieldType, string $operator, $value, ?string $fieldKey = null): void
     {
         switch ($fieldType) {
             case 'text':
@@ -258,7 +283,20 @@ class MetadataFilterService
                 break;
 
             case 'multiselect':
-                if ($operator === 'contains_any' && is_array($value)) {
+                // Special handling for dominant_colors: filter by hex values within color objects
+                // For dominant_colors, value_json is: [{hex: "#FF0000", rgb: [...], coverage: 0.45}, ...]
+                // Filter value is array of hex strings: ["#FF0000", "#00FF00"]
+                // We need to check if any color object in the array has a hex matching selected hexes
+                if ($fieldKey === 'dominant_colors' && is_array($value) && count($value) > 0) {
+                    // Filter by hex values: check if any color object in value_json has hex matching selected values
+                    $query->where(function ($q) use ($value) {
+                        foreach ($value as $hex) {
+                            // Check if value_json array contains a color object with this hex
+                            // JSON path: $[*].hex matches the hex value
+                            $q->orWhereRaw("JSON_SEARCH(am.value_json, 'one', ?, NULL, '$[*].hex') IS NOT NULL", [$hex]);
+                        }
+                    });
+                } elseif ($operator === 'contains_any' && is_array($value)) {
                     $query->where(function ($q) use ($value) {
                         foreach ($value as $val) {
                             $q->orWhereRaw("JSON_CONTAINS(am.value_json, ?)", [json_encode($val)]);
@@ -363,10 +401,22 @@ class MetadataFilterService
             // Check applies_to field (from metadata_fields table)
             $appliesTo = $field['applies_to'] ?? 'all';
             
-            // Metadata fields are never global filters (they're category-specific)
-            // Global filters persist across category switches (Search, Category, Asset Type, Brand)
-            // Metadata fields are scoped to categories and are filtered by visibility resolver
-            $isGlobal = false;
+            // Phase L.5.1: System metadata fields are global when viewing "All Categories"
+            // System fields (orientation, color_space, resolution_class) are computed
+            // from assets themselves, not category-specific, so they're safe to show globally
+            // These fields have scope='system' and are automatically populated
+            $systemFieldKeys = ['orientation', 'color_space', 'resolution_class'];
+            $fieldKey = $field['key'] ?? $field['field_key'] ?? '';
+            
+            // Check if field is a system field by key (safe approach)
+            // Known system fields that are computed from assets, not category-specific
+            $isSystemField = in_array($fieldKey, $systemFieldKeys);
+            
+            // Mark as global if:
+            // 1. Viewing "All Categories" (category is null) AND
+            // 2. Field is a system metadata field (computed from asset, not category-specific)
+            // This allows these filters to work in "All Categories" view
+            $isGlobal = ($category === null && $isSystemField);
             
             // Map applies_to to asset_types array for Phase H compatibility
             // 'all' means applies to all asset types (null = all asset types in Phase H)

@@ -11,11 +11,13 @@ import { getImageBackgroundStyle } from '../../utils/imageUtils'
 import BrandAvatar from '../../Components/BrandAvatar'
 
 // CategoryCard component matching Categories/Index clean design
-function CategoryCard({ category, brandId, brand_users, brand_roles, private_category_limits, onUpgradeClick, editingId, setEditingId, onEditStart, onEditSave, onEditCancel }) {
+function CategoryCard({ category, brandId, brand_users, brand_roles, private_category_limits, can_edit_system_categories, onUpgradeClick, editingId, setEditingId, onEditStart, onEditSave, onEditCancel }) {
     const [deleteProcessing, setDeleteProcessing] = useState(false)
     const [editName, setEditName] = useState(category.name)
     const [editIcon, setEditIcon] = useState(category.icon || 'folder')
     const [editIsPrivate, setEditIsPrivate] = useState(category.is_private || false)
+    const [editIsHidden, setEditIsHidden] = useState(category.is_hidden || false)
+    // is_locked is site admin only - not editable by tenants, so we don't need state for it
     const [editAccessRules, setEditAccessRules] = useState(category.access_rules || [])
     const editInputRef = useRef(null)
     
@@ -31,35 +33,72 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     
     useEffect(() => {
         if (isEditing) {
-            setEditName(category.name)
-            setEditIcon(category.icon || 'folder')
-            setEditIsPrivate(category.is_private || false)
-            setEditAccessRules(category.access_rules || [])
+            // Only set editable fields based on category type
+            if (category.is_system && can_edit_system_categories) {
+                // System categories: only hide (is_locked is site admin only)
+                setEditIsHidden(category.is_hidden || false)
+            } else {
+                // Custom categories: full editing
+                setEditName(category.name)
+                setEditIcon(category.icon || 'folder')
+                setEditIsPrivate(category.is_private || false)
+                setEditAccessRules(category.access_rules || [])
+            }
         }
-    }, [isEditing, category.name, category.icon, category.is_private, category.access_rules])
+    }, [isEditing, category.name, category.icon, category.is_private, category.is_hidden, category.access_rules, category.is_system, can_edit_system_categories])
     
     const handleEditStart = () => {
         if (setEditingId) {
             setEditingId(category.id)
         }
-        setEditName(category.name)
-        setEditIcon(category.icon || 'folder')
-        setEditIsPrivate(category.is_private || false)
-        setEditAccessRules(category.access_rules || [])
+        // Only set editable fields based on category type
+        if (category.is_system && can_edit_system_categories) {
+            // System categories: only hide (is_locked is site admin only)
+            setEditIsHidden(category.is_hidden || false)
+        } else {
+            // Custom categories: full editing
+            setEditName(category.name)
+            setEditIcon(category.icon || 'folder')
+            setEditIsPrivate(category.is_private || false)
+            setEditAccessRules(category.access_rules || [])
+        }
     }
     
     const handleEditSave = () => {
-        if (!editName.trim()) {
+        // For system categories, skip name validation (name is immutable)
+        if (!category.is_system && !editName.trim()) {
             handleEditCancel()
             return
         }
         
-        // Validate private category has access rules
-        if (editIsPrivate && (!editAccessRules || editAccessRules.length === 0)) {
+        // Validate private category has access rules (only for custom categories)
+        if (!category.is_system && editIsPrivate && (!editAccessRules || editAccessRules.length === 0)) {
             alert('Private categories must have at least one access rule (role or user).')
             return
         }
         
+        // For system categories, only send hide field (name/icon are immutable, is_locked is site admin only)
+        if (category.is_system && can_edit_system_categories) {
+            const updateData = {
+                is_hidden: editIsHidden,
+                // is_locked is site admin only - not editable by tenants
+            }
+            
+            if (onEditSave) {
+                onEditSave(category.id, updateData)
+            } else {
+                router.put(`/app/brands/${brandId}/categories/${category.id}`, updateData, {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        setEditingId(null)
+                        router.reload({ preserveScroll: true })
+                    },
+                })
+            }
+            return
+        }
+        
+        // For custom categories, allow full editing
         const updateData = {
             name: editName.trim(),
             icon: editIcon,
@@ -86,10 +125,15 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
         } else {
             setEditingId(null)
         }
-        setEditName(category.name)
-        setEditIcon(category.icon || 'folder')
-        setEditIsPrivate(category.is_private || false)
-        setEditAccessRules(category.access_rules || [])
+        // Reset fields based on category type
+        if (category.is_system && can_edit_system_categories) {
+            setEditIsHidden(category.is_hidden || false)
+        } else {
+            setEditName(category.name)
+            setEditIcon(category.icon || 'folder')
+            setEditIsPrivate(category.is_private || false)
+            setEditAccessRules(category.access_rules || [])
+        }
     }
     
     const handleEditKeyDown = (e) => {
@@ -118,8 +162,13 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     // Use backend-provided flag to determine if category can be edited/deleted
     // Backend checks: template exists, is_locked, etc.
     // For system categories that can be deleted (template deleted), don't allow editing
-    const canEdit = category.id && category.can_be_deleted !== false && 
-                    !(category.is_system && !category.template_exists)
+    // But allow editing system categories if plan allows (for hide/lock functionality)
+    // System categories can be edited even if locked, as long as plan allows and template exists
+    const canEditSystem = category.is_system && can_edit_system_categories && category.id && category.template_exists
+    const canEditCustom = category.id && category.can_be_deleted !== false && 
+                    !(category.is_system && !category.template_exists) &&
+                    !category.is_locked
+    const canEdit = canEditSystem || canEditCustom
     const processing = deleteProcessing
 
     return (
@@ -147,22 +196,51 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
                         <div className="flex-1 min-w-0">
                             {isEditing ? (
                                 <div className="space-y-4 relative z-10">
-                                    <div>
-                                        <input
-                                            ref={editInputRef}
-                                            type="text"
-                                            value={editName}
-                                            onChange={(e) => setEditName(e.target.value)}
-                                            onKeyDown={handleEditKeyDown}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                        />
-                                    </div>
-                                    <div className="relative">
-                                        <CategoryIconSelector
-                                            value={editIcon}
-                                            onChange={setEditIcon}
-                                        />
-                                    </div>
+                                    {/* System categories: Only show hide/lock controls, no name/icon editing */}
+                                    {category.is_system && can_edit_system_categories ? (
+                                        <div className="space-y-4">
+                                            <div className="rounded-md bg-blue-50 p-3 border border-blue-200">
+                                                <p className="text-sm text-blue-800">
+                                                    <strong>System categories are immutable.</strong> You can hide this category, but cannot rename it or change its icon. Lock status is managed by site administrators only.
+                                                </p>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <div className="flex items-center">
+                                                    <input
+                                                        id={`edit_category_is_hidden_${category.id}`}
+                                                        type="checkbox"
+                                                        checked={editIsHidden}
+                                                        onChange={(e) => setEditIsHidden(e.target.checked)}
+                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <label htmlFor={`edit_category_is_hidden_${category.id}`} className="ml-2 block text-sm text-gray-900">
+                                                        Hide this category
+                                                    </label>
+                                                </div>
+                                                {/* is_locked is site admin only - not shown to tenants */}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* Custom categories: Full editing (name, icon, private settings) */}
+                                            <div>
+                                                <input
+                                                    ref={editInputRef}
+                                                    type="text"
+                                                    value={editName}
+                                                    onChange={(e) => setEditName(e.target.value)}
+                                                    onKeyDown={handleEditKeyDown}
+                                                    className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <CategoryIconSelector
+                                                    value={editIcon}
+                                                    onChange={setEditIcon}
+                                                />
+                                            </div>
+                                        </>
+                                    )}
                                     
                                     {/* Private Category Access Controls - Only for custom categories */}
                                     {isCustomCategory && (
@@ -283,7 +361,12 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
                                         <button
                                             type="button"
                                             onClick={handleEditSave}
-                                            disabled={!editName.trim() || (editIsPrivate && (!editAccessRules || editAccessRules.length === 0))}
+                                            disabled={
+                                                // For system categories, no validation needed (just hide/lock)
+                                                // For custom categories, validate name and private access rules
+                                                (!category.is_system && !editName.trim()) || 
+                                                (!category.is_system && editIsPrivate && (!editAccessRules || editAccessRules.length === 0))
+                                            }
                                             className="inline-flex items-center rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <svg className="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
@@ -309,6 +392,14 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
                                         <p className="text-sm font-medium text-gray-900 truncate">
                                             {category.name}
                                         </p>
+                                        {category.is_hidden && (
+                                            <span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-gray-50 text-gray-600 ring-gray-600/20" title="This category is hidden and will not appear in the sidebar">
+                                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 01-4.243-4.243m4.242 4.242L9.88 9.88" />
+                                                </svg>
+                                                Hidden
+                                            </span>
+                                        )}
                                         {category.is_system && (
                                             <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20">
                                                 System
@@ -379,7 +470,7 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
                                     handleEditStart()
                                 }}
                                 className="rounded-md bg-white px-2 py-1.5 text-sm font-semibold text-gray-600 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                                title="Edit category"
+                                title={category.is_system && can_edit_system_categories ? "Configure hide/lock settings" : "Edit category"}
                             >
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
@@ -406,7 +497,7 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, private_category_limits }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, private_category_limits, can_edit_system_categories }) {
     const { auth } = usePage().props
     const [cropModalOpen, setCropModalOpen] = useState(false)
     const [iconCropModalOpen, setIconCropModalOpen] = useState(false)
@@ -1223,7 +1314,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     {/* Create Category Form */}
                                     {showCreateCategoryForm && category_limits && category_limits.can_create && (
                                         <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 shadow-sm">
-                                            <form onSubmit={handleCreateCategory} className="px-4 py-5 sm:p-6">
+                                            <div className="px-4 py-5 sm:p-6">
                                                 <div className="space-y-4">
                                                     <div>
                                                         <label htmlFor="category_name" className="block text-sm font-medium text-gray-700">
@@ -1398,14 +1489,15 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                         Cancel
                                                     </button>
                                                     <button
-                                                        type="submit"
+                                                        type="button"
+                                                        onClick={handleCreateCategory}
                                                         disabled={creatingCategory || !categoryFormData.name.trim() || (categoryFormData.is_private && (!categoryFormData.access_rules || categoryFormData.access_rules.length === 0))}
                                                         className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                                     >
                                                         {creatingCategory ? 'Creating...' : 'Create Category'}
                                                     </button>
                                                 </div>
-                                            </form>
+                                            </div>
                                         </div>
                                     )}
 
@@ -1492,6 +1584,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                         brand_users={brand_users}
                                                         brand_roles={brand_roles}
                                                         private_category_limits={private_category_limits}
+                                                        can_edit_system_categories={can_edit_system_categories}
                                                         editingId={editingCategoryId}
                                                         setEditingId={setEditingCategoryId}
                                                         onUpgradeClick={(cat) => {

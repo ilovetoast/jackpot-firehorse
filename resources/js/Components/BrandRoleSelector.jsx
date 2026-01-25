@@ -12,11 +12,22 @@ export default function BrandRoleSelector({
     const [brandAssignments, setBrandAssignments] = useState(() => {
         // Initialize with selectedBrands if provided
         if (selectedBrands && selectedBrands.length > 0) {
-            return selectedBrands.map(b => ({
-                brand_id: b.brand_id || b.id,
+            return selectedBrands.map(b => {
+                let role = b.role
                 // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-                role: (b.role === 'owner' ? 'admin' : b.role) || 'member',
-            }))
+                if (role === 'owner') {
+                    role = 'admin'
+                }
+                // Convert 'member' to 'viewer' for brand roles (member is only for tenant-level)
+                if (role === 'member') {
+                    role = 'viewer'
+                }
+                // Default to 'viewer' if no role specified
+                return {
+                    brand_id: b.brand_id || b.id,
+                    role: role || 'viewer',
+                }
+            })
         }
         return []
     })
@@ -49,10 +60,10 @@ export default function BrandRoleSelector({
             // Remove brand
             setBrandAssignments(brandAssignments.filter(b => b.brand_id !== brandId))
         } else {
-            // Add brand with default role 'member'
+            // Add brand with default role 'viewer' (member is tenant-level only)
             setBrandAssignments([
                 ...brandAssignments,
-                { brand_id: brandId, role: 'member' },
+                { brand_id: brandId, role: 'viewer' },
             ])
         }
     }
@@ -66,7 +77,7 @@ export default function BrandRoleSelector({
     const selectAll = () => {
         const allBrands = brands.map(b => ({
             brand_id: b.id,
-            role: 'member',
+            role: 'viewer', // Default to viewer (member is tenant-level only)
         }))
         setBrandAssignments(allBrands)
     }
@@ -76,11 +87,12 @@ export default function BrandRoleSelector({
     }
 
     const isValidRole = (role) => {
-        // Owner is not a valid brand role - convert to admin
-        if (role === 'owner') {
+        // Owner and member are not valid brand roles (tenant-level only)
+        if (role === 'owner' || role === 'member') {
             return false
         }
-        return ['member', 'admin', 'brand_manager'].includes(role)
+        // Valid brand roles: viewer, contributor, brand_manager, admin
+        return ['viewer', 'contributor', 'brand_manager', 'admin'].includes(role)
     }
 
     return (
@@ -141,9 +153,10 @@ export default function BrandRoleSelector({
                                         onClick={(e) => e.stopPropagation()}
                                         className="ml-4 block rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
                                     >
-                                        <option value="member">Member</option>
-                                        <option value="admin">Admin</option>
+                                        <option value="viewer">Viewer</option>
+                                        <option value="contributor">Contributor</option>
                                         <option value="brand_manager">Brand Manager</option>
+                                        <option value="admin">Admin</option>
                                     </select>
                                 )}
                             </div>

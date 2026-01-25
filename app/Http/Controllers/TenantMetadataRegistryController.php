@@ -381,11 +381,10 @@ class TenantMetadataRegistryController extends Controller
             abort(403, 'You do not have permission to view metadata visibility.');
         }
 
-        $suppressedCategoryIds = $this->visibilityService->getSuppressedCategories($tenant, $field);
-        
         // Get category-specific overrides (including is_primary)
         // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
         $brand = app('brand');
+        $suppressedCategoryIds = $this->visibilityService->getSuppressedCategories($tenant, $field, $brand?->id);
         $categoryOverrides = $this->visibilityService->getCategoryOverrides($tenant, $field, $brand?->id);
 
         return response()->json([

@@ -843,6 +843,7 @@ class CompanyController extends Controller
         }
 
         // Get all company roles (tenant-level roles, ordered by hierarchy)
+        // Note: Only Owner, Admin, and Member are tenant-level roles. All other roles are brand-scoped.
         $companyRoles = [
             ['id' => 'owner', 'name' => 'Owner', 'icon' => '👑'],
             ['id' => 'admin', 'name' => 'Admin', 'icon' => ''],

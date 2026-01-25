@@ -120,9 +120,9 @@ class CompanyBrandSeeder extends Seeder
             $initialDefaultBrand->update([
                 'name' => $initialCompany->name, // Brand name same as company name
                 'show_in_selector' => true,
-                'primary_color' => '#6366f1',
-                'secondary_color' => '#8b5cf6',
-                'accent_color' => '#ec4899',
+                'primary_color' => '#502c6d',
+                'secondary_color' => '#ffffff',
+                'accent_color' => '#8000ff',
             ]);
         }
 

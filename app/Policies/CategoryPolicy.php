@@ -16,9 +16,14 @@ use App\Models\User;
  * - Hidden categories (is_hidden=true): Require 'manage categories' permission (or specific permission)
  *
  * Mutation Rules:
- * - System categories (is_system=true): Cannot be updated or deleted
- * - Locked categories (is_locked=true): Cannot be updated or deleted
+ * - System categories (is_system=true): Immutable - cannot be renamed, deleted, or have icon changed
+ *   - Enterprise/Pro plans can hide system categories
+ *   - is_locked is site admin only (cannot be set/changed by tenants)
+ * - Locked categories (is_locked=true): Cannot be updated or deleted (except is_hidden for system categories)
+ *   - is_locked can only be set/changed by site administrators
+ *   - Tenants cannot see or edit the is_locked field
  * - Custom categories: Can be updated/deleted by users with 'manage categories' permission
+ *   - is_locked is site admin only (cannot be set/changed by tenants)
  */
 class CategoryPolicy
 {
@@ -139,20 +144,6 @@ class CategoryPolicy
             }
         }
 
-        // Cannot update locked categories (unless their system template is deleted)
-        if ($category->is_locked) {
-            // Check if the system template still exists
-            if ($category->is_system && $category->system_category_id) {
-                $templateExists = \App\Models\SystemCategory::where('id', $category->system_category_id)->exists();
-                if ($templateExists) {
-                    return false;
-                }
-                // Template is deleted, allow update
-            } else {
-                return false;
-            }
-        }
-
         // System categories can only be updated if:
         // 1. Plan has edit_system_categories feature, OR
         // 2. The system template no longer exists (orphaned category)
@@ -171,9 +162,32 @@ class CategoryPolicy
             // If template exists, require edit_system_categories feature
             if ($templateExists) {
                 $planService = app(\App\Services\PlanService::class);
-                return $planService->hasFeature($tenant, 'edit_system_categories');
+                $canEditSystem = $planService->hasFeature($tenant, 'edit_system_categories');
+                
+                // If plan allows editing system categories, allow updates even if locked
+                // (CategoryService will handle which fields can be updated for locked categories)
+                if ($canEditSystem) {
+                    return true;
+                }
+                // Log why update was denied for debugging
+                \Log::info('Category update denied', [
+                    'category_id' => $category->id,
+                    'category_name' => $category->name,
+                    'is_system' => $category->is_system,
+                    'template_exists' => $templateExists,
+                    'can_edit_system' => $canEditSystem,
+                    'tenant_id' => $tenant->id,
+                    'plan' => $planService->getCurrentPlan($tenant),
+                ]);
+                return false;
             }
             // Template is deleted, allow update
+        }
+
+        // Cannot update locked custom categories
+        // (System categories are handled above)
+        if ($category->is_locked && !$category->is_system) {
+            return false;
         }
 
         return true;

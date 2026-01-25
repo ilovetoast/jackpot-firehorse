@@ -8,7 +8,9 @@ use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\AiMetadataConfidenceService;
+use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
+use App\Services\AssetPublicationService;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
@@ -28,6 +30,8 @@ class AssetController extends Controller
         protected SystemCategoryService $systemCategoryService,
         protected PlanService $planService,
         protected AssetDeletionService $deletionService,
+        protected AssetPublicationService $publicationService,
+        protected AssetArchiveService $archiveService,
         protected MetadataFilterService $metadataFilterService,
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected AiMetadataConfidenceService $confidenceService
@@ -42,6 +46,23 @@ class AssetController extends Controller
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
+
+        // Phase L.5.1: Permission checks for lifecycle filters
+        // - asset.publish: Required for "Pending Approval" filter (approvers can see pending assets)
+        // - metadata.bypass_approval: Required for "Unpublished" filter (full viewing privileges)
+        // - asset.archive: Required for "Archived" filter (users who can archive assets)
+        // Define early so they can be used in category count queries
+        $canPublish = $user && $user->hasPermissionForTenant($tenant, 'asset.publish');
+        $canBypassApproval = $user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval');
+        // Check tenant permission first, then brand permission (matches AssetPolicy pattern)
+        $canArchive = $user && (
+            $user->hasPermissionForTenant($tenant, 'asset.archive') ||
+            ($brand && $user->hasPermissionForBrand($brand, 'asset.archive'))
+        );
+        
+        // For backward compatibility and default visibility: users with asset.publish can see unpublished
+        // But unpublished filter specifically requires metadata.bypass_approval (full viewing privileges)
+        $canSeeUnpublished = $canPublish || $canBypassApproval;
 
         if (!$tenant || !$brand) {
             // Handle case where tenant or brand is not resolved (e.g., no active tenant/brand)
@@ -60,12 +81,18 @@ class AssetController extends Controller
             ->where('asset_type', AssetType::ASSET)
             ->active(); // Filter out soft-deleted, templates, and deleted system categories
 
-        // If user does not have 'manage categories' permission, filter out hidden categories
+        // IMPORTANT: Always get ALL categories (including hidden) to check for existence
+        // We'll filter hidden categories later when building the response, but we need
+        // to know if a category exists (even if hidden) to avoid adding templates
+        $allCategoriesIncludingHidden = $query->get();
+        
+        // Filter out hidden categories for users without 'manage categories' permission
+        // This is for the final response, but we keep allCategoriesIncludingHidden for template checking
         if (! $user || ! $user->can('manage categories')) {
-            $query->visible();
+            $categories = $allCategoriesIncludingHidden->filter(fn($cat) => !$cat->is_hidden)->values();
+        } else {
+            $categories = $allCategoriesIncludingHidden;
         }
-
-        $categories = $query->get();
 
         // Filter out private categories that the user doesn't have access to
         // Use CategoryPolicy to check access for each category
@@ -127,8 +154,10 @@ class AssetController extends Controller
         }
 
         // Add system templates that don't have matching brand categories
+        // IMPORTANT: Check against allCategoriesIncludingHidden, not $categories
+        // This ensures we don't add a template if the category exists but is hidden
         foreach ($systemTemplates as $template) {
-            $exists = $categories->contains(function ($category) use ($template) {
+            $exists = $allCategoriesIncludingHidden->contains(function ($category) use ($template) {
                 return $category->slug === $template->slug && 
                        $category->asset_type->value === $template->asset_type->value;
             });
@@ -163,10 +192,32 @@ class AssetController extends Controller
             // Use whereRaw for JSON extraction in WHERE clause
             // Note: Only counts assets that have metadata with a valid category_id
             // Assets without metadata or without category_id are excluded (consistent with grid filtering)
-            $counts = Asset::where('tenant_id', $tenant->id)
+            // Phase L.5.1: Count logic matches grid visibility (approvers see unpublished, others don't)
+            $countQuery = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::ASSET)
-                ->where('status', AssetStatus::VISIBLE)
+                ->where('type', AssetType::ASSET);
+            
+            // Apply same visibility rules as main query
+            // CRITICAL: Unpublished assets should NEVER be counted unless filter is explicitly active
+            // Even users with permissions should not see unpublished assets in counts by default
+            if ($canSeeUnpublished) {
+                // Users with permissions can see HIDDEN assets (pending approval) that are published
+                // But still exclude unpublished assets unless filter is active
+                $countQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                    ->whereNotNull('published_at'); // Always exclude unpublished in default counts
+            } else {
+                // Regular users only see VISIBLE, published assets
+                $countQuery->where('status', AssetStatus::VISIBLE)
+                    ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
+            }
+            
+            $counts = $countQuery
+                ->whereNull('archived_at') // Phase L.3: Exclude archived assets
+                ->where(function ($query) {
+                    // Phase M: Exclude expired assets
+                    $query->whereNull('expires_at')
+                          ->orWhere('expires_at', '>', now());
+                })
                 ->whereNull('deleted_at')
                 ->whereNotNull('metadata')
                 ->whereRaw('JSON_EXTRACT(metadata, "$.category_id") IS NOT NULL')
@@ -184,10 +235,32 @@ class AssetController extends Controller
         }
         
         // Get total asset count for "All" button
-        $totalAssetCount = Asset::where('tenant_id', $tenant->id)
+        // Phase L.5.1: Count logic matches grid visibility (approvers see unpublished, others don't)
+        $totalCountQuery = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET)
-            ->where('status', AssetStatus::VISIBLE)
+            ->where('type', AssetType::ASSET);
+        
+        // Apply same visibility rules as main query
+        // CRITICAL: Unpublished assets should NEVER be counted unless filter is explicitly active
+        // Even users with permissions should not see unpublished assets in counts by default
+        if ($canSeeUnpublished) {
+            // Users with permissions can see HIDDEN assets (pending approval) that are published
+            // But still exclude unpublished assets unless filter is active
+            $totalCountQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                ->whereNotNull('published_at'); // Always exclude unpublished in default counts
+        } else {
+            // Regular users only see VISIBLE, published assets
+            $totalCountQuery->where('status', AssetStatus::VISIBLE)
+                ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
+        }
+        
+        $totalAssetCount = $totalCountQuery
+            ->whereNull('archived_at') // Phase L.3: Exclude archived assets
+            ->where(function ($query) {
+                // Phase M: Exclude expired assets
+                $query->whereNull('expires_at')
+                      ->orWhere('expires_at', '>', now());
+            })
             ->whereNull('deleted_at')
             ->count();
         
@@ -223,16 +296,146 @@ class AssetController extends Controller
         // AssetStatus represents VISIBILITY only, not processing progress.
         // Processing state is tracked via thumbnail_status, metadata flags, and activity events.
 
+        // Phase L.5.1: $canSeeUnpublished is already defined above (after $user is available)
+
         $assetsQuery = Asset::query()
         ->where('tenant_id', $tenant->id)
         ->where('brand_id', $brand->id)
-        ->where('type', AssetType::ASSET)
+        ->where('type', AssetType::ASSET);
 
-        // Visibility-only filter - assets with VISIBLE status are shown in grid
-        ->where('status', AssetStatus::VISIBLE)
+        // Phase L.5.1: Lifecycle filter - Check early to determine visibility rules
+        // SECURITY: Apply lifecycle filters based on specific permissions
+        // - pending_approval: Requires asset.publish (approvers)
+        // - unpublished: Requires metadata.bypass_approval (full viewing privileges)
+        // - archived: Requires asset.archive (users who can archive assets)
+        // - expired: Requires asset.archive (users who can archive assets, similar lifecycle management)
+        // This prevents unauthorized access to filtered assets via URL manipulation
+        $lifecycleFilter = $request->get('lifecycle');
+        if ($lifecycleFilter === 'pending_approval' && !$canPublish) {
+            // User doesn't have asset.publish permission - ignore filter and log security event
+            \Log::warning('[AssetController] Unauthorized pending_approval filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'unpublished' && !$canBypassApproval) {
+            // User doesn't have metadata.bypass_approval permission - ignore filter and log security event
+            \Log::warning('[AssetController] Unauthorized unpublished filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'archived' && !$canArchive) {
+            // User doesn't have asset.archive permission - ignore filter and log security event
+            \Log::warning('[AssetController] Unauthorized archived filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'expired' && !$canArchive) {
+            // Phase M: User doesn't have asset.archive permission - ignore filter and log security event
+            // Use same permission as archived since it's similar lifecycle management
+            \Log::warning('[AssetController] Unauthorized expired filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        }
+
+        // Phase L.5.1: Visibility filter
+        // Users with asset.publish can see HIDDEN assets (pending approval)
+        // Other users only see VISIBLE assets
+        // When lifecycle filter is active, adjust status filter accordingly
+        if ($lifecycleFilter === 'pending_approval' && $canPublish) {
+            // Pending approval: Only HIDDEN status, unpublished
+            // Requires asset.publish permission (approvers)
+            $assetsQuery->where('status', AssetStatus::HIDDEN)
+                ->whereNull('published_at');
+            
+            \Log::info('[AssetController] Applied pending_approval lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+        } elseif ($lifecycleFilter === 'unpublished' && $canBypassApproval) {
+            // Unpublished filter: Show all unpublished assets (both VISIBLE and HIDDEN status)
+            // Requires metadata.bypass_approval permission (full viewing privileges)
+            $assetsQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                ->whereNull('published_at');
+            
+            \Log::info('[AssetController] Applied unpublished lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'can_bypass_approval' => $canBypassApproval,
+            ]);
+        } elseif ($lifecycleFilter === 'archived' && $canArchive) {
+            // Archived filter: Show only archived assets
+            // Requires asset.archive permission (users who can archive assets)
+            $assetsQuery->whereNotNull('archived_at');
+            
+            \Log::info('[AssetController] Applied archived lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'can_archive' => $canArchive,
+            ]);
+        } elseif ($lifecycleFilter === 'expired' && $canArchive) {
+            // Phase M: Expired filter: Show only expired assets
+            // Requires asset.archive permission (users who can archive assets, similar lifecycle management)
+            $assetsQuery->whereNotNull('expires_at')
+                        ->where('expires_at', '<=', now());
+            
+            \Log::info('[AssetController] Applied expired lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'can_archive' => $canArchive,
+            ]);
+        } else {
+            // Default visibility rules (no lifecycle filter active)
+            // CRITICAL: Unpublished assets should NEVER show unless filter is explicitly active
+            // Even users with permissions should not see unpublished assets by default
+            if ($canSeeUnpublished) {
+                // Users with permissions can see HIDDEN assets (pending approval) that are published
+                // But still exclude unpublished assets unless filter is active
+                $assetsQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                    ->whereNotNull('published_at'); // Always exclude unpublished in default view
+            } else {
+                // Regular users only see VISIBLE, published assets
+                $assetsQuery->where('status', AssetStatus::VISIBLE)
+                    ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
+            }
+        }
+
+        // Phase L.3: Exclude archived assets by default (unless archived filter is active)
+        // Archived assets are hidden from the grid unless explicitly filtered
+        if ($lifecycleFilter !== 'archived') {
+            $assetsQuery->whereNull('archived_at');
+        }
+
+        // Phase M: Exclude expired assets by default
+        // Expired assets are hidden from the grid unless explicitly filtered
+        // Archived assets are excluded first, then expired assets
+        // Expiration is derived state: expired = expires_at != null && expires_at < now()
+        // Note: Expired filter is handled above in lifecycle filter section
+        if ($lifecycleFilter !== 'expired') {
+            $assetsQuery->where(function ($query) {
+                $query->whereNull('expires_at')
+                      ->orWhere('expires_at', '>', now());
+            });
+        }
 
         // Exclude soft-deleted assets only
-        ->whereNull('deleted_at');
+        $assetsQuery->whereNull('deleted_at');
 
 
         // Filter by category if provided (check metadata for category_id)
@@ -291,6 +494,18 @@ class AssetController extends Controller
         }
 
         $assets = $assetsQuery->get();
+        
+        // SECURITY: Filter assets through AssetPolicy to ensure user can view each asset
+        // This is critical for enterprise-level permission enforcement
+        // Even if query returns assets, user must have explicit permission to view them
+        if ($user) {
+            $assets = $assets->filter(function ($asset) use ($user) {
+                return \Illuminate\Support\Facades\Gate::forUser($user)->allows('view', $asset);
+            })->values();
+        } else {
+            // No user - filter out all assets (shouldn't happen in authenticated routes, but be defensive)
+            $assets = collect();
+        }
         
         // HARD TERMINAL STATE: Check for stuck assets and repair them
         // This prevents infinite processing states by automatically failing
@@ -461,6 +676,37 @@ class AssetController extends Controller
                     }
                 }
 
+                // Phase L.4: Get lifecycle relationship data (published_by, archived_by)
+                $publishedBy = null;
+                if ($asset->published_by_id) {
+                    $user = \App\Models\User::find($asset->published_by_id);
+                    if ($user) {
+                        $publishedBy = [
+                            'id' => $user->id,
+                            'name' => $user->name,
+                            'first_name' => $user->first_name,
+                            'last_name' => $user->last_name,
+                            'email' => $user->email,
+                            'avatar_url' => $user->avatar_url,
+                        ];
+                    }
+                }
+
+                $archivedBy = null;
+                if ($asset->archived_by_id) {
+                    $user = \App\Models\User::find($asset->archived_by_id);
+                    if ($user) {
+                        $archivedBy = [
+                            'id' => $user->id,
+                            'name' => $user->name,
+                            'first_name' => $user->first_name,
+                            'last_name' => $user->last_name,
+                            'email' => $user->email,
+                            'avatar_url' => $user->avatar_url,
+                        ];
+                    }
+                }
+
                 // Step 6: Generate distinct thumbnail URLs for preview and final
                 // CRITICAL: Preview and final URLs must NEVER be the same to prevent cache confusion
                 // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
@@ -558,7 +804,7 @@ class AssetController extends Controller
                 }
                 
                 // Phase G.4: Merge asset_metadata table rows into metadata.fields structure
-                // This ensures automated fields (orientation, resolution_class, etc.) appear in the UI
+                // This ensures automated fields (orientation, resolution_class, dominant_colors, etc.) appear in the UI
                 $assetMetadataRows = \DB::table('asset_metadata')
                     ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
                     ->where('asset_metadata.asset_id', $asset->id)
@@ -572,6 +818,7 @@ class AssetController extends Controller
                 }
                 
                 // Merge asset_metadata rows into fields (automated fields will be added here)
+                // Note: dominant_colors is included here as it's stored in asset_metadata table
                 foreach ($assetMetadataRows as $row) {
                     $value = json_decode($row->value_json, true);
                     // Use the most recent value if multiple exist (last one wins)
@@ -682,8 +929,14 @@ class AssetController extends Controller
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
+                        'slug' => $category ? $category->slug : null, // Include slug for CSS class determination
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
+                    // Phase L.4: Lifecycle fields (read-only display)
+                    'published_at' => $asset->published_at?->toIso8601String(),
+                    'published_by' => $publishedBy, // User who published the asset
+                    'archived_at' => $asset->archived_at?->toIso8601String(),
+                    'archived_by' => $archivedBy, // User who archived the asset
                     'source_dimensions' => $sourceDimensions, // Source image dimensions (width x height) if available
                     // Thumbnail URLs - distinct paths prevent cache confusion
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
@@ -706,6 +959,9 @@ class AssetController extends Controller
         // Default to 'image' for schema resolution when category context doesn't provide file type
         // TODO: Could infer from actual assets in category or add file_type to categories
         $filterableSchema = [];
+        
+        // Phase L.5.1: Enable filters in "All Categories" view
+        // Resolve schema even when categoryId is null to allow system-level filters
         if ($categoryId && $category) {
             // Use 'image' as default file type for metadata schema resolution
             // Category's asset_type is organizational, not a file type
@@ -720,6 +976,21 @@ class AssetController extends Controller
             
             // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
+        } elseif (!$categoryId) {
+            // "All Categories" view: Resolve schema without category context
+            // This enables system-level metadata fields (orientation, color_space, resolution_class, dimensions)
+            // that are computed from assets themselves, not category-specific
+            $fileType = 'image'; // Default file type for metadata schema resolution
+            
+            $schema = $this->metadataSchemaResolver->resolve(
+                $tenant->id,
+                $brand->id,
+                null, // No category context
+                $fileType
+            );
+            
+            // Pass null category to mark system fields as global
+            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
         }
         
         // available_values is required by Phase H filter visibility rules
@@ -745,13 +1016,36 @@ class AssetController extends Controller
             if (!empty($filterableFieldKeys)) {
                 // Source 1: Query asset_metadata table (Phase G.4 structure)
                 // This is the authoritative source for approved metadata values
+                // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
+                // They should be included in available_values regardless of approved_at
+                
+                // Get automatic field IDs (fields with population_mode = 'automatic')
+                $automaticFieldIds = \DB::table('metadata_fields')
+                    ->where('population_mode', 'automatic')
+                    ->pluck('id')
+                    ->toArray();
+                
+                // Build query: Include automatic fields regardless of approved_at, require approved_at for others
                 $assetMetadataValues = \DB::table('asset_metadata')
                     ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
                     ->whereIn('asset_metadata.asset_id', $assetIds)
-                    ->whereNotNull('asset_metadata.approved_at') // Only approved values
                     ->whereIn('metadata_fields.key', array_keys($filterableFieldKeys))
                     ->whereNotNull('asset_metadata.value_json')
-                    ->select('metadata_fields.key', 'asset_metadata.value_json', 'asset_metadata.confidence')
+                    ->where(function($query) use ($automaticFieldIds) {
+                        // Automatic fields: include if value exists (no approval required)
+                        if (!empty($automaticFieldIds)) {
+                            $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                  ->orWhere(function($q) use ($automaticFieldIds) {
+                                      // Non-automatic fields require approval
+                                      $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                        ->whereNotNull('asset_metadata.approved_at');
+                                  });
+                        } else {
+                            // No automatic fields, require approval for all
+                            $query->whereNotNull('asset_metadata.approved_at');
+                        }
+                    })
+                    ->select('metadata_fields.key', 'metadata_fields.population_mode', 'asset_metadata.value_json', 'asset_metadata.confidence')
                     ->distinct()
                     ->get();
                 
@@ -759,9 +1053,12 @@ class AssetController extends Controller
                 foreach ($assetMetadataValues as $row) {
                     $fieldKey = $row->key;
                     $confidence = $row->confidence !== null ? (float) $row->confidence : null;
+                    $populationMode = $row->population_mode ?? 'manual';
                     
-                    // Suppress low-confidence AI metadata values
-                    if ($this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
+                    // CRITICAL: Confidence suppression applies ONLY to AI fields
+                    // Automatic/system fields are never suppressed (they are authoritative)
+                    $isAiField = $populationMode === 'ai';
+                    if ($isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
                         continue; // Skip this value - treat as if it doesn't exist
                     }
                     
@@ -1728,6 +2025,268 @@ class AssetController extends Controller
      * @param Asset $asset
      * @return JsonResponse
      */
+    /**
+     * Publish an asset.
+     *
+     * Phase L.6.1 — Asset Approval Actions
+     * Publishes an asset using AssetPublicationService with proper authorization.
+     *
+     * @param Asset $asset The asset to publish
+     * @return JsonResponse
+     */
+    public function publish(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Verify user is authenticated
+        if (!$user) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 401);
+        }
+
+        try {
+            // Publish the asset (service handles authorization via policy)
+            $this->publicationService->publish($asset, $user);
+
+            // Refresh asset to get updated state
+            $asset->refresh();
+
+            return response()->json([
+                'message' => 'Asset published successfully',
+                'asset_id' => $asset->id,
+                'published_at' => $asset->published_at?->toIso8601String(),
+                'published_by_id' => $asset->published_by_id,
+                'status' => $asset->status->value,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            // Provide more helpful error message
+            $tenant = app('tenant');
+            $hasPermission = $user->hasPermissionForTenant($tenant, 'asset.publish');
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantAdminOrOwner = in_array($tenantRole, ['admin', 'owner']);
+            $isAssignedToBrand = $asset->brand_id ? $user->brands()->where('brands.id', $asset->brand_id)->exists() : true;
+            
+            $message = 'You do not have permission to publish this asset.';
+            if (!$hasPermission && !$isTenantAdminOrOwner) {
+                $message .= ' Your role does not have the "asset.publish" permission.';
+            } elseif (!$isAssignedToBrand && !$isTenantAdminOrOwner) {
+                $message .= ' You are not assigned to the brand that owns this asset.';
+            }
+            
+            return response()->json([
+                'message' => $message,
+            ], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to publish asset', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to publish asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Unpublish an asset.
+     *
+     * Phase L.6.1 — Asset Approval Actions
+     * Unpublishes an asset using AssetPublicationService with proper authorization.
+     *
+     * @param Asset $asset The asset to unpublish
+     * @return JsonResponse
+     */
+    public function unpublish(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Verify user is authenticated
+        if (!$user) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 401);
+        }
+
+        try {
+            // Unpublish the asset (service handles authorization via policy)
+            $this->publicationService->unpublish($asset, $user);
+
+            // Refresh asset to get updated state
+            $asset->refresh();
+
+            return response()->json([
+                'message' => 'Asset unpublished successfully',
+                'asset_id' => $asset->id,
+                'published_at' => null,
+                'published_by_id' => null,
+                'status' => $asset->status->value,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json([
+                'message' => 'You do not have permission to unpublish this asset',
+            ], 403);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to unpublish asset', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to unpublish asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Archive an asset.
+     *
+     * Phase L.3 — Asset Archive & Restore
+     * Archives an asset using AssetArchiveService with proper authorization.
+     *
+     * @param Asset $asset The asset to archive
+     * @return JsonResponse
+     */
+    public function archive(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Verify user is authenticated
+        if (!$user) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 401);
+        }
+
+        try {
+            // Archive the asset (service handles authorization via policy)
+            $this->archiveService->archive($asset, $user);
+
+            // Refresh asset to get updated state
+            $asset->refresh();
+
+            return response()->json([
+                'message' => 'Asset archived successfully',
+                'asset_id' => $asset->id,
+                'archived_at' => $asset->archived_at?->toIso8601String(),
+                'archived_by_id' => $asset->archived_by_id,
+                'status' => $asset->status->value,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json([
+                'message' => 'You do not have permission to archive this asset',
+            ], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to archive asset', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to archive asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore an archived asset.
+     *
+     * Phase L.3 — Asset Archive & Restore
+     * Restores an asset using AssetArchiveService with proper authorization.
+     *
+     * @param Asset $asset The asset to restore
+     * @return JsonResponse
+     */
+    public function restore(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        // Verify asset belongs to tenant
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'message' => 'Asset not found',
+            ], 404);
+        }
+
+        // Verify user is authenticated
+        if (!$user) {
+            return response()->json([
+                'message' => 'Unauthorized',
+            ], 401);
+        }
+
+        try {
+            // Restore the asset (service handles authorization via policy)
+            $this->archiveService->restore($asset, $user);
+
+            // Refresh asset to get updated state
+            $asset->refresh();
+
+            return response()->json([
+                'message' => 'Asset restored successfully',
+                'asset_id' => $asset->id,
+                'archived_at' => null,
+                'archived_by_id' => null,
+                'status' => $asset->status->value,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json([
+                'message' => 'You do not have permission to restore this asset',
+            ], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to restore asset', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to restore asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function destroy(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');

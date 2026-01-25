@@ -287,6 +287,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/api/assets/{asset}/tags/autocomplete', [\App\Http\Controllers\AssetTagController::class, 'autocomplete'])->name('api.assets.tags.autocomplete');
             Route::get('/api/tenants/{tenant}/tags/autocomplete', [\App\Http\Controllers\AssetTagController::class, 'tenantAutocomplete'])->name('api.tenants.tags.autocomplete');
             
+            // Pending AI Suggestions API (dashboard tile)
+            Route::get('/api/pending-ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingSuggestions'])->name('api.pending-ai-suggestions');
+            
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
             Route::get('/assets/{asset}/metadata/all', [\App\Http\Controllers\AssetMetadataController::class, 'getAllMetadata'])->name('assets.metadata.all');
@@ -339,6 +342,12 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/assets/{asset}/thumbnails/preview', [\App\Http\Controllers\AssetThumbnailController::class, 'removePreview'])->name('assets.thumbnails.remove-preview');
             // Admin thumbnail style regeneration endpoint (site roles only)
             Route::post('/assets/{asset}/thumbnails/regenerate-styles', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateStyles'])->name('assets.thumbnails.regenerate-styles');
+            // Phase L.6.1: Asset approval actions (publish/unpublish)
+            Route::post('/assets/{asset}/publish', [\App\Http\Controllers\AssetController::class, 'publish'])->name('assets.publish');
+            Route::post('/assets/{asset}/unpublish', [\App\Http\Controllers\AssetController::class, 'unpublish'])->name('assets.unpublish');
+            // Phase L.3: Asset archive & restore actions
+            Route::post('/assets/{asset}/archive', [\App\Http\Controllers\AssetController::class, 'archive'])->name('assets.archive');
+            Route::post('/assets/{asset}/restore', [\App\Http\Controllers\AssetController::class, 'restore'])->name('assets.restore');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/deliverables', [\App\Http\Controllers\DeliverableController::class, 'index'])->name('deliverables.index');
             Route::get('/collections', [\App\Http\Controllers\CollectionController::class, 'index'])->name('collections.index');

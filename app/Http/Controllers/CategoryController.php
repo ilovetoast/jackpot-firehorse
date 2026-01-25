@@ -230,16 +230,36 @@ class CategoryController extends Controller
         // Check if user has admin/owner role or manage categories/manage brands permission - using policy
         $this->authorize('update', $category);
 
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'slug' => 'nullable|string|max:255',
-            'icon' => 'nullable|string|max:255',
-            'is_private' => 'nullable|boolean',
-            'access_rules' => 'nullable|array',
-            'access_rules.*.type' => 'required|string|in:role,user',
-            'access_rules.*.role' => 'required_if:access_rules.*.type,role|nullable|string',
-            'access_rules.*.user_id' => 'required_if:access_rules.*.type,user|nullable|integer|exists:users,id',
-        ]);
+        // System categories are immutable - only allow hide changes
+        // is_locked is site admin only and cannot be changed by tenants
+        if ($category->is_system) {
+            $validated = $request->validate([
+                'is_hidden' => 'nullable|boolean',
+                // is_locked is site admin only - not accepted from tenant requests
+            ]);
+            
+            // Explicitly reject is_locked if somehow sent
+            if ($request->has('is_locked')) {
+                abort(403, 'Lock status can only be managed by site administrators.');
+            }
+        } else {
+            // Custom categories can be fully edited (except is_locked which is site admin only)
+            $validated = $request->validate([
+                'name' => 'required|string|max:255',
+                'slug' => 'nullable|string|max:255',
+                'icon' => 'nullable|string|max:255',
+                'is_private' => 'nullable|boolean',
+                'access_rules' => 'nullable|array',
+                'access_rules.*.type' => 'required|string|in:role,user',
+                'access_rules.*.role' => 'required_if:access_rules.*.type,role|nullable|string',
+                'access_rules.*.user_id' => 'required_if:access_rules.*.type,user|nullable|integer|exists:users,id',
+            ]);
+            
+            // Explicitly reject is_locked if somehow sent (site admin only)
+            if ($request->has('is_locked')) {
+                abort(403, 'Lock status can only be managed by site administrators.');
+            }
+        }
 
         try {
             $this->categoryService->update($category, $validated);

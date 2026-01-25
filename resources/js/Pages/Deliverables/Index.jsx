@@ -272,7 +272,16 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                             </button>
                                         )}
                                         {categories.length > 0 ? (
-                                            categories.map((category) => (
+                                            categories
+                                                .filter(category => {
+                                                    // Filter out hidden categories from sidebar
+                                                    // Explicitly check for truthy values that indicate hidden
+                                                    if (category.is_hidden === true || category.is_hidden === 1 || category.is_hidden === '1' || category.is_hidden === 'true') {
+                                                        return false; // Hide this category
+                                                    }
+                                                    return true; // Show this category
+                                                })
+                                                .map((category) => (
                                                 <button
                                                     key={category.id || `template-${category.slug}-${category.asset_type}`}
                                                     onClick={() => handleCategorySelect(category)}

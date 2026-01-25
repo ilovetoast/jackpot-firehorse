@@ -378,7 +378,7 @@ export default function BrandsIndex({ brands, limits }) {
                                                                 </div>
                                                             </div>
                                                             
-                                                            <UserInviteForm brandId={brand.id} defaultRole="member" />
+                                                            <UserInviteForm brandId={brand.id} defaultRole="viewer" />
                                                         </div>
 
                                                         {/* Recommended Users (Company users not on brand) */}
@@ -465,10 +465,10 @@ export default function BrandsIndex({ brands, limits }) {
 }
 
 // User Invite Form Component
-function UserInviteForm({ brandId, defaultRole = 'member' }) {
+function UserInviteForm({ brandId, defaultRole = 'viewer' }) {
     const { data, setData, post, processing, errors, reset } = useForm({
         email: '',
-        role: defaultRole,
+        role: defaultRole === 'member' ? 'viewer' : defaultRole, // Convert member to viewer (member is tenant-level only)
     })
 
     const handleSubmit = (e) => {
@@ -499,13 +499,14 @@ function UserInviteForm({ brandId, defaultRole = 'member' }) {
                 </div>
                 <div className="flex-shrink-0">
                     <select
-                        value={data.role}
+                        value={data.role === 'member' ? 'viewer' : data.role}
                         onChange={(e) => setData('role', e.target.value)}
                         className="block rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                     >
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
+                        <option value="viewer">Viewer</option>
+                        <option value="contributor">Contributor</option>
                         <option value="brand_manager">Brand Manager</option>
+                        <option value="admin">Admin</option>
                     </select>
                 </div>
                 <button

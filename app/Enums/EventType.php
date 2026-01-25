@@ -59,6 +59,11 @@ class EventType
     public const ASSET_UPDATED = 'asset.updated';
     public const ASSET_DELETED = 'asset.deleted';
     public const ASSET_RESTORED = 'asset.restored';
+    public const ASSET_PUBLISHED = 'asset.published';
+    public const ASSET_UNPUBLISHED = 'asset.unpublished';
+    public const ASSET_PENDING_APPROVAL = 'asset.pending_approval'; // Phase L.5.1: Category-based approval
+    public const ASSET_ARCHIVED = 'asset.archived';
+    public const ASSET_UNARCHIVED = 'asset.unarchived';
     public const ASSET_VERSION_ADDED = 'asset.version_added';
     public const ASSET_PREVIEWED = 'asset.previewed';
     public const ASSET_METADATA_UPDATED = 'asset.metadata_updated';
@@ -231,6 +236,11 @@ class EventType
             self::ASSET_UPDATED,
             self::ASSET_DELETED,
             self::ASSET_RESTORED,
+            self::ASSET_PUBLISHED,
+            self::ASSET_UNPUBLISHED,
+            self::ASSET_PENDING_APPROVAL,
+            self::ASSET_ARCHIVED,
+            self::ASSET_UNARCHIVED,
             self::ASSET_VERSION_ADDED,
             self::ASSET_PREVIEWED,
             self::ASSET_METADATA_UPDATED,

@@ -595,6 +595,77 @@ class UploadCompletionService
                 }
             }
 
+            // Phase L.5.1: Category-based approval rules
+            if ($categoryId !== null && $userId !== null) {
+                $category = Category::find($categoryId);
+                $user = \App\Models\User::find($userId);
+                
+                if ($category && $category->requiresApproval()) {
+                    // Category requires approval: Keep unpublished, set status to HIDDEN, fire event
+                    $asset->published_at = null;
+                    $asset->published_by_id = null;
+                    $asset->status = AssetStatus::HIDDEN;
+                    $asset->save();
+                    
+                    // Fire ASSET_PENDING_APPROVAL event
+                    try {
+                        \App\Services\ActivityRecorder::record(
+                            tenant: $asset->tenant,
+                            eventType: \App\Enums\EventType::ASSET_PENDING_APPROVAL,
+                            subject: $asset,
+                            actor: $user,
+                            brand: $asset->brand,
+                            metadata: [
+                                'category_id' => $categoryId,
+                                'category_name' => $category->name,
+                            ]
+                        );
+                        
+                        // Phase L.6.3: Dispatch event for email notifications
+                        \App\Events\AssetPendingApproval::dispatch($asset, $user, $category->name);
+                    } catch (\Exception $e) {
+                        // Activity logging must never break processing
+                        Log::error('Failed to log asset pending approval event', [
+                            'asset_id' => $asset->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                    
+                    Log::info('[UploadCompletionService] Asset requires approval (category requires_approval=true)', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $categoryId,
+                        'category_name' => $category->name,
+                        'status' => AssetStatus::HIDDEN->value,
+                    ]);
+                } elseif ($category && !$category->requiresApproval()) {
+                    // Auto-publish: Category does not require approval
+                    $asset->published_at = now();
+                    $asset->published_by_id = $userId; // Use uploader as published_by
+                    // Status remains VISIBLE (set during asset creation)
+                    $asset->save();
+                    
+                    Log::info('[UploadCompletionService] Asset auto-published (category does not require approval)', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $categoryId,
+                        'category_name' => $category->name,
+                        'published_by_id' => $userId,
+                    ]);
+                } else {
+                    // Category not found - asset remains unpublished
+                    Log::warning('[UploadCompletionService] Category not found for approval check', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $categoryId,
+                    ]);
+                }
+            } else {
+                // No category or user ID - asset remains unpublished
+                Log::info('[UploadCompletionService] Asset not auto-published (no category or user ID)', [
+                    'asset_id' => $asset->id,
+                    'category_id' => $categoryId,
+                    'user_id' => $userId,
+                ]);
+            }
+
             // Update upload session status and uploaded size (transition already validated above)
             // This is inside the transaction so status only updates if asset creation succeeds
             $uploadSession->update([

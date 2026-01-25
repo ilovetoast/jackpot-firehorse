@@ -23,16 +23,16 @@ use App\Models\User;
  * - reply: Same as view (uses 'tickets.reply' permission if assigned)
  * - Cannot see: tenant_internal, internal tickets, internal notes, SLA data
  *
- * Staff Users (Site Support, Site Admin, Site Owner, Site Engineering, Compliance):
+ * Staff Users (Site Support, Site Admin, Site Owner, Site Engineering, Site Compliance):
  * - viewAnyForStaff: Requires 'tickets.view_staff' permission OR has site role (backward compatibility)
  * - viewForStaff: Requires 'tickets.view_staff' permission OR has site role
  * - assign: Requires 'tickets.assign' permission OR has site_support/site_admin/site_owner role
  * - addInternalNote: Requires 'tickets.add_internal_note' permission OR has site_support/site_admin/site_owner/site_engineering role
  * - convert: Requires 'tickets.convert' permission OR has site_admin/site_owner role
  * - viewSLA: Requires 'tickets.view_sla' permission OR has site role (never tenants)
- * - viewAuditLog: Requires 'tickets.view_audit_log' permission OR has site_owner/compliance role
+ * - viewAuditLog: Requires 'tickets.view_audit_log' permission OR has site_owner/site_compliance role
  * - createEngineeringTicket: Requires 'tickets.create_engineering' permission OR has site_engineering/site_admin/site_owner role
- * - viewEngineeringTickets: Requires 'tickets.view_engineering' permission OR has site_engineering/site_admin/site_owner/compliance role
+ * - viewEngineeringTickets: Requires 'tickets.view_engineering' permission OR has site_engineering/site_admin/site_owner/site_compliance role
  * - linkDiagnostic: Requires 'tickets.link_diagnostic' permission OR has site_engineering/site_admin/site_owner role
  *
  * Default Permissions (assigned in PermissionSeeder):
@@ -40,7 +40,7 @@ use App\Models\User;
  * - Site Admin: Full ticket access (except view_audit_log)
  * - Site Support: Can manage tenant tickets and add internal notes
  * - Site Engineering: Can view and manage internal tickets
- * - Compliance: View-only access (view_staff, view_engineering, view_audit_log)
+ * - Site Compliance: View-only access (view_staff, view_engineering, view_audit_log)
  *
  * These rules ensure strict tenant isolation while providing staff with operational capabilities.
  * Permissions can be customized via Admin > Permissions UI.
@@ -110,7 +110,7 @@ class TicketPolicy
             'site_support',
             'site_admin',
             'site_owner',
-            'compliance',
+            'site_compliance',
             'site_engineering',
         ]);
     }
@@ -204,7 +204,7 @@ class TicketPolicy
             'site_engineering',
             'site_admin',
             'site_owner',
-            'compliance',
+            'site_compliance',
         ]);
     }
 
@@ -275,7 +275,7 @@ class TicketPolicy
         // Backward compatibility: check for site roles
         return $user->hasAnyRole([
             'site_owner',
-            'compliance',
+            'site_compliance',
         ]);
     }
 }
