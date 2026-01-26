@@ -1847,11 +1847,8 @@ class UploadController extends Controller
                     }
                 }
 
-                // CRITICAL: Pass metadata in the format UploadCompletionService expects
-                // UploadCompletionService expects: { fields: { fieldKey: value } } or { fieldKey: value }
-                // We have metadataFields extracted, so wrap it in 'fields' key for consistency
-                $metadataForComplete = !empty($metadataFields) ? ['fields' => $metadataFields] : [];
-                
+                // CRITICAL: Do NOT pass metadata to complete() - we'll persist it separately with proper approval check
+                // UploadCompletionService would auto-approve metadata, but we need to check approval requirements
                 $asset = $this->completionService->complete(
                     $uploadSession,
                     $assetType,
@@ -1859,7 +1856,7 @@ class UploadController extends Controller
                     $title, // title - use title from frontend, fallback to filename if null
                     $uploadKey, // s3Key
                     $categoryId,
-                    $metadataForComplete, // Pass metadata in { fields: {...} } format
+                    null, // Do NOT pass metadata here - persist separately below with approval check
                     $user->id
                 );
 
