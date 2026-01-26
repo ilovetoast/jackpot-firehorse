@@ -304,6 +304,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Pending AI Suggestions API (dashboard tile)
             Route::get('/api/pending-ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingSuggestions'])->name('api.pending-ai-suggestions');
             
+            // TASK 2: Pending metadata approvals endpoint (UI-only, does not alter approval logic)
+            Route::get('/api/pending-metadata-approvals', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingMetadataApprovals'])->name('api.pending-metadata-approvals');
+            
             // Asset metadata manual editing (Phase 2 – Step 6)
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
             Route::get('/assets/{asset}/metadata/all', [\App\Http\Controllers\AssetMetadataController::class, 'getAllMetadata'])->name('assets.metadata.all');

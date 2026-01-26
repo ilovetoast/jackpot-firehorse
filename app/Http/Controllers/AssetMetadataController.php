@@ -3643,6 +3643,129 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Get all pending metadata approvals for quick review modal.
+     * 
+     * TASK 2: UI-only endpoint for pending metadata review modal.
+     * Does not alter approval logic or persistence.
+     * 
+     * GET /app/api/pending-metadata-approvals
+     * 
+     * Returns pending metadata fields from asset_metadata table (not candidates).
+     * Uses AssetMetadataStateResolver as data source.
+     * 
+     * @return JsonResponse
+     */
+    public function getAllPendingMetadataApprovals(): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (!$tenant || !$brand) {
+            return response()->json(['message' => 'Tenant and brand must be selected'], 403);
+        }
+
+        // Check permission - only approvers can view pending metadata
+        if (!$this->approvalResolver->canApprove($user, $tenant)) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        // Get pending metadata from asset_metadata table (not candidates)
+        // Only fields that require approval (user or AI source, not automatic/system)
+        $pendingMetadata = DB::table('asset_metadata')
+            ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->whereNull('asset_metadata.approved_at')
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+            ->whereIn('asset_metadata.source', ['ai', 'user'])
+            ->where('metadata_fields.population_mode', '!=', 'automatic')
+            ->select(
+                'asset_metadata.id',
+                'asset_metadata.asset_id',
+                'asset_metadata.metadata_field_id as field_id',
+                'asset_metadata.value_json',
+                'asset_metadata.source',
+                'asset_metadata.confidence',
+                'metadata_fields.key as field_key',
+                'metadata_fields.system_label as field_label',
+                'metadata_fields.type as field_type',
+                'assets.title as asset_title',
+                'assets.original_filename as asset_filename',
+                'assets.thumbnail_status',
+                'assets.metadata',
+                'assets.mime_type',
+                'assets.file_extension'
+            )
+            ->orderBy('asset_metadata.created_at', 'desc')
+            ->get();
+
+        // Get options for select fields
+        $fieldIds = $pendingMetadata->pluck('field_id')->unique();
+        $optionsMap = [];
+        if ($fieldIds->isNotEmpty()) {
+            $options = DB::table('metadata_options')
+                ->whereIn('metadata_field_id', $fieldIds)
+                ->select('metadata_field_id', 'value', 'system_label as display_label')
+                ->get()
+                ->groupBy('metadata_field_id');
+
+            foreach ($options as $fieldId => $opts) {
+                $optionsMap[$fieldId] = $opts->map(fn($opt) => [
+                    'value' => $opt->value,
+                    'display_label' => $opt->display_label,
+                ])->toArray();
+            }
+        }
+
+        // Load all assets in bulk to avoid N+1 queries
+        $assetIds = $pendingMetadata->pluck('asset_id')->unique()->toArray();
+        $assets = Asset::whereIn('id', $assetIds)
+            ->get()
+            ->keyBy('id');
+
+        $items = [];
+        foreach ($pendingMetadata as $metadata) {
+            $asset = $assets->get($metadata->asset_id);
+            $thumbnailUrls = $this->getThumbnailUrls($asset);
+            $value = json_decode($metadata->value_json, true);
+            
+            // Get thumbnail status and metadata for ThumbnailPreview component
+            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                ? $asset->thumbnail_status->value 
+                : ($asset->thumbnail_status ?? 'pending')) : 'pending';
+            $assetMetadata = $asset ? ($asset->metadata ?? []) : [];
+            
+            $items[] = [
+                'id' => $metadata->id,
+                'asset_id' => $metadata->asset_id,
+                'field_id' => $metadata->field_id,
+                'value' => $value,
+                'field_key' => $metadata->field_key,
+                'field_label' => $metadata->field_label,
+                'field_type' => $metadata->field_type,
+                'confidence' => $metadata->confidence ? (float) $metadata->confidence : null,
+                'source' => $metadata->source,
+                'options' => $optionsMap[$metadata->field_id] ?? [],
+                'asset_title' => $metadata->asset_title,
+                'asset_filename' => $metadata->asset_filename,
+                'final_thumbnail_url' => $thumbnailUrls['final'] ?? null,
+                'preview_thumbnail_url' => $thumbnailUrls['preview'] ?? null,
+                'thumbnail_status' => $thumbnailStatus,
+                'metadata' => $assetMetadata,
+                'mime_type' => $metadata->mime_type ?? null,
+                'file_extension' => $metadata->file_extension ?? null,
+            ];
+        }
+
+        return response()->json([
+            'items' => $items,
+            'total' => count($items),
+        ]);
+    }
+
+    /**
      * Get thumbnail URLs for an asset (matches AssetController structure).
      * Returns both preview and final thumbnail URLs separately.
      *

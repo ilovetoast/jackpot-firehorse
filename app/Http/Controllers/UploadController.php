@@ -9,6 +9,8 @@ use App\Models\Category;
 use App\Models\UploadSession;
 use App\Services\AbandonedSessionService;
 use App\Services\ActivityRecorder;
+use App\Services\Metadata\AssetMetadataStateResolver;
+use App\Services\MetadataApprovalResolver;
 use App\Services\MetadataPersistenceService;
 use App\Services\MultipartUploadService;
 use App\Services\MultipartUploadUrlService;
@@ -37,7 +39,9 @@ class UploadController extends Controller
         protected MultipartUploadService $multipartService,
         protected UploadMetadataSchemaResolver $uploadMetadataSchemaResolver,
         protected MetadataPersistenceService $metadataPersistenceService,
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected AssetMetadataStateResolver $metadataStateResolver,
+        protected MetadataApprovalResolver $approvalResolver
     ) {
     }
 
@@ -1668,10 +1672,47 @@ class UploadController extends Controller
 
                 if ($existingAsset) {
                     // Asset already exists - return existing asset (idempotent)
+                    // TASK 1: Check approval info for existing asset (UI-only, read-only)
+                    $approvalRequired = false;
+                    $pendingMetadataCount = 0;
+                    
+                    $canApprove = $this->approvalResolver->canApprove($user, $tenant);
+                    if (!$canApprove) {
+                        $approvalEnabled = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
+                        
+                        if ($approvalEnabled) {
+                            $metadataState = $this->metadataStateResolver->resolve($existingAsset);
+                            
+                            $automaticFieldIds = \Illuminate\Support\Facades\DB::table('metadata_fields')
+                                ->where('population_mode', 'automatic')
+                                ->pluck('id')
+                                ->toArray();
+                            
+                            foreach ($metadataState as $fieldId => $state) {
+                                if (!$state['has_pending']) {
+                                    continue;
+                                }
+                                
+                                if (in_array($fieldId, $automaticFieldIds)) {
+                                    continue;
+                                }
+                                
+                                $pendingRow = $state['pending'];
+                                if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
+                                    $pendingMetadataCount++;
+                                    $approvalRequired = true;
+                                }
+                            }
+                        }
+                    }
+                    
                     $results[] = [
                         'upload_key' => $uploadKey,
                         'status' => 'success',
                         'asset_id' => $existingAsset->id,
+                        // TASK 1: Approval information for UI (read-only, no logic changes)
+                        'approval_required' => $approvalRequired,
+                        'pending_metadata_count' => $pendingMetadataCount,
                     ];
                     continue; // Skip to next manifest item
                 }
@@ -1868,11 +1909,55 @@ class UploadController extends Controller
                     }
                 }
 
+                // TASK 1: Check if metadata requires approval (UI-only, read-only information)
+                // This does not modify approval logic or persistence - only exposes data for UI
+                $approvalRequired = false;
+                $pendingMetadataCount = 0;
+                
+                // Only check if approval is enabled and user is a contributor (not approver)
+                $canApprove = $this->approvalResolver->canApprove($user, $tenant);
+                if (!$canApprove) {
+                    // Check if approval workflow is enabled for this brand
+                    $approvalEnabled = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
+                    
+                    if ($approvalEnabled) {
+                        // Resolve metadata state to count pending fields
+                        $metadataState = $this->metadataStateResolver->resolve($asset);
+                        
+                        // Count pending metadata fields (exclude automatic fields)
+                        $automaticFieldIds = \Illuminate\Support\Facades\DB::table('metadata_fields')
+                            ->where('population_mode', 'automatic')
+                            ->pluck('id')
+                            ->toArray();
+                        
+                        foreach ($metadataState as $fieldId => $state) {
+                            if (!$state['has_pending']) {
+                                continue;
+                            }
+                            
+                            // Skip automatic fields (they don't require approval)
+                            if (in_array($fieldId, $automaticFieldIds)) {
+                                continue;
+                            }
+                            
+                            // Check if pending row is from user or AI (requires approval)
+                            $pendingRow = $state['pending'];
+                            if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
+                                $pendingMetadataCount++;
+                                $approvalRequired = true;
+                            }
+                        }
+                    }
+                }
+
                 // Success result
                 $results[] = [
                     'upload_key' => $uploadKey,
                     'status' => 'success',
                     'asset_id' => $asset->id,
+                    // TASK 1: Approval information for UI (read-only, no logic changes)
+                    'approval_required' => $approvalRequired,
+                    'pending_metadata_count' => $pendingMetadataCount,
                 ];
 
                 // Note: Activity logging is handled by UploadCompletionService::complete()

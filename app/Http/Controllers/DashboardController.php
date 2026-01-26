@@ -407,19 +407,19 @@ class DashboardController extends Controller
         
         // Count pending metadata approvals (from asset_metadata table, not candidates)
         // Only show to users who can approve metadata
+        // TASK 2: Use same query logic as getAllPendingMetadataApprovals() API endpoint for consistency
         $pendingMetadataApprovalsCount = 0;
         $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
         if ($approvalResolver->canApprove($user, $tenant)) {
             $pendingMetadataApprovalsCount = DB::table('asset_metadata')
                 ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+                ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
                 ->where('assets.tenant_id', $tenant->id)
                 ->where('assets.brand_id', $brand->id)
                 ->whereNull('asset_metadata.approved_at')
                 ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
                 ->whereIn('asset_metadata.source', ['ai', 'user'])
-                ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
                 ->where('metadata_fields.population_mode', '!=', 'automatic')
-                ->distinct('asset_metadata.id')
                 ->count('asset_metadata.id');
         }
         

@@ -20,6 +20,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
+import { usePermission } from '../hooks/usePermission'
 import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
@@ -29,6 +30,7 @@ import { normalizeUploadError } from '../utils/uploadErrorNormalizer' // Phase 2
 import DevUploadDiagnostics from './DevUploadDiagnostics' // Phase 2.5 Step 3: Dev-only diagnostics panel
 import MetadataGroups from './Upload/MetadataGroups' // Phase 2 – Step 2: Dynamic metadata schema
 import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // Phase 2 – Step 3: Required field validation
+import ApprovalNotice from './Upload/ApprovalNotice' // TASK 1: Approval notice for contributors
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -62,6 +64,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Phase 2 invariant: This component assumes it is mounted only when visible.
     // Lifecycle (mount/unmount) controls visibility — not internal state.
     const { auth } = usePage().props
+    
+    // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
+    const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
+    const isContributor = !canApproveMetadata
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef(null)
     const dropZoneRef = useRef(null)
@@ -176,6 +182,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // Track when finalize succeeds (all files finalized, no failures) - used to disable form during auto-close delay
     const [isFinalizeSuccess, setIsFinalizeSuccess] = useState(false)
+    
+    // TASK 1: Track approval info from finalize response (UI-only, read-only)
+    const [approvalInfo, setApprovalInfo] = useState({ approvalRequired: false, pendingMetadataCount: 0 })
 
     // ═══════════════════════════════════════════════════════════════
     // CLEAN UPLOADER V2 — TEMPORARILY DISABLED LEGACY
@@ -2764,6 +2773,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // For multipart uploads, also match by uploadSessionId if uploadKey doesn't match
             let finalizedCount = 0
             let failedCount = 0
+            
+            // TASK 1: Collect approval info from all successful results (aggregate before setting state)
+            let totalApprovalRequired = false
+            let totalPendingMetadataCount = 0
 
             setV2Files((prevFiles) => {
                 return prevFiles.map((f) => {
@@ -2846,6 +2859,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             uploadKey: f.uploadKey,
                             isMultipart: !!v2ToUploadManagerMapRef.current.get(f.clientId)
                         })
+                        
+                        // TASK 1: Collect approval info from response (UI-only, read-only)
+                        // Aggregate across all successful files
+                        if (result.approval_required || (result.pending_metadata_count && result.pending_metadata_count > 0)) {
+                            totalApprovalRequired = totalApprovalRequired || result.approval_required || false
+                            totalPendingMetadataCount += (result.pending_metadata_count || 0)
+                        }
+                        
                         return {
                             ...f,
                             status: 'finalized',
@@ -2916,6 +2937,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             })
 
             // batchStatus is now computed from v2Files, no manual update needed
+            
+            // TASK 1: Set approval info once after processing all results
+            if (totalApprovalRequired || totalPendingMetadataCount > 0) {
+                setApprovalInfo({
+                    approvalRequired: totalApprovalRequired,
+                    pendingMetadataCount: totalPendingMetadataCount
+                })
+            }
             
             // Set success state if all files finalized and no failures (for UI overlay during auto-close delay)
             if (finalizedCount > 0 && failedCount === 0) {
@@ -3509,6 +3538,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Used when closing dialog to clean up state.
      */
     const resetV2State = useCallback(() => {
+        // TASK 1: Reset approval info when state resets
+        setApprovalInfo({ approvalRequired: false, pendingMetadataCount: 0 })
         setV2Files([])
         setSelectedCategoryId(initialCategoryId || null) // Reset to initial category
         setGlobalMetadataDraft({}) // Reset global metadata
@@ -4006,6 +4037,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         </div>
                                     </div>
                                 </div>
+                            )}
+
+                            {/* TASK 1: Approval notice for contributors (non-blocking, informational only) */}
+                            {isContributor && (
+                                <ApprovalNotice 
+                                    approvalRequired={approvalInfo.approvalRequired}
+                                    pendingMetadataCount={approvalInfo.pendingMetadataCount}
+                                />
                             )}
 
                             {/* CLEAN UPLOADER V2 — Partial success banner */}

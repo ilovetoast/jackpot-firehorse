@@ -22,6 +22,7 @@ import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
+import PendingMetadataTile from '../Components/PendingMetadataTile'
 
 export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
@@ -379,30 +380,8 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                         <PendingAiSuggestionsTile pendingCount={pending_ai_suggestions.total || 0} />
                     )}
 
-                    {/* Pending Metadata Approvals Tile */}
-                    {pending_metadata_approvals_count > 0 && auth?.metadata_approval_features?.metadata_approval_enabled && (
-                        <Link
-                            href="/app/assets"
-                            className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200 hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer"
-                        >
-                            <div className="flex items-center">
-                                <div className="flex-shrink-0">
-                                    <ExclamationCircleIcon className="h-6 w-6 text-yellow-500" aria-hidden="true" />
-                                </div>
-                                <div className="ml-5 w-0 flex-1">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">Pending Metadata Approvals</dt>
-                                    <dd className="mt-1">
-                                        <div className="flex items-baseline">
-                                            <span className="text-2xl font-semibold tracking-tight text-gray-900">
-                                                {pending_metadata_approvals_count.toLocaleString()}
-                                            </span>
-                                        </div>
-                                        <p className="mt-1 text-xs text-gray-500">Click to review pending metadata</p>
-                                    </dd>
-                                </div>
-                            </div>
-                        </Link>
-                    )}
+                    {/* TASK 2: Pending Metadata Approvals Tile */}
+                    <PendingMetadataTile pendingCount={pending_metadata_approvals_count || 0} />
 
                     {/* AI Tagging Card - Only show if user has permission and data is available */}
                     {ai_usage && (
