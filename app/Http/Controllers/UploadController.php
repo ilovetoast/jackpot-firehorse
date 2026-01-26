@@ -316,16 +316,6 @@ class UploadController extends Controller
             );
         }
 
-        // 🔍 DEBUG LOGGING: Log raw request before validation
-        Log::info('[Upload Complete] Raw request received', [
-            'upload_session_id' => $request->input('upload_session_id'),
-            'asset_type' => $request->input('asset_type'),
-            'title' => $request->input('title'),
-            'filename' => $request->input('filename'),
-            'category_id' => $request->input('category_id'),
-            'metadata' => $request->input('metadata'),
-            'all_input' => $request->all(),
-        ]);
 
         // Validate request - enforce required fields and types
         // Note: asset_type is nullable for backward compatibility, defaults to 'asset' if not provided
@@ -362,30 +352,9 @@ class UploadController extends Controller
             ->where('tenant_id', $tenant->id)
             ->firstOrFail();
 
-        // 🔍 DEBUG LOGGING: Log validated payload before processing
         $categoryId = isset($validated['category_id']) ? (int) $validated['category_id'] : null;
-        Log::info('[Upload Complete] Validated payload before calling service', [
-            'upload_session_id' => $validated['upload_session_id'],
-            'asset_type' => $validated['asset_type'] ?? 'asset (default)',
-            'title' => $validated['title'] ?? 'null',
-            'filename' => $validated['filename'] ?? 'null',
-            'category_id' => $categoryId ?? 'null',
-            'metadata' => $validated['metadata'] ?? 'null',
-            'metadata_type' => gettype($validated['metadata'] ?? null),
-            'metadata_keys' => is_array($validated['metadata'] ?? null) ? array_keys($validated['metadata']) : 'not_array',
-        ]);
 
         try {
-            // Pass all values explicitly (no silent nulls)
-            Log::info('[Upload Complete] Calling completion service with parameters', [
-                'upload_session_id' => $uploadSession->id,
-                'asset_type' => $validated['asset_type'] ?? null,
-                'filename' => $validated['filename'] ?? null,
-                'title' => $validated['title'] ?? null,
-                'category_id' => $categoryId,
-                'metadata' => $validated['metadata'] ?? null,
-            ]);
-            
             // Get authenticated user
             $user = Auth::user();
             $userId = $user ? $user->id : null;
@@ -1640,15 +1609,6 @@ class UploadController extends Controller
             'manifest.*.resolved_filename' => 'nullable|string|max:255',
         ]);
 
-        // DEBUG: Log raw request to see what we're actually receiving
-        Log::info('[UploadController::finalize] Raw request received', [
-            'has_manifest' => isset($validated['manifest']),
-            'manifest_count' => count($validated['manifest'] ?? []),
-            'first_item_keys' => !empty($validated['manifest']) ? array_keys($validated['manifest'][0] ?? []) : [],
-            'first_item_metadata' => $validated['manifest'][0]['metadata'] ?? 'not_set',
-            'first_item_metadata_type' => gettype($validated['manifest'][0]['metadata'] ?? null),
-        ]);
-
         $manifest = $validated['manifest'];
         $results = [];
 
@@ -1847,8 +1807,6 @@ class UploadController extends Controller
                     }
                 }
 
-                // CRITICAL: Do NOT pass metadata to complete() - we'll persist it separately with proper approval check
-                // UploadCompletionService would auto-approve metadata, but we need to check approval requirements
                 $asset = $this->completionService->complete(
                     $uploadSession,
                     $assetType,
@@ -1860,6 +1818,11 @@ class UploadController extends Controller
                     $user->id
                 );
 
+                // IMPORTANT:
+                // Metadata MUST be persisted exactly once during upload.
+                // UploadController::finalize() is the single source of truth for
+                // metadata persistence so that approval logic is always enforced.
+                // Do NOT persist metadata inside UploadCompletionService.
                 // Phase 2 – Step 4: Persist metadata to asset_metadata table (after asset creation)
                 // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
                 // This ensures approval logic runs only after asset exists, not during upload
@@ -1878,17 +1841,6 @@ class UploadController extends Controller
                         // Determine asset type for schema resolution (file type, not category asset_type)
                         // Default to 'image' - can be enhanced to detect from file MIME type
                         $fileAssetType = 'image';
-
-                        // UX-2: Log batch upload metadata handling (dev-only)
-                        if (config('app.env') !== 'production') {
-                            Log::debug('[UploadController::finalize] Persisting upload metadata', [
-                                'asset_id' => $asset->id,
-                                'upload_key' => $uploadKey,
-                                'category_id' => $categoryId,
-                                'field_count' => count($metadataFields),
-                                'context' => 'upload',
-                            ]);
-                        }
 
                         // UX-2: CRITICAL - Pass autoApprove=false to allow approval resolver to check
                         // Approval is determined AFTER upload, not during metadata entry

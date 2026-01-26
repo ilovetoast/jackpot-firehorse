@@ -56,16 +56,6 @@ class MetadataPersistenceService
         string $assetType = 'image',
         bool $autoApprove = false
     ): void {
-        // UX-2: Log context for debugging (dev-only)
-        $context = $autoApprove ? 'upload' : 'edit';
-        if (config('app.env') !== 'production') {
-            Log::debug('[MetadataPersistence] Context: ' . $context, [
-                'asset_id' => $asset->id,
-                'user_id' => $userId,
-                'auto_approve' => $autoApprove,
-                'field_count' => count($metadataValues),
-            ]);
-        }
 
         // UX-2: Assertion - Upload context must never reject metadata due to permissions
         // This is a safety guard to ensure upload-time metadata is always accepted
@@ -144,39 +134,17 @@ class MetadataPersistenceService
                     $brand = \App\Models\Brand::find($asset->brand_id);
                     $user = $userId ? \App\Models\User::find($userId) : null;
 
-                    // UX-2: Assertion - Upload context must bypass approval checks
-                    // During upload, metadata is always accepted regardless of user permissions
-                    // Approval enforcement happens AFTER upload via MetadataApprovalResolver
+                    // Invariant:
+                    // Approval requirements must be evaluated for BOTH upload and edit contexts.
+                    // Upload context must never bypass approval logic.
                     if ($autoApprove) {
                         // Upload context: Metadata is always accepted, approval determined after asset creation
                         $requiresApproval = false;
-                        
-                        // UX-2: Log approval resolution path for debugging (dev-only)
-                        if (config('app.env') !== 'production') {
-                            $wouldRequireApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
-                            
-                            Log::debug('[MetadataPersistence] Upload context - approval deferred', [
-                                'asset_id' => $asset->id,
-                                'field_key' => $fieldKey,
-                                'would_require_approval_post_upload' => $wouldRequireApproval,
-                                'approval_resolved_after_upload' => true,
-                            ]);
-                        }
                     } else {
                         // Edit context: Check if approval is required
                         // Post-upload edits require approval if workflow is enabled (unless user has bypass_approval permission)
                         // Phase M-2: Pass brand for company + brand level gating
                         $requiresApproval = $tenant && $brand && $this->approvalResolver->requiresApproval('user', $tenant, $user, $brand);
-                        
-                        // UX-2: Log approval resolution for edit context (dev-only)
-                        if (config('app.env') !== 'production') {
-                            Log::debug('[MetadataPersistence] Edit context - approval check', [
-                                'asset_id' => $asset->id,
-                                'field_key' => $fieldKey,
-                                'requires_approval' => $requiresApproval,
-                                'user_has_bypass' => $user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval'),
-                            ]);
-                        }
                     }
 
                     // Insert asset_metadata row
