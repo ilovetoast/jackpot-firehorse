@@ -465,6 +465,17 @@ class AssetController extends Controller
         // Exclude soft-deleted assets only
         $assetsQuery->whereNull('deleted_at');
 
+        // Default sort: recently added (created_at desc)
+        // This ensures newest assets appear first in the grid
+        $sortBy = $request->get('sort', 'created_at');
+        $sortOrder = $request->get('order', 'desc');
+        
+        if ($sortBy === 'created_at') {
+            $assetsQuery->orderBy('created_at', $sortOrder);
+        } else {
+            // Fallback to created_at desc if invalid sort
+            $assetsQuery->orderBy('created_at', 'desc');
+        }
 
         // Filter by category if provided (check metadata for category_id)
         if ($categoryId) {

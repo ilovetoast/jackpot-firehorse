@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import { XMarkIcon, CheckIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
-import { usePage } from '@inertiajs/react'
+import { usePage, router } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { usePermission } from '../hooks/usePermission'
 
@@ -92,6 +92,9 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                 throw new Error(data.message || 'Failed to approve')
             }
 
+            // Refresh dashboard to update pending count
+            router.reload({ only: ['pending_ai_suggestions'] })
+
             // Remove item from list and adjust index
             const newItems = items.filter((i) => !(i.id === item.id && i.asset_id === item.asset_id && i.type === item.type))
             setItems(newItems)
@@ -145,6 +148,9 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                 const data = await response.json()
                 throw new Error(data.message || 'Failed to reject')
             }
+
+            // Refresh dashboard to update pending count
+            router.reload({ only: ['pending_ai_suggestions'] })
 
             // Remove item from list and adjust index
             const newItems = items.filter((i) => !(i.id === item.id && i.asset_id === item.asset_id && i.type === item.type))

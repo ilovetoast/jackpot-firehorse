@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { XMarkIcon, CheckIcon, PencilIcon, XCircleIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
-import { usePage } from '@inertiajs/react'
+import { usePage, router } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { usePermission } from '../hooks/usePermission'
 
@@ -42,23 +42,34 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
             },
             credentials: 'same-origin',
         })
-            .then((res) => res.json())
+            .then(async (res) => {
+                if (!res.ok) {
+                    const errorText = await res.text().catch(() => 'Unknown error')
+                    throw new Error(`HTTP ${res.status}: ${errorText}`)
+                }
+                return res.json()
+            })
             .then((data) => {
                 // Group items by asset_id for one-asset-at-a-time display
                 const items = data.items || []
                 const assetsMap = new Map()
                 
                 items.forEach((item) => {
+                    if (!item || !item.asset_id) {
+                        console.warn('[PendingMetadataModal] Skipping invalid item:', item)
+                        return
+                    }
+                    
                     if (!assetsMap.has(item.asset_id)) {
                         assetsMap.set(item.asset_id, {
                             asset_id: item.asset_id,
-                            asset_title: item.asset_title,
-                            asset_filename: item.asset_filename,
-                            final_thumbnail_url: item.final_thumbnail_url,
-                            preview_thumbnail_url: item.preview_thumbnail_url,
-                            thumbnail_status: item.thumbnail_status,
-                            mime_type: item.mime_type,
-                            file_extension: item.file_extension,
+                            asset_title: item.asset_title || item.asset_filename || null,
+                            asset_filename: item.asset_filename || null,
+                            final_thumbnail_url: item.final_thumbnail_url || null,
+                            preview_thumbnail_url: item.preview_thumbnail_url || null,
+                            thumbnail_status: item.thumbnail_status || 'pending',
+                            mime_type: item.mime_type || null,
+                            file_extension: item.file_extension || null,
                             metadata: item.metadata || {},
                             fields: []
                         })
@@ -73,6 +84,7 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
             })
             .catch((err) => {
                 console.error('[PendingMetadataModal] Failed to fetch pending metadata', err)
+                alert('Failed to load pending metadata approvals. Please try again.')
                 setLoading(false)
             })
     }, [isOpen, canApprove])
@@ -106,6 +118,9 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                 const data = await response.json()
                 throw new Error(data.message || 'Failed to approve')
             }
+
+            // Refresh dashboard to update pending count
+            router.reload({ only: ['pending_metadata_approvals_count'] })
 
             // Remove field from current asset's fields
             setAssets((prevAssets) => {
@@ -160,6 +175,9 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                 const data = await response.json()
                 throw new Error(data.message || 'Failed to reject')
             }
+
+            // Refresh dashboard to update pending count
+            router.reload({ only: ['pending_metadata_approvals_count'] })
 
             // Remove field from current asset's fields
             setAssets((prevAssets) => {

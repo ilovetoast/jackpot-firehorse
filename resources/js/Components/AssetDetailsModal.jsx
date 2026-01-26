@@ -98,11 +98,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [showActionsDropdown, setShowActionsDropdown] = useState(false)
     const actionsDropdownRef = useRef(null)
     
-    // Metadata approval state
-    const [approvingMetadataId, setApprovingMetadataId] = useState(null)
-    const [rejectingMetadataId, setRejectingMetadataId] = useState(null)
-    
-    // Check if user can approve metadata
+    // Check if user can approve metadata (for display purposes only - approval happens in drawer)
     const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
     const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
     
@@ -171,49 +167,8 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
         }
     }
 
-    // Handle approve pending metadata
-    const handleApproveMetadata = async (metadataId) => {
-        if (!metadataId) return
-        
-        setApprovingMetadataId(metadataId)
-        
-        try {
-            const response = await window.axios.post(`/app/metadata/${metadataId}/approve`)
-            
-            // Refresh metadata
-            await fetchMetadata()
-            
-            // Dispatch event for other components
-            window.dispatchEvent(new CustomEvent('metadata-updated'))
-        } catch (err) {
-            console.error('Failed to approve metadata:', err)
-            alert(err.response?.data?.message || 'Failed to approve metadata')
-        } finally {
-            setApprovingMetadataId(null)
-        }
-    }
-
-    // Handle reject pending metadata
-    const handleRejectMetadata = async (metadataId) => {
-        if (!metadataId) return
-        
-        setRejectingMetadataId(metadataId)
-        
-        try {
-            const response = await window.axios.post(`/app/metadata/${metadataId}/reject`)
-            
-            // Refresh metadata
-            await fetchMetadata()
-            
-            // Dispatch event for other components
-            window.dispatchEvent(new CustomEvent('metadata-updated'))
-        } catch (err) {
-            console.error('Failed to reject metadata:', err)
-            alert(err.response?.data?.message || 'Failed to reject metadata')
-        } finally {
-            setRejectingMetadataId(null)
-        }
-    }
+    // NOTE: Approve/Reject handlers removed - use drawer's PendingMetadataList component instead
+    // The drawer uses the proper /pending endpoint and refreshes correctly
 
     // Check if field has a value
     const hasValue = (value, type) => {
@@ -1419,35 +1374,8 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                         </div>
                                                         <div className="ml-3 flex-shrink-0 flex items-center gap-2">
                                                             {getSourceBadge(field)}
-                                                            {/* Show approve/reject buttons if field has pending approval and user can approve */}
-                                                            {field.has_pending && 
-                                                             metadataApprovalEnabled && 
-                                                             canApproveMetadata && 
-                                                             field.pending_metadata_ids && 
-                                                             field.pending_metadata_ids.length > 0 && (
-                                                                <>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleApproveMetadata(field.pending_metadata_ids[0])}
-                                                                        disabled={approvingMetadataId === field.pending_metadata_ids[0] || rejectingMetadataId === field.pending_metadata_ids[0]}
-                                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                        title="Approve this metadata value"
-                                                                    >
-                                                                        <CheckIcon className="h-3 w-3" />
-                                                                        Approve
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRejectMetadata(field.pending_metadata_ids[0])}
-                                                                        disabled={approvingMetadataId === field.pending_metadata_ids[0] || rejectingMetadataId === field.pending_metadata_ids[0]}
-                                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                        title="Reject this metadata value"
-                                                                    >
-                                                                        <XMarkIcon className="h-3 w-3" />
-                                                                        Reject
-                                                                    </button>
-                                                                </>
-                                                            )}
+                                                            {/* Approve/Reject buttons removed - use drawer's PendingMetadataList component instead */}
+                                                            {/* The drawer's approval functionality works correctly and uses the proper /pending endpoint */}
                                                             {/* Show "Auto" badge for readonly/automatic fields */}
                                                             {(field.readonly || field.population_mode === 'automatic') && (
                                                                 <span
