@@ -1141,7 +1141,7 @@ class CompanyController extends Controller
                 return response()->json(['error' => 'You do not have permission to update AI settings.'], 403);
             }
 
-            $validated =             $request->validate([
+            $validated = $request->validate([
                 'disable_ai_tagging' => 'boolean',
                 'enable_ai_tag_suggestions' => 'boolean',
                 'enable_ai_tag_auto_apply' => 'boolean',

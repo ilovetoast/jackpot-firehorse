@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Middleware;
 use Spatie\Permission\Models\Role;
 
@@ -443,6 +444,88 @@ class HandleInertiaRequests extends Middleware
             ],
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
         ];
+        
+        // Add pending items counts for notification bell (simple, lightweight)
+        // Only calculate if tenant and brand are available
+        if ($tenant && $activeBrand && $user) {
+            try {
+                // Pending AI suggestions count (metadata candidates + tag candidates)
+                $pendingMetadataCount = DB::table('asset_metadata_candidates')
+                    ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
+                    ->where('assets.tenant_id', $tenant->id)
+                    ->where('assets.brand_id', $activeBrand->id)
+                    ->whereNull('asset_metadata_candidates.resolved_at')
+                    ->whereNull('asset_metadata_candidates.dismissed_at')
+                    ->where('asset_metadata_candidates.producer', 'ai')
+                    ->count();
+                    
+                $pendingTagCount = DB::table('asset_tag_candidates')
+                    ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
+                    ->where('assets.tenant_id', $tenant->id)
+                    ->where('assets.brand_id', $activeBrand->id)
+                    ->where('asset_tag_candidates.producer', 'ai')
+                    ->whereNull('asset_tag_candidates.resolved_at')
+                    ->whereNull('asset_tag_candidates.dismissed_at')
+                    ->count();
+                    
+                $totalPendingAiSuggestions = $pendingMetadataCount + $pendingTagCount;
+                
+                // Pending metadata approvals: Always compute user's own pending fields
+                // Only compute global pending (for approvers) if user can approve
+                $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
+                $canApprove = $approvalResolver->canApprove($user, $tenant);
+                
+                // Base query for pending metadata (field-based, not asset-based)
+                $pendingMetadataBaseQuery = DB::table('asset_metadata')
+                    ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                    ->where('assets.tenant_id', $tenant->id)
+                    ->where('assets.brand_id', $activeBrand->id)
+                    ->whereNull('asset_metadata.approved_at')
+                    ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+                    ->whereIn('asset_metadata.source', ['ai', 'user'])
+                    ->where('metadata_fields.population_mode', '!=', 'automatic')
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
+                            ->from('asset_metadata as approved_metadata')
+                            ->whereColumn('approved_metadata.asset_id', 'asset_metadata.asset_id')
+                            ->whereColumn('approved_metadata.metadata_field_id', 'asset_metadata.metadata_field_id')
+                            ->whereNotNull('approved_metadata.approved_at')
+                            ->whereNotIn('approved_metadata.source', ['user_rejected', 'ai_rejected']);
+                    });
+                
+                // Always compute: user's own pending metadata fields
+                $myPendingMetadataApprovalsCount = (clone $pendingMetadataBaseQuery)
+                    ->where('assets.user_id', $user->id)
+                    ->count('asset_metadata.id');
+                
+                // Conditionally compute: all pending metadata fields (only for approvers)
+                $pendingMetadataApprovalsCount = null;
+                if ($canApprove) {
+                    $pendingMetadataApprovalsCount = (clone $pendingMetadataBaseQuery)
+                        ->count('asset_metadata.id');
+                }
+                
+                $shared['pending_items'] = [
+                    'ai_suggestions' => $totalPendingAiSuggestions,
+                    'metadata_approvals' => $pendingMetadataApprovalsCount, // null if not approver
+                    'my_pending_metadata_approvals' => $myPendingMetadataApprovalsCount, // always computed
+                ];
+            } catch (\Exception $e) {
+                // If there's an error, just set to zero
+                $shared['pending_items'] = [
+                    'ai_suggestions' => 0,
+                    'metadata_approvals' => null,
+                    'my_pending_metadata_approvals' => 0,
+                ];
+            }
+        } else {
+            $shared['pending_items'] = [
+                'ai_suggestions' => 0,
+                'metadata_approvals' => null,
+                'my_pending_metadata_approvals' => 0,
+            ];
+        }
         
         return $shared;
     }

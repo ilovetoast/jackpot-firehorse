@@ -14,6 +14,8 @@ const WIDGETS = [
     { key: 'download_links', label: 'Download Links', description: 'Shows download link usage' },
     { key: 'most_viewed', label: 'Most Viewed Assets', description: 'Shows most viewed assets' },
     { key: 'most_downloaded', label: 'Most Downloaded Assets', description: 'Shows most downloaded assets' },
+    { key: 'pending_ai_suggestions', label: 'Pending AI Suggestions', description: 'Shows pending AI tag and metadata suggestions' },
+    { key: 'pending_metadata_approvals', label: 'Pending Metadata Approvals', description: 'Shows pending metadata fields requiring approval' },
 ]
 
 const ROLES = [
@@ -40,7 +42,13 @@ export default function DashboardWidgetSettings({ tenant, canEdit }) {
                 } else {
                     // Defaults: company widgets hidden for contributor/viewer, visible for others
                     const isCompanyWidget = ['total_assets', 'storage', 'download_links'].includes(widget.key)
+                    const isPermissionWidget = ['pending_ai_suggestions', 'pending_metadata_approvals'].includes(widget.key)
+                    
                     if (isCompanyWidget) {
+                        config[role.key][widget.key] = !['contributor', 'viewer'].includes(role.key)
+                    } else if (isPermissionWidget) {
+                        // Permission-based widgets: visible to owner/admin/brand_manager by default
+                        // (actual visibility still requires permissions, this is just the widget visibility setting)
                         config[role.key][widget.key] = !['contributor', 'viewer'].includes(role.key)
                     } else {
                         config[role.key][widget.key] = true // Most viewed/downloaded visible to all
@@ -107,7 +115,12 @@ export default function DashboardWidgetSettings({ tenant, canEdit }) {
             defaultConfig[role.key] = {}
             WIDGETS.forEach(widget => {
                 const isCompanyWidget = ['total_assets', 'storage', 'download_links'].includes(widget.key)
+                const isPermissionWidget = ['pending_ai_suggestions', 'pending_metadata_approvals'].includes(widget.key)
+                
                 if (isCompanyWidget) {
+                    defaultConfig[role.key][widget.key] = !['contributor', 'viewer'].includes(role.key)
+                } else if (isPermissionWidget) {
+                    // Permission-based widgets: visible to owner/admin/brand_manager by default
                     defaultConfig[role.key][widget.key] = !['contributor', 'viewer'].includes(role.key)
                 } else {
                     defaultConfig[role.key][widget.key] = true

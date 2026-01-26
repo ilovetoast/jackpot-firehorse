@@ -77,7 +77,8 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                     assetsMap.get(item.asset_id).fields.push(item)
                 })
                 
-                setAssets(Array.from(assetsMap.values()))
+                const assetsArray = Array.from(assetsMap.values())
+                setAssets(assetsArray)
                 setCurrentIndex(0)
                 currentIndexRef.current = 0
                 setLoading(false)
@@ -119,13 +120,11 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                 throw new Error(data.message || 'Failed to approve')
             }
 
-            // Refresh dashboard to update pending count
-            router.reload({ only: ['pending_metadata_approvals_count'] })
-
-            // Remove field from current asset's fields
+            // Remove field from current asset's fields first (optimistic update)
             setAssets((prevAssets) => {
+                const currentIdx = currentIndexRef.current
                 const updatedAssets = prevAssets.map((asset, idx) => {
-                    if (idx === currentIndex) {
+                    if (idx === currentIdx) {
                         return {
                             ...asset,
                             fields: asset.fields.filter((f) => f.id !== field.id)
@@ -137,12 +136,19 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                 // Adjust current index if needed (use setTimeout to avoid state update conflicts)
                 if (updatedAssets.length === 0) {
                     setTimeout(() => onClose(), 0)
-                } else if (currentIndex >= updatedAssets.length && updatedAssets.length > 0) {
-                    setTimeout(() => setCurrentIndex(updatedAssets.length - 1), 0)
+                } else if (currentIdx >= updatedAssets.length && updatedAssets.length > 0) {
+                    const newIndex = updatedAssets.length - 1
+                    setTimeout(() => {
+                        setCurrentIndex(newIndex)
+                        currentIndexRef.current = newIndex
+                    }, 0)
                 }
                 
                 return updatedAssets
             })
+
+            // Don't reload dashboard while modal is open - it causes the modal to close
+            // The pending count will update when the modal is closed and dashboard refreshes naturally
         } catch (error) {
             console.error('[PendingMetadataModal] Failed to approve', error)
             alert(error.message || 'Failed to approve metadata')
@@ -176,13 +182,11 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                 throw new Error(data.message || 'Failed to reject')
             }
 
-            // Refresh dashboard to update pending count
-            router.reload({ only: ['pending_metadata_approvals_count'] })
-
-            // Remove field from current asset's fields
+            // Remove field from current asset's fields first (optimistic update)
             setAssets((prevAssets) => {
+                const currentIdx = currentIndexRef.current
                 const updatedAssets = prevAssets.map((asset, idx) => {
-                    if (idx === currentIndex) {
+                    if (idx === currentIdx) {
                         return {
                             ...asset,
                             fields: asset.fields.filter((f) => f.id !== field.id)
@@ -194,12 +198,19 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                 // Adjust current index if needed (use setTimeout to avoid state update conflicts)
                 if (updatedAssets.length === 0) {
                     setTimeout(() => onClose(), 0)
-                } else if (currentIndex >= updatedAssets.length && updatedAssets.length > 0) {
-                    setTimeout(() => setCurrentIndex(updatedAssets.length - 1), 0)
+                } else if (currentIdx >= updatedAssets.length && updatedAssets.length > 0) {
+                    const newIndex = updatedAssets.length - 1
+                    setTimeout(() => {
+                        setCurrentIndex(newIndex)
+                        currentIndexRef.current = newIndex
+                    }, 0)
                 }
                 
                 return updatedAssets
             })
+
+            // Don't reload dashboard while modal is open - it causes the modal to close
+            // The pending count will update when the modal is closed and dashboard refreshes naturally
         } catch (error) {
             console.error('[PendingMetadataModal] Failed to reject', error)
             alert(error.message || 'Failed to reject metadata')
@@ -214,12 +225,13 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
 
     // Handle edit & approve (navigate to asset edit page)
     const handleEditAndApprove = (field) => {
-        // Navigate to asset edit page - approval will happen there
-        // Close modal first, then navigate
+        // Navigate to assets page with asset query param to open drawer
+        // Use Inertia router to navigate properly
         onClose()
-        setTimeout(() => {
-            window.location.href = `/app/assets/${field.asset_id}?edit_metadata=${field.field_id}`
-        }, 100)
+        router.visit(`/app/assets?asset=${field.asset_id}&edit_metadata=${field.field_id}`, {
+            preserveState: false, // Allow navigation to assets page
+            preserveScroll: false,
+        })
     }
 
     // Handle approve all fields for current asset and move to next
@@ -244,21 +256,29 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                     return prevAssets
                 }
                 // Advance to next asset if available
-                if (currentIndex < prevAssets.length - 1) {
-                    setCurrentIndex(currentIndex + 1)
+                // Use the ref to get the most current index after state updates
+                const nextIndex = currentIndexRef.current < prevAssets.length - 1 
+                    ? currentIndexRef.current + 1 
+                    : currentIndexRef.current
+                
+                if (nextIndex < prevAssets.length) {
+                    setCurrentIndex(nextIndex)
+                    currentIndexRef.current = nextIndex
                 } else {
                     // No more assets, close modal
                     onClose()
                 }
                 return prevAssets
             })
-        }, 200)
+        }, 300)
     }
 
     // Handle skip (move to next asset)
     const handleSkip = () => {
         if (hasMore) {
-            setCurrentIndex(currentIndex + 1)
+            const nextIndex = currentIndex + 1
+            setCurrentIndex(nextIndex)
+            currentIndexRef.current = nextIndex
         } else {
             onClose()
         }
@@ -433,7 +453,11 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                                 <div className="flex items-center justify-between gap-3">
                                     <button
                                         type="button"
-                                        onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
+                                        onClick={() => {
+                                            const prevIndex = Math.max(0, currentIndex - 1)
+                                            setCurrentIndex(prevIndex)
+                                            currentIndexRef.current = prevIndex
+                                        }}
                                         disabled={!hasPrevious}
                                         className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
@@ -462,7 +486,11 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
                                     
                                     <button
                                         type="button"
-                                        onClick={() => setCurrentIndex(Math.min(assets.length - 1, currentIndex + 1))}
+                                        onClick={() => {
+                                            const nextIndex = Math.min(assets.length - 1, currentIndex + 1)
+                                            setCurrentIndex(nextIndex)
+                                            currentIndexRef.current = nextIndex
+                                        }}
                                         disabled={!hasMore}
                                         className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >

@@ -18,7 +18,9 @@ export default function PendingMetadataTile({ pendingCount = 0 }) {
     const [isModalOpen, setIsModalOpen] = useState(false)
     const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
 
-    // Don't show tile if user doesn't have approve permission or no pending approvals
+    // Only show tile for users who can approve metadata
+    // Contributors cannot approve, so they shouldn't see this tile
+    // (They can see their own pending count in notifications instead)
     if (!canApprove || pendingCount === 0) {
         return null
     }
@@ -38,7 +40,9 @@ export default function PendingMetadataTile({ pendingCount = 0 }) {
                         </div>
                     </div>
                     <div className="ml-5 w-0 flex-1">
-                        <dt className="text-sm font-medium text-gray-500 truncate">Pending Metadata Approvals</dt>
+                        <dt className="text-sm font-medium text-gray-500 truncate">
+                            Pending Metadata Approvals
+                        </dt>
                         <dd className="mt-1">
                             <div className="flex items-baseline">
                                 <span className="text-2xl font-semibold tracking-tight text-gray-900">

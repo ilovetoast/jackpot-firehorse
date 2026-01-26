@@ -1,16 +1,35 @@
 import { useState, useEffect } from 'react'
-import { BellIcon } from '@heroicons/react/24/outline'
+import { usePage, router } from '@inertiajs/react'
+import { BellIcon, SparklesIcon, CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
+import { usePermission } from '../hooks/usePermission'
 
 /**
  * Phase AF-3: Notification Bell Component
  * 
  * Shows unread notification count and opens notification panel.
+ * Also shows simple pending items (AI suggestions, metadata approvals).
  */
 export default function NotificationBell({ textColor = '#000000' }) {
+    const { pending_items } = usePage().props
     const [notifications, setNotifications] = useState([])
     const [unreadCount, setUnreadCount] = useState(0)
     const [isOpen, setIsOpen] = useState(false)
     const [loading, setLoading] = useState(true)
+    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
+    const { hasPermission: canViewSuggestions } = usePermission('metadata.suggestions.view')
+    const [hasStaleAssetGrid, setHasStaleAssetGrid] = useState(() => {
+        // Initialize from window-level state
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            return window.__assetGridStaleness.hasStaleAssetGrid || false
+        }
+        return false
+    })
+    
+    // Determine which metadata approval count to show
+    // Approvers see all pending (actionable), contributors see their own (informational)
+    const metadataApprovalsCount = canApprove 
+        ? (pending_items?.metadata_approvals ?? 0)  // Approvers: all pending
+        : (pending_items?.my_pending_metadata_approvals ?? 0)  // Contributors: their own
 
     useEffect(() => {
         loadNotifications()
@@ -18,6 +37,28 @@ export default function NotificationBell({ textColor = '#000000' }) {
         // Refresh notifications every 30 seconds
         const interval = setInterval(loadNotifications, 30000)
         return () => clearInterval(interval)
+    }, [])
+    
+    // Listen for staleness flag changes
+    useEffect(() => {
+        const handleStalenessChange = (event) => {
+            setHasStaleAssetGrid(event.detail.hasStaleAssetGrid)
+        }
+        
+        // Initialize from window state
+        if (typeof window !== 'undefined') {
+            if (window.__assetGridStaleness) {
+                setHasStaleAssetGrid(window.__assetGridStaleness.hasStaleAssetGrid || false)
+            }
+            
+            window.addEventListener('assetGridStalenessChanged', handleStalenessChange)
+        }
+        
+        return () => {
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('assetGridStalenessChanged', handleStalenessChange)
+            }
+        }
     }, [])
 
     const loadNotifications = async () => {
@@ -81,7 +122,23 @@ export default function NotificationBell({ textColor = '#000000' }) {
     }
 
     return (
-        <div className="relative">
+        <div className="relative flex items-center gap-2">
+            {/* Stale Asset Grid Indicator - shows when grid is stale */}
+            {hasStaleAssetGrid && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        // Navigate to assets page to refresh
+                        router.visit('/app/assets')
+                    }}
+                    className="relative p-2 text-amber-500 hover:text-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 rounded-full transition-colors"
+                    title="Asset grid may be stale - click to refresh"
+                    aria-label="Asset grid may be stale"
+                >
+                    <SparklesIcon className="h-6 w-6" />
+                </button>
+            )}
+            
             <button
                 type="button"
                 onClick={() => setIsOpen(!isOpen)}
@@ -89,12 +146,17 @@ export default function NotificationBell({ textColor = '#000000' }) {
                 style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
             >
                 <BellIcon className="h-6 w-6" />
-                {unreadCount > 0 && (
+                {/* Show badge if there are unread notifications OR pending items (only if user has permission) */}
+                {(unreadCount > 0 || (pending_items && ((canViewSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0))) && (
                     <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
                 )}
-                {unreadCount > 0 && (
+                {(unreadCount > 0 || (pending_items && ((canViewSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0))) && (
                     <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
-                        {unreadCount > 9 ? '9+' : unreadCount}
+                        {(() => {
+                            const totalPending = (canViewSuggestions ? (pending_items?.ai_suggestions || 0) : 0) + metadataApprovalsCount
+                            const total = unreadCount + totalPending
+                            return total > 9 ? '9+' : total
+                        })()}
                     </span>
                 )}
             </button>
@@ -110,9 +172,89 @@ export default function NotificationBell({ textColor = '#000000' }) {
                             <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
                         </div>
                         <div className="py-1">
+                            {/* Pending Items - Simple notifications */}
+                            {pending_items && ((canViewSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0) && (
+                                <>
+                                    {canViewSuggestions && pending_items.ai_suggestions > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                router.visit('/app/dashboard')
+                                                setIsOpen(false)
+                                            }}
+                                            className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 bg-blue-50"
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                    <SparklesIcon className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-medium text-gray-900">
+                                                            {pending_items.ai_suggestions} pending AI {pending_items.ai_suggestions === 1 ? 'suggestion' : 'suggestions'}
+                                                        </p>
+                                                        <p className="text-xs text-gray-500 mt-0.5">
+                                                            Review tags and metadata
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
+                                            </div>
+                                        </button>
+                                    )}
+                                    {metadataApprovalsCount > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                router.visit('/app/dashboard')
+                                                setIsOpen(false)
+                                            }}
+                                            className={`w-full text-left px-4 py-3 text-sm ${
+                                                canApprove 
+                                                    ? 'hover:bg-amber-50 bg-amber-50'  // Approver: actionable warning style
+                                                    : 'hover:bg-gray-50 bg-gray-50'    // Contributor: informational subtle style
+                                            }`}
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                    {canApprove ? (
+                                                        <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                                                    ) : (
+                                                        <InformationCircleIcon className="h-5 w-5 text-gray-500 flex-shrink-0 mt-0.5" />
+                                                    )}
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-medium text-gray-900">
+                                                            {canApprove ? (
+                                                                <>
+                                                                    {metadataApprovalsCount} pending metadata {metadataApprovalsCount === 1 ? 'approval' : 'approvals'}
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    {metadataApprovalsCount} of your metadata {metadataApprovalsCount === 1 ? 'field is' : 'fields are'} pending approval
+                                                                </>
+                                                            )}
+                                                        </p>
+                                                        <p className="text-xs text-gray-500 mt-0.5">
+                                                            {canApprove ? (
+                                                                'Review metadata fields'
+                                                            ) : (
+                                                                'An admin will review these shortly'
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <span className={`ml-2 h-2 w-2 rounded-full flex-shrink-0 mt-1 ${
+                                                    canApprove ? 'bg-amber-500' : 'bg-gray-400'
+                                                }`} />
+                                            </div>
+                                        </button>
+                                    )}
+                                    {(notifications.length > 0 || loading) && (
+                                        <div className="border-t border-gray-200 my-1" />
+                                    )}
+                                </>
+                            )}
+                            
+                            {/* Regular Notifications */}
                             {loading ? (
                                 <div className="px-4 py-3 text-sm text-gray-500">Loading...</div>
-                            ) : notifications.length === 0 ? (
+                            ) : notifications.length === 0 && (!pending_items || ((!canViewSuggestions || pending_items.ai_suggestions === 0) && metadataApprovalsCount === 0)) ? (
                                 <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
                             ) : (
                                 notifications.map((notification) => (

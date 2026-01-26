@@ -1356,7 +1356,7 @@ class AssetController extends Controller
                 ->whereNull('deleted_at')
                 ->orderBy('created_at', 'desc')
                 ->limit(100) // Reasonable limit
-                ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at'])
+                ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at', 'user_id'])
                 ->map(function ($asset) use ($now, $staleThreshold, &$staleCount) {
                     $ageMinutes = $asset->created_at->diffInMinutes($now);
                     $isStale = $ageMinutes > $staleThreshold;
@@ -1380,6 +1380,7 @@ class AssetController extends Controller
                         'created_at' => $asset->created_at->toIso8601String(),
                         'age_minutes' => $ageMinutes,
                         'is_stale' => $isStale,
+                        'user_id' => $asset->user_id, // Include user_id to detect other users' uploads
                     ];
                 })
                 ->filter(function ($asset) {

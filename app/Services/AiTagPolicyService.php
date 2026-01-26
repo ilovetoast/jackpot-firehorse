@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * AI Tag Policy Service
@@ -222,13 +223,38 @@ class AiTagPolicyService
         }
 
         // Upsert settings
-        DB::table('tenant_ai_tag_settings')->updateOrInsert(
-            ['tenant_id' => $tenant->id],
-            array_merge($filteredSettings, [
-                'updated_at' => now(),
-                'created_at' => now(), // Only used if inserting
-            ])
-        );
+        // Check if ai_best_practices_limit column exists (added in later migration)
+        $hasBestPracticesLimit = Schema::hasColumn('tenant_ai_tag_settings', 'ai_best_practices_limit');
+        
+        // Remove ai_best_practices_limit from update if column doesn't exist
+        $settingsToUpdate = $filteredSettings;
+        if (!$hasBestPracticesLimit && isset($settingsToUpdate['ai_best_practices_limit'])) {
+            unset($settingsToUpdate['ai_best_practices_limit']);
+        }
+        
+        // Use updateOrInsert - it only sets created_at on insert, not on update
+        $exists = DB::table('tenant_ai_tag_settings')
+            ->where('tenant_id', $tenant->id)
+            ->exists();
+        
+        if ($exists) {
+            // Update existing record (don't touch created_at)
+            if (!empty($settingsToUpdate)) {
+                DB::table('tenant_ai_tag_settings')
+                    ->where('tenant_id', $tenant->id)
+                    ->update(array_merge($settingsToUpdate, [
+                        'updated_at' => now(),
+                    ]));
+            }
+        } else {
+            // Insert new record (set both timestamps)
+            DB::table('tenant_ai_tag_settings')
+                ->insert(array_merge($settingsToUpdate, [
+                    'tenant_id' => $tenant->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]));
+        }
 
         // Clear cache
         $this->clearCache($tenant);
@@ -263,14 +289,25 @@ class AiTagPolicyService
                 ];
             }
 
-            return [
+            // Check if ai_best_practices_limit column exists (added in later migration)
+            $hasBestPracticesLimit = Schema::hasColumn('tenant_ai_tag_settings', 'ai_best_practices_limit');
+            
+            $result = [
                 'disable_ai_tagging' => (bool) $settings->disable_ai_tagging,
                 'enable_ai_tag_suggestions' => (bool) $settings->enable_ai_tag_suggestions,
                 'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
                 'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
                 'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,
-                'ai_best_practices_limit' => $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT,
             ];
+            
+            // Only include ai_best_practices_limit if column exists
+            if ($hasBestPracticesLimit) {
+                $result['ai_best_practices_limit'] = $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT;
+            } else {
+                $result['ai_best_practices_limit'] = self::BEST_PRACTICES_AUTO_TAG_LIMIT; // Use default if column doesn't exist
+            }
+            
+            return $result;
         });
     }
 

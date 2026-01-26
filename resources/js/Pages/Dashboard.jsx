@@ -41,6 +41,8 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
     const showDownloadLinks = widget_visibility.download_links !== false
     const showMostViewed = widget_visibility.most_viewed !== false
     const showMostDownloaded = widget_visibility.most_downloaded !== false
+    const showPendingAiSuggestions = widget_visibility.pending_ai_suggestions !== false
+    const showPendingMetadataApprovals = widget_visibility.pending_metadata_approvals !== false
 
     // Format storage size with appropriate unit
     const formatStorage = (mb) => {
@@ -375,13 +377,15 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                         </Link>
                     )}
 
-                    {/* Pending AI Suggestions Tile */}
-                    {pending_ai_suggestions && (
+                    {/* Pending AI Suggestions Tile - Check widget visibility AND permission */}
+                    {showPendingAiSuggestions && pending_ai_suggestions && (
                         <PendingAiSuggestionsTile pendingCount={pending_ai_suggestions.total || 0} />
                     )}
 
-                    {/* TASK 2: Pending Metadata Approvals Tile */}
-                    <PendingMetadataTile pendingCount={pending_metadata_approvals_count || 0} />
+                    {/* TASK 2: Pending Metadata Approvals Tile - Check widget visibility AND permission */}
+                    {showPendingMetadataApprovals && (
+                        <PendingMetadataTile pendingCount={pending_metadata_approvals_count || 0} />
+                    )}
 
                     {/* AI Tagging Card - Only show if user has permission and data is available */}
                     {ai_usage && (

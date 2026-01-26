@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { usePage } from '@inertiajs/react'
+import { usePage, router } from '@inertiajs/react'
 import {
     ArrowPathIcon,
     XCircleIcon,
     ChevronUpIcon,
     ChevronDownIcon,
     XMarkIcon,
+    SparklesIcon,
 } from '@heroicons/react/24/outline'
 
 /**
@@ -251,6 +252,74 @@ export default function AssetProcessingTray() {
         return title.substring(0, maxLength) + '...'
     }
 
+    // Detect if any processing assets were uploaded by OTHER users (not current user)
+    const currentUserId = auth?.user?.id
+    const hasOtherUsersAssets = processingAssets.some(
+        (asset) => asset.user_id && asset.user_id !== currentUserId
+    )
+
+    // Staleness flag: Track if asset grid is stale (has other users' processing assets)
+    // This flag is set when hasOtherUsersAssets becomes true, and cleared on refresh/navigation
+    const [hasStaleAssetGrid, setHasStaleAssetGrid] = useState(() => {
+        // Initialize from window-level state (persists across component remounts)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            return window.__assetGridStaleness.hasStaleAssetGrid || false
+        }
+        return false
+    })
+
+    // Update window-level state when staleness changes
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            if (!window.__assetGridStaleness) {
+                window.__assetGridStaleness = { hasStaleAssetGrid: false }
+            }
+            window.__assetGridStaleness.hasStaleAssetGrid = hasStaleAssetGrid
+            
+            // Dispatch custom event for other components to listen
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid }
+            }))
+        }
+    }, [hasStaleAssetGrid])
+
+    // Set staleness flag when other users' assets start processing
+    useEffect(() => {
+        if (hasOtherUsersAssets && !hasStaleAssetGrid) {
+            setHasStaleAssetGrid(true)
+        }
+    }, [hasOtherUsersAssets, hasStaleAssetGrid])
+
+    // Handle refresh button click - soft reload asset grid and clear staleness
+    const handleRefreshGrid = () => {
+        // Clear staleness flag immediately (optimistic)
+        setHasStaleAssetGrid(false)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
+        
+        // Check if we're on the assets page
+        const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
+        const isAssetsPage = currentPath.startsWith('/app/assets') || currentPath.startsWith('/app/categories')
+        
+        if (isAssetsPage) {
+            // Soft reload only the assets data (preserves scroll, filters, etc.)
+            router.reload({ 
+                only: ['assets'],
+                onSuccess: () => {
+                    // Ensure staleness is cleared after reload completes
+                    setHasStaleAssetGrid(false)
+                }
+            })
+        } else {
+            // If not on assets page, do a full page reload to navigate to assets
+            router.visit('/app/assets')
+        }
+    }
+
     // Don't render on unauthenticated routes or admin routes
     if (!isAuthenticated || isAdminRoute) {
         return null
@@ -285,13 +354,26 @@ export default function AssetProcessingTray() {
                             )}
                         </button>
                     </div>
-                    <button
-                        onClick={handleDismiss}
-                        className="text-gray-400 hover:text-gray-500 focus:outline-none"
-                        aria-label="Dismiss tray"
-                    >
-                        <XMarkIcon className="h-5 w-5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {/* Refresh button - only show when other users' assets are processing */}
+                        {hasOtherUsersAssets && (
+                            <button
+                                onClick={handleRefreshGrid}
+                                className="text-gray-400 hover:text-indigo-600 focus:outline-none transition-colors"
+                                aria-label="New assets are processing — refresh grid"
+                                title="New assets are processing — refresh grid"
+                            >
+                                <SparklesIcon className="h-5 w-5" />
+                            </button>
+                        )}
+                        <button
+                            onClick={handleDismiss}
+                            className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                            aria-label="Dismiss tray"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Expanded content */}

@@ -5,7 +5,7 @@
  * across all assets. Allows quick approve/deny actions.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { XMarkIcon, CheckIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
@@ -16,6 +16,7 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
     const [loading, setLoading] = useState(true)
     const [items, setItems] = useState([])
     const [currentIndex, setCurrentIndex] = useState(0)
+    const currentIndexRef = useRef(0) // Track current index for closures
     const [processing, setProcessing] = useState(new Set())
     
     // Permission checks
@@ -42,6 +43,7 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
             .then((data) => {
                 setItems(data.items || [])
                 setCurrentIndex(0)
+                currentIndexRef.current = 0
                 setLoading(false)
             })
             .catch((err) => {
@@ -92,19 +94,34 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                 throw new Error(data.message || 'Failed to approve')
             }
 
-            // Refresh dashboard to update pending count
-            router.reload({ only: ['pending_ai_suggestions'] })
-
-            // Remove item from list and adjust index
-            const newItems = items.filter((i) => !(i.id === item.id && i.asset_id === item.asset_id && i.type === item.type))
-            setItems(newItems)
-            
-            // Adjust current index if needed
-            if (currentIndex >= newItems.length && newItems.length > 0) {
-                setCurrentIndex(newItems.length - 1)
-            } else if (newItems.length === 0) {
-                onClose()
-            }
+            // Optimistically update UI - remove item from list
+            // Don't reload - it causes the modal to close
+            // Dashboard will refresh when modal is closed
+            setItems((prevItems) => {
+                const newItems = prevItems.filter((i) => !(i.id === item.id && i.asset_id === item.asset_id && i.type === item.type))
+                const currentIdx = currentIndexRef.current
+                
+                // Adjust current index if needed
+                if (newItems.length === 0) {
+                    // All items processed - close modal and refresh dashboard
+                    setTimeout(() => {
+                        onClose()
+                        // Refresh dashboard count after modal is closed
+                        setTimeout(() => {
+                            router.reload({ only: ['pending_ai_suggestions'] })
+                        }, 100)
+                    }, 0)
+                } else if (currentIdx >= newItems.length) {
+                    // Current index is out of bounds - move to last item
+                    const newIndex = newItems.length - 1
+                    setTimeout(() => {
+                        setCurrentIndex(newIndex)
+                        currentIndexRef.current = newIndex
+                    }, 0)
+                }
+                
+                return newItems
+            })
         } catch (error) {
             console.error('[PendingAiSuggestionsModal] Failed to approve', error)
             alert(error.message || 'Failed to approve suggestion')
@@ -149,19 +166,34 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                 throw new Error(data.message || 'Failed to reject')
             }
 
-            // Refresh dashboard to update pending count
-            router.reload({ only: ['pending_ai_suggestions'] })
-
-            // Remove item from list and adjust index
-            const newItems = items.filter((i) => !(i.id === item.id && i.asset_id === item.asset_id && i.type === item.type))
-            setItems(newItems)
-            
-            // Adjust current index if needed
-            if (currentIndex >= newItems.length && newItems.length > 0) {
-                setCurrentIndex(newItems.length - 1)
-            } else if (newItems.length === 0) {
-                onClose()
-            }
+            // Optimistically update UI - remove item from list
+            // Don't reload - it causes the modal to close
+            // Dashboard will refresh when modal is closed
+            setItems((prevItems) => {
+                const newItems = prevItems.filter((i) => !(i.id === item.id && i.asset_id === item.asset_id && i.type === item.type))
+                const currentIdx = currentIndexRef.current
+                
+                // Adjust current index if needed
+                if (newItems.length === 0) {
+                    // All items processed - close modal and refresh dashboard
+                    setTimeout(() => {
+                        onClose()
+                        // Refresh dashboard count after modal is closed
+                        setTimeout(() => {
+                            router.reload({ only: ['pending_ai_suggestions'] })
+                        }, 100)
+                    }, 0)
+                } else if (currentIdx >= newItems.length) {
+                    // Current index is out of bounds - move to last item
+                    const newIndex = newItems.length - 1
+                    setTimeout(() => {
+                        setCurrentIndex(newIndex)
+                        currentIndexRef.current = newIndex
+                    }, 0)
+                }
+                
+                return newItems
+            })
         } catch (error) {
             console.error('[PendingAiSuggestionsModal] Failed to reject', error)
             alert(error.message || 'Failed to reject suggestion')
@@ -382,7 +414,11 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                     <div className="flex items-center justify-between text-sm">
                                         <button
                                             type="button"
-                                            onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
+                                            onClick={() => {
+                                                const newIndex = Math.max(0, currentIndex - 1)
+                                                setCurrentIndex(newIndex)
+                                                currentIndexRef.current = newIndex
+                                            }}
                                             disabled={!hasPrevious}
                                             className="px-3 py-1 text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
@@ -390,7 +426,11 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => setCurrentIndex(Math.min(items.length - 1, currentIndex + 1))}
+                                            onClick={() => {
+                                                const newIndex = Math.min(items.length - 1, currentIndex + 1)
+                                                setCurrentIndex(newIndex)
+                                                currentIndexRef.current = newIndex
+                                            }}
                                             disabled={!hasMore}
                                             className="px-3 py-1 text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >

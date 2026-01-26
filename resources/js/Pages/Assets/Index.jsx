@@ -72,6 +72,14 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 return mergeAsset(prevAsset, newAsset)
             })
         })
+        
+        // Clear staleness flag when assets prop is reloaded (grid is now synced)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
     }, [assets])
     
     // Store only asset ID to prevent stale object references after Inertia reloads
@@ -98,7 +106,42 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
     useEffect(() => {
         setActiveAssetId(null)
+        
+        // Clear staleness flag when category changes (view is synced with new category)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
     }, [selectedCategoryId])
+    
+    // Open drawer from URL query parameter (e.g., ?asset={id}&edit_metadata={field_id})
+    // Also clear staleness flag on mount (navigation to /app/assets completes)
+    useEffect(() => {
+        // Clear staleness flag when navigating to assets page (view is synced)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
+        
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search)
+            const assetId = urlParams.get('asset')
+            const editMetadataFieldId = urlParams.get('edit_metadata')
+            
+            if (assetId && localAssets.length > 0) {
+                const asset = localAssets.find(a => a.id === assetId)
+                if (asset) {
+                    setActiveAssetId(assetId)
+                    // If edit_metadata param is present, the drawer will handle it
+                    // (AssetDrawer or AssetMetadataDisplay should read this)
+                }
+            }
+        }
+    }, [localAssets]) // Re-check when assets load
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge

@@ -409,27 +409,34 @@ class DashboardController extends Controller
         // Only show to users who can approve metadata
         // TASK 2: Use same query logic as getAllPendingMetadataApprovals() API endpoint for consistency
         // Only count fields where there's NO approved row (matches AssetMetadataStateResolver logic)
-        $pendingMetadataApprovalsCount = 0;
         $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
-        if ($approvalResolver->canApprove($user, $tenant)) {
-            $pendingMetadataApprovalsCount = DB::table('asset_metadata')
-                ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
-                ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-                ->where('assets.tenant_id', $tenant->id)
-                ->where('assets.brand_id', $brand->id)
-                ->whereNull('asset_metadata.approved_at')
-                ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
-                ->whereIn('asset_metadata.source', ['ai', 'user'])
-                ->where('metadata_fields.population_mode', '!=', 'automatic')
-                // Exclude fields that already have an approved row (matches AssetMetadataStateResolver logic)
-                ->whereNotExists(function ($query) {
-                    $query->select(DB::raw(1))
-                        ->from('asset_metadata as approved_metadata')
-                        ->whereColumn('approved_metadata.asset_id', 'asset_metadata.asset_id')
-                        ->whereColumn('approved_metadata.metadata_field_id', 'asset_metadata.metadata_field_id')
-                        ->whereNotNull('approved_metadata.approved_at')
-                        ->whereNotIn('approved_metadata.source', ['user_rejected', 'ai_rejected']);
-                })
+        $canApprove = $approvalResolver->canApprove($user, $tenant);
+        
+        // Base query for pending metadata (field-based, not asset-based)
+        $pendingMetadataBaseQuery = DB::table('asset_metadata')
+            ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->whereNull('asset_metadata.approved_at')
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+            ->whereIn('asset_metadata.source', ['ai', 'user'])
+            ->where('metadata_fields.population_mode', '!=', 'automatic')
+            // Exclude fields that already have an approved row (matches AssetMetadataStateResolver logic)
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('asset_metadata as approved_metadata')
+                    ->whereColumn('approved_metadata.asset_id', 'asset_metadata.asset_id')
+                    ->whereColumn('approved_metadata.metadata_field_id', 'asset_metadata.metadata_field_id')
+                    ->whereNotNull('approved_metadata.approved_at')
+                    ->whereNotIn('approved_metadata.source', ['user_rejected', 'ai_rejected']);
+            });
+        
+        // Only calculate count for approvers - contributors cannot approve, so they shouldn't see this tile
+        // Contributors can see their own pending count in the notification bell instead
+        $pendingMetadataApprovalsCount = 0;
+        if ($canApprove) {
+            $pendingMetadataApprovalsCount = (clone $pendingMetadataBaseQuery)
                 ->count('asset_metadata.id');
         }
         
@@ -523,7 +530,7 @@ class DashboardController extends Controller
         
         // Default widget visibility: company widgets visible to owner/admin/brand_manager, hidden for contributor/viewer
         // Widget config format: { role: { widget_name: true/false } }
-        // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded'
+        // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded', 'pending_ai_suggestions', 'pending_metadata_approvals'
         $defaultWidgetVisibility = [
             'owner' => [
                 'total_assets' => true,
@@ -531,6 +538,8 @@ class DashboardController extends Controller
                 'download_links' => true,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'pending_ai_suggestions' => true,
+                'pending_metadata_approvals' => true,
             ],
             'admin' => [
                 'total_assets' => true,
@@ -538,6 +547,8 @@ class DashboardController extends Controller
                 'download_links' => true,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'pending_ai_suggestions' => true,
+                'pending_metadata_approvals' => true,
             ],
             'brand_manager' => [
                 'total_assets' => true,
@@ -545,6 +556,8 @@ class DashboardController extends Controller
                 'download_links' => true,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'pending_ai_suggestions' => true,
+                'pending_metadata_approvals' => true,
             ],
             'contributor' => [
                 'total_assets' => false, // Contributors don't see company widgets
@@ -552,6 +565,8 @@ class DashboardController extends Controller
                 'download_links' => false,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'pending_ai_suggestions' => false, // Permission-based widgets hidden by default for contributors
+                'pending_metadata_approvals' => false,
             ],
             'viewer' => [
                 'total_assets' => false, // Viewers only see Most Viewed and Most Downloaded
@@ -559,6 +574,8 @@ class DashboardController extends Controller
                 'download_links' => false,
                 'most_viewed' => true,
                 'most_downloaded' => true,
+                'pending_ai_suggestions' => false, // Permission-based widgets hidden by default for viewers
+                'pending_metadata_approvals' => false,
             ],
         ];
         
