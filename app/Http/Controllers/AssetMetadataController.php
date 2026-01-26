@@ -656,17 +656,10 @@ class AssetMetadataController extends Controller
             $assetType
         );
 
-        // Load current metadata values
-        // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
-        // They are authoritative the moment they exist and should always be included if present
-        // Only AI fields require approved_at
-        
-        // Get automatic field IDs (fields with population_mode = 'automatic')
-        // Query metadata_fields table to find all automatic fields
-        $automaticFieldIds = DB::table('metadata_fields')
-            ->where('population_mode', 'automatic')
-            ->pluck('id')
-            ->toArray();
+        // Use canonical metadata state resolver
+        // This provides a single source of truth for metadata state resolution
+        $resolver = app(\App\Services\Metadata\AssetMetadataStateResolver::class);
+        $resolvedState = $resolver->resolve($asset);
         
         // Check if user can approve (to show pending metadata)
         $canApprove = $this->approvalResolver->canApprove($user, $tenant);
@@ -677,169 +670,125 @@ class AssetMetadataController extends Controller
         // Source (user/system/ai) is irrelevant once approved.
         // Do not add source-based filtering here.
         
-        // Build query: Include automatic fields regardless of approved_at, require approved_at for others
-        // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
-        // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
-        // This prevents someone from "optimizing" it away later.
-        // For users who can approve, also include pending metadata (approved_at IS NULL) so they can see what needs approval
-        $currentMetadataRows = DB::table('asset_metadata')
-            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
-            ->where(function($query) use ($automaticFieldIds, $canApprove) {
-                // Automatic fields: include if value exists (no approval required)
-                if (!empty($automaticFieldIds)) {
-                    $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                          ->orWhere(function($q) use ($automaticFieldIds, $canApprove) {
-                              // Non-automatic fields: require approval OR show pending if user can approve
-                              $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds);
-                              if ($canApprove) {
-                                  // Approvers can see both approved and pending metadata
-                                  $q->where(function($subQ) {
-                                      $subQ->whereNotNull('asset_metadata.approved_at')
-                                           ->orWhereNull('asset_metadata.approved_at');
-                                  });
-                              } else {
-                                  // Contributor / Viewer visibility rule:
-                                  // Approved metadata must always be visible regardless of source
-                                  $q->whereNotNull('asset_metadata.approved_at');
-                              }
-                          });
-                } else {
-                    // No automatic fields
-                    if ($canApprove) {
-                        // Approvers can see both approved and pending metadata
-                        $query->where(function($q) {
-                            $q->whereNotNull('asset_metadata.approved_at')
-                              ->orWhereNull('asset_metadata.approved_at');
-                        });
-                    } else {
-                        // Contributor / Viewer visibility rule:
-                        // Approved metadata must always be visible regardless of source
-                        $query->whereNotNull('asset_metadata.approved_at');
-                    }
-                }
-            })
-            ->select(
-                'metadata_fields.id as metadata_field_id',
-                'metadata_fields.key',
-                'metadata_fields.type',
-                'metadata_fields.population_mode',
-                'asset_metadata.value_json',
-                'asset_metadata.source',
-                'asset_metadata.confidence',
-                'asset_metadata.overridden_at',
-                'asset_metadata.overridden_by',
-                'asset_metadata.approved_at'
-            )
-            ->orderByRaw("
-                CASE 
-                    WHEN asset_metadata.approved_at IS NOT NULL THEN 1
-                    ELSE 2
-                END
-            ")
-            ->orderByRaw("
-                CASE 
-                    WHEN asset_metadata.source = 'manual_override' THEN 1
-                    WHEN asset_metadata.source = 'user' THEN 2
-                    WHEN asset_metadata.source = 'automatic' THEN 3
-                    WHEN asset_metadata.source = 'ai' THEN 4
-                    ELSE 5
-                END
-            ")
-            ->orderByRaw("
-                CASE 
-                    WHEN asset_metadata.approved_at IS NOT NULL THEN asset_metadata.approved_at
-                    ELSE asset_metadata.created_at
-                END DESC
-            ")
-            ->get()
-            ->groupBy('metadata_field_id');
+        // Get automatic field IDs (fields with population_mode = 'automatic')
+        // Automatic fields are always shown regardless of approval status
+        $automaticFieldIds = DB::table('metadata_fields')
+            ->where('population_mode', 'automatic')
+            ->pluck('id')
+            ->toArray();
 
         // Build map of field_id to current values and override state
         // Suppress low-confidence AI metadata values at read time
         $fieldValues = [];
         $fieldOverrideState = []; // Phase B5: Track override state for hybrid fields
-        foreach ($currentMetadataRows as $fieldId => $rows) {
-            // Get field type and most recent row (highest priority after ordering)
-            // For approvers, prefer approved values, but show pending if no approved exists
-            $approvedRow = $rows->firstWhere('approved_at', '!=', null);
-            $mostRecent = $approvedRow ?? $rows->first();
-            $fieldKey = $mostRecent->key ?? null;
-            $fieldType = $mostRecent->type ?? 'text';
-            $source = $mostRecent->source ?? null;
-            $confidence = $mostRecent->confidence !== null ? (float) $mostRecent->confidence : null;
-            $populationMode = $mostRecent->population_mode ?? 'manual';
-            $isPending = $mostRecent->approved_at === null;
-
-            // CRITICAL: Confidence suppression applies ONLY to AI fields
-            // Automatic/system fields are never suppressed (they are authoritative)
-            $isAutomaticField = $populationMode === 'automatic';
+        
+        foreach ($resolvedState as $fieldId => $state) {
+            // Get field info for type and population mode
+            $fieldInfo = DB::table('metadata_fields')
+                ->where('id', $fieldId)
+                ->first();
+            
+            if (!$fieldInfo) {
+                continue;
+            }
+            
+            $fieldKey = $fieldInfo->key ?? null;
+            $fieldType = $fieldInfo->type ?? 'text';
+            $populationMode = $fieldInfo->population_mode ?? 'manual';
+            $isAutomaticField = in_array($fieldId, $automaticFieldIds) || $populationMode === 'automatic';
+            
+            // Determine which row to use based on resolver state and permissions
+            // Contributors: only approved (or automatic fields)
+            // Approvers: approved, or pending if no approved exists
+            $effectiveRow = null;
+            $isPending = false;
+            
+            if ($state['approved']) {
+                // Use approved row
+                $effectiveRow = $state['approved'];
+                $isPending = false;
+            } elseif ($canApprove && $state['pending']) {
+                // Approvers can see pending if no approved exists
+                $effectiveRow = $state['pending'];
+                $isPending = true;
+            } elseif ($isAutomaticField && $state['pending']) {
+                // Automatic fields: show pending if exists (they don't require approval)
+                $effectiveRow = $state['pending'];
+                $isPending = false; // Automatic fields are never "pending" from approval perspective
+            } else {
+                // No value to show
+                continue;
+            }
+            
+            if (!$effectiveRow) {
+                continue;
+            }
+            
+            $source = $effectiveRow->source ?? null;
+            $confidence = $effectiveRow->confidence !== null ? (float) $effectiveRow->confidence : null;
             $isAiField = $populationMode === 'ai';
             
+            // CRITICAL: Confidence suppression applies ONLY to AI fields
+            // Automatic/system fields are never suppressed (they are authoritative)
             if ($fieldKey && $isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
                 // Suppress low-confidence AI metadata values (PRESENTATION LAYER ONLY)
                 // Treat as if value doesn't exist - skip this field entirely
                 continue;
             }
-            
 
             if ($fieldType === 'multiselect') {
-                // For multiselect, collect all unique values from all rows
-                // Filter out low-confidence values for each row (ONLY for AI fields)
-                $allValues = [];
-                foreach ($rows as $row) {
-                    $rowConfidence = $row->confidence !== null ? (float) $row->confidence : null;
-                    $rowFieldKey = $row->key ?? $fieldKey;
-                    $rowPopulationMode = $row->population_mode ?? 'manual';
-                    
-                    // Skip low-confidence values in multiselect arrays (ONLY for AI fields)
-                    // Automatic/system fields are never suppressed
-                    if ($rowFieldKey && $rowPopulationMode === 'ai' && $this->confidenceService->shouldSuppress($rowFieldKey, $rowConfidence)) {
-                        continue;
-                    }
-                    
-                    $value = json_decode($row->value_json, true);
-                    if (is_array($value)) {
-                        $allValues = array_merge($allValues, $value);
-                    } else {
-                        $allValues[] = $value;
-                    }
+                // For multiselect, use value from effective row
+                // Note: Resolver already provides the canonical row, so we use it directly
+                $value = json_decode($effectiveRow->value_json, true);
+                if (is_array($value)) {
+                    $fieldValues[$fieldId] = array_unique($value, SORT_REGULAR);
+                } else {
+                    $fieldValues[$fieldId] = [$value];
                 }
-                $fieldValues[$fieldId] = array_unique($allValues, SORT_REGULAR);
             } else {
-                // For single-value fields, use the most recent value (highest priority)
-                // If approver and there's a pending value, show it even if there's no approved value
-                $fieldValues[$fieldId] = json_decode($mostRecent->value_json, true);
+                // For single-value fields, use the effective row value
+                $fieldValues[$fieldId] = json_decode($effectiveRow->value_json, true);
             }
 
             // Phase B5: Track override state
             $fieldOverrideState[$fieldId] = [
                 'source' => $source,
                 'is_overridden' => $source === 'manual_override',
-                'overridden_at' => $mostRecent->overridden_at ?? null,
-                'overridden_by' => $mostRecent->overridden_by ?? null,
+                'overridden_at' => $effectiveRow->overridden_at ?? null,
+                'overridden_by' => $effectiveRow->overridden_by ?? null,
                 'is_pending' => $isPending, // Track if this value is pending approval
             ];
         }
 
-        // Phase 8: Check for pending metadata per field
+        // Phase 8: Check for pending metadata per field using canonical resolver
         // Include both AI fields and user-added metadata that requires approval
         // Automatic/system fields never require approval and must be excluded
-        $pendingMetadata = DB::table('asset_metadata')
-            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->whereNull('asset_metadata.approved_at')
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
-            ->whereIn('asset_metadata.source', ['ai', 'user']) // Both AI and user-added metadata can require approval
-            ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields
-            ->select('asset_metadata.metadata_field_id', 'asset_metadata.id as pending_metadata_id')
-            ->get();
+        $pendingFieldIds = [];
+        $pendingMetadataByField = [];
         
-        $pendingFieldIds = $pendingMetadata->pluck('metadata_field_id')->unique()->toArray();
-        $pendingMetadataByField = $pendingMetadata->groupBy('metadata_field_id')->map(function ($items) {
-            return $items->pluck('pending_metadata_id')->toArray();
-        })->toArray();
+        foreach ($resolvedState as $fieldId => $state) {
+            if (!$state['has_pending']) {
+                continue;
+            }
+            
+            // Check if field is automatic (exclude from pending approvals)
+            $fieldInfo = DB::table('metadata_fields')
+                ->where('id', $fieldId)
+                ->first();
+            
+            if ($fieldInfo && $fieldInfo->population_mode === 'automatic') {
+                continue; // Exclude automatic fields
+            }
+            
+            // Only include user and AI sources (exclude automatic/system/manual_override from pending)
+            $pendingRow = $state['pending'];
+            if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
+                $pendingFieldIds[] = $fieldId;
+                $pendingMetadataByField[$fieldId] = [$pendingRow->id];
+            }
+        }
+        
+        $pendingFieldIds = array_unique($pendingFieldIds);
 
         // Phase C2/C4: Get visibility resolver for category suppression and tenant override filtering
         $visibilityResolver = app(\App\Services\MetadataVisibilityResolver::class);
@@ -2209,59 +2158,63 @@ class AssetMetadataController extends Controller
             $fieldMap[$field['field_id']] = $field;
         }
 
-        // Load pending metadata (unapproved, not rejected)
-        // Include both AI fields and user-added metadata that requires approval
-        // Automatic/system fields never require approval and must be excluded
-        $pendingMetadata = DB::table('asset_metadata')
-            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-            ->where('asset_metadata.asset_id', $asset->id)
-            ->whereNull('asset_metadata.approved_at')
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
-            ->whereIn('asset_metadata.source', ['ai', 'user']) // Both AI and user-added metadata can require approval
-            ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields
-            ->select(
-                'asset_metadata.id',
-                'asset_metadata.metadata_field_id',
-                'asset_metadata.value_json',
-                'asset_metadata.confidence',
-                'asset_metadata.source',
-                'asset_metadata.created_at',
-                'metadata_fields.key',
-                'metadata_fields.system_label',
-                'metadata_fields.type'
-            )
-            ->orderBy('asset_metadata.created_at', 'desc')
-            ->get();
+        // Use canonical metadata state resolver
+        // This provides a single source of truth for metadata state resolution
+        $resolver = app(\App\Services\Metadata\AssetMetadataStateResolver::class);
+        $resolvedState = $resolver->resolve($asset);
 
-        // Group by field_id
+        // Filter to only fields with pending metadata
+        // Exclude automatic fields (they don't require approval)
         $groupedPending = [];
         $canApprove = $this->approvalResolver->canApprove($user, $tenant);
 
-        foreach ($pendingMetadata as $pending) {
-            $fieldId = $pending->metadata_field_id;
-            if (!isset($groupedPending[$fieldId])) {
-                $fieldDef = $fieldMap[$fieldId] ?? null;
-                if (!$fieldDef) {
-                    continue; // Skip if field not in resolved schema
-                }
-
-                $groupedPending[$fieldId] = [
-                    'field_id' => $fieldId,
-                    'field_key' => $pending->key,
-                    'field_label' => $pending->system_label,
-                    'field_type' => $pending->type,
-                    'options' => $fieldDef['options'] ?? [], // Include options for edit modal
-                    'values' => [],
-                    'can_approve' => $canApprove,
-                ];
+        foreach ($resolvedState as $fieldId => $state) {
+            // Only include fields with pending metadata
+            if (!$state['has_pending']) {
+                continue;
             }
 
-            $groupedPending[$fieldId]['values'][] = [
-                'id' => $pending->id,
-                'value' => json_decode($pending->value_json, true),
-                'source' => $pending->source,
-                'confidence' => $pending->confidence,
-                'created_at' => $pending->created_at,
+            $fieldDef = $fieldMap[$fieldId] ?? null;
+            if (!$fieldDef) {
+                continue; // Skip if field not in resolved schema
+            }
+
+            // Check if field is automatic (exclude from pending approvals)
+            $fieldInfo = DB::table('metadata_fields')
+                ->where('id', $fieldId)
+                ->first();
+            
+            if ($fieldInfo && $fieldInfo->population_mode === 'automatic') {
+                continue; // Exclude automatic fields
+            }
+
+            // Get pending row from resolved state
+            $pendingRow = $state['pending'];
+            if (!$pendingRow) {
+                continue;
+            }
+
+            // Only include user and AI sources (exclude automatic/system/manual_override from pending)
+            if (!in_array($pendingRow->source, ['ai', 'user'])) {
+                continue;
+            }
+
+            $groupedPending[$fieldId] = [
+                'field_id' => $fieldId,
+                'field_key' => $fieldInfo->key ?? null,
+                'field_label' => $fieldInfo->system_label ?? null,
+                'field_type' => $fieldInfo->type ?? 'text',
+                'options' => $fieldDef['options'] ?? [], // Include options for edit modal
+                'values' => [
+                    [
+                        'id' => $pendingRow->id,
+                        'value' => json_decode($pendingRow->value_json, true),
+                        'source' => $pendingRow->source,
+                        'confidence' => $pendingRow->confidence,
+                        'created_at' => $pendingRow->created_at,
+                    ],
+                ],
+                'can_approve' => $canApprove,
             ];
         }
 
@@ -2366,6 +2319,9 @@ class AssetMetadataController extends Controller
             }
         });
 
+        // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
+        $this->triggerAiSuggestionsIfReady($asset);
+
         return response()->json(['message' => 'Metadata approved']);
     }
 
@@ -2465,6 +2421,9 @@ class AssetMetadataController extends Controller
                 ]);
             }
         });
+
+        // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
+        $this->triggerAiSuggestionsIfReady($asset);
 
         return response()->json(['message' => 'Metadata edited and approved']);
     }
@@ -2718,6 +2677,9 @@ class AssetMetadataController extends Controller
             'metadata_field_id' => $candidate->metadata_field_id,
             'user_id' => $user->id,
         ]);
+
+        // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
+        $this->triggerAiSuggestionsIfReady($asset);
 
         return response()->json([
             'message' => 'Candidate approved and created as manual override',
@@ -3742,5 +3704,40 @@ class AssetMetadataController extends Controller
             'preview' => $previewThumbnailUrl,
             'final' => $finalThumbnailUrl,
         ];
+    }
+
+    /**
+     * Centralized AI trigger logic.
+     * 
+     * After metadata approval completes, check if all metadata is approved.
+     * If no pending metadata exists and AI suggestions haven't been completed,
+     * dispatch the AI suggestion job.
+     * 
+     * This is the single place where AI triggers happen after approval.
+     * 
+     * @param Asset $asset
+     * @return void
+     */
+    protected function triggerAiSuggestionsIfReady(Asset $asset): void
+    {
+        // Use canonical metadata state resolver to check if all metadata is approved
+        $resolver = app(\App\Services\Metadata\AssetMetadataStateResolver::class);
+        
+        // Check if there's no pending metadata requiring approval
+        if (!$resolver->hasNoPendingMetadata($asset)) {
+            return; // Still has pending metadata, don't trigger AI
+        }
+        
+        // Check if AI suggestions have already been completed
+        $metadata = $asset->metadata ?? [];
+        $aiSuggestionsCompleted = isset($metadata['ai_metadata_suggestions_completed']) && 
+            $metadata['ai_metadata_suggestions_completed'] === true;
+        
+        if ($aiSuggestionsCompleted) {
+            return; // Already completed, don't trigger again
+        }
+        
+        // All metadata approved and AI suggestions not yet completed - trigger AI
+        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
     }
 }
