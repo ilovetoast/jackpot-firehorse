@@ -14,6 +14,7 @@ import {
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
+import { usePermission } from '../hooks/usePermission'
 
 export default function PendingMetadataList({ assetId }) {
     const { auth, tenant } = usePage().props
@@ -24,11 +25,11 @@ export default function PendingMetadataList({ assetId }) {
     const [processing, setProcessing] = useState(new Set())
     const [showConfirmApprove, setShowConfirmApprove] = useState(null)
     const [showConfirmReject, setShowConfirmReject] = useState(null)
+    const [approvalRequired, setApprovalRequired] = useState(false)
+    const [aiSuggestionsEnabled, setAiSuggestionsEnabled] = useState(false)
 
-    // Get user role to determine if they can approve
-    // Use tenant_role from auth props (available in HandleInertiaRequests)
-    const userRole = auth?.tenant_role || 'member'
-    const canApprove = ['owner', 'admin', 'manager'].includes(userRole?.toLowerCase())
+    // Step 4: Use permission check instead of role check
+    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
 
     // Fetch pending metadata
     useEffect(() => {
@@ -46,6 +47,8 @@ export default function PendingMetadataList({ assetId }) {
             .then((res) => res.json())
             .then((data) => {
                 setPending(data.pending || [])
+                setApprovalRequired(data.approval_required || false)
+                setAiSuggestionsEnabled(data.ai_suggestions_enabled || false)
                 setLoading(false)
             })
             .catch((err) => {
@@ -264,6 +267,16 @@ export default function PendingMetadataList({ assetId }) {
                     <ClockIcon className="h-4 w-4 mr-2 text-yellow-500" />
                     Pending Metadata
                 </h3>
+                
+                {/* Step 3: Informational UI notice for approvers only */}
+                {canApprove && pending.length > 0 && approvalRequired && aiSuggestionsEnabled && (
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <p className="text-sm text-blue-800">
+                            AI suggestions will run automatically once metadata review is complete.
+                        </p>
+                    </div>
+                )}
+                
                 <div className="space-y-4">
                     {pending.map((item) => (
                         <div key={item.field_id} className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">

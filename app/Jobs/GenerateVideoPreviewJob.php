@@ -11,6 +11,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Generate Video Preview Job
@@ -56,6 +57,31 @@ class GenerateVideoPreviewJob implements ShouldQueue
 
         try {
             $asset = Asset::findOrFail($this->assetId);
+            
+            // Log activity: Video preview generation started
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_VIDEO_PREVIEW_STARTED,
+                    []
+                );
+            } catch (\Exception $e) {
+                Log::error('Failed to log video preview started event', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            // Check if video_preview_url column exists in the database
+            // This handles cases where the migration hasn't been run yet
+            if (!Schema::hasColumn('assets', 'video_preview_url')) {
+                Log::error('[GenerateVideoPreviewJob] Video preview column missing', [
+                    'asset_id' => $asset->id,
+                    'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
+                ]);
+                // Don't throw - preview generation failure should not block upload completion
+                return;
+            }
 
             // Check if asset is a video
             $fileTypeService = app(\App\Services\FileTypeService::class);
@@ -66,6 +92,24 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'file_type' => $fileType,
                 ]);
+                
+                // Log activity: Video preview skipped (not a video)
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_VIDEO_PREVIEW_SKIPPED,
+                        [
+                            'reason' => 'not_a_video',
+                            'file_type' => $fileType,
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    Log::error('Failed to log video preview skipped event', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                
                 return;
             }
 
@@ -75,6 +119,23 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'preview_url' => $asset->video_preview_url,
                 ]);
+                
+                // Log activity: Video preview skipped (already generated)
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_VIDEO_PREVIEW_SKIPPED,
+                        [
+                            'reason' => 'already_generated',
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    Log::error('Failed to log video preview skipped event', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+                
                 return;
             }
 
@@ -91,6 +152,52 @@ class GenerateVideoPreviewJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'preview_path' => $previewPath,
             ]);
+            
+            // Log activity: Video preview generation completed
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_VIDEO_PREVIEW_COMPLETED,
+                    [
+                        'preview_path' => $previewPath,
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::error('Failed to log video preview completed event', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle database errors (like missing column)
+            $errorMessage = $e->getMessage();
+            
+            // Check if error is about missing column
+            if (str_contains($errorMessage, "Unknown column 'video_preview_url'")) {
+                Log::error('[GenerateVideoPreviewJob] Video preview column missing (QueryException)', [
+                    'asset_id' => $this->assetId,
+                    'error' => $errorMessage,
+                    'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
+                ]);
+                // Don't throw - preview generation failure should not block upload completion
+                return;
+            }
+
+            // Other database errors
+            Log::error('[GenerateVideoPreviewJob] Job failed with database exception', [
+                'asset_id' => $this->assetId,
+                'exception' => get_class($e),
+                'message' => $errorMessage,
+            ]);
+
+            // Don't throw - preview generation failure should not block upload completion
+            $asset = Asset::find($this->assetId);
+            if ($asset) {
+                Log::warning('[GenerateVideoPreviewJob] Preview generation failed (non-fatal)', [
+                    'asset_id' => $asset->id,
+                    'error' => $errorMessage,
+                ]);
+            }
         } catch (\Throwable $e) {
             Log::error('[GenerateVideoPreviewJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
@@ -106,6 +213,23 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'error' => $e->getMessage(),
                 ]);
+                
+                // Log activity: Video preview generation failed
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_VIDEO_PREVIEW_FAILED,
+                        [
+                            'error' => $e->getMessage(),
+                            'exception' => get_class($e),
+                        ]
+                    );
+                } catch (\Exception $logException) {
+                    Log::error('Failed to log video preview failed event', [
+                        'asset_id' => $asset->id,
+                        'error' => $logException->getMessage(),
+                    ]);
+                }
             }
 
             // Don't re-throw - allow job to complete silently

@@ -288,6 +288,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     </div>
+                    )}
 
                     {/* Download Links Card */}
                     <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
@@ -347,7 +348,6 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     </div>
-                    )}
 
                     {/* Phase L.5.1: Unpublished Assets Tile */}
                     {unpublished_assets_count > 0 && (

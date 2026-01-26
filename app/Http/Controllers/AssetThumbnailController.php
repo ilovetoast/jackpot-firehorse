@@ -9,6 +9,7 @@ use Aws\S3\Exception\S3Exception;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -1183,7 +1184,31 @@ class AssetThumbnailController extends Controller
             ], 422);
         }
 
+        // Check if video has a thumbnail/poster (required for preview generation)
+        // Video preview generation requires the video file to exist, which should have a poster thumbnail
+        if (!$asset->video_poster_url && !$asset->thumbnail_url && !$asset->final_thumbnail_url) {
+            return response()->json([
+                'error' => 'Cannot generate video preview: Video thumbnail does not exist. Please generate a thumbnail first.',
+            ], 422);
+        }
+
         try {
+            // Check if video_preview_url column exists in the database
+            // This handles cases where the migration hasn't been run yet
+            $hasVideoPreviewColumn = \Illuminate\Support\Facades\Schema::hasColumn('assets', 'video_preview_url');
+            
+            if (!$hasVideoPreviewColumn) {
+                Log::error('[AssetThumbnailController] Video preview column missing', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                    'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
+                ]);
+
+                return response()->json([
+                    'error' => 'Video preview feature is not available. The database migration for video preview support has not been run. Please contact your administrator.',
+                ], 500);
+            }
+
             // Clear existing preview URL to allow regeneration
             $asset->update([
                 'video_preview_url' => null,
@@ -1201,11 +1226,41 @@ class AssetThumbnailController extends Controller
                 'success' => true,
                 'message' => 'Video preview regeneration job dispatched',
             ], 200);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle database errors (like missing column)
+            $errorCode = $e->getCode();
+            $errorMessage = $e->getMessage();
+            
+            // Check if error is about missing column
+            if (str_contains($errorMessage, "Unknown column 'video_preview_url'")) {
+                Log::error('[AssetThumbnailController] Video preview column missing (QueryException)', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                    'error' => $errorMessage,
+                ]);
+
+                return response()->json([
+                    'error' => 'Video preview feature is not available. The database migration for video preview support has not been run. Please contact your administrator.',
+                ], 500);
+            }
+
+            // Other database errors
+            Log::error('[AssetThumbnailController] Video preview regeneration failed (QueryException)', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $errorMessage,
+                'code' => $errorCode,
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to dispatch video preview regeneration: Database error occurred. Please contact your administrator.',
+            ], 500);
         } catch (\Exception $e) {
             Log::error('[AssetThumbnailController] Video preview regeneration failed', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([

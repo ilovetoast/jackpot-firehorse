@@ -953,10 +953,14 @@ class AssetMetadataController extends Controller
         $approvalRequired = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
         $approverCapable = $this->approvalResolver->canApprove($user, $tenant);
 
+        // Calculate pending metadata count (unique fields with pending metadata)
+        $pendingMetadataCount = count($pendingFieldIds);
+
         return response()->json([
             'fields' => $editableFields,
             'approval_required' => $approvalRequired,
             'approver_capable' => $approverCapable,
+            'pending_metadata_count' => $pendingMetadataCount,
         ]);
     }
 

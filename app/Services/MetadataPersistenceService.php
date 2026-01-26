@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\Category;
+use App\Services\ActivityRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -201,6 +203,47 @@ class MetadataPersistenceService
                         'changed_by' => $userId,
                         'created_at' => now(),
                     ]);
+
+                    // Step 4: Add timeline event for metadata submission (if approval required)
+                    if ($requiresApproval && $tenant && $brand && $userId) {
+                        try {
+                            $user = \App\Models\User::find($userId);
+                            if ($user) {
+                                // Count pending fields for this asset to include in timeline
+                                $pendingCount = DB::table('asset_metadata')
+                                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                                    ->where('asset_metadata.asset_id', $asset->id)
+                                    ->whereNull('asset_metadata.approved_at')
+                                    ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+                                    ->whereIn('asset_metadata.source', ['ai', 'user'])
+                                    ->where('metadata_fields.population_mode', '!=', 'automatic')
+                                    ->distinct('asset_metadata.metadata_field_id')
+                                    ->count('asset_metadata.metadata_field_id');
+
+                                ActivityRecorder::record(
+                                    tenant: $tenant,
+                                    eventType: EventType::ASSET_METADATA_UPDATED,
+                                    subject: $asset,
+                                    actor: $user,
+                                    brand: $brand,
+                                    metadata: [
+                                        'action' => 'submitted_for_approval',
+                                        'field_key' => $fieldKey,
+                                        'field_id' => $fieldId,
+                                        'field_count' => $pendingCount,
+                                        'submitted_by' => $userId,
+                                    ]
+                                );
+                            }
+                        } catch (\Exception $e) {
+                            // Activity logging must never break processing
+                            Log::error('Failed to log metadata submission activity', [
+                                'asset_id' => $asset->id,
+                                'field_id' => $fieldId,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
                 }
             }
         });

@@ -109,7 +109,8 @@ class FeatureGate
         $companySettings = $company->settings ?? [];
         $companyEnabled = $companySettings['enable_metadata_approval'] ?? false;
         
-        if (!$companyEnabled) {
+        // Handle both boolean true and truthy values (including string "1")
+        if (!$companyEnabled || ($companyEnabled !== true && $companyEnabled !== '1' && $companyEnabled !== 1)) {
             return false;
         }
         
@@ -117,6 +118,8 @@ class FeatureGate
         $brandSettings = $brand->settings ?? [];
         $brandEnabled = $brandSettings['metadata_approval_enabled'] ?? false;
         
-        return $brandEnabled === true;
+        // Handle both boolean true and truthy values (including string "1")
+        // This prevents issues where settings are stored as strings from JSON/forms
+        return $brandEnabled === true || $brandEnabled === '1' || $brandEnabled === 1;
     }
 }

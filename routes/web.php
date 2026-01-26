@@ -326,6 +326,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/metadata/{metadataId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveMetadata'])->name('metadata.approve');
             Route::post('/metadata/{metadataId}/edit-approve', [\App\Http\Controllers\AssetMetadataController::class, 'editAndApproveMetadata'])->name('metadata.edit-approve');
             Route::post('/metadata/{metadataId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectMetadata'])->name('metadata.reject');
+            Route::post('/assets/{asset}/metadata/approve-all', [\App\Http\Controllers\AssetMetadataController::class, 'approveAllMetadata'])->name('assets.metadata.approve-all');
             
             // Asset metadata candidate review workflow (Phase B9)
             Route::get('/assets/{asset}/metadata/review', [\App\Http\Controllers\AssetMetadataController::class, 'getReview'])->name('assets.metadata.review');

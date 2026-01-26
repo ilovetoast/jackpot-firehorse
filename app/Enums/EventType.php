@@ -117,6 +117,12 @@ class EventType
     public const ASSET_THUMBNAIL_SKIPPED = 'asset.thumbnail.skipped';
     public const ASSET_THUMBNAIL_RETRY_REQUESTED = 'asset.thumbnail.retry_requested';
     public const ASSET_THUMBNAIL_REMOVED = 'asset.thumbnail.removed';
+    
+    // Video preview generation events
+    public const ASSET_VIDEO_PREVIEW_STARTED = 'asset.video_preview.started';
+    public const ASSET_VIDEO_PREVIEW_COMPLETED = 'asset.video_preview.completed';
+    public const ASSET_VIDEO_PREVIEW_FAILED = 'asset.video_preview.failed';
+    public const ASSET_VIDEO_PREVIEW_SKIPPED = 'asset.video_preview.skipped';
     public const ASSET_PROMOTED = 'asset.promoted';
     public const ASSET_READY = 'asset.ready';
 
@@ -269,6 +275,10 @@ class EventType
             self::ASSET_THUMBNAIL_SKIPPED,
             self::ASSET_THUMBNAIL_RETRY_REQUESTED,
             self::ASSET_THUMBNAIL_REMOVED,
+            self::ASSET_VIDEO_PREVIEW_STARTED,
+            self::ASSET_VIDEO_PREVIEW_COMPLETED,
+            self::ASSET_VIDEO_PREVIEW_FAILED,
+            self::ASSET_VIDEO_PREVIEW_SKIPPED,
             self::ASSET_PROMOTED,
             self::ASSET_READY,
             self::ASSET_DOWNLOAD_CREATED,

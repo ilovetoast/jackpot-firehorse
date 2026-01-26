@@ -464,17 +464,19 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'metadata' => $currentMetadata,
             ];
             
-            // Check if asset is a video and set poster URL
+            // Check if asset is a video and set poster path
+            // Store S3 path (not presigned URL) - URLs are generated on-demand via AssetThumbnailController
+            // AWS S3 presigned URLs have a maximum expiration of 7 days, so we can't store long-lived URLs
             $fileTypeService = app(\App\Services\FileTypeService::class);
             $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
             if ($fileType === 'video' && isset($finalThumbnails['thumb'])) {
-                // Store poster URL (use thumb style for grid display)
-                // Generate signed URL for poster (posters are served via signed URLs)
+                // Store poster path (S3 key) - use thumb style for grid display
+                // The path will be used to generate URLs on-demand via thumbnail controller
                 $posterPath = $finalThumbnails['thumb']['path'] ?? null;
                 if ($posterPath) {
-                    $posterUrl = Storage::disk('s3')
-                        ->temporaryUrl($posterPath, now()->addYears(10)); // Long-lived URL
-                    $updateData['video_poster_url'] = $posterUrl;
+                    // Store the S3 path, not a presigned URL
+                    // URLs will be generated on-demand when needed (via AssetThumbnailController or Asset accessor)
+                    $updateData['video_poster_url'] = $posterPath;
                 }
             }
 
@@ -767,8 +769,21 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'file_type' => $fileType,
                 'missing' => $requirements['missing'],
+                'mime_type' => $asset->mime_type,
+                'filename' => $asset->original_filename,
             ]);
             return false;
+        }
+        
+        // Additional logging for video files to help diagnose issues
+        if ($fileType === 'video') {
+            Log::info('[GenerateThumbnailsJob] Video thumbnail generation supported', [
+                'asset_id' => $asset->id,
+                'file_type' => $fileType,
+                'mime_type' => $asset->mime_type,
+                'filename' => $asset->original_filename,
+                'requirements_met' => true,
+            ]);
         }
         
         return true;
@@ -807,6 +822,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             // Check for specific missing requirements
             foreach ($requirements['missing'] as $missing) {
                 if (str_contains($missing, 'FFmpeg')) {
+                    // Video files require FFmpeg for thumbnail generation
+                    if ($fileType === 'video') {
+                        return 'unsupported_format:video_ffmpeg_missing';
+                    }
                     return 'unsupported_format:video_ffmpeg_missing';
                 }
                 if (str_contains($missing, 'Imagick')) {

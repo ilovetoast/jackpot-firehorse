@@ -204,10 +204,24 @@ export default function ThumbnailPreview({
                 setImageError(false)
             }
         } else {
-            console.error('[ThumbnailPreview] Final thumbnail failed', {
-                assetId: asset?.id,
-                url: activeThumbnailUrl,
-            })
+            // Final thumbnail failed to load - this is expected if:
+            // 1. Thumbnail status is COMPLETED but file doesn't exist in S3 (data inconsistency)
+            // 2. S3 access/permissions issue
+            // 3. Thumbnail was deleted but status wasn't updated
+            // In all cases, we gracefully fall back to icon - this is not a critical error
+            if (!isFailed && !hasThumbnailError) {
+                // Only log as warning if status suggests it should exist
+                // This helps identify data inconsistencies without being too noisy
+                console.warn('[ThumbnailPreview] Final thumbnail not found (status suggests it should exist)', {
+                    assetId: asset?.id,
+                    url: activeThumbnailUrl,
+                    thumbnailStatus: thumbnailStatus,
+                    note: 'This may indicate the thumbnail file is missing from S3 despite COMPLETED status',
+                })
+            } else {
+                // Status is FAILED or has error - this is expected, don't log
+            }
+            
             setImageLoaded(false)
             setImageError(true)
             

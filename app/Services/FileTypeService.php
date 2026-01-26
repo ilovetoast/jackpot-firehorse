@@ -128,6 +128,15 @@ class FileTypeService
                     $ffmpegPath = $this->findFFmpegPath();
                     if (!$ffmpegPath) {
                         $missing[] = "External tool: FFmpeg (required for video processing)";
+                        \Illuminate\Support\Facades\Log::warning('[FileTypeService] FFmpeg not found during requirements check', [
+                            'file_type' => $fileType,
+                            'checked_paths' => ['ffmpeg (PATH)', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg'],
+                        ]);
+                    } else {
+                        \Illuminate\Support\Facades\Log::debug('[FileTypeService] FFmpeg found during requirements check', [
+                            'file_type' => $fileType,
+                            'ffmpeg_path' => $ffmpegPath,
+                        ]);
                     }
                 } elseif ($tool === 'libreoffice') {
                     // @todo Implement LibreOffice checking when needed

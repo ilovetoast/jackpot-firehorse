@@ -12,7 +12,7 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { usePermission } from '../hooks/usePermission'
 
-export default function AssetMetadataDisplay({ assetId }) {
+export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) {
     const { auth } = usePage().props
     const [fields, setFields] = useState([])
     const [loading, setLoading] = useState(true)
@@ -20,12 +20,9 @@ export default function AssetMetadataDisplay({ assetId }) {
     const [editingField, setEditingField] = useState(null)
     const [overridingFieldId, setOverridingFieldId] = useState(null)
     const [revertingFieldId, setRevertingFieldId] = useState(null)
-    const [approvingMetadataId, setApprovingMetadataId] = useState(null)
-    const [rejectingMetadataId, setRejectingMetadataId] = useState(null)
+    const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
     
-    // Check if user can approve metadata
-    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
-    const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
+    // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
 
     // Fetch editable metadata
     const fetchMetadata = () => {
@@ -43,6 +40,11 @@ export default function AssetMetadataDisplay({ assetId }) {
             .then((res) => res.json())
             .then((data) => {
                 setFields(data.fields || [])
+                const count = data.pending_metadata_count || 0
+                setPendingMetadataCount(count)
+                if (onPendingCountChange) {
+                    onPendingCountChange(count)
+                }
                 setLoading(false)
             })
             .catch((err) => {
@@ -90,73 +92,7 @@ export default function AssetMetadataDisplay({ assetId }) {
         }
     }
 
-    // Handle approve pending metadata
-    const handleApprove = async (metadataId) => {
-        if (!metadataId) return
-        
-        setApprovingMetadataId(metadataId)
-        
-        try {
-            const response = await fetch(`/app/metadata/${metadataId}/approve`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
-                credentials: 'same-origin',
-            })
-
-            if (!response.ok) {
-                const data = await response.json()
-                throw new Error(data.message || 'Failed to approve metadata')
-            }
-
-            // Refresh metadata
-            fetchMetadata()
-            
-            // Dispatch event for other components
-            window.dispatchEvent(new CustomEvent('metadata-updated'))
-        } catch (err) {
-            console.error('[AssetMetadataDisplay] Failed to approve metadata', err)
-            alert(err.message || 'Failed to approve metadata')
-        } finally {
-            setApprovingMetadataId(null)
-        }
-    }
-
-    // Handle reject pending metadata
-    const handleReject = async (metadataId) => {
-        if (!metadataId) return
-        
-        setRejectingMetadataId(metadataId)
-        
-        try {
-            const response = await fetch(`/app/metadata/${metadataId}/reject`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
-                credentials: 'same-origin',
-            })
-
-            if (!response.ok) {
-                const data = await response.json()
-                throw new Error(data.message || 'Failed to reject metadata')
-            }
-
-            // Refresh metadata
-            fetchMetadata()
-            
-            // Dispatch event for other components
-            window.dispatchEvent(new CustomEvent('metadata-updated'))
-        } catch (err) {
-            console.error('[AssetMetadataDisplay] Failed to reject metadata', err)
-            alert(err.message || 'Failed to reject metadata')
-        } finally {
-            setRejectingMetadataId(null)
-        }
-    }
+    // Step 1: Removed inline approval/reject handlers - approval actions consolidated in Pending Metadata section
 
     // Check if field has a value
     const hasValue = (value) => {
@@ -318,17 +254,6 @@ export default function AssetMetadataDisplay({ assetId }) {
                                         <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
                                             <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
                                                 {field.display_label}
-                                                {/* Show pending badge if field has pending approval or current value is pending */}
-                                                {((field.has_pending || field.is_value_pending) && 
-                                                 field.population_mode !== 'automatic' &&
-                                                 !field.readonly) && (
-                                                    <span
-                                                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
-                                                        title="This field has pending changes awaiting approval"
-                                                    >
-                                                        Pending
-                                                    </span>
-                                                )}
                                             </span>
                                         </dt>
                                         {/* Show the value if there is one, or nothing if no value */}
@@ -393,35 +318,7 @@ export default function AssetMetadataDisplay({ assetId }) {
                                         </div>
                                     ) : (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
-                                            {/* Show approve/reject buttons if field has pending approval and user can approve */}
-                                            {field.has_pending && 
-                                             metadataApprovalEnabled && 
-                                             canApprove && 
-                                             field.pending_metadata_ids && 
-                                             field.pending_metadata_ids.length > 0 && (
-                                                <>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleApprove(field.pending_metadata_ids[0])}
-                                                        disabled={approvingMetadataId === field.pending_metadata_ids[0] || rejectingMetadataId === field.pending_metadata_ids[0]}
-                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        title="Approve this metadata value"
-                                                    >
-                                                        <CheckIcon className="h-3 w-3" />
-                                                        Approve
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleReject(field.pending_metadata_ids[0])}
-                                                        disabled={approvingMetadataId === field.pending_metadata_ids[0] || rejectingMetadataId === field.pending_metadata_ids[0]}
-                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        title="Reject this metadata value"
-                                                    >
-                                                        <XMarkIcon className="h-3 w-3" />
-                                                        Reject
-                                                    </button>
-                                                </>
-                                            )}
+                                            {/* Step 1: Inline approval buttons removed - all approval actions consolidated in Pending Metadata section */}
                                             <button
                                                 type="button"
                                                 onClick={() => {

@@ -311,6 +311,8 @@ class AssetController extends Controller
         // Query visible assets for this brand and asset type
         // AssetStatus represents VISIBILITY only, not processing progress.
         // Processing state is tracked via thumbnail_status, metadata flags, and activity events.
+        // Step 2: Asset visibility must not depend on metadata approval or existence
+        // Assets remain visible regardless of metadata approval state, rejection, or presence
 
         // Phase L.5.1: $canSeeUnpublished is already defined above (after $user is available)
 
@@ -1022,6 +1024,10 @@ class AssetController extends Controller
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
+                    // TODO: Future enhancement - Add pending_metadata_count to asset grid items
+                    // This would enable grid-level badges/indicators for assets with pending metadata
+                    // Currently, pending metadata is only visible in the asset drawer
+                    // Grid and filters remain unchanged - pending metadata does NOT affect filtering or search
                 ];
             })
             ->values();

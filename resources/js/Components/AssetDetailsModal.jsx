@@ -1394,15 +1394,23 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                             {field.metadata && 
                                                              field.population_mode !== 'automatic' &&
                                                              !field.readonly &&
-                                                             (field.metadata.approved_at || field.metadata.confidence !== null) && (
-                                                                <div className="mt-1 text-xs text-gray-400">
-                                                                    {field.metadata.approved_at && (
-                                                                        <span>
+                                                             (field.metadata.approved_at || field.metadata.is_pending || field.is_value_pending || field.metadata.confidence !== null) && (
+                                                                <div className="mt-1 text-xs">
+                                                                    {/* Show pending status if value is pending approval */}
+                                                                    {(field.metadata.is_pending || field.is_value_pending) && !field.metadata.approved_at && (
+                                                                        <span className="text-amber-600 font-medium">
+                                                                            Pending approval
+                                                                        </span>
+                                                                    )}
+                                                                    {/* Show approved status if value is approved */}
+                                                                    {field.metadata.approved_at && !(field.metadata.is_pending || field.is_value_pending) && (
+                                                                        <span className="text-gray-400">
                                                                             {field.metadata.source === 'ai' ? 'AI suggestion accepted' : 'Approved'} {new Date(field.metadata.approved_at).toLocaleDateString()}
                                                                         </span>
                                                                     )}
+                                                                    {/* Show confidence for AI fields */}
                                                                     {field.metadata.confidence !== null && (
-                                                                        <span className={field.metadata.approved_at ? ' ml-2' : ''}>
+                                                                        <span className={`${field.metadata.approved_at || field.metadata.is_pending || field.is_value_pending ? ' ml-2' : ''} text-gray-400`}>
                                                                             {field.metadata.confidence ? `${(field.metadata.confidence * 100).toFixed(0)}% confidence` : ''}
                                                                         </span>
                                                                     )}

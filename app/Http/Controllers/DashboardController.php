@@ -9,6 +9,7 @@ use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetMetric;
+use App\Models\Category;
 use App\Models\Download;
 use App\Enums\DownloadStatus;
 use App\Enums\MetricType;
@@ -192,19 +193,42 @@ class DashboardController extends Controller
         $mostViewedAssets = collect();
         if ($mostViewedAssetIds->isNotEmpty()) {
             $assets = Asset::whereIn('id', $mostViewedAssetIds->keys())
-                ->with('category') // Eager load category for permission checks
                 ->get()
                 ->keyBy('id');
             
-            $mostViewedAssets = $mostViewedAssetIds->map(function ($viewCount, $assetId) use ($assets, $user) {
+            // Eager load categories to avoid N+1 queries
+            // Extract category IDs from asset metadata
+            $categoryIds = $assets->map(function ($asset) {
+                $metadata = $asset->metadata;
+                if (!is_array($metadata)) {
+                    return null;
+                }
+                return $metadata['category_id'] ?? null;
+            })->filter()->unique()->values()->all();
+            
+            $categories = collect();
+            if (!empty($categoryIds)) {
+                $categories = Category::whereIn('id', $categoryIds)
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->get()
+                    ->keyBy('id');
+            }
+            
+            $mostViewedAssets = $mostViewedAssetIds->map(function ($viewCount, $assetId) use ($assets, $categories, $user) {
                 $asset = $assets->get($assetId);
                 if (!$asset) {
                     return null;
                 }
                 
+                // Get category from eager-loaded collection
+                $metadata = $asset->metadata;
+                $categoryId = (is_array($metadata) && isset($metadata['category_id'])) ? $metadata['category_id'] : null;
+                $category = $categoryId ? $categories->get($categoryId) : null;
+                
                 // Check if user can view the asset's category (respects protected categories)
-                if ($asset->category) {
-                    $canViewCategory = $user->can('view', $asset->category);
+                if ($category) {
+                    $canViewCategory = $user->can('view', $category);
                     if (!$canViewCategory) {
                         return null; // Skip assets in protected categories user can't access
                     }
@@ -275,23 +299,41 @@ class DashboardController extends Controller
                 ->get()
                 ->keyBy('id');
             
-            $mostDownloadedAssets = $mostDownloadedAssetIds->map(function ($downloadCount, $assetId) use ($assets, $user, $tenant, $brand) {
+            // Eager load categories to avoid N+1 queries
+            // Extract category IDs from asset metadata
+            $categoryIds = $assets->map(function ($asset) {
+                $metadata = $asset->metadata;
+                if (!is_array($metadata)) {
+                    return null;
+                }
+                return $metadata['category_id'] ?? null;
+            })->filter()->unique()->values()->all();
+            
+            $categories = collect();
+            if (!empty($categoryIds)) {
+                $categories = Category::whereIn('id', $categoryIds)
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->get()
+                    ->keyBy('id');
+            }
+            
+            $mostDownloadedAssets = $mostDownloadedAssetIds->map(function ($downloadCount, $assetId) use ($assets, $categories, $user, $tenant, $brand) {
                 $asset = $assets->get($assetId);
                 if (!$asset) {
                     return null;
                 }
                 
+                // Get category from eager-loaded collection
+                $metadata = $asset->metadata;
+                $categoryId = (is_array($metadata) && isset($metadata['category_id'])) ? $metadata['category_id'] : null;
+                $category = $categoryId ? $categories->get($categoryId) : null;
+                
                 // Check if user can view the asset's category (respects protected categories)
-                // Category ID is stored in asset metadata
-                $metadata = $asset->metadata ?? [];
-                $categoryId = $metadata['category_id'] ?? null;
-                if ($categoryId) {
-                    $category = \App\Models\Category::find($categoryId);
-                    if ($category && $category->tenant_id === $tenant->id && $category->brand_id === $brand->id) {
-                        $canViewCategory = $user->can('view', $category);
-                        if (!$canViewCategory) {
-                            return null; // Skip assets in protected categories user can't access
-                        }
+                if ($category) {
+                    $canViewCategory = $user->can('view', $category);
+                    if (!$canViewCategory) {
+                        return null; // Skip assets in protected categories user can't access
                     }
                 }
                 

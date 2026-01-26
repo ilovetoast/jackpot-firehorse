@@ -60,6 +60,7 @@ import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 import { useAssetMetrics } from '../hooks/useAssetMetrics'
+import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/solid'
 
 export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null }) {
     const { auth } = usePage().props
@@ -92,6 +93,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [resubmitComment, setResubmitComment] = useState('')
     const [resubmitLoading, setResubmitLoading] = useState(false)
     
+    // Metadata approval state
+    const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
+    const [approvingAllMetadata, setApprovingAllMetadata] = useState(false)
+    
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
     const [toastType, setToastType] = useState('success')
@@ -102,11 +107,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         return assets.filter(a => {
             const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
             const mimeType = a.mime_type || ''
-            // Include images, PDFs (both support thumbnail generation), and videos
+            const isVideoFile = mimeType.startsWith('video/') || ['MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
+            // Include images, PDFs (both support thumbnail generation), and videos with posters
             return mimeType.startsWith('image/') || 
                    mimeType === 'application/pdf' ||
-                   mimeType.startsWith('video/') ||
-                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF', 'MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
+                   (isVideoFile && (a.video_poster_url || a.thumbnail_url || a.final_thumbnail_url)) ||
+                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF'].includes(ext)
         })
     }, [assets])
 
@@ -502,6 +508,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Check if user has permission to generate/retry thumbnails
     const { hasPermission: canRetryThumbnails } = usePermission('assets.retry_thumbnails')
     const { hasPermission: canPublish } = usePermission('asset.publish')
+    const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
 
     // Check if asset can have thumbnail generated (for previously skipped assets)
     // IMPORTANT: This is for existing assets that were skipped but are now supported
@@ -807,8 +814,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >
-                            {isVideo && displayAsset.storage_root_path ? (
+                            {isVideo && displayAsset.id && (displayAsset.video_poster_url || displayAsset.thumbnail_url || displayAsset.final_thumbnail_url) ? (
                                 // Phase V-1: Video playback with enlarge support
+                                // Only show video player if poster/thumbnail exists
                                 <div
                                     className="w-full h-full cursor-pointer group relative"
                                     onClick={() => {
@@ -819,7 +827,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     <video
                                         className="w-full h-full object-contain bg-black"
                                         controls
-                                        poster={displayAsset.video_poster_url || undefined}
+                                        poster={displayAsset.video_poster_url || displayAsset.thumbnail_url || displayAsset.final_thumbnail_url || undefined}
                                         preload="metadata"
                                         playsInline
                                         onClick={(e) => {
@@ -1093,6 +1101,29 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             title="Metadata"
                             defaultExpanded={true}
                         >
+                            {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
+                            {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
+                            {auth?.metadata_approval_features?.metadata_approval_enabled && 
+                             displayAsset?.id && 
+                             pendingMetadataCount > 0 && 
+                             canApproveMetadata && (
+                                <div className="mb-4 pb-4 border-b border-gray-200">
+                                    <PendingMetadataList assetId={displayAsset.id} />
+                                </div>
+                            )}
+                            
+                            {/* Step 3: Contributor Pending Feedback (Read-only) */}
+                            {/* Show notice for contributors (users without approval permission) */}
+                            {auth?.metadata_approval_features?.metadata_approval_enabled && 
+                             pendingMetadataCount > 0 && 
+                             !canApproveMetadata && (
+                                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                                    <p className="text-sm text-amber-800">
+                                        Metadata submitted for approval
+                                    </p>
+                                </div>
+                            )}
+                            
                             {/* Category as first line */}
                             {categoryName && categoryName !== 'Uncategorized' && (
                                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap mb-2 md:mb-3">
@@ -1106,7 +1137,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     </dd>
                                 </div>
                             )}
-                            <AssetMetadataDisplay assetId={displayAsset.id} />
+                            
+                            <AssetMetadataDisplay 
+                                assetId={displayAsset.id} 
+                                onPendingCountChange={setPendingMetadataCount}
+                            />
                             {/* Tags at bottom of metadata */}
                             <div className="mt-4 pt-4 border-t border-gray-100">
                                 <AssetTagManager 
@@ -1120,12 +1155,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </div>
                         </CollapsibleSection>
                     </div>
-                )}
-
-                {/* Phase 8: Pending Metadata Approval */}
-                {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
-                {auth?.metadata_approval_features?.metadata_approval_enabled && displayAsset?.id && (
-                    <PendingMetadataList assetId={displayAsset.id} />
                 )}
 
                 {/* Phase AF-2: Approval History */}
@@ -1561,8 +1590,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 
             </div>
 
-            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) or Videos */}
-            {showZoomModal && (hasThumbnailSupport || isVideo) && currentCarouselAsset?.id && (
+            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) or Videos with Posters */}
+            {showZoomModal && (hasThumbnailSupport || (isVideo && currentCarouselAsset?.video_poster_url)) && currentCarouselAsset?.id && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                     onClick={() => setShowZoomModal(false)}
@@ -1614,8 +1643,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
                             const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
                             
-                            if (isCurrentVideo && currentCarouselAsset.storage_root_path) {
-                                // Video playback in fullscreen modal
+                            if (isCurrentVideo && currentCarouselAsset.id && currentCarouselAsset.video_poster_url) {
+                                // Video playback in fullscreen modal (only if poster exists)
                                 return (
                                     <video
                                         key={currentCarouselAsset.id} // Key forces remount for clean transition

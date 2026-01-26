@@ -20,6 +20,11 @@ use Illuminate\Support\Facades\DB;
  * - Respects active metadata resolution (approved user values win)
  * - Latest approved value per field is used
  * - Phase C2: Respects category suppression rules via MetadataVisibilityResolver
+ * 
+ * CRITICAL INVARIANT: Asset visibility must NEVER depend on metadata approval state.
+ * This service filters assets based on metadata VALUES, but assets remain visible
+ * even if all their metadata is rejected or pending. Metadata rejection does NOT
+ * affect asset visibility - only metadata visibility and filtering behavior.
  */
 class MetadataFilterService
 {
@@ -142,11 +147,16 @@ class MetadataFilterService
             $populationMode = $fieldDef->population_mode ?? 'manual';
             $isAutomatic = $populationMode === 'automatic';
             
+            // Step 2: Asset visibility must not depend on metadata approval or existence
+            // This whereExists is used ONLY for filtering metadata values, not for filtering assets
+            // Assets remain visible even if all their metadata is rejected or pending
             $q->whereExists(function ($subQ) use ($fieldId, $fieldKey, $fieldType, $operator, $value, $isAutomatic) {
                 $subQ->select(DB::raw(1))
                     ->from('asset_metadata as am')
                     ->whereColumn('am.asset_id', 'assets.id')
                     ->where('am.metadata_field_id', $fieldId)
+                    // Exclude rejected sources - rejected metadata should not affect filtering
+                    ->whereNotIn('am.source', ['user_rejected', 'ai_rejected'])
                     ->whereIn('am.source', ['user', 'system', 'ai', 'manual_override', 'automatic']); // Include all sources including automatic
                 
                 // For automatic fields, don't require approved_at
@@ -159,6 +169,7 @@ class MetadataFilterService
                         FROM asset_metadata
                         WHERE asset_id = am.asset_id
                         AND metadata_field_id = ?
+                        AND source NOT IN ('user_rejected', 'ai_rejected')
                         AND source IN ('user', 'system', 'ai', 'manual_override', 'automatic')
                     )", [$fieldId]);
                 } else {
@@ -169,6 +180,7 @@ class MetadataFilterService
                             FROM asset_metadata
                             WHERE asset_id = am.asset_id
                             AND metadata_field_id = ?
+                            AND source NOT IN ('user_rejected', 'ai_rejected')
                             AND source IN ('user', 'system', 'ai', 'manual_override')
                             AND approved_at IS NOT NULL
                         )", [$fieldId]);

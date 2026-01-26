@@ -444,6 +444,30 @@ class Asset extends Model
     }
 
     /**
+     * Get the category for this asset.
+     *
+     * Categories are stored in asset metadata as category_id (JSON field).
+     * This accessor looks up the category based on the ID stored in metadata.
+     *
+     * @return Category|null
+     */
+    public function getCategoryAttribute(): ?Category
+    {
+        $metadata = $this->metadata ?? [];
+        $categoryId = $metadata['category_id'] ?? null;
+        
+        if (!$categoryId) {
+            return null;
+        }
+        
+        // Look up category by ID, scoped to the asset's tenant and brand
+        return Category::where('id', $categoryId)
+            ->where('tenant_id', $this->tenant_id)
+            ->where('brand_id', $this->brand_id)
+            ->first();
+    }
+
+    /**
      * Get the medium thumbnail URL for AI image analysis.
      *
      * This method checks both temp and final thumbnail paths to support
@@ -521,5 +545,46 @@ class Asset extends Model
         }
         
         return null;
+    }
+
+    /**
+     * Get the video poster URL (generated on-demand from S3 path).
+     *
+     * video_poster_url stores the S3 path in the database, and this accessor generates
+     * a presigned URL on-demand (max 7 days expiration per AWS limits).
+     *
+     * When setting: $asset->video_poster_url = 'path/to/file.jpg' - stores raw path
+     * When getting: $asset->video_poster_url - returns presigned URL generated from path
+     *
+     * @param mixed $value Raw database value (S3 path or legacy URL)
+     * @return string|null Presigned S3 URL to video poster, or null if not available
+     */
+    public function getVideoPosterUrlAttribute($value): ?string
+    {
+        // If value is null or empty, return null
+        if (!$value) {
+            return null;
+        }
+
+        // If value is already a URL (legacy data from before fix), return it as-is
+        // This handles existing assets that may have URLs stored
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        // Value is an S3 path - generate presigned URL on-demand
+        try {
+            // Generate presigned URL with maximum allowed expiration (7 days)
+            // AWS S3 presigned URLs have a maximum expiration of 7 days
+            return \Illuminate\Support\Facades\Storage::disk('s3')
+                ->temporaryUrl($value, now()->addDays(7));
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('[Asset] Failed to generate signed S3 URL for video poster', [
+                'asset_id' => $this->id,
+                'poster_path' => $value,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 }
