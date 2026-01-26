@@ -671,6 +671,12 @@ class AssetMetadataController extends Controller
         // Check if user can approve (to show pending metadata)
         $canApprove = $this->approvalResolver->canApprove($user, $tenant);
         
+        // IMPORTANT:
+        // Drawer metadata visibility for contributors/viewers
+        // must depend ONLY on approved_at.
+        // Source (user/system/ai) is irrelevant once approved.
+        // Do not add source-based filtering here.
+        
         // Build query: Include automatic fields regardless of approved_at, require approved_at for others
         // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
         // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
@@ -679,7 +685,6 @@ class AssetMetadataController extends Controller
         $currentMetadataRows = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
-            ->whereIn('asset_metadata.source', ['user', 'automatic', 'ai', 'manual_override', 'system'])
             ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
             ->where(function($query) use ($automaticFieldIds, $canApprove) {
                 // Automatic fields: include if value exists (no approval required)
@@ -695,7 +700,8 @@ class AssetMetadataController extends Controller
                                            ->orWhereNull('asset_metadata.approved_at');
                                   });
                               } else {
-                                  // Non-approvers only see approved metadata
+                                  // Contributor / Viewer visibility rule:
+                                  // Approved metadata must always be visible regardless of source
                                   $q->whereNotNull('asset_metadata.approved_at');
                               }
                           });
@@ -708,7 +714,8 @@ class AssetMetadataController extends Controller
                               ->orWhereNull('asset_metadata.approved_at');
                         });
                     } else {
-                        // Non-approvers only see approved metadata
+                        // Contributor / Viewer visibility rule:
+                        // Approved metadata must always be visible regardless of source
                         $query->whereNotNull('asset_metadata.approved_at');
                     }
                 }
@@ -898,20 +905,34 @@ class AssetMetadataController extends Controller
             // For readonly/automatic fields, we still want to show them (read-only display)
             // So we only check permission for non-readonly fields
             $canEdit = true; // Default for readonly/automatic fields (they're shown read-only)
+            
+            // ISSUE FIX: Approved metadata visibility for contributors/viewers
+            // Previously, fields were filtered out if user lacked edit permission, even when approved metadata existed.
+            // This caused approved metadata (e.g., photo_type, scene_classification) to be invisible to contributors/viewers.
+            // Fix: Check if field has approved metadata - if so, show it read-only even without edit permission.
+            // Only skip fields if user cannot edit AND there's no approved value.
+            // See docs/PHASE_C_METADATA_GOVERNANCE.md for details.
+            $hasApprovedValue = isset($fieldValues[$field['field_id']]) && 
+                                isset($fieldOverrideState[$field['field_id']]) &&
+                                !($fieldOverrideState[$field['field_id']]['is_pending'] ?? true);
+            
             if (!$isReadonly) {
+                // NOTE: Permission check uses brand-level permissions (brand->id), not tenant-level
+                // This ensures permissions are scoped correctly to the brand context
                 $canEdit = $this->permissionResolver->canEdit(
                     $field['field_id'],
                     $userRole,
                     $tenant->id,
-                    $brand->id,
+                    $brand->id, // Brand-level permission check
                     $category->id
                 );
 
                 // For rating fields, show them even if user can't edit (so they can see the rating)
-                // For other fields, skip if user cannot edit
+                // For approved metadata, show it read-only even if user cannot edit
+                // Only skip if user cannot edit AND there's no approved value
                 $isRating = ($field['type'] ?? 'text') === 'rating' || ($field['key'] ?? null) === 'quality_rating';
-                if (!$canEdit && !$isRating) {
-                    continue; // Skip fields user cannot edit (except rating fields)
+                if (!$canEdit && !$isRating && !$hasApprovedValue) {
+                    continue; // Skip fields user cannot edit that have no approved value (except rating fields)
                 }
             }
 

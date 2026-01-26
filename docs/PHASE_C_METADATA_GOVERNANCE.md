@@ -144,3 +144,34 @@ Phase C is complete when:
 - Tenants can safely extend metadata
 - No schema drift occurs
 - Governance rules are explicit and enforceable
+
+---
+
+## Known Issues
+
+### Metadata Drawer Permission Checks
+
+**Issue:** Approved metadata was not visible in the Asset Drawer for contributors/viewers, even when the metadata had been approved.
+
+**Root Cause:** The permission check in `AssetMetadataController::getEditableMetadata()` was filtering out fields where the user lacked edit permission, even when approved metadata existed. This caused approved metadata (e.g., `photo_type`, `scene_classification`) to be invisible to contributors/viewers who should be able to view (but not edit) approved metadata.
+
+**Fix Applied (January 2026):**
+- Modified permission check logic to verify if a field has approved metadata before filtering
+- Fields with approved metadata are now shown read-only to contributors/viewers, even without edit permission
+- Only fields without approved metadata are filtered out when the user lacks edit permission
+- Edit buttons are hidden in the UI when `can_edit` is false
+
+**Location:** 
+- Backend: `app/Http/Controllers/AssetMetadataController.php` (method: `getEditableMetadata`)
+- Frontend: `resources/js/Components/AssetMetadataDisplay.jsx`
+
+**Important Notes:**
+- Permission checks use **brand-level permissions** (`brand->id`), not tenant-level
+- Approved metadata visibility depends only on `approved_at`, not on source (user/system/AI)
+- Pending metadata remains hidden from contributors/viewers (as intended)
+- Automatic/readonly fields are always shown (they don't require approval)
+
+**Watch Out For:**
+- When modifying drawer metadata queries, ensure approved metadata is visible regardless of edit permissions
+- Do not add source-based filtering for contributors/viewers - only check `approved_at`
+- Always verify brand-level permissions are used, not tenant-level

@@ -311,12 +311,13 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) 
                                     </div>
                                     {/* Show "Auto" badge where edit button would be for readonly/automatic fields */}
                                     {/* For rating fields, don't show edit button - rating is clickable directly */}
+                                    {/* Only show edit button if user has edit permission (can_edit/is_user_editable) */}
                                     {isRating ? null : (field.readonly || field.population_mode === 'automatic') ? (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 inline-flex items-center gap-1 text-xs text-gray-500">
                                             <LockClosedIcon className="h-3 w-3" />
                                             <span className="italic">Auto</span>
                                         </div>
-                                    ) : (
+                                    ) : (field.can_edit !== false && field.is_user_editable !== false) ? (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
                                             {/* Step 1: Inline approval buttons removed - all approval actions consolidated in Pending Metadata section */}
                                             <button
@@ -331,7 +332,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) 
                                                 {fieldHasValue ? 'Edit' : 'Add'}
                                             </button>
                                         </div>
-                                    )}
+                                    ) : null}
                                 </div>
                             )
                         })}
