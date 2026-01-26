@@ -473,6 +473,12 @@ class AssetController extends Controller
                 ->where('metadata->category_id', (int) $categoryId);
         }
 
+        // Filter by uploaded_by (user filter)
+        $uploadedBy = $request->get('uploaded_by');
+        if ($uploadedBy) {
+            $assetsQuery->where('user_id', (int) $uploadedBy);
+        }
+
         // Phase 2 – Step 8: Apply metadata filters
         // Filters can come as JSON string (from URL query param) or array (from Inertia)
         $filtersParam = $request->get('filters', []);
@@ -872,17 +878,25 @@ class AssetController extends Controller
                 
                 // Final thumbnail URL provided when thumbnail_status === COMPLETED
                 // OR when thumbnails actually exist in metadata (handles status sync issues)
-                $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+                // Use 'medium' size for better quality in asset grid
+                $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && (isset($metadata['thumbnails']['thumb']) || isset($metadata['thumbnails']['medium']));
                 $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                 
                 if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
-                    // Verify thumbnail path exists before generating URL
-                    $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
+                    // Prefer medium size for better quality, fallback to thumb if medium not available
+                    $thumbnailStyle = 'medium';
+                    $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+                    
+                    // Fallback to 'thumb' if medium doesn't exist
+                    if (!$thumbnailPath && !isset($metadata['thumbnails']['medium'])) {
+                        $thumbnailStyle = 'thumb';
+                        $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
+                    }
                     
                     if ($thumbnailPath || $thumbnailsExistInMetadata) {
                         $finalThumbnailUrl = route('assets.thumbnail.final', [
                             'asset' => $asset->id,
-                            'style' => 'thumb',
+                            'style' => $thumbnailStyle,
                         ]);
                         
                         // Add version query param if available (ensures browser refetches when version changes)
@@ -1252,6 +1266,31 @@ class AssetController extends Controller
             'saved_views' => $savedViews, // Phase 2 – Step 8: Saved filter views
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
+            'uploaded_by_users' => \App\Models\User::whereIn('id', function ($query) use ($tenant, $brand) {
+                $query->select('user_id')
+                      ->from('assets')
+                      ->where('tenant_id', $tenant->id)
+                      ->where('brand_id', $brand->id)
+                      ->where('type', AssetType::ASSET)
+                      ->whereNull('deleted_at')
+                      ->whereNotNull('user_id')
+                      ->distinct();
+            })
+            ->select('id', 'first_name', 'last_name', 'email', 'avatar_url')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->orderBy('email')
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'avatar_url' => $user->avatar_url,
+                ];
+            }),
         ]);
     }
 
@@ -1664,13 +1703,24 @@ class AssetController extends Controller
         
         // Final thumbnail URL provided when thumbnail_status === COMPLETED
         // OR when thumbnails actually exist in metadata (handles status sync issues)
-        $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+        // Use 'medium' size for better quality
+        $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && (isset($metadata['thumbnails']['thumb']) || isset($metadata['thumbnails']['medium']));
         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
         
         if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
+            // Prefer medium size for better quality, fallback to thumb if medium not available
+            $thumbnailStyle = 'medium';
+            $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+            
+            // Fallback to 'thumb' if medium doesn't exist
+            if (!$thumbnailPath && !isset($metadata['thumbnails']['medium'])) {
+                $thumbnailStyle = 'thumb';
+                $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
+            }
+            
             $finalThumbnailUrl = route('assets.thumbnail.final', [
                 'asset' => $asset->id,
-                'style' => 'thumb',
+                'style' => $thumbnailStyle,
             ]);
             
             // Add version query param if available

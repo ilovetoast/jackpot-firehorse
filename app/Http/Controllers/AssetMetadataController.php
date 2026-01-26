@@ -50,10 +50,16 @@ class AssetMetadataController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
+        $user = Auth::user();
 
         // Verify asset belongs to tenant and brand
         if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check permission - viewers cannot see AI suggestions
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+            return response()->json(['message' => 'Permission denied'], 403);
         }
 
         // Load category for schema resolution
@@ -178,6 +184,13 @@ class AssetMetadataController extends Controller
 
         if (!$suggestion) {
             return response()->json(['message' => 'Suggestion not found'], 404);
+        }
+
+        // Check permission - only users with metadata.suggestions.apply can approve
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.apply')) {
+            return response()->json([
+                'message' => 'You do not have permission to approve suggestions.',
+            ], 403);
         }
 
         // Check if user already approved a value for this field
@@ -390,6 +403,13 @@ class AssetMetadataController extends Controller
 
         if (!$suggestion) {
             return response()->json(['message' => 'Suggestion not found'], 404);
+        }
+
+        // Check permission - only users with metadata.suggestions.dismiss can reject
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.dismiss')) {
+            return response()->json([
+                'message' => 'You do not have permission to reject suggestions.',
+            ], 403);
         }
 
         DB::transaction(function () use ($suggestion, $suggestionId, $user) {
@@ -648,26 +668,49 @@ class AssetMetadataController extends Controller
             ->pluck('id')
             ->toArray();
         
+        // Check if user can approve (to show pending metadata)
+        $canApprove = $this->approvalResolver->canApprove($user, $tenant);
+        
         // Build query: Include automatic fields regardless of approved_at, require approved_at for others
         // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
         // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
         // This prevents someone from "optimizing" it away later.
+        // For users who can approve, also include pending metadata (approved_at IS NULL) so they can see what needs approval
         $currentMetadataRows = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
             ->whereIn('asset_metadata.source', ['user', 'automatic', 'ai', 'manual_override', 'system'])
-            ->where(function($query) use ($automaticFieldIds) {
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
+            ->where(function($query) use ($automaticFieldIds, $canApprove) {
                 // Automatic fields: include if value exists (no approval required)
                 if (!empty($automaticFieldIds)) {
                     $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                          ->orWhere(function($q) use ($automaticFieldIds) {
-                              // Non-automatic fields require approval
-                              $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                                ->whereNotNull('asset_metadata.approved_at');
+                          ->orWhere(function($q) use ($automaticFieldIds, $canApprove) {
+                              // Non-automatic fields: require approval OR show pending if user can approve
+                              $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds);
+                              if ($canApprove) {
+                                  // Approvers can see both approved and pending metadata
+                                  $q->where(function($subQ) {
+                                      $subQ->whereNotNull('asset_metadata.approved_at')
+                                           ->orWhereNull('asset_metadata.approved_at');
+                                  });
+                              } else {
+                                  // Non-approvers only see approved metadata
+                                  $q->whereNotNull('asset_metadata.approved_at');
+                              }
                           });
                 } else {
-                    // No automatic fields, require approval for all
-                    $query->whereNotNull('asset_metadata.approved_at');
+                    // No automatic fields
+                    if ($canApprove) {
+                        // Approvers can see both approved and pending metadata
+                        $query->where(function($q) {
+                            $q->whereNotNull('asset_metadata.approved_at')
+                              ->orWhereNull('asset_metadata.approved_at');
+                        });
+                    } else {
+                        // Non-approvers only see approved metadata
+                        $query->whereNotNull('asset_metadata.approved_at');
+                    }
                 }
             })
             ->select(
@@ -682,6 +725,12 @@ class AssetMetadataController extends Controller
                 'asset_metadata.overridden_by',
                 'asset_metadata.approved_at'
             )
+            ->orderByRaw("
+                CASE 
+                    WHEN asset_metadata.approved_at IS NOT NULL THEN 1
+                    ELSE 2
+                END
+            ")
             ->orderByRaw("
                 CASE 
                     WHEN asset_metadata.source = 'manual_override' THEN 1
@@ -706,12 +755,15 @@ class AssetMetadataController extends Controller
         $fieldOverrideState = []; // Phase B5: Track override state for hybrid fields
         foreach ($currentMetadataRows as $fieldId => $rows) {
             // Get field type and most recent row (highest priority after ordering)
-            $mostRecent = $rows->first();
+            // For approvers, prefer approved values, but show pending if no approved exists
+            $approvedRow = $rows->firstWhere('approved_at', '!=', null);
+            $mostRecent = $approvedRow ?? $rows->first();
             $fieldKey = $mostRecent->key ?? null;
             $fieldType = $mostRecent->type ?? 'text';
             $source = $mostRecent->source ?? null;
             $confidence = $mostRecent->confidence !== null ? (float) $mostRecent->confidence : null;
             $populationMode = $mostRecent->population_mode ?? 'manual';
+            $isPending = $mostRecent->approved_at === null;
 
             // CRITICAL: Confidence suppression applies ONLY to AI fields
             // Automatic/system fields are never suppressed (they are authoritative)
@@ -750,6 +802,7 @@ class AssetMetadataController extends Controller
                 $fieldValues[$fieldId] = array_unique($allValues, SORT_REGULAR);
             } else {
                 // For single-value fields, use the most recent value (highest priority)
+                // If approver and there's a pending value, show it even if there's no approved value
                 $fieldValues[$fieldId] = json_decode($mostRecent->value_json, true);
             }
 
@@ -759,21 +812,27 @@ class AssetMetadataController extends Controller
                 'is_overridden' => $source === 'manual_override',
                 'overridden_at' => $mostRecent->overridden_at ?? null,
                 'overridden_by' => $mostRecent->overridden_by ?? null,
+                'is_pending' => $isPending, // Track if this value is pending approval
             ];
         }
 
         // Phase 8: Check for pending metadata per field
-        // CRITICAL: Only include AI fields (population_mode = 'ai')
+        // Include both AI fields and user-added metadata that requires approval
         // Automatic/system fields never require approval and must be excluded
         $pendingMetadata = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
             ->whereNull('asset_metadata.approved_at')
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
-            ->where('metadata_fields.population_mode', 'ai') // Only AI fields require approval
-            ->pluck('asset_metadata.metadata_field_id')
-            ->toArray();
-        $pendingFieldIds = array_unique($pendingMetadata);
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+            ->whereIn('asset_metadata.source', ['ai', 'user']) // Both AI and user-added metadata can require approval
+            ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields
+            ->select('asset_metadata.metadata_field_id', 'asset_metadata.id as pending_metadata_id')
+            ->get();
+        
+        $pendingFieldIds = $pendingMetadata->pluck('metadata_field_id')->unique()->toArray();
+        $pendingMetadataByField = $pendingMetadata->groupBy('metadata_field_id')->map(function ($items) {
+            return $items->pluck('pending_metadata_id')->toArray();
+        })->toArray();
 
         // Phase C2/C4: Get visibility resolver for category suppression and tenant override filtering
         $visibilityResolver = app(\App\Services\MetadataVisibilityResolver::class);
@@ -857,13 +916,19 @@ class AssetMetadataController extends Controller
             }
 
             // Get current value(s) for this field
+            // For approvers, show pending values if no approved value exists
             $currentValue = $fieldValues[$field['field_id']] ?? null;
+            $fieldOverrideInfo = $fieldOverrideState[$field['field_id']] ?? [];
+            $isValuePending = $fieldOverrideInfo['is_pending'] ?? false;
 
             // Resolve display label: prefer display_label from schema, fall back to system_label from DB, then key
             $displayLabel = $field['display_label'] 
                 ?? $fieldDef->system_label 
                 ?? $field['key'];
 
+            // Get pending metadata IDs for this field
+            $pendingMetadataIds = $pendingMetadataByField[$field['field_id']] ?? [];
+            
             $editableFields[] = [
                 'metadata_field_id' => $field['field_id'],
                 'field_key' => $field['key'],
@@ -875,6 +940,8 @@ class AssetMetadataController extends Controller
                 'can_edit' => !$isReadonly && $canEdit, // Reflect actual permission check result
                 'current_value' => $currentValue,
                 'has_pending' => in_array($field['field_id'], $pendingFieldIds), // Phase 8
+                'pending_metadata_ids' => $pendingMetadataIds, // IDs of pending metadata records for this field
+                'is_value_pending' => $isValuePending, // Whether the current displayed value is pending approval
                 // Phase B2: Add readonly and population_mode flags
                 'readonly' => $isReadonly,
                 'population_mode' => $populationMode,
@@ -882,8 +949,14 @@ class AssetMetadataController extends Controller
         }
 
 
+        // Determine if approval is required and if user can approve
+        $approvalRequired = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
+        $approverCapable = $this->approvalResolver->canApprove($user, $tenant);
+
         return response()->json([
             'fields' => $editableFields,
+            'approval_required' => $approvalRequired,
+            'approver_capable' => $approverCapable,
         ]);
     }
 
@@ -900,11 +973,15 @@ class AssetMetadataController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
+        $user = Auth::user();
 
         // Verify asset belongs to tenant and brand
         if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
         }
+        
+        // Check if user can approve (to show pending metadata)
+        $canApprove = $this->approvalResolver->canApprove($user, $tenant);
 
         // Load category for schema resolution
         $category = null;
@@ -925,13 +1002,165 @@ class AssetMetadataController extends Controller
         // Determine asset type
         $assetType = $this->determineAssetType($asset);
 
-        // Resolve metadata schema (all fields, not just editable)
-        $schema = $this->metadataSchemaResolver->resolve(
-            $asset->tenant_id,
-            $asset->brand_id,
-            $category->id,
-            $assetType
-        );
+        // AssetDetailsModal is a "source of truth" - shows ALL fields regardless of Quick View setting
+        // Only respects category enablement (big blue toggle), not show_on_edit checkbox
+        // We need to bypass the schema resolver's is_visible filter (which includes Quick View)
+        // and only check category-level enablement
+        
+        // Load fields directly and resolve manually, checking only category enablement
+        $fields = DB::table('metadata_fields')
+            ->where(function ($query) use ($assetType) {
+                $query->where('applies_to', $assetType)
+                    ->orWhere('applies_to', 'all');
+            })
+            ->whereNull('deprecated_at')
+            ->where(function ($query) use ($asset) {
+                $query->where(function ($q) {
+                    $q->where('scope', 'system')
+                        ->whereNull('tenant_id');
+                })
+                ->orWhere(function ($q) use ($asset) {
+                    $q->where('scope', 'tenant')
+                        ->where('tenant_id', $asset->tenant_id)
+                        ->where('is_active', true);
+                });
+            })
+            ->select([
+                'id',
+                'key',
+                'system_label',
+                'type',
+                'applies_to',
+                'scope',
+                'is_filterable',
+                'is_user_editable',
+                'is_ai_trainable',
+                'is_upload_visible',
+                'is_internal_only',
+                'group_key',
+                'plan_gate',
+                'deprecated_at',
+                'replacement_field_id',
+                DB::raw("COALESCE(population_mode, 'manual') as population_mode"),
+                DB::raw("COALESCE(show_on_upload, true) as show_on_upload"),
+                DB::raw("COALESCE(show_on_edit, true) as show_on_edit"),
+                DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
+                DB::raw("COALESCE(readonly, false) as readonly"),
+                DB::raw("COALESCE(is_primary, false) as is_primary"),
+            ])
+            ->get()
+            ->keyBy('id');
+        
+        // Check category enablement only (big blue toggle) - ignore tenant-level Quick View
+        $systemVisibilityService = app(\App\Services\SystemMetadataVisibilityService::class);
+        $systemCategoryId = $category->system_category_id;
+        
+        // Load option visibility for select/multiselect fields
+        $optionVisibility = [];
+        $optionRows = DB::table('metadata_option_visibility')
+            ->where('tenant_id', $asset->tenant_id)
+            ->where(function ($q) use ($asset, $category) {
+                $q->where(function ($subQ) {
+                    $subQ->whereNull('brand_id')->whereNull('category_id');
+                });
+                if ($asset->brand_id) {
+                    $q->orWhere(function ($subQ) use ($asset) {
+                        $subQ->where('brand_id', $asset->brand_id)->whereNull('category_id');
+                    });
+                }
+                if ($asset->brand_id && $category->id) {
+                    $q->orWhere(function ($subQ) use ($asset, $category) {
+                        $subQ->where('brand_id', $asset->brand_id)->where('category_id', $category->id);
+                    });
+                }
+            })
+            ->get();
+        
+        foreach ($optionRows as $row) {
+            if (!isset($optionVisibility[$row->metadata_option_id])) {
+                $optionVisibility[$row->metadata_option_id] = (bool) $row->is_hidden;
+            }
+        }
+        
+        // Resolve fields, checking only category enablement (not Quick View)
+        // Check category-level visibility overrides directly (big blue toggle)
+        // This bypasses tenant-level Quick View settings
+        $categoryVisibilityOverrides = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $asset->tenant_id)
+            ->where('brand_id', $asset->brand_id)
+            ->where('category_id', $category->id)
+            ->whereIn('metadata_field_id', $fields->keys()->toArray())
+            ->pluck('is_hidden', 'metadata_field_id')
+            ->toArray();
+        
+        $schemaFields = [];
+        foreach ($fields as $fieldId => $field) {
+            // Check if field is enabled for this category (big blue toggle)
+            // 1. Check category-level visibility override (highest priority - the big blue toggle)
+            if (isset($categoryVisibilityOverrides[$fieldId])) {
+                if ($categoryVisibilityOverrides[$fieldId]) {
+                    continue; // Field disabled for this category (big blue toggle OFF)
+                }
+                // Category override says visible - include it (regardless of Quick View)
+            } else {
+                // No category override - check system-level category suppression
+                if ($systemCategoryId !== null) {
+                    $isCategoryEnabled = $systemVisibilityService->isVisibleForCategory(
+                        $fieldId,
+                        $systemCategoryId
+                    );
+                    
+                    if (!$isCategoryEnabled) {
+                        continue; // Field disabled for this category (big blue toggle OFF)
+                    }
+                }
+            }
+            
+            // Resolve field options
+            $options = [];
+            if (in_array($field->type, ['select', 'multiselect'], true)) {
+                $optionRows = DB::table('metadata_options')
+                    ->where('metadata_field_id', $fieldId)
+                    ->orderBy('system_label')
+                    ->get();
+                
+                foreach ($optionRows as $option) {
+                    $isHidden = $optionVisibility[$option->id] ?? false;
+                    if (!$isHidden) {
+                        $options[] = [
+                            'value' => $option->value,
+                            'display_label' => $option->system_label ?? $option->value,
+                        ];
+                    }
+                }
+            }
+            
+            // Resolve display label
+            $displayLabel = $field->system_label ?? $field->key;
+            
+            // Include field in modal (regardless of Quick View setting)
+            $schemaFields[] = [
+                'field_id' => $fieldId,
+                'key' => $field->key,
+                'display_label' => $displayLabel,
+                'type' => $field->type,
+                'group_key' => $field->group_key,
+                'applies_to' => $field->applies_to,
+                'is_visible' => true, // Always visible in modal (source of truth)
+                'is_upload_visible' => (bool) $field->is_upload_visible,
+                'is_filterable' => (bool) $field->is_filterable,
+                'is_internal_only' => (bool) $field->is_internal_only,
+                'population_mode' => $field->population_mode ?? 'manual',
+                'show_on_upload' => (bool) ($field->show_on_upload ?? true),
+                'show_on_edit' => (bool) ($field->show_on_edit ?? true), // For reference only, not used for filtering
+                'show_in_filters' => (bool) ($field->show_in_filters ?? true),
+                'readonly' => (bool) ($field->readonly ?? false),
+                'is_primary' => false, // Not relevant for modal
+                'options' => $options,
+            ];
+        }
+        
+        $schema = ['fields' => $schemaFields];
 
         // Load all current metadata values from asset_metadata table
         // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
@@ -948,21 +1177,41 @@ class AssetMetadataController extends Controller
         // Phase M-1: Include 'system' source for system-computed metadata (orientation, color_space, resolution_class)
         // IMPORTANT: 'system' metadata is automatic and always included; exclusion here causes silent UI loss
         // This prevents someone from "optimizing" it away later.
+        // For users who can approve, also include pending metadata (approved_at IS NULL) so they can see what needs approval
         $currentMetadataRows = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
-            ->where(function($query) use ($automaticFieldIds) {
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
+            ->where(function($query) use ($automaticFieldIds, $canApprove) {
                 // Automatic fields: include if value exists (no approval required)
                 if (!empty($automaticFieldIds)) {
                     $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                          ->orWhere(function($q) use ($automaticFieldIds) {
-                              // Non-automatic fields require approval
-                              $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
-                                ->whereNotNull('asset_metadata.approved_at');
+                          ->orWhere(function($q) use ($automaticFieldIds, $canApprove) {
+                              // Non-automatic fields: require approval OR show pending if user can approve
+                              $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds);
+                              if ($canApprove) {
+                                  // Approvers can see both approved and pending metadata
+                                  $q->where(function($subQ) {
+                                      $subQ->whereNotNull('asset_metadata.approved_at')
+                                           ->orWhereNull('asset_metadata.approved_at');
+                                  });
+                              } else {
+                                  // Non-approvers only see approved metadata
+                                  $q->whereNotNull('asset_metadata.approved_at');
+                              }
                           });
                 } else {
-                    // No automatic fields, require approval for all
-                    $query->whereNotNull('asset_metadata.approved_at');
+                    // No automatic fields
+                    if ($canApprove) {
+                        // Approvers can see both approved and pending metadata
+                        $query->where(function($q) {
+                            $q->whereNotNull('asset_metadata.approved_at')
+                              ->orWhereNull('asset_metadata.approved_at');
+                        });
+                    } else {
+                        // Non-approvers only see approved metadata
+                        $query->whereNotNull('asset_metadata.approved_at');
+                    }
                 }
             })
             ->select(
@@ -979,6 +1228,12 @@ class AssetMetadataController extends Controller
                 'asset_metadata.approved_at',
                 'asset_metadata.approved_by'
             )
+            ->orderByRaw("
+                CASE 
+                    WHEN asset_metadata.approved_at IS NOT NULL THEN 1
+                    ELSE 2
+                END
+            ")
             ->orderByRaw("
                 CASE 
                     WHEN asset_metadata.source = 'manual_override' THEN 1
@@ -998,11 +1253,31 @@ class AssetMetadataController extends Controller
             ->get()
             ->groupBy('metadata_field_id');
 
+        // Phase 8: Check for pending metadata per field
+        // Include both AI fields and user-added metadata that requires approval
+        // Automatic/system fields never require approval and must be excluded
+        $pendingMetadata = DB::table('asset_metadata')
+            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+            ->where('asset_metadata.asset_id', $asset->id)
+            ->whereNull('asset_metadata.approved_at')
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+            ->whereIn('asset_metadata.source', ['ai', 'user']) // Both AI and user-added metadata can require approval
+            ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields
+            ->select('asset_metadata.metadata_field_id', 'asset_metadata.id as pending_metadata_id')
+            ->get();
+        
+        $pendingFieldIds = $pendingMetadata->pluck('metadata_field_id')->unique()->toArray();
+        $pendingMetadataByField = $pendingMetadata->groupBy('metadata_field_id')->map(function ($items) {
+            return $items->pluck('pending_metadata_id')->toArray();
+        })->toArray();
+
         // Build map of field_id to current values and metadata
         $fieldValues = [];
         $fieldMetadata = [];
         foreach ($currentMetadataRows as $fieldId => $rows) {
-            $mostRecent = $rows->first();
+            // For approvers, prefer approved values, but show pending if no approved exists
+            $approvedRow = $rows->firstWhere('approved_at', '!=', null);
+            $mostRecent = $approvedRow ?? $rows->first();
             $fieldType = $mostRecent->type ?? 'text';
 
             if ($fieldType === 'multiselect') {
@@ -1018,9 +1293,12 @@ class AssetMetadataController extends Controller
                 }
                 $fieldValues[$fieldId] = array_unique($allValues, SORT_REGULAR);
             } else {
-                // For single-value fields, use the most recent value
+                // For single-value fields, use the most recent value (highest priority)
+                // If approver and there's a pending value, show it even if there's no approved value
                 $fieldValues[$fieldId] = json_decode($mostRecent->value_json, true);
             }
+
+            $isPending = $mostRecent->approved_at === null;
 
             $fieldMetadata[$fieldId] = [
                 'source' => $mostRecent->source,
@@ -1031,6 +1309,7 @@ class AssetMetadataController extends Controller
                 'overridden_by' => $mostRecent->overridden_by,
                 'approved_at' => $mostRecent->approved_at,
                 'approved_by' => $mostRecent->approved_by,
+                'is_pending' => $isPending, // Track if this value is pending approval
             ];
         }
 
@@ -1047,6 +1326,10 @@ class AssetMetadataController extends Controller
             $currentValue = $fieldValues[$fieldId] ?? null;
             $metadata = $fieldMetadata[$fieldId] ?? null;
 
+            // Get pending metadata IDs for this field
+            $pendingMetadataIds = $pendingMetadataByField[$fieldId] ?? [];
+            $isValuePending = $metadata && ($metadata['is_pending'] ?? false);
+            
             $allFields[] = [
                 'metadata_field_id' => $fieldId,
                 'field_key' => $field['key'],
@@ -1060,6 +1343,9 @@ class AssetMetadataController extends Controller
                 'is_system_generated' => ($field['population_mode'] ?? 'manual') === 'automatic',
                 'current_value' => $currentValue,
                 'has_value' => $currentValue !== null,
+                'has_pending' => in_array($fieldId, $pendingFieldIds),
+                'pending_metadata_ids' => $pendingMetadataIds,
+                'is_value_pending' => $isValuePending,
                 'metadata' => $metadata,
             ];
         }
@@ -1899,14 +2185,15 @@ class AssetMetadataController extends Controller
         }
 
         // Load pending metadata (unapproved, not rejected)
-        // CRITICAL: Only include AI fields (population_mode = 'ai')
+        // Include both AI fields and user-added metadata that requires approval
         // Automatic/system fields never require approval and must be excluded
         $pendingMetadata = DB::table('asset_metadata')
             ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
             ->where('asset_metadata.asset_id', $asset->id)
             ->whereNull('asset_metadata.approved_at')
-            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected'])
-            ->where('metadata_fields.population_mode', 'ai') // Only AI fields require approval
+            ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+            ->whereIn('asset_metadata.source', ['ai', 'user']) // Both AI and user-added metadata can require approval
+            ->where('metadata_fields.population_mode', '!=', 'automatic') // Exclude automatic fields
             ->select(
                 'asset_metadata.id',
                 'asset_metadata.metadata_field_id',
@@ -2267,10 +2554,16 @@ class AssetMetadataController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
+        $user = Auth::user();
 
         // Verify asset belongs to tenant and brand
         if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Check if user can view metadata suggestions
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.suggestions.view')) {
+            return response()->json(['message' => 'Permission denied'], 403);
         }
 
         $reviewService = app(\App\Services\MetadataReviewService::class);
@@ -3281,7 +3574,13 @@ class AssetMetadataController extends Controller
         // Process tag candidates
         foreach ($tagCandidates as $candidate) {
             $asset = $assets->get($candidate->asset_id);
-            $thumbnailUrl = $this->getThumbnailUrl($asset);
+            $thumbnailUrls = $this->getThumbnailUrls($asset);
+            
+            // Get thumbnail status and metadata for ThumbnailPreview component
+            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                ? $asset->thumbnail_status->value 
+                : ($asset->thumbnail_status ?? 'pending')) : 'pending';
+            $metadata = $asset ? ($asset->metadata ?? []) : [];
             
             $items[] = [
                 'id' => $candidate->id,
@@ -3293,15 +3592,26 @@ class AssetMetadataController extends Controller
                 'source' => $candidate->source,
                 'asset_title' => $candidate->asset_title,
                 'asset_filename' => $candidate->asset_filename,
-                'thumbnail_url' => $thumbnailUrl,
+                'final_thumbnail_url' => $thumbnailUrls['final'] ?? null,
+                'preview_thumbnail_url' => $thumbnailUrls['preview'] ?? null,
+                'thumbnail_status' => $thumbnailStatus,
+                'metadata' => $metadata,
+                'mime_type' => $asset->mime_type ?? null,
+                'file_extension' => $asset->file_extension ?? null,
             ];
         }
 
         // Process metadata candidates
         foreach ($metadataCandidates as $candidate) {
             $asset = $assets->get($candidate->asset_id);
-            $thumbnailUrl = $this->getThumbnailUrl($asset);
+            $thumbnailUrls = $this->getThumbnailUrls($asset);
             $value = json_decode($candidate->value_json, true);
+            
+            // Get thumbnail status and metadata for ThumbnailPreview component
+            $thumbnailStatus = $asset ? ($asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                ? $asset->thumbnail_status->value 
+                : ($asset->thumbnail_status ?? 'pending')) : 'pending';
+            $metadata = $asset ? ($asset->metadata ?? []) : [];
             
             $items[] = [
                 'id' => $candidate->id,
@@ -3317,7 +3627,12 @@ class AssetMetadataController extends Controller
                 'options' => $optionsMap[$candidate->metadata_field_id] ?? [],
                 'asset_title' => $candidate->asset_title,
                 'asset_filename' => $candidate->asset_filename,
-                'thumbnail_url' => $thumbnailUrl,
+                'final_thumbnail_url' => $thumbnailUrls['final'] ?? null,
+                'preview_thumbnail_url' => $thumbnailUrls['preview'] ?? null,
+                'thumbnail_status' => $thumbnailStatus,
+                'metadata' => $metadata,
+                'mime_type' => $asset->mime_type ?? null,
+                'file_extension' => $asset->file_extension ?? null,
             ];
         }
 
@@ -3341,15 +3656,16 @@ class AssetMetadataController extends Controller
     }
 
     /**
-     * Get thumbnail URL for an asset.
+     * Get thumbnail URLs for an asset (matches AssetController structure).
+     * Returns both preview and final thumbnail URLs separately.
      *
      * @param Asset|null $asset
-     * @return string|null
+     * @return array{preview: string|null, final: string|null}
      */
-    protected function getThumbnailUrl(?Asset $asset): ?string
+    protected function getThumbnailUrls(?Asset $asset): array
     {
         if (!$asset) {
-            return null;
+            return ['preview' => null, 'final' => null];
         }
 
         $metadata = $asset->metadata ?? [];
@@ -3357,46 +3673,49 @@ class AssetMetadataController extends Controller
             ? $asset->thumbnail_status->value 
             : ($asset->thumbnail_status ?? 'pending');
 
-        // Try preview thumbnail first (faster, available earlier)
+        // Preview thumbnail URL (temporary, available early)
+        $previewThumbnailUrl = null;
         $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
         if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-            return route('assets.thumbnail.preview', [
+            $previewThumbnailUrl = route('assets.thumbnail.preview', [
                 'asset' => $asset->id,
                 'style' => 'preview',
             ]);
         }
 
-        // Fall back to final thumbnail if available
-        // Use 'large' for better quality in modal, fall back to 'medium' if large not available
-        if ($thumbnailStatus === 'completed') {
-            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            $thumbnails = $metadata['thumbnails'] ?? [];
+        // Final thumbnail URL (permanent, only when completed)
+        $finalThumbnailUrl = null;
+        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+        $thumbnails = $metadata['thumbnails'] ?? [];
+        $thumbnailsExistInMetadata = !empty($thumbnails) && (isset($thumbnails['thumb']) || isset($thumbnails['medium']));
+
+        if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
+            // Prefer medium size for better quality, fallback to thumb if medium not available
+            $thumbnailStyle = 'medium';
+            $thumbnailPath = $asset->thumbnailPathForStyle('medium');
             
-            // Prefer large thumbnail for better quality in modal
-            if (!empty($thumbnails) && isset($thumbnails['large'])) {
-                $url = route('assets.thumbnail.final', [
-                    'asset' => $asset->id,
-                    'style' => 'large',
-                ]);
-                if ($thumbnailVersion) {
-                    $url .= '?v=' . $thumbnailVersion;
-                }
-                return $url;
+            // Fallback to 'thumb' if medium doesn't exist
+            if (!$thumbnailPath && !isset($thumbnails['medium'])) {
+                $thumbnailStyle = 'thumb';
+                $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
             }
             
-            // Fall back to medium if large not available
-            if (!empty($thumbnails) && isset($thumbnails['medium'])) {
-                $url = route('assets.thumbnail.final', [
+            if ($thumbnailPath || $thumbnailsExistInMetadata) {
+                $finalThumbnailUrl = route('assets.thumbnail.final', [
                     'asset' => $asset->id,
-                    'style' => 'medium',
+                    'style' => $thumbnailStyle,
                 ]);
+                
+                // Add version query param if available (ensures browser refetches when version changes)
                 if ($thumbnailVersion) {
-                    $url .= '?v=' . $thumbnailVersion;
+                    $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
                 }
-                return $url;
             }
         }
 
-        return null;
+        return [
+            'preview' => $previewThumbnailUrl,
+            'final' => $finalThumbnailUrl,
+        ];
     }
 }

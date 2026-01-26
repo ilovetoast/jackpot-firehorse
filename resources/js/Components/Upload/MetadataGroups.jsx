@@ -5,9 +5,12 @@
  *
  * Renders all metadata groups from the upload schema.
  * Handles empty state gracefully.
+ * 
+ * UX-1: Shows helper message when metadata approval is enabled for contributors.
  */
 
 import { useRef } from 'react'
+import { usePage } from '@inertiajs/react'
 import MetadataGroup from './MetadataGroup'
 import { validateMetadata } from '../../utils/metadataValidation'
 
@@ -30,7 +33,14 @@ export default function MetadataGroups({
     showErrors = false,
     onValidationAttempt = null
 }) {
+    const { auth } = usePage().props
     const groupRefs = useRef({})
+
+    // UX-1: Check if we should show metadata approval helper message
+    // Show when: metadata approval is enabled AND user does not have bypass permission
+    const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
+    const hasBypassPermission = auth?.permissions?.includes('metadata.bypass_approval') === true
+    const showApprovalMessage = metadataApprovalEnabled && !hasBypassPermission
 
     // Handle empty state
     if (!groups || groups.length === 0) {
@@ -45,6 +55,14 @@ export default function MetadataGroups({
 
     return (
         <div className="space-y-6">
+            {/* UX-1: Helper message for contributors when metadata approval is enabled */}
+            {showApprovalMessage && (
+                <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
+                    <p className="text-xs text-gray-600">
+                        Metadata entered here will be reviewed before publishing.
+                    </p>
+                </div>
+            )}
             {groups.map((group) => {
                 const groupErrors = validateMetadata([group], values)
                 const hasErrors = Object.keys(groupErrors).length > 0

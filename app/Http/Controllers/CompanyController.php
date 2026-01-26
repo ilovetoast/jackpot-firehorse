@@ -290,6 +290,44 @@ class CompanyController extends Controller
     }
 
     /**
+     * Update dashboard widget settings.
+     */
+    public function updateWidgetSettings(Request $request)
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors([
+                'settings' => 'You must select a company to update settings.',
+            ]);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        // Check if user has permission to update company settings
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+            abort(403, 'Only administrators and owners can update widget settings.');
+        }
+
+        $validated = $request->validate([
+            'dashboard_widgets' => 'required|array',
+            'dashboard_widgets.*' => 'array', // Each role is an array
+            'dashboard_widgets.*.*' => 'boolean', // Each widget visibility is a boolean
+        ]);
+
+        // Merge widget settings with existing settings
+        $currentSettings = $tenant->settings ?? [];
+        $currentSettings['dashboard_widgets'] = $validated['dashboard_widgets'];
+        
+        $tenant->update(['settings' => $currentSettings]);
+
+        return $this->backWithSuccess('Widget settings updated successfully');
+    }
+
+    /**
      * Show the company activity logs page.
      */
     public function activity(Request $request): Response

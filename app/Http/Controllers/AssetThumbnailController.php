@@ -1058,4 +1058,159 @@ class AssetThumbnailController extends Controller
 
         return $this->s3Client;
     }
+
+    /**
+     * Regenerate video thumbnail (poster frame) for a video asset.
+     *
+     * POST /app/assets/{asset}/thumbnails/regenerate-video-thumbnail
+     *
+     * Regenerates the video poster thumbnail using FFmpeg.
+     * Only works for video assets.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function regenerateVideoThumbnail(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        // Authorize: User must have permission to regenerate thumbnails
+        $this->authorize('retryThumbnails', $asset);
+
+        $user = $request->user();
+
+        // Verify asset is a video
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+
+        if ($fileType !== 'video') {
+            return response()->json([
+                'error' => 'This endpoint is only available for video assets',
+            ], 422);
+        }
+
+        // Check if asset has required storage information
+        if (!$asset->storage_root_path || !$asset->storageBucket) {
+            return response()->json([
+                'error' => 'Asset storage information is missing',
+            ], 422);
+        }
+
+        try {
+            // Reset thumbnail status to PENDING to allow regeneration
+            $asset->update([
+                'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
+                'thumbnail_error' => null,
+                'thumbnail_started_at' => null,
+            ]);
+
+            // Dispatch GenerateThumbnailsJob which will handle video thumbnail generation
+            \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
+
+            Log::info('[AssetThumbnailController] Video thumbnail regeneration job dispatched', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+
+            // Log activity event
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_THUMBNAIL_STARTED,
+                    [
+                        'triggered_by' => 'user_manual_video_thumbnail_regeneration',
+                        'triggered_by_user_id' => $user->id,
+                        'file_type' => 'video',
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::error('Failed to log video thumbnail regeneration event', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Video thumbnail regeneration job dispatched',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('[AssetThumbnailController] Video thumbnail regeneration failed', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to dispatch video thumbnail regeneration: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Regenerate video preview (hover preview video) for a video asset.
+     *
+     * POST /app/assets/{asset}/thumbnails/regenerate-video-preview
+     *
+     * Regenerates the hover preview video using FFmpeg.
+     * Only works for video assets.
+     *
+     * @param Request $request
+     * @param Asset $asset
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function regenerateVideoPreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        // Authorize: User must have permission to regenerate thumbnails
+        $this->authorize('retryThumbnails', $asset);
+
+        $user = $request->user();
+
+        // Verify asset is a video
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+
+        if ($fileType !== 'video') {
+            return response()->json([
+                'error' => 'This endpoint is only available for video assets',
+            ], 422);
+        }
+
+        // Check if asset has required storage information
+        if (!$asset->storage_root_path || !$asset->storageBucket) {
+            return response()->json([
+                'error' => 'Asset storage information is missing',
+            ], 422);
+        }
+
+        try {
+            // Clear existing preview URL to allow regeneration
+            $asset->update([
+                'video_preview_url' => null,
+            ]);
+
+            // Dispatch GenerateVideoPreviewJob
+            \App\Jobs\GenerateVideoPreviewJob::dispatch($asset->id);
+
+            Log::info('[AssetThumbnailController] Video preview regeneration job dispatched', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Video preview regeneration job dispatched',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('[AssetThumbnailController] Video preview regeneration failed', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to dispatch video preview regeneration: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

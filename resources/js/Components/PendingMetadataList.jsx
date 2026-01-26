@@ -429,6 +429,7 @@ function EditApproveModal({ metadataId, field, value, onChange, onSave, onClose,
                                 value={value}
                                 onChange={onChange}
                                 disabled={processing}
+                                isUploadContext={false}
                             />
                         </div>
 

@@ -238,6 +238,11 @@ class UploadMetadataSchemaResolver
      *
      * Phase 4: Adds can_edit flag based on user role and permissions.
      * Phase 5: Also respects is_user_editable flag from metadata_fields.
+     * 
+     * UPLOAD CONTEXT FIX: During upload, all metadata fields are editable by contributors.
+     * Approval is enforced AFTER upload via MetadataApprovalResolver, not during metadata entry.
+     * This allows contributors to enter metadata during upload, which is then reviewed/approved
+     * as part of the asset approval workflow.
      *
      * @param array $fields
      * @param string $userRole
@@ -257,34 +262,21 @@ class UploadMetadataSchemaResolver
             return $fields;
         }
 
-        // Get permissions for all fields at once
-        $fieldIds = array_column($fields, 'field_id');
-        $permissions = $this->permissionResolver->canEditMultiple(
-            $fieldIds,
-            $userRole,
-            $tenantId,
-            $brandId,
-            $categoryId
-        );
-
         // Load field properties from database
+        $fieldIds = array_column($fields, 'field_id');
         $fieldData = \Illuminate\Support\Facades\DB::table('metadata_fields')
             ->whereIn('id', $fieldIds)
             ->select('id', 'is_user_editable', 'population_mode', 'readonly')
             ->get()
             ->keyBy('id');
 
-        // Add can_edit flag to each field
-        // Field is editable only if:
-        // 1. Permission resolver says user can edit (Phase 4) - owners/admins bypass this
-        // 2. Field is marked as user-editable in database (Phase 5)
+        // UPLOAD CONTEXT: All fields are editable during upload (approval happens after upload)
         // Exception: System-locked fields (automatic + readonly) are never editable by users
+        // This allows contributors to enter metadata during upload, which is then reviewed
+        // via MetadataApprovalResolver after the asset is created.
         foreach ($fields as &$field) {
             $fieldId = $field['field_id'];
             $fieldInfo = $fieldData[$fieldId] ?? null;
-            
-            $hasPermission = $permissions[$fieldId] ?? false;
-            $isUserEditable = $fieldInfo ? ($fieldInfo->is_user_editable ?? true) : true;
             
             // Check if field is system-locked (automatic + readonly)
             // These fields are automatically populated by the system and users cannot edit them
@@ -292,9 +284,9 @@ class UploadMetadataSchemaResolver
                 && ($fieldInfo->population_mode ?? null) === 'automatic' 
                 && ($fieldInfo->readonly ?? false) === true;
             
-            // Field is editable if:
-            // - Has permission AND is user-editable AND not system-locked
-            $field['can_edit'] = ($hasPermission && $isUserEditable && !$isSystemLocked);
+            // During upload: All fields are editable except system-locked fields
+            // Approval is enforced AFTER upload via MetadataApprovalResolver
+            $field['can_edit'] = !$isSystemLocked;
         }
 
         return $fields;

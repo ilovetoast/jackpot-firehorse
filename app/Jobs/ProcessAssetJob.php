@@ -162,19 +162,34 @@ class ProcessAssetJob implements ShouldQueue
         // 1. ExtractMetadataJob - Extract file metadata
         // 2. GenerateThumbnailsJob - Generate thumbnail styles
         // 3. GeneratePreviewJob - Generate preview images
-        // 4. ComputedMetadataJob - Compute technical metadata (Phase 5)
-        // 5. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
-        // 6. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
-        // 7. AITaggingJob - AI-powered tagging
-        // 8. AiMetadataGenerationJob - AI metadata generation (Phase I) - creates candidates
-        // 9. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5) - creates suggestions from candidates
-        // 10. FinalizeAssetJob - Mark asset as completed
-        // 11. PromoteAssetJob - Move from temp/ to canonical assets/ location
+        // 4. GenerateVideoPreviewJob - Generate video hover previews (video assets only)
+        // 5. ComputedMetadataJob - Compute technical metadata (Phase 5)
+        // 6. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
+        // 7. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
+        // 8. AITaggingJob - AI-powered tagging
+        // 9. AiMetadataGenerationJob - AI metadata generation (Phase I) - creates candidates
+        // 10. AiMetadataSuggestionJob - AI metadata suggestions (Phase 2 – Step 5) - creates suggestions from candidates
+        // 11. FinalizeAssetJob - Mark asset as completed
+        // 12. PromoteAssetJob - Move from temp/ to canonical assets/ location
         //    (runs after thumbnail generation, requires COMPLETED status)
-        Bus::chain([
+        
+        // Check if asset is a video to conditionally add video preview job
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        $isVideo = $fileType === 'video';
+        
+        $chainJobs = [
             new ExtractMetadataJob($asset->id),
             new GenerateThumbnailsJob($asset->id),
             new GeneratePreviewJob($asset->id),
+        ];
+        
+        // Add video preview generation for video assets (after thumbnails)
+        if ($isVideo) {
+            $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
+        }
+        
+        $chainJobs = array_merge($chainJobs, [
             new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
             new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
             new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
@@ -183,7 +198,9 @@ class ProcessAssetJob implements ShouldQueue
             ...$this->getConditionalAiJobs($asset),
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),
-        ])->dispatch();
+        ]);
+        
+        Bus::chain($chainJobs)->dispatch();
 
         Log::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
             'asset_id' => $asset->id,

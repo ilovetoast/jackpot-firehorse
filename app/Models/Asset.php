@@ -224,6 +224,11 @@ class Asset extends Model
         'rejection_reason',
         'approval_summary', // Phase AF-6
         'approval_summary_generated_at', // Phase AF-6
+        'video_duration', // Phase V-1: Video duration in seconds
+        'video_width', // Phase V-1: Video width in pixels
+        'video_height', // Phase V-1: Video height in pixels
+        'video_poster_url', // Phase V-1: URL to video poster thumbnail
+        'video_preview_url', // Phase V-1: URL to hover preview video
     ];
 
     /**

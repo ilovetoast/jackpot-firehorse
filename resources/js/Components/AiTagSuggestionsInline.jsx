@@ -26,6 +26,7 @@ export default function AiTagSuggestionsInline({ assetId }) {
     const hasFetchedSuggestions = useRef(false) // Prevent multiple fetches per component instance
     
     const { hasPermission: canView } = usePermission('metadata.suggestions.view')
+    const { hasPermission: canApply } = usePermission('metadata.suggestions.apply')
 
     // Fetch AI tag suggestions (only once per asset, with caching)
     useEffect(() => {
@@ -86,6 +87,12 @@ export default function AiTagSuggestionsInline({ assetId }) {
     // Handle accept (create tag in asset_tags)
     const handleAccept = async (candidateId, tag) => {
         if (processing.has(candidateId)) return
+        
+        // Check permission before accepting
+        if (!canApply) {
+            alert('You do not have permission to approve tag suggestions.')
+            return
+        }
 
         setProcessing((prev) => new Set(prev).add(candidateId))
 
@@ -248,7 +255,7 @@ export default function AiTagSuggestionsInline({ assetId }) {
                                 />
                             )}
                             <div className="flex items-center gap-1 ml-1">
-                                {suggestion.can_apply && (
+                                {suggestion.can_apply && canApply && (
                                     <button
                                         type="button"
                                         onClick={() => handleAccept(suggestion.id, suggestion.tag)}

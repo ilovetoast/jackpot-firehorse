@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
+import { usePermission } from '../../hooks/usePermission'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
@@ -17,6 +18,7 @@ import { CategoryIcon } from '../../Helpers/categoryIcons'
 export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [] }) {
     const pageProps = usePage().props
     const { auth } = pageProps
+    const { hasPermission: canUpload } = usePermission('asset.upload')
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
@@ -178,22 +180,30 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     
     // Handle drag-and-drop on grid area
     const handleDragOver = useCallback((e) => {
+        // Only allow drag-over if user can upload
+        if (!canUpload) {
+            return
+        }
         e.preventDefault()
         e.stopPropagation()
         // Only show drag overlay if dragging files (not other elements)
         if (e.dataTransfer.types.includes('Files')) {
             setIsDraggingOver(true)
         }
-    }, [])
+    }, [canUpload])
     
     const handleDragEnter = useCallback((e) => {
+        // Only allow drag-enter if user can upload
+        if (!canUpload) {
+            return
+        }
         e.preventDefault()
         e.stopPropagation()
         // Only show drag overlay if dragging files (not other elements)
         if (e.dataTransfer.types.includes('Files')) {
             setIsDraggingOver(true)
         }
-    }, [])
+    }, [canUpload])
     
     const handleDragLeave = useCallback((e) => {
         e.preventDefault()
@@ -206,6 +216,10 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     }, [])
     
     const handleDrop = useCallback((e) => {
+        // Only allow drop if user can upload
+        if (!canUpload) {
+            return
+        }
         e.preventDefault()
         e.stopPropagation()
         setIsDraggingOver(false) // Clear drag state on drop
@@ -218,7 +232,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                 handleOpenUploadDialog(imageFiles)
             }
         }
-    }, [handleOpenUploadDialog])
+    }, [canUpload, handleOpenUploadDialog])
 
     return (
         <div key={pageKey} className="h-screen flex flex-col overflow-hidden">
@@ -369,10 +383,10 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
                             paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
                         }}
-                        onDragOver={handleDragOver}
-                        onDragEnter={handleDragEnter}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleDrop}
+                        onDragOver={canUpload ? handleDragOver : undefined}
+                        onDragEnter={canUpload ? handleDragEnter : undefined}
+                        onDragLeave={canUpload ? handleDragLeave : undefined}
+                        onDrop={canUpload ? handleDrop : undefined}
                     >
                         {/* Drag and drop overlay */}
                         {isDraggingOver && (() => {

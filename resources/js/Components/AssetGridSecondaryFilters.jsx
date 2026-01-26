@@ -26,13 +26,14 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon } from '@heroicons/react/24/outline'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
 import DominantColorsFilter from './DominantColorsFilter'
 import { usePermission } from '../hooks/usePermission'
+import UserSelect from './UserSelect'
 
 /**
  * Secondary Filter Bar Component
@@ -70,13 +71,20 @@ export default function AssetGridSecondaryFilters({
     const [unpublishedFilter, setUnpublishedFilter] = useState(false)
     const [archivedFilter, setArchivedFilter] = useState(false)
     
-    // Check URL for lifecycle filters on mount
+    // User filter state
+    const [userFilter, setUserFilter] = useState(null)
+    
+    // Check URL for lifecycle filters and user filter on mount
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search)
         const lifecycle = urlParams.get('lifecycle')
         setPendingPublicationFilter(lifecycle === 'pending_approval')
         setUnpublishedFilter(lifecycle === 'unpublished')
         setArchivedFilter(lifecycle === 'archived')
+        
+        // Check for user filter
+        const uploadedBy = urlParams.get('uploaded_by')
+        setUserFilter(uploadedBy || null)
     }, [])
     
     // Sync with URL changes
@@ -87,6 +95,10 @@ export default function AssetGridSecondaryFilters({
             setPendingPublicationFilter(lifecycle === 'pending_approval')
             setUnpublishedFilter(lifecycle === 'unpublished')
             setArchivedFilter(lifecycle === 'archived')
+            
+            // Sync user filter
+            const uploadedBy = urlParams.get('uploaded_by')
+            setUserFilter(uploadedBy || null)
         }
         
         // Listen for URL changes
@@ -98,6 +110,8 @@ export default function AssetGridSecondaryFilters({
             const newPending = lifecycle === 'pending_approval'
             const newUnpublished = lifecycle === 'unpublished'
             const newArchived = lifecycle === 'archived'
+            const newUploadedBy = urlParams.get('uploaded_by') || null
+            
             if (newPending !== pendingPublicationFilter) {
                 setPendingPublicationFilter(newPending)
             }
@@ -107,13 +121,16 @@ export default function AssetGridSecondaryFilters({
             if (newArchived !== archivedFilter) {
                 setArchivedFilter(newArchived)
             }
+            if (newUploadedBy !== userFilter) {
+                setUserFilter(newUploadedBy)
+            }
         }, 200)
         
         return () => {
             window.removeEventListener('popstate', handleUrlChange)
             clearInterval(interval)
         }
-    }, [pendingPublicationFilter, unpublishedFilter, archivedFilter])
+    }, [pendingPublicationFilter, unpublishedFilter, archivedFilter, userFilter])
     
     // Handle pending publication filter toggle
     const handlePendingPublicationFilterToggle = () => {
@@ -177,6 +194,26 @@ export default function AssetGridSecondaryFilters({
         } else {
             urlParams.delete('lifecycle')
             setArchivedFilter(false)
+        }
+        
+        // Update URL and reload assets
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets'],
+        })
+    }
+    
+    // Handle user filter change
+    const handleUserFilterChange = (userId) => {
+        const urlParams = new URLSearchParams(window.location.search)
+        
+        if (userId) {
+            urlParams.set('uploaded_by', userId)
+            setUserFilter(userId)
+        } else {
+            urlParams.delete('uploaded_by')
+            setUserFilter(null)
         }
         
         // Update URL and reload assets
@@ -386,11 +423,11 @@ export default function AssetGridSecondaryFilters({
         })
     }
     
-    // Count active filters (including lifecycle filters)
+    // Count active filters (including lifecycle filters and user filter)
     const metadataFilterCount = Object.values(filters).filter(
         (f) => f && f.value !== null && f.value !== '' && (!Array.isArray(f.value) || f.value.length > 0)
     ).length
-    const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0)
+    const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0) + (userFilter ? 1 : 0)
     
     // Always render the "More filters" bar container
     // Content changes based on category, but bar persists
@@ -491,6 +528,19 @@ export default function AssetGridSecondaryFilters({
                         </div>
                     )}
                     
+                    {/* User Filter - Created By */}
+                    {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 && (
+                        <div className="mb-4 pb-4 border-b border-gray-200">
+                            <UserSelect
+                                users={pageProps.uploaded_by_users}
+                                value={userFilter}
+                                onChange={handleUserFilterChange}
+                                placeholder="All Users"
+                                label="Created By"
+                            />
+                        </div>
+                    )}
+                    
                     {/* Active Filters (if any) */}
                     {activeFilterCount > 0 && (
                         <div className="mb-4">
@@ -530,6 +580,22 @@ export default function AssetGridSecondaryFilters({
                                             type="button"
                                             onClick={handleArchivedFilterToggle}
                                             className="text-gray-600 hover:text-gray-800"
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                )}
+                                {userFilter && (
+                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                        <span>
+                                            Created By: {pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.name || 
+                                                         pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.email || 
+                                                         'Unknown User'}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleUserFilterChange(null)}
+                                            className="text-indigo-600 hover:text-indigo-800"
                                         >
                                             <XMarkIcon className="h-3 w-3" />
                                         </button>

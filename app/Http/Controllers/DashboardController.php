@@ -174,6 +174,7 @@ class DashboardController extends Controller
         }
         
         // Get most viewed assets (top 6) - only visible, non-deleted assets
+        // Filter by category permissions to respect protected categories
         $mostViewedAssetIds = AssetMetric::where('asset_metrics.tenant_id', $tenant->id)
             ->where('asset_metrics.brand_id', $brand->id)
             ->where('asset_metrics.metric_type', MetricType::VIEW->value)
@@ -185,19 +186,28 @@ class DashboardController extends Controller
             ->select('assets.id', DB::raw('COUNT(asset_metrics.id) as view_count'))
             ->groupBy('assets.id')
             ->orderByDesc('view_count')
-            ->limit(6)
+            ->limit(20) // Get more to filter by permissions
             ->pluck('view_count', 'id');
         
         $mostViewedAssets = collect();
         if ($mostViewedAssetIds->isNotEmpty()) {
             $assets = Asset::whereIn('id', $mostViewedAssetIds->keys())
+                ->with('category') // Eager load category for permission checks
                 ->get()
                 ->keyBy('id');
             
-            $mostViewedAssets = $mostViewedAssetIds->map(function ($viewCount, $assetId) use ($assets) {
+            $mostViewedAssets = $mostViewedAssetIds->map(function ($viewCount, $assetId) use ($assets, $user) {
                 $asset = $assets->get($assetId);
                 if (!$asset) {
                     return null;
+                }
+                
+                // Check if user can view the asset's category (respects protected categories)
+                if ($asset->category) {
+                    $canViewCategory = $user->can('view', $asset->category);
+                    if (!$canViewCategory) {
+                        return null; // Skip assets in protected categories user can't access
+                    }
                 }
                 
                 // Generate thumbnail URLs (same logic as AssetController)
@@ -240,10 +250,11 @@ class DashboardController extends Controller
                     'thumbnail_status' => $thumbnailStatus,
                     'view_count' => (int) $viewCount,
                 ];
-            })->filter()->values();
+            })->filter()->take(6)->values(); // Take top 6 after filtering
         }
         
         // Get most downloaded assets (top 6) - only visible, non-deleted assets
+        // Filter by category permissions to respect protected categories
         $mostDownloadedAssetIds = AssetMetric::where('asset_metrics.tenant_id', $tenant->id)
             ->where('asset_metrics.brand_id', $brand->id)
             ->where('asset_metrics.metric_type', MetricType::DOWNLOAD->value)
@@ -255,7 +266,7 @@ class DashboardController extends Controller
             ->select('assets.id', DB::raw('COUNT(asset_metrics.id) as download_count'))
             ->groupBy('assets.id')
             ->orderByDesc('download_count')
-            ->limit(6)
+            ->limit(20) // Get more to filter by permissions
             ->pluck('download_count', 'id');
         
         $mostDownloadedAssets = collect();
@@ -264,10 +275,24 @@ class DashboardController extends Controller
                 ->get()
                 ->keyBy('id');
             
-            $mostDownloadedAssets = $mostDownloadedAssetIds->map(function ($downloadCount, $assetId) use ($assets) {
+            $mostDownloadedAssets = $mostDownloadedAssetIds->map(function ($downloadCount, $assetId) use ($assets, $user, $tenant, $brand) {
                 $asset = $assets->get($assetId);
                 if (!$asset) {
                     return null;
+                }
+                
+                // Check if user can view the asset's category (respects protected categories)
+                // Category ID is stored in asset metadata
+                $metadata = $asset->metadata ?? [];
+                $categoryId = $metadata['category_id'] ?? null;
+                if ($categoryId) {
+                    $category = \App\Models\Category::find($categoryId);
+                    if ($category && $category->tenant_id === $tenant->id && $category->brand_id === $brand->id) {
+                        $canViewCategory = $user->can('view', $category);
+                        if (!$canViewCategory) {
+                            return null; // Skip assets in protected categories user can't access
+                        }
+                    }
                 }
                 
                 // Generate thumbnail URLs (same logic as AssetController)
@@ -310,7 +335,7 @@ class DashboardController extends Controller
                     'thumbnail_status' => $thumbnailStatus,
                     'download_count' => (int) $downloadCount,
                 ];
-            })->filter()->values();
+            })->filter()->take(6)->values(); // Take top 6 after filtering
         }
         
         // Phase M-1: Get pending AI suggestions count (ONLY candidates, not asset_metadata)
@@ -337,6 +362,24 @@ class DashboardController extends Controller
         // Phase M-1: Exclude asset_metadata.approved_at IS NULL from pending count
         // Metadata is reviewed inline during asset review, not as separate suggestions
         $totalPendingCount = $pendingMetadataCount + $pendingTagCount;
+        
+        // Count pending metadata approvals (from asset_metadata table, not candidates)
+        // Only show to users who can approve metadata
+        $pendingMetadataApprovalsCount = 0;
+        $approvalResolver = app(\App\Services\MetadataApprovalResolver::class);
+        if ($approvalResolver->canApprove($user, $tenant)) {
+            $pendingMetadataApprovalsCount = DB::table('asset_metadata')
+                ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+                ->where('assets.tenant_id', $tenant->id)
+                ->where('assets.brand_id', $brand->id)
+                ->whereNull('asset_metadata.approved_at')
+                ->whereNotIn('asset_metadata.source', ['user_rejected', 'ai_rejected', 'automatic', 'system', 'manual_override'])
+                ->whereIn('asset_metadata.source', ['ai', 'user'])
+                ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                ->where('metadata_fields.population_mode', '!=', 'automatic')
+                ->distinct('asset_metadata.id')
+                ->count('asset_metadata.id');
+        }
         
         // Phase L.5.1: Count unpublished assets (waiting to be published)
         // Only visible to users with metadata.bypass_approval (full viewing privileges)
@@ -423,6 +466,63 @@ class DashboardController extends Controller
             });
         }
         
+        // Get widget visibility configuration from tenant settings
+        $widgetConfig = $tenant->settings['dashboard_widgets'] ?? [];
+        
+        // Default widget visibility: company widgets visible to owner/admin/brand_manager, hidden for contributor/viewer
+        // Widget config format: { role: { widget_name: true/false } }
+        // Widget names: 'total_assets', 'storage', 'download_links', 'most_viewed', 'most_downloaded'
+        $defaultWidgetVisibility = [
+            'owner' => [
+                'total_assets' => true,
+                'storage' => true,
+                'download_links' => true,
+                'most_viewed' => true,
+                'most_downloaded' => true,
+            ],
+            'admin' => [
+                'total_assets' => true,
+                'storage' => true,
+                'download_links' => true,
+                'most_viewed' => true,
+                'most_downloaded' => true,
+            ],
+            'brand_manager' => [
+                'total_assets' => true,
+                'storage' => true,
+                'download_links' => true,
+                'most_viewed' => true,
+                'most_downloaded' => true,
+            ],
+            'contributor' => [
+                'total_assets' => false, // Contributors don't see company widgets
+                'storage' => false,
+                'download_links' => false,
+                'most_viewed' => true,
+                'most_downloaded' => true,
+            ],
+            'viewer' => [
+                'total_assets' => false, // Viewers only see Most Viewed and Most Downloaded
+                'storage' => false,
+                'download_links' => false,
+                'most_viewed' => true,
+                'most_downloaded' => true,
+            ],
+        ];
+        
+        // Merge user config with defaults (user config overrides defaults)
+        $roleWidgetVisibility = [];
+        foreach ($defaultWidgetVisibility as $role => $widgets) {
+            $roleWidgetVisibility[$role] = array_merge(
+                $defaultWidgetVisibility[$role],
+                $widgetConfig[$role] ?? []
+            );
+        }
+        
+        // Determine current user's widget visibility
+        $userRole = strtolower($userRole ?? 'viewer');
+        $userWidgetVisibility = $roleWidgetVisibility[$userRole] ?? $roleWidgetVisibility['viewer'];
+        
         return Inertia::render('Dashboard', [
             'tenant' => $tenant,
             'brand' => $brand,
@@ -450,6 +550,7 @@ class DashboardController extends Controller
                     'limit' => $maxDownloadsPerMonth, // Monthly download limit
                 ],
             ],
+            'widget_visibility' => $userWidgetVisibility, // Widget visibility for current user's role
             'most_viewed_assets' => $mostViewedAssets,
             'most_downloaded_assets' => $mostDownloadedAssets,
             'ai_usage' => $aiUsageData, // Tenant-scoped AI usage (shared across all brands)
@@ -460,6 +561,7 @@ class DashboardController extends Controller
                 'tag_candidates' => $pendingTagCount,
                 // Phase M-1: pending_metadata excluded - metadata approval is asset-centric
             ],
+            'pending_metadata_approvals_count' => $pendingMetadataApprovalsCount, // Count of pending metadata approvals (for approvers only)
             'unpublished_assets_count' => $unpublishedAssetsCount, // Phase L.5.1: Count of unpublished assets
         ]);
     }

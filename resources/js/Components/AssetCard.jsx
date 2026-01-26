@@ -79,6 +79,16 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     const extLower = fileExtension.toLowerCase()
     const isImage = asset.mime_type?.startsWith('image/') || imageExtensions.includes(extLower)
     
+    // Phase V-1: Detect if asset is a video
+    const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+    const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
+    
+    // Phase V-1: Hover preview state (desktop only)
+    const [isHovering, setIsHovering] = useState(false)
+    const [previewLoaded, setPreviewLoaded] = useState(false)
+    const videoPreviewRef = useRef(null)
+    const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
+    
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures memoized components re-render when thumbnail availability changes
     // after background reconciliation. Recompute only when asset id or thumbnailVersion changes.
@@ -196,17 +206,63 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) */}
             {/* Use ThumbnailPreview component for consistent state machine and fade-in */}
             {/* FORBIDDEN: Never use green placeholders. ThumbnailPreview handles all states with FileTypeIcon fallback. */}
-            <div className="aspect-[4/3] bg-gray-50 relative overflow-hidden">
-                <ThumbnailPreview
-                    asset={asset}
-                    alt={asset.title || asset.original_filename || 'Asset'}
-                    className="w-full h-full"
-                    retryCount={0}
-                    onRetry={null}
-                    size="lg"
-                    thumbnailVersion={thumbnailVersion}
-                    shouldAnimateThumbnail={shouldAnimateThumbnail}
-                />
+            <div 
+                className="aspect-[4/3] bg-gray-50 relative overflow-hidden"
+                onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
+                onMouseLeave={() => {
+                    setIsHovering(false)
+                    // Pause and unload preview on mouse leave
+                    if (videoPreviewRef.current) {
+                        videoPreviewRef.current.pause()
+                        videoPreviewRef.current.currentTime = 0
+                    }
+                }}
+            >
+                {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
+                {isVideo && isHovering && asset.video_preview_url && !isMobile && (
+                    <video
+                        ref={videoPreviewRef}
+                        src={asset.video_preview_url}
+                        className="absolute inset-0 w-full h-full object-cover z-10"
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        onLoadedData={() => setPreviewLoaded(true)}
+                        style={{ opacity: previewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
+                    />
+                )}
+                
+                {/* Phase V-1: Use video poster if available, otherwise use ThumbnailPreview */}
+                {isVideo && asset.video_poster_url ? (
+                    <img
+                        src={asset.video_poster_url}
+                        alt={asset.title || asset.original_filename || 'Video'}
+                        className={`w-full h-full object-cover ${isHovering && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                    />
+                ) : (
+                    <ThumbnailPreview
+                        asset={asset}
+                        alt={asset.title || asset.original_filename || 'Asset'}
+                        className="w-full h-full"
+                        retryCount={0}
+                        onRetry={null}
+                        size="lg"
+                        thumbnailVersion={thumbnailVersion}
+                        shouldAnimateThumbnail={shouldAnimateThumbnail}
+                    />
+                )}
+                
+                {/* Phase V-1: Play icon overlay for videos */}
+                {isVideo && (
+                    <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                        <div className="bg-black/40 backdrop-blur-sm rounded-full p-3">
+                            <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </div>
+                    </div>
+                )}
                 
                 {/* Phase 2 – Step 7: Bulk selection checkbox */}
                 {onBulkSelect && (

@@ -8,12 +8,14 @@
 import { useState } from 'react'
 import { SparklesIcon } from '@heroicons/react/24/outline'
 import PendingAiSuggestionsModal from './PendingAiSuggestionsModal'
+import { usePermission } from '../hooks/usePermission'
 
 export default function PendingAiSuggestionsTile({ pendingCount = 0 }) {
     const [isModalOpen, setIsModalOpen] = useState(false)
+    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
 
-    // Don't show tile if there are no pending suggestions
-    if (pendingCount === 0) {
+    // Don't show tile if user doesn't have view permission or no pending suggestions
+    if (!canView || pendingCount === 0) {
         return null
     }
 

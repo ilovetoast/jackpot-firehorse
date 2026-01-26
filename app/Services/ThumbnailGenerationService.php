@@ -1667,28 +1667,321 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Generate thumbnail for video files (first frame extraction).
+     * Generate thumbnail for video files (poster frame extraction).
      *
-     * @todo Implement video poster frame generation (FFmpeg)
-     *   - Option 1: Use FFmpeg via shell command (ffmpeg -i video.mp4 -ss 00:00:01 -vframes 1 thumbnail.jpg)
-     *   - Option 2: Use PHP-FFMpeg library (https://github.com/PHP-FFMpeg/PHP-FFMpeg)
-     *   - Note: May want to extract frame at specific time (e.g., 1 second) instead of first frame
-     *   - Future: Generate multiple frames for video preview (first, middle, last)
+     * Uses FFmpeg to extract a poster frame from the video.
+     * Frame timestamp: 25-40% of video duration (defaults to 30%).
+     * Output format: JPG or WebP (based on config).
      *
-     * NOTE: Requires FFmpeg or similar tool.
-     * This is a placeholder implementation.
-     *
-     * @param string $sourcePath
-     * @param array $styleConfig
-     * @return string|null Path to generated thumbnail, or null if not supported
+     * @param string $sourcePath Local path to video file
+     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @return string Path to generated thumbnail image
+     * @throws \RuntimeException If video processing fails
      */
-    protected function generateVideoThumbnail(string $sourcePath, array $styleConfig): ?string
+    protected function generateVideoThumbnail(string $sourcePath, array $styleConfig): string
     {
-        Log::info('Video thumbnail generation not yet implemented', [
+        // Verify source file exists
+        if (!file_exists($sourcePath)) {
+            throw new \RuntimeException("Source video file does not exist: {$sourcePath}");
+        }
+
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException("Source video file is empty (size: 0 bytes)");
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating video thumbnail using FFmpeg', [
             'source_path' => $sourcePath,
+            'source_file_size' => $sourceFileSize,
+            'style_config' => $styleConfig,
         ]);
-        
+
+        // Check if FFmpeg is available
+        $ffmpegPath = $this->findFFmpegPath();
+        if (!$ffmpegPath) {
+            throw new \RuntimeException('FFmpeg is not installed or not found in PATH. Video processing requires FFmpeg.');
+        }
+
+        try {
+            // Get video duration and dimensions using FFprobe
+            $videoInfo = $this->getVideoInfo($sourcePath, $ffmpegPath);
+            $duration = $videoInfo['duration'] ?? 0;
+            $width = $videoInfo['width'] ?? 0;
+            $height = $videoInfo['height'] ?? 0;
+
+            if ($duration <= 0) {
+                throw new \RuntimeException('Unable to determine video duration');
+            }
+
+            if ($width === 0 || $height === 0) {
+                throw new \RuntimeException('Unable to determine video dimensions');
+            }
+
+            Log::info('[ThumbnailGenerationService] Video info extracted', [
+                'source_path' => $sourcePath,
+                'duration' => $duration,
+                'width' => $width,
+                'height' => $height,
+            ]);
+
+            // Calculate frame timestamp: 25-40% of duration (defaults to 30%)
+            // This avoids black frames at the start and ensures we get actual content
+            $timestampPercent = 0.30; // 30% of duration
+            $timestamp = max(0.5, $duration * $timestampPercent); // Minimum 0.5 seconds
+
+            // Extract frame at calculated timestamp
+            $tempImagePath = tempnam(sys_get_temp_dir(), 'video_thumb_') . '.jpg';
+            
+            // FFmpeg command to extract frame
+            // -ss: seek to timestamp
+            // -i: input file
+            // -vframes 1: extract only 1 frame
+            // -q:v 2: high quality JPEG (1-31, lower is better)
+            // -y: overwrite output file
+            $command = sprintf(
+                '%s -ss %.2f -i %s -vframes 1 -q:v 2 -y %s 2>&1',
+                escapeshellarg($ffmpegPath),
+                $timestamp,
+                escapeshellarg($sourcePath),
+                escapeshellarg($tempImagePath)
+            );
+
+            Log::info('[ThumbnailGenerationService] Extracting video frame', [
+                'source_path' => $sourcePath,
+                'timestamp' => $timestamp,
+                'command' => $command,
+            ]);
+
+            $output = [];
+            $returnCode = 0;
+            exec($command, $output, $returnCode);
+
+            if ($returnCode !== 0 || !file_exists($tempImagePath) || filesize($tempImagePath) === 0) {
+                $errorOutput = implode("\n", $output);
+                Log::error('[ThumbnailGenerationService] FFmpeg frame extraction failed', [
+                    'source_path' => $sourcePath,
+                    'return_code' => $returnCode,
+                    'output' => $errorOutput,
+                ]);
+                throw new \RuntimeException("Failed to extract video frame: FFmpeg returned error code {$returnCode}");
+            }
+
+            Log::info('[ThumbnailGenerationService] Video frame extracted', [
+                'source_path' => $sourcePath,
+                'temp_image_path' => $tempImagePath,
+                'image_size_bytes' => filesize($tempImagePath),
+            ]);
+
+            // Resize the extracted frame to match thumbnail style dimensions
+            // Use GD library to resize (same as image thumbnails for consistency)
+            if (!extension_loaded('gd')) {
+                throw new \RuntimeException('GD extension is required for video thumbnail resizing');
+            }
+
+            // Load the extracted frame
+            $sourceImage = imagecreatefromjpeg($tempImagePath);
+            if ($sourceImage === false) {
+                throw new \RuntimeException("Failed to load extracted video frame from: {$tempImagePath}");
+            }
+
+            try {
+                // Get source image dimensions
+                $sourceWidth = imagesx($sourceImage);
+                $sourceHeight = imagesy($sourceImage);
+
+                if ($sourceWidth === 0 || $sourceHeight === 0) {
+                    throw new \RuntimeException('Extracted video frame has invalid dimensions');
+                }
+
+                // Calculate thumbnail dimensions (maintain aspect ratio)
+                $targetWidth = $styleConfig['width'];
+                $targetHeight = $styleConfig['height'];
+                $fit = $styleConfig['fit'] ?? 'contain';
+
+                [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                    $sourceWidth,
+                    $sourceHeight,
+                    $targetWidth,
+                    $targetHeight,
+                    $fit
+                );
+
+                // Create thumbnail image
+                $thumbImage = imagecreatetruecolor($thumbWidth, $thumbHeight);
+                if ($thumbImage === false) {
+                    throw new \RuntimeException('Failed to create thumbnail image resource');
+                }
+
+                // Fill with white background
+                $white = imagecolorallocate($thumbImage, 255, 255, 255);
+                imagefill($thumbImage, 0, 0, $white);
+
+                // Resize image
+                imagecopyresampled(
+                    $thumbImage,
+                    $sourceImage,
+                    0, 0, 0, 0,
+                    $thumbWidth,
+                    $thumbHeight,
+                    $sourceWidth,
+                    $sourceHeight
+                );
+
+                // Apply blur for preview thumbnails (LQIP effect)
+                if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                    for ($i = 0; $i < 2; $i++) {
+                        imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
+                    }
+                }
+
+                // Determine output format based on config (default to WebP for better compression)
+                $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
+                $quality = $styleConfig['quality'] ?? 85;
+
+                // Save thumbnail to temporary file
+                if ($outputFormat === 'webp' && function_exists('imagewebp')) {
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.webp';
+                    if (!imagewebp($thumbImage, $thumbPath, $quality)) {
+                        throw new \RuntimeException('Failed to save video thumbnail image as WebP');
+                    }
+                } else {
+                    // Fallback to JPEG if WebP not available or not configured
+                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_') . '.jpg';
+                    if (!imagejpeg($thumbImage, $thumbPath, $quality)) {
+                        throw new \RuntimeException('Failed to save video thumbnail image as JPEG');
+                    }
+                }
+
+                Log::info('[ThumbnailGenerationService] Video thumbnail generated successfully', [
+                    'source_path' => $sourcePath,
+                    'thumb_path' => $thumbPath,
+                    'thumb_width' => $thumbWidth,
+                    'thumb_height' => $thumbHeight,
+                    'thumb_size_bytes' => filesize($thumbPath),
+                ]);
+
+                return $thumbPath;
+            } finally {
+                imagedestroy($sourceImage);
+                if (isset($thumbImage)) {
+                    imagedestroy($thumbImage);
+                }
+                // Clean up temporary extracted frame
+                if (file_exists($tempImagePath)) {
+                    @unlink($tempImagePath);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] Video thumbnail generation failed', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+            ]);
+            throw new \RuntimeException("Video thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
+     * Find FFmpeg executable path.
+     *
+     * @return string|null Path to FFmpeg executable or null if not found
+     */
+    protected function findFFmpegPath(): ?string
+    {
+        // Common FFmpeg paths
+        $possiblePaths = [
+            'ffmpeg', // In PATH
+            '/usr/bin/ffmpeg',
+            '/usr/local/bin/ffmpeg',
+            '/opt/homebrew/bin/ffmpeg', // macOS Homebrew
+        ];
+
+        foreach ($possiblePaths as $path) {
+            // Check if command exists and is executable
+            if ($path === 'ffmpeg') {
+                // Check if ffmpeg is in PATH
+                $output = [];
+                $returnCode = 0;
+                exec('which ffmpeg 2>&1', $output, $returnCode);
+                if ($returnCode === 0 && !empty($output[0]) && file_exists($output[0])) {
+                    return $output[0];
+                }
+            } elseif (file_exists($path) && is_executable($path)) {
+                return $path;
+            }
+        }
+
         return null;
+    }
+
+    /**
+     * Get video information using FFprobe.
+     *
+     * @param string $videoPath Path to video file
+     * @param string $ffmpegPath Path to FFmpeg executable
+     * @return array Video information (duration, width, height)
+     * @throws \RuntimeException If FFprobe fails
+     */
+    protected function getVideoInfo(string $videoPath, string $ffmpegPath): array
+    {
+        // Try to use ffprobe first (more reliable)
+        $ffprobePath = str_replace('ffmpeg', 'ffprobe', $ffmpegPath);
+        if (!file_exists($ffprobePath) || !is_executable($ffprobePath)) {
+            // Fallback: use ffmpeg to probe
+            $ffprobePath = $ffmpegPath;
+        }
+
+        // Get video information using JSON output
+        $command = sprintf(
+            '%s -v quiet -print_format json -show_format -show_streams %s 2>&1',
+            escapeshellarg($ffprobePath),
+            escapeshellarg($videoPath)
+        );
+
+        $output = [];
+        $returnCode = 0;
+        exec($command, $output, $returnCode);
+
+        if ($returnCode !== 0) {
+            $errorOutput = implode("\n", $output);
+            Log::error('[ThumbnailGenerationService] FFprobe failed', [
+                'video_path' => $videoPath,
+                'return_code' => $returnCode,
+                'output' => $errorOutput,
+            ]);
+            throw new \RuntimeException("Failed to get video information: FFprobe returned error code {$returnCode}");
+        }
+
+        $jsonOutput = implode("\n", $output);
+        $videoData = json_decode($jsonOutput, true);
+
+        if (!$videoData || !isset($videoData['format'])) {
+            throw new \RuntimeException('Failed to parse video information from FFprobe output');
+        }
+
+        // Find video stream
+        $videoStream = null;
+        foreach ($videoData['streams'] ?? [] as $stream) {
+            if (isset($stream['codec_type']) && $stream['codec_type'] === 'video') {
+                $videoStream = $stream;
+                break;
+            }
+        }
+
+        if (!$videoStream) {
+            throw new \RuntimeException('No video stream found in file');
+        }
+
+        // Extract duration, width, height
+        $duration = (float) ($videoData['format']['duration'] ?? 0);
+        $width = (int) ($videoStream['width'] ?? 0);
+        $height = (int) ($videoStream['height'] ?? 0);
+
+        return [
+            'duration' => $duration,
+            'width' => $width,
+            'height' => $height,
+        ];
     }
 
     /**

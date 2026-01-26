@@ -620,7 +620,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     // Update active section on scroll
     useEffect(() => {
         const handleScroll = () => {
-            const sections = ['basic-information', 'brand-colors', 'sidebar-settings', 'categories']
+            const sections = ['basic-information', 'brand-colors', 'sidebar-settings', 'metadata', 'categories']
             const scrollPosition = window.scrollY + 100
 
             for (let i = sections.length - 1; i >= 0; i--) {
@@ -1265,39 +1265,86 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </div>
                                     {errors.nav_color && <p className="mt-2 text-sm text-red-600">{errors.nav_color}</p>}
                                 </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-                                {/* Phase M-2: Metadata Approval Toggle */}
-                                {['pro', 'enterprise'].includes(current_plan) && tenant_settings?.enable_metadata_approval && (
-                                    <div className="border-t border-gray-200 pt-6">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex-1">
-                                                <label htmlFor="metadata_approval_enabled" className="block text-sm font-medium leading-6 text-gray-900">
-                                                    Enable metadata approval for this brand
-                                                </label>
-                                                <p className="mt-1 text-sm text-gray-500">
-                                                    Metadata approval is available for this plan and can be enabled per brand. When enabled, metadata edits by contributors and viewers will require approval from brand managers or admins.
+                    {/* Metadata Section */}
+                    <div id="metadata" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">Metadata</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Configure metadata approval workflows and manage metadata fields for this brand.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
+                                <div className="px-4 py-5 sm:p-6">
+                                    <div className="space-y-6">
+                                        {/* Phase M-2: Metadata Approval Toggle */}
+                                        {['pro', 'enterprise'].includes(current_plan) && tenant_settings?.enable_metadata_approval && (
+                                            <div>
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex-1">
+                                                        <label htmlFor="metadata_approval_enabled" className="block text-sm font-medium leading-6 text-gray-900">
+                                                            Enable metadata approval for this brand
+                                                        </label>
+                                                        <p className="mt-1 text-sm text-gray-500">
+                                                            Metadata approval is available for this plan and can be enabled per brand. When enabled, metadata edits by contributors and viewers will require approval from brand managers or admins.
+                                                        </p>
+                                                    </div>
+                                                    <div className="ml-4">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setData('settings.metadata_approval_enabled', !data.settings?.metadata_approval_enabled)}
+                                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                                data.settings?.metadata_approval_enabled ? 'bg-indigo-600' : 'bg-gray-200'
+                                                            }`}
+                                                            role="switch"
+                                                            aria-checked={data.settings?.metadata_approval_enabled}
+                                                        >
+                                                            <span
+                                                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                    data.settings?.metadata_approval_enabled ? 'translate-x-5' : 'translate-x-0'
+                                                                }`}
+                                                            />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {(!['pro', 'enterprise'].includes(current_plan) || !tenant_settings?.enable_metadata_approval) && (
+                                            <div className="rounded-md bg-gray-50 p-4">
+                                                <p className="text-sm text-gray-600">
+                                                    {!['pro', 'enterprise'].includes(current_plan) 
+                                                        ? 'Metadata approval workflows require a Pro or Enterprise plan.'
+                                                        : 'Metadata approval must be enabled at the company level first.'}
                                                 </p>
                                             </div>
-                                            <div className="ml-4">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setData('settings.metadata_approval_enabled', !data.settings?.metadata_approval_enabled)}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-                                                        data.settings?.metadata_approval_enabled ? 'bg-indigo-600' : 'bg-gray-200'
-                                                    }`}
-                                                    role="switch"
-                                                    aria-checked={data.settings?.metadata_approval_enabled}
+                                        )}
+
+                                        {/* Metadata Fields Management */}
+                                        <div className="border-t border-gray-200 pt-6">
+                                            <div>
+                                                <h4 className="text-sm font-medium leading-6 text-gray-900 mb-2">
+                                                    Metadata Fields
+                                                </h4>
+                                                <p className="text-sm text-gray-500 mb-4">
+                                                    Manage metadata fields and visibility settings for this brand. Configure where fields appear in upload, edit, and filter interfaces.
+                                                </p>
+                                                <Link
+                                                    href="/app/tenant/metadata/registry"
+                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                                 >
-                                                    <span
-                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                            data.settings?.metadata_approval_enabled ? 'translate-x-5' : 'translate-x-0'
-                                                        }`}
-                                                    />
-                                                </button>
+                                                    Manage Metadata Fields
+                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                                    </svg>
+                                                </Link>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
                                     </div>
                                 </div>
                             </div>
@@ -1738,33 +1785,6 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         </div>
                     </div>
 
-                    {/* Metadata Fields */}
-                    <div id="metadata" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-1">
-                            <h3 className="text-base font-semibold leading-6 text-gray-900">
-                                Metadata
-                            </h3>
-                            <p className="mt-2 text-sm text-gray-500">
-                                Manage metadata fields and visibility settings for this brand.
-                            </p>
-                        </div>
-                        <div className="lg:col-span-2">
-                            <div className="bg-white rounded-lg border border-gray-200 p-4">
-                                <p className="text-sm text-gray-700 mb-4">
-                                    Manage metadata fields and visibility settings for this brand. Configure where fields appear in upload, edit, and filter interfaces.
-                                </p>
-                                <Link
-                                    href="/app/tenant/metadata/registry"
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                >
-                                    Manage Metadata Fields
-                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                    </svg>
-                                </Link>
-                            </div>
-                        </div>
-                    </div>
 
                     {errors.error && (
                         <div className="rounded-md bg-red-50 p-4">

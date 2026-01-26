@@ -304,6 +304,7 @@ export default function BulkMetadataEditModal({
                                         onChange={setValue}
                                         disabled={false}
                                         showError={false}
+                                        isUploadContext={false}
                                     />
                                 )}
                                 <button

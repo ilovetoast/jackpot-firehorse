@@ -15,6 +15,7 @@ import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
+import { usePermission } from '../../hooks/usePermission'
 import {
     FolderIcon,
     TagIcon,
@@ -25,6 +26,7 @@ import { CategoryIcon } from '../../Helpers/categoryIcons'
 export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [], available_values = {} }) {
     const pageProps = usePage().props
     const { auth } = pageProps
+    const { hasPermission: canUpload } = usePermission('asset.upload')
     
     // Use prop directly (now in function signature) or fallback to pageProps
     const availableValues = available_values || pageProps.available_values || {}
@@ -390,22 +392,30 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     
     // Handle drag-and-drop on grid area
     const handleDragOver = useCallback((e) => {
+        // Only allow drag-over if user can upload
+        if (!canUpload) {
+            return
+        }
         e.preventDefault()
         e.stopPropagation()
         // Only show drag overlay if dragging files (not other elements)
         if (e.dataTransfer.types.includes('Files')) {
             setIsDraggingOver(true)
         }
-    }, [])
+    }, [canUpload])
     
     const handleDragEnter = useCallback((e) => {
+        // Only allow drag-enter if user can upload
+        if (!canUpload) {
+            return
+        }
         e.preventDefault()
         e.stopPropagation()
         // Only show drag overlay if dragging files (not other elements)
         if (e.dataTransfer.types.includes('Files')) {
             setIsDraggingOver(true)
         }
-    }, [])
+    }, [canUpload])
     
     const handleDragLeave = useCallback((e) => {
         e.preventDefault()
@@ -418,6 +428,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     }, [])
     
     const handleDrop = useCallback((e) => {
+        // Only allow drop if user can upload
+        if (!canUpload) {
+            return
+        }
         e.preventDefault()
         e.stopPropagation()
         setIsDraggingOver(false) // Clear drag state on drop
@@ -430,7 +444,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 handleOpenUploadDialog(imageFiles)
             }
         }
-    }, [handleOpenUploadDialog])
+    }, [canUpload, handleOpenUploadDialog])
 
     // Phase L.6.2: Detect pending publication or unpublished mode from URL
     const [isPendingApprovalMode, setIsPendingApprovalMode] = useState(() => {
@@ -631,10 +645,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
                             paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
                         }}
-                        onDragOver={handleDragOver}
-                        onDragEnter={handleDragEnter}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleDrop}
+                        onDragOver={canUpload ? handleDragOver : undefined}
+                        onDragEnter={canUpload ? handleDragEnter : undefined}
+                        onDragLeave={canUpload ? handleDragLeave : undefined}
+                        onDrop={canUpload ? handleDrop : undefined}
                     >
                         {/* Drag and drop overlay */}
                         {isDraggingOver && (() => {

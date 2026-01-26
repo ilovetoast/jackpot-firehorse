@@ -317,33 +317,38 @@ return [
                 'video/x-msvideo',
                 'video/x-matroska',
                 'video/webm',
+                'video/x-m4v',
             ],
-            'extensions' => ['mp4', 'mov', 'avi', 'mkv', 'webm'],
+            'extensions' => ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'],
             
             'capabilities' => [
-                'thumbnail' => false, // @todo Implement
-                'metadata' => false,
-                'preview' => false,
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
                 'ai_analysis' => false,
-                'download_only' => true,
+                'download_only' => false,
             ],
             
             'handlers' => [
                 'thumbnail' => 'generateVideoThumbnail',
+                'metadata' => 'extractVideoMetadata',
             ],
             
             'requirements' => [
-                'external_tools' => ['ffmpeg'], // Future requirement
+                'external_tools' => ['ffmpeg'],
             ],
             
             'errors' => [
-                'not_implemented' => 'Video thumbnail generation is not yet implemented.',
+                'processing_failed' => 'Unable to process video. The file format may not be supported.',
+                'corrupted' => 'Unable to read video file. The file may be corrupted.',
+                'ffmpeg_not_found' => 'Video processing requires FFmpeg to be installed.',
+                'extraction_failed' => 'Unable to extract video frame. Please try again.',
             ],
             
             'frontend_hints' => [
-                'can_preview_inline' => false,
+                'can_preview_inline' => true,
                 'preview_component' => 'video',
-                'show_placeholder' => true,
+                'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
         ],

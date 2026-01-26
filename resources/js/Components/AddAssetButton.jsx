@@ -3,6 +3,8 @@
 // See docs/PHASE_2_UPLOAD_SYSTEM.md for Phase 2 status
 
 import { usePage } from '@inertiajs/react'
+import { usePermission } from '../hooks/usePermission'
+import PermissionGate from './PermissionGate'
 
 /**
  * AddAssetButton - Button to trigger upload dialog (gated by permissions)
@@ -23,6 +25,12 @@ export default function AddAssetButton({
     disabled = false
 }) {
     const { auth } = usePage().props
+    const { hasPermission: canUpload } = usePermission('asset.upload')
+    
+    // Hide button if user doesn't have upload permission
+    if (!canUpload) {
+        return null
+    }
     
     const defaultText = defaultAssetType === 'asset' 
         ? 'Add Asset' 

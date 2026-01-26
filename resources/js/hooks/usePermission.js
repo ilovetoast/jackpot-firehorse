@@ -12,6 +12,7 @@ export function usePermission(permission, requireAll = true) {
     
     // Extract values that affect permission calculation
     const tenantRole = auth?.tenant_role || null
+    const brandRole = auth?.brand_role || null
     const rolePermissions = auth?.role_permissions || {}
     const directPermissions = auth?.permissions || []
     
@@ -25,10 +26,48 @@ export function usePermission(permission, requireAll = true) {
         return sitePermissions.includes(perm) || perm.startsWith('site.') || perm.endsWith('.admin')
     }
     
+    // Brand-scoped permissions (permissions that should check brand role, not tenant role)
+    // These are permissions defined in PermissionMap::brandPermissions()
+    const brandScopedPermissions = [
+        'asset.view', 'asset.download', 'asset.upload', 'asset.publish', 'asset.unpublish', 'asset.archive', 'asset.restore',
+        'metadata.set_on_upload', 'metadata.edit_post_upload', 'metadata.bypass_approval', 'metadata.override_automatic',
+        'metadata.review_candidates', 'metadata.bulk_edit', 'metadata.suggestions.view', 'metadata.suggestions.apply', 'metadata.suggestions.dismiss',
+        'assets.tags.create', 'assets.tags.delete',
+        'brand_settings.manage', 'brand_categories.manage', 'billing.view', 'assets.retry_thumbnails',
+    ]
+    const isBrandScopedPermission = (perm) => {
+        return brandScopedPermissions.includes(perm)
+    }
+    
     // Memoize permission check to recalculate when auth props change
     const hasPermission = useMemo(() => {
         // Check permissions
         return permissions.every((perm) => {
+            // For brand-scoped permissions, ONLY check brand role (brand-level control, not tenant-level)
+            // Exception: tenant admin/owner bypass brand role checks (they have full access to all brands)
+            if (isBrandScopedPermission(perm)) {
+                // Tenant admin/owner bypass brand role checks (they have full access to all brands)
+                // This matches backend behavior: hasPermissionForBrand allows admin/owner to bypass
+                if (tenantRole && ['admin', 'owner'].includes(tenantRole)) {
+                    // Admin/owner at tenant level have full access - they can do anything
+                    // We assume they have the permission (matches backend hasPermissionForBrand logic)
+                    return true
+                }
+                
+                // For all other users, ONLY check brand role (brand-level control, not tenant-level)
+                // This ensures brand-scoped permissions are controlled by brand role, not tenant role
+                if (brandRole && typeof brandRole === 'string' && rolePermissions && typeof rolePermissions === 'object') {
+                    const brandRolePerms = rolePermissions[brandRole]
+                    if (Array.isArray(brandRolePerms) && brandRolePerms.includes(perm)) {
+                        return true
+                    }
+                }
+                
+                // No brand role or permission not found - deny access
+                // This ensures brand-scoped permissions are ONLY controlled by brand role
+                return false
+            }
+            
             // For company permissions, ONLY check tenant role permissions (not site permissions)
             // For site permissions, check both direct permissions and tenant role
             const isSite = isSitePermission(perm)
@@ -52,12 +91,37 @@ export function usePermission(permission, requireAll = true) {
             
             return false
         })
-    }, [permission, tenantRole, rolePermissions, directPermissions, requireAll])
+    }, [permission, tenantRole, brandRole, rolePermissions, directPermissions, requireAll])
     
     // If requireAll is false, we need to recalculate with OR logic
     if (!requireAll) {
         const hasAnyPermission = useMemo(() => {
             return permissions.some((perm) => {
+                // For brand-scoped permissions, ONLY check brand role (brand-level control, not tenant-level)
+                // Exception: tenant admin/owner bypass brand role checks (they have full access to all brands)
+                if (isBrandScopedPermission(perm)) {
+                    // Tenant admin/owner bypass brand role checks (they have full access to all brands)
+                    // This matches backend behavior: hasPermissionForBrand allows admin/owner to bypass
+                    if (tenantRole && ['admin', 'owner'].includes(tenantRole)) {
+                        // Admin/owner at tenant level have full access - they can do anything
+                        // We assume they have the permission (matches backend hasPermissionForBrand logic)
+                        return true
+                    }
+                    
+                    // For all other users, ONLY check brand role (brand-level control, not tenant-level)
+                    // This ensures brand-scoped permissions are controlled by brand role, not tenant role
+                    if (brandRole && typeof brandRole === 'string' && rolePermissions && typeof rolePermissions === 'object') {
+                        const brandRolePerms = rolePermissions[brandRole]
+                        if (Array.isArray(brandRolePerms) && brandRolePerms.includes(perm)) {
+                            return true
+                        }
+                    }
+                    
+                    // No brand role or permission not found - deny access
+                    // This ensures brand-scoped permissions are ONLY controlled by brand role
+                    return false
+                }
+                
                 // For company permissions, ONLY check tenant role permissions
                 // For site permissions, check both direct and tenant role
                 const isSite = isSitePermission(perm)
@@ -77,7 +141,7 @@ export function usePermission(permission, requireAll = true) {
                 
                 return false
             })
-        }, [permission, tenantRole, rolePermissions, directPermissions])
+        }, [permission, tenantRole, brandRole, rolePermissions, directPermissions])
         
         return { hasPermission: hasAnyPermission }
     }

@@ -5,6 +5,7 @@ import AppFooter from '../../Components/AppFooter'
 import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
 import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
 import TagQuality from '../../Components/Companies/TagQuality'
+import DashboardWidgetSettings from '../../Components/Companies/DashboardWidgetSettings'
 import { usePermission } from '../../hooks/usePermission'
 import { debounce } from 'lodash-es'
 
@@ -292,6 +293,19 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     }`}
                                 >
                                     Metadata
+                                </button>
+                            )}
+                            {canEditCompanySettings && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSectionClick('dashboard-widgets')}
+                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                        activeSection === 'dashboard-widgets'
+                                            ? 'border-indigo-500 text-indigo-600'
+                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }`}
+                                >
+                                    Dashboard Widgets
                                 </button>
                             )}
                             {canEditCompanySettings && (
@@ -848,6 +862,16 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {/* Dashboard Widget Settings */}
+                    {canEditCompanySettings && (
+                        <div id="dashboard-widgets" className="mb-12 scroll-mt-8">
+                            <DashboardWidgetSettings 
+                                tenant={tenant} 
+                                canEdit={canEditCompanySettings}
+                            />
                         </div>
                     )}
 

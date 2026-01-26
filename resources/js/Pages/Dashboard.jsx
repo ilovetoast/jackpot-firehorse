@@ -23,7 +23,7 @@ import AppNav from '../Components/AppNav'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0 }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
@@ -33,6 +33,13 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
         download_links: { value: 0, change: 0, is_positive: true, limit: null },
     }
     const dashboardStats = stats || defaultStats
+    
+    // Widget visibility configuration (defaults to showing all if not configured)
+    const showTotalAssets = widget_visibility.total_assets !== false
+    const showStorage = widget_visibility.storage !== false
+    const showDownloadLinks = widget_visibility.download_links !== false
+    const showMostViewed = widget_visibility.most_viewed !== false
+    const showMostDownloaded = widget_visibility.most_downloaded !== false
 
     // Format storage size with appropriate unit
     const formatStorage = (mb) => {
@@ -189,6 +196,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
 
                 <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
                     {/* Total Assets Card */}
+                    {showTotalAssets && (
                     <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
                         <div className="flex items-center">
                             <div className="flex-shrink-0">
@@ -219,8 +227,10 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     </div>
+                    )}
 
                     {/* Storage Size Card */}
+                    {showStorage && (
                     <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
                         <div className="flex items-center">
                             <div className="flex-shrink-0">
@@ -337,6 +347,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     </div>
+                    )}
 
                     {/* Phase L.5.1: Unpublished Assets Tile */}
                     {unpublished_assets_count > 0 && (
@@ -366,6 +377,31 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                     {/* Pending AI Suggestions Tile */}
                     {pending_ai_suggestions && (
                         <PendingAiSuggestionsTile pendingCount={pending_ai_suggestions.total || 0} />
+                    )}
+
+                    {/* Pending Metadata Approvals Tile */}
+                    {pending_metadata_approvals_count > 0 && auth?.metadata_approval_features?.metadata_approval_enabled && (
+                        <Link
+                            href="/app/assets"
+                            className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200 hover:border-yellow-300 hover:shadow-md transition-all cursor-pointer"
+                        >
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                    <ExclamationCircleIcon className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+                                </div>
+                                <div className="ml-5 w-0 flex-1">
+                                    <dt className="text-sm font-medium text-gray-500 truncate">Pending Metadata Approvals</dt>
+                                    <dd className="mt-1">
+                                        <div className="flex items-baseline">
+                                            <span className="text-2xl font-semibold tracking-tight text-gray-900">
+                                                {pending_metadata_approvals_count.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-gray-500">Click to review pending metadata</p>
+                                    </dd>
+                                </div>
+                            </div>
+                        </Link>
                     )}
 
                     {/* AI Tagging Card - Only show if user has permission and data is available */}
@@ -488,8 +524,10 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                 </div>
 
                 {/* Most Viewed and Most Downloaded Blocks */}
+                {(showMostViewed || showMostDownloaded) && (
                 <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
                     {/* Most Viewed Assets */}
+                    {showMostViewed && (
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="px-4 py-5 sm:p-6">
                             <div className="flex items-center justify-between mb-4">
@@ -544,8 +582,10 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             )}
                         </div>
                     </div>
+                    )}
 
                     {/* Most Downloaded Assets */}
+                    {showMostDownloaded && (
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="px-4 py-5 sm:p-6">
                             <div className="flex items-center justify-between mb-4">
@@ -600,7 +640,9 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             )}
                         </div>
                     </div>
+                    )}
                 </div>
+                )}
 
                 {/* Recent Activity - Only show if user has permission */}
                 {recent_activity && (

@@ -55,6 +55,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::middleware('tenant')->group(function () {
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
+        Route::put('/companies/settings/widgets', [\App\Http\Controllers\CompanyController::class, 'updateWidgetSettings'])->name('companies.settings.widgets.update');
         Route::get('/companies/permissions', [\App\Http\Controllers\CompanyController::class, 'permissions'])->name('companies.permissions');
         Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');
@@ -355,6 +356,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/assets/{asset}/thumbnails/preview', [\App\Http\Controllers\AssetThumbnailController::class, 'removePreview'])->name('assets.thumbnails.remove-preview');
             // Admin thumbnail style regeneration endpoint (site roles only)
             Route::post('/assets/{asset}/thumbnails/regenerate-styles', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateStyles'])->name('assets.thumbnails.regenerate-styles');
+            // Phase V-1: Video-specific regeneration endpoints
+            Route::post('/assets/{asset}/thumbnails/regenerate-video-thumbnail', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateVideoThumbnail'])->name('assets.thumbnails.regenerate-video-thumbnail');
+            Route::post('/assets/{asset}/thumbnails/regenerate-video-preview', [\App\Http\Controllers\AssetThumbnailController::class, 'regenerateVideoPreview'])->name('assets.thumbnails.regenerate-video-preview');
             // Phase L.6.1: Asset approval actions (publish/unpublish)
             Route::post('/assets/{asset}/publish', [\App\Http\Controllers\AssetController::class, 'publish'])->name('assets.publish');
             Route::post('/assets/{asset}/unpublish', [\App\Http\Controllers\AssetController::class, 'unpublish'])->name('assets.unpublish');

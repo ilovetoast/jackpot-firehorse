@@ -78,13 +78,34 @@ class PasswordResetMail extends Mailable
 
             $rendered = $template->render($variables);
 
+            // Ensure we have valid HTML content - must be non-empty string
+            $htmlContent = !empty($rendered['body_html']) ? trim((string) $rendered['body_html']) : null;
+            $textContent = !empty($rendered['body_text']) ? trim((string) $rendered['body_text']) : null;
+
+            // Validate that htmlContent is actually HTML (contains HTML tags)
+            $isHtml = $htmlContent && preg_match('/<[^>]+>/', $htmlContent);
+
+            // If HTML is empty, null, or not valid HTML, fall back to view-based approach
+            if (empty($htmlContent) || !$isHtml) {
+                $url = url(route('password.reset', [
+                    'token' => $this->token,
+                    'email' => $this->user->email,
+                ], false));
+
+                return new Content(
+                    view: 'emails.password-reset',
+                    with: ['url' => $url],
+                );
+            }
+
+            // Use htmlString only when we have valid HTML content
+            // Only pass htmlString - don't pass text parameter to avoid conflicts
             return new Content(
-                htmlString: $rendered['body_html'],
-                textString: $rendered['body_text'],
+                htmlString: $htmlContent,
             );
         }
 
-        // Fallback
+        // Fallback to view-based email
         $url = url(route('password.reset', [
             'token' => $this->token,
             'email' => $this->user->email,

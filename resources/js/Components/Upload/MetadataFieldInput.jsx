@@ -24,10 +24,11 @@ import { usePage } from '@inertiajs/react'
  * @param {boolean} [props.disabled] - Whether field is disabled
  * @param {boolean} [props.showError] - Whether to show validation error
  */
-export default function MetadataFieldInput({ field, value, onChange, disabled = false, showError = false }) {
+export default function MetadataFieldInput({ field, value, onChange, disabled = false, showError = false, isUploadContext = true }) {
     const isRequired = field.is_required || false
-    // Phase 4: Check can_edit permission (default to true for backward compatibility)
-    const canEdit = field.can_edit !== undefined ? field.can_edit : true
+    // UPLOAD CONTEXT FIX: During upload, all fields are editable (approval happens after upload)
+    // For non-upload contexts (e.g., asset drawer), respect can_edit permission
+    const canEdit = isUploadContext ? true : (field.can_edit !== undefined ? field.can_edit : true)
     const isDisabled = disabled || !canEdit
     const hasError = showError && isRequired && !isFieldSatisfied(field, value)
     const handleChange = (newValue) => {

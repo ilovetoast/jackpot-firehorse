@@ -15,8 +15,8 @@
  * @param {boolean} props.isOpen - Whether modal is open
  * @param {Function} props.onClose - Callback when modal should close
  */
-import { useEffect, useState, useRef } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/outline'
+import { useEffect, useState, useRef, useMemo } from 'react'
+import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
@@ -74,6 +74,22 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [forceImageMagick, setForceImageMagick] = useState(false)
     const thumbnailDropdownRef = useRef(null)
     
+    // Phase V-1: Video regeneration state
+    const [regeneratingVideoThumbnail, setRegeneratingVideoThumbnail] = useState(false)
+    const [regeneratingVideoPreview, setRegeneratingVideoPreview] = useState(false)
+    const [videoThumbnailError, setVideoThumbnailError] = useState(null)
+    const [videoPreviewError, setVideoPreviewError] = useState(null)
+    
+    // Phase V-1: Detect if asset is a video
+    const isVideo = useMemo(() => {
+        if (!asset) return false
+        const mimeType = asset.mime_type || ''
+        const filename = asset.original_filename || ''
+        const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+        const ext = filename.split('.').pop()?.toLowerCase() || ''
+        return mimeType.startsWith('video/') || videoExtensions.includes(ext)
+    }, [asset])
+    
     // Remove preview state
     const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
     const [removePreviewError, setRemovePreviewError] = useState(null)
@@ -81,6 +97,14 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     // Actions dropdown state
     const [showActionsDropdown, setShowActionsDropdown] = useState(false)
     const actionsDropdownRef = useRef(null)
+    
+    // Metadata approval state
+    const [approvingMetadataId, setApprovingMetadataId] = useState(null)
+    const [rejectingMetadataId, setRejectingMetadataId] = useState(null)
+    
+    // Check if user can approve metadata
+    const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
+    const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
     
     // Lifecycle actions state
     const [publishing, setPublishing] = useState(false)
@@ -144,6 +168,50 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
             setError(err.response?.data?.message || 'Failed to load metadata')
         } finally {
             setLoading(false)
+        }
+    }
+
+    // Handle approve pending metadata
+    const handleApproveMetadata = async (metadataId) => {
+        if (!metadataId) return
+        
+        setApprovingMetadataId(metadataId)
+        
+        try {
+            const response = await window.axios.post(`/app/metadata/${metadataId}/approve`)
+            
+            // Refresh metadata
+            await fetchMetadata()
+            
+            // Dispatch event for other components
+            window.dispatchEvent(new CustomEvent('metadata-updated'))
+        } catch (err) {
+            console.error('Failed to approve metadata:', err)
+            alert(err.response?.data?.message || 'Failed to approve metadata')
+        } finally {
+            setApprovingMetadataId(null)
+        }
+    }
+
+    // Handle reject pending metadata
+    const handleRejectMetadata = async (metadataId) => {
+        if (!metadataId) return
+        
+        setRejectingMetadataId(metadataId)
+        
+        try {
+            const response = await window.axios.post(`/app/metadata/${metadataId}/reject`)
+            
+            // Refresh metadata
+            await fetchMetadata()
+            
+            // Dispatch event for other components
+            window.dispatchEvent(new CustomEvent('metadata-updated'))
+        } catch (err) {
+            console.error('Failed to reject metadata:', err)
+            alert(err.response?.data?.message || 'Failed to reject metadata')
+        } finally {
+            setRejectingMetadataId(null)
         }
     }
 
@@ -511,6 +579,92 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
         }
     }
     
+    // Phase V-1: Handle Video Thumbnail Regeneration
+    const handleRegenerateVideoThumbnail = async () => {
+        if (!asset?.id) return
+        
+        setRegeneratingVideoThumbnail(true)
+        setVideoThumbnailError(null)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${asset.id}/thumbnails/regenerate-video-thumbnail`)
+            
+            if (response.data.success) {
+                // Refresh page to show updated thumbnail
+                router.reload({ 
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                setVideoThumbnailError(response.data.error || 'Failed to regenerate video thumbnail')
+            }
+        } catch (err) {
+            console.error('Video thumbnail regeneration error:', err)
+            
+            if (err.response) {
+                const status = err.response.status
+                const errorMessage = err.response.data?.error || 'Failed to regenerate video thumbnail'
+                
+                if (status === 403) {
+                    setVideoThumbnailError('You do not have permission to regenerate video thumbnails')
+                } else if (status === 404) {
+                    setVideoThumbnailError('Asset not found')
+                } else if (status === 422) {
+                    setVideoThumbnailError(errorMessage)
+                } else {
+                    setVideoThumbnailError(errorMessage)
+                }
+            } else {
+                setVideoThumbnailError('Network error. Please try again.')
+            }
+        } finally {
+            setRegeneratingVideoThumbnail(false)
+        }
+    }
+    
+    // Phase V-1: Handle Video Preview Regeneration
+    const handleRegenerateVideoPreview = async () => {
+        if (!asset?.id) return
+        
+        setRegeneratingVideoPreview(true)
+        setVideoPreviewError(null)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${asset.id}/thumbnails/regenerate-video-preview`)
+            
+            if (response.data.success) {
+                // Refresh page to show updated preview
+                router.reload({ 
+                    preserveState: true,
+                    preserveScroll: true,
+                })
+            } else {
+                setVideoPreviewError(response.data.error || 'Failed to regenerate video preview')
+            }
+        } catch (err) {
+            console.error('Video preview regeneration error:', err)
+            
+            if (err.response) {
+                const status = err.response.status
+                const errorMessage = err.response.data?.error || 'Failed to regenerate video preview'
+                
+                if (status === 403) {
+                    setVideoPreviewError('You do not have permission to regenerate video previews')
+                } else if (status === 404) {
+                    setVideoPreviewError('Asset not found')
+                } else if (status === 422) {
+                    setVideoPreviewError(errorMessage)
+                } else {
+                    setVideoPreviewError(errorMessage)
+                }
+            } else {
+                setVideoPreviewError('Network error. Please try again.')
+            }
+        } finally {
+            setRegeneratingVideoPreview(false)
+        }
+    }
+    
     // Handle Remove Preview
     const handleRemovePreview = async () => {
         if (!asset?.id) {
@@ -616,7 +770,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                 )}
                                 
                             {/* Actions Dropdown */}
-                            {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin || canPublishWithFallback || canUnpublishWithFallback || canArchiveWithFallback || canRestoreWithFallback) && (
+                            {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin || canPublishWithFallback || canUnpublishWithFallback || canArchiveWithFallback || canRestoreWithFallback || isVideo) && (
                                     <div className="relative" ref={actionsDropdownRef}>
                                     <button
                                         type="button"
@@ -753,6 +907,49 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                     </button>
                                                 )}
                                                 
+                                                {/* Phase V-1: Video-specific regeneration options */}
+                                                {isVideo && (
+                                                    <>
+                                                        {/* Divider if there are other actions above */}
+                                                        {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin) && (
+                                                            <div className="border-t border-gray-200 my-1" />
+                                                        )}
+                                                        
+                                                        {/* Regenerate Video Thumbnail */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setShowActionsDropdown(false)
+                                                                handleRegenerateVideoThumbnail()
+                                                            }}
+                                                            disabled={regeneratingVideoThumbnail}
+                                                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                        >
+                                                            <ArrowPathIcon className={`h-4 w-4 ${regeneratingVideoThumbnail ? 'animate-spin' : ''}`} />
+                                                            Regenerate Video Thumbnail
+                                                        </button>
+                                                        
+                                                        {/* Regenerate Video Preview */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setShowActionsDropdown(false)
+                                                                handleRegenerateVideoPreview()
+                                                            }}
+                                                            disabled={regeneratingVideoPreview}
+                                                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                                        >
+                                                            <ArrowPathIcon className={`h-4 w-4 ${regeneratingVideoPreview ? 'animate-spin' : ''}`} />
+                                                            Regenerate Preview Video
+                                                        </button>
+                                                        
+                                                        {/* Divider if there are other actions below */}
+                                                        {(canRegenerateThumbnailsAdmin || supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split('.').pop())) && (
+                                                            <div className="border-t border-gray-200 my-1" />
+                                                        )}
+                                                    </>
+                                                )}
+                                                
                                                 {/* Remove Preview */}
                                                 {supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split('.').pop()) && (
                                                     <button
@@ -867,6 +1064,17 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                     {removePreviewError && (
                                         <div className="mt-4 rounded-md bg-red-50 p-3">
                                             <p className="text-sm text-red-800">{removePreviewError}</p>
+                                        </div>
+                                    )}
+                                    {/* Phase V-1: Video regeneration error messages */}
+                                    {videoThumbnailError && (
+                                        <div className="mt-4 rounded-md bg-red-50 p-3">
+                                            <p className="text-sm text-red-800">{videoThumbnailError}</p>
+                                        </div>
+                                    )}
+                                    {videoPreviewError && (
+                                        <div className="mt-4 rounded-md bg-red-50 p-3">
+                                            <p className="text-sm text-red-800">{videoPreviewError}</p>
                                         </div>
                                     )}
                                     
@@ -1114,7 +1322,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                 <div>
                                     <h4 className="text-sm font-medium text-gray-900 mb-3">All Metadata Fields</h4>
                                     <div className="space-y-1">
-                                        {metadata.fields && metadata.fields.length > 0 ? (
+                                        {metadata && metadata.fields && metadata.fields.length > 0 ? (
                                             metadata.fields
                                                 .filter((field) => field.key !== 'tags') // Hide Tags field as we show it separately below
                                                 .map((field) => {
@@ -1154,7 +1362,20 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                     >
                                                         <div className="flex-1 min-w-0">
                                                             <div className="text-sm text-gray-900">
-                                                                <span className="text-gray-500">{field.display_label}</span>
+                                                                <span className="flex items-center gap-2">
+                                                                    <span className="text-gray-500">{field.display_label}</span>
+                                                                    {/* Show pending badge if field has pending approval */}
+                                                                    {((field.has_pending || field.is_value_pending) && 
+                                                                     field.population_mode !== 'automatic' &&
+                                                                     !field.readonly) && (
+                                                                        <span
+                                                                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800"
+                                                                            title="This field has pending changes awaiting approval"
+                                                                        >
+                                                                            Pending
+                                                                        </span>
+                                                                    )}
+                                                                </span>
                                                                 <span className="text-gray-400 text-xs ml-1">({typeLabel})</span>
                                                                 {(formattedValue || dominantColorsArray) && (
                                                                     <>
@@ -1190,6 +1411,35 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                         </div>
                                                         <div className="ml-3 flex-shrink-0 flex items-center gap-2">
                                                             {getSourceBadge(field)}
+                                                            {/* Show approve/reject buttons if field has pending approval and user can approve */}
+                                                            {field.has_pending && 
+                                                             metadataApprovalEnabled && 
+                                                             canApproveMetadata && 
+                                                             field.pending_metadata_ids && 
+                                                             field.pending_metadata_ids.length > 0 && (
+                                                                <>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleApproveMetadata(field.pending_metadata_ids[0])}
+                                                                        disabled={approvingMetadataId === field.pending_metadata_ids[0] || rejectingMetadataId === field.pending_metadata_ids[0]}
+                                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        title="Approve this metadata value"
+                                                                    >
+                                                                        <CheckIcon className="h-3 w-3" />
+                                                                        Approve
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleRejectMetadata(field.pending_metadata_ids[0])}
+                                                                        disabled={approvingMetadataId === field.pending_metadata_ids[0] || rejectingMetadataId === field.pending_metadata_ids[0]}
+                                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        title="Reject this metadata value"
+                                                                    >
+                                                                        <XMarkIcon className="h-3 w-3" />
+                                                                        Reject
+                                                                    </button>
+                                                                </>
+                                                            )}
                                                             {/* Show "Auto" badge for readonly/automatic fields */}
                                                             {(field.readonly || field.population_mode === 'automatic') && (
                                                                 <span

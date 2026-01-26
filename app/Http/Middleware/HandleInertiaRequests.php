@@ -253,6 +253,7 @@ class HandleInertiaRequests extends Middleware
         $permissions = [];
         $roles = [];
         $tenantRole = null;
+        $brandRole = null;
         $rolePermissions = [];
         $permissions = []; // Initialize as empty array
         $roles = []; // Initialize as empty array
@@ -319,6 +320,19 @@ class HandleInertiaRequests extends Middleware
             foreach ($allRoles as $role) {
                 $rolePermissions[$role->name] = $role->permissions->pluck('name')->toArray();
             }
+            
+            // Add brand role permissions mapping (brand roles are NOT Spatie roles, they're strings in brand_user pivot)
+            // Use PermissionMap to get brand role permissions
+            $brandRolePermissions = \App\Support\Roles\PermissionMap::brandPermissions();
+            foreach ($brandRolePermissions as $brandRoleName => $brandPerms) {
+                $rolePermissions[$brandRoleName] = $brandPerms;
+            }
+            
+            // Get user's brand role for the active brand (if available)
+            $brandRole = null;
+            if ($activeBrand && $user) {
+                $brandRole = $user->getRoleForBrand($activeBrand);
+            }
         } else {
             // No tenant selected - still get site role permissions if user has site roles
             if ($user) {
@@ -363,6 +377,7 @@ class HandleInertiaRequests extends Middleware
                 'error' => $request->session()->get('error'),
                 'warning' => $request->session()->get('warning'),
                 'info' => $request->session()->get('info'),
+                'status' => $request->session()->get('status'), // For password reset status messages
             ],
             // Phase 2.5: Environment detection for dev-only features
             'env' => [
@@ -399,7 +414,8 @@ class HandleInertiaRequests extends Middleware
                 'permissions' => array_values($permissions), // Ensure it's a proper array (not an object with numeric keys)
                 'roles' => $roles,
                 'tenant_role' => $tenantRole, // Current tenant-specific role
-                'role_permissions' => $rolePermissions, // Mapping of role names to permission arrays
+                'brand_role' => $brandRole ?? null, // Current brand-specific role (if active brand exists)
+                'role_permissions' => $rolePermissions, // Mapping of role names to permission arrays (includes both tenant and brand roles)
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
                     $featureGate = app(FeatureGate::class);

@@ -16,6 +16,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Generate Asset Thumbnails Job
@@ -455,18 +456,35 @@ class GenerateThumbnailsJob implements ShouldQueue
             $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
             $currentMetadata['thumbnails'] = $finalThumbnails; // Only final thumbnails (exclude preview)
 
+            // Phase V-1: For video assets, store poster URL from thumbnail
+            $updateData = [
+                'thumbnail_status' => ThumbnailStatus::COMPLETED,
+                'thumbnail_error' => null,
+                'thumbnail_started_at' => null, // Clear start time on completion
+                'metadata' => $currentMetadata,
+            ];
+            
+            // Check if asset is a video and set poster URL
+            $fileTypeService = app(\App\Services\FileTypeService::class);
+            $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+            if ($fileType === 'video' && isset($finalThumbnails['thumb'])) {
+                // Store poster URL (use thumb style for grid display)
+                // Generate signed URL for poster (posters are served via signed URLs)
+                $posterPath = $finalThumbnails['thumb']['path'] ?? null;
+                if ($posterPath) {
+                    $posterUrl = Storage::disk('s3')
+                        ->temporaryUrl($posterPath, now()->addYears(10)); // Long-lived URL
+                    $updateData['video_poster_url'] = $posterUrl;
+                }
+            }
+
             // CRITICAL: Asset.status represents visibility and must remain UPLOADED
             // Processing jobs (thumbnails, metadata, previews) must NOT mutate Asset.status
             // Processing progress is tracked via thumbnail_status, metadata flags, and activity events
             // AssetController queries only status = UPLOADED, so changing status hides assets from the grid
             // Step 4: Only mark as COMPLETED after verification passes
             // Clear thumbnail_started_at when completed (no longer needed)
-            $asset->update([
-                'thumbnail_status' => ThumbnailStatus::COMPLETED,
-                'thumbnail_error' => null,
-                'thumbnail_started_at' => null, // Clear start time on completion
-                'metadata' => $currentMetadata,
-            ]);
+            $asset->update($updateData);
             
             // Refresh asset to ensure metadata is loaded correctly
             $asset->refresh();
@@ -726,86 +744,34 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     protected function supportsThumbnailGeneration(Asset $asset): bool
     {
-        $mimeType = strtolower($asset->mime_type ?? '');
-        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        // Use FileTypeService as the single source of truth for file type support
+        $fileTypeService = app(\App\Services\FileTypeService::class);
         
-        // PDF support - first-class supported type for thumbnail generation
-        // Uses spatie/pdf-to-image with ImageMagick/Ghostscript backend
-        // Only page 1 is used for thumbnail generation (enforced in ThumbnailGenerationService)
-        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
-            // Verify spatie/pdf-to-image package is available
-            if (!class_exists(\Spatie\PdfToImage\Pdf::class)) {
-                Log::warning('[GenerateThumbnailsJob] PDF support requires spatie/pdf-to-image package', [
-                    'asset_id' => $asset->id,
-                ]);
-                return false;
-            }
-            return true;
+        // Detect file type
+        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
+        
+        if (!$fileType) {
+            // Unknown file type - not supported
+            return false;
         }
         
-        // TIFF support - uses Imagick for thumbnail generation
-        if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
-            // Verify Imagick extension is available
-            if (!extension_loaded('imagick')) {
-                Log::warning('[GenerateThumbnailsJob] TIFF support requires Imagick PHP extension', [
-                    'asset_id' => $asset->id,
-                ]);
-                return false;
-            }
-            return true;
+        // Check if file type supports thumbnail generation
+        if (!$fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+            return false;
         }
         
-        // AVIF support - uses Imagick for thumbnail generation
-        if ($mimeType === 'image/avif' || $extension === 'avif') {
-            // Verify Imagick extension is available
-            if (!extension_loaded('imagick')) {
-                Log::warning('[GenerateThumbnailsJob] AVIF support requires Imagick PHP extension', [
-                    'asset_id' => $asset->id,
-                ]);
-                return false;
-            }
-            return true;
+        // Check if requirements are met (PHP extensions, packages, external tools)
+        $requirements = $fileTypeService->checkRequirements($fileType);
+        if (!$requirements['met']) {
+            Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
+                'asset_id' => $asset->id,
+                'file_type' => $fileType,
+                'missing' => $requirements['missing'],
+            ]);
+            return false;
         }
         
-        // Supported image MIME types - ONLY formats that GD library can actually process
-        // GD library supports: JPEG, PNG, WEBP, GIF
-        // BMP, SVG are NOT supported by GD (would require Imagick or other tools)
-        $supportedMimeTypes = [
-            'image/jpeg',
-            'image/jpg',
-            'image/png',
-            'image/gif',
-            'image/webp',
-            // TIFF excluded: GD library does not support TIFF (requires Imagick)
-            // BMP excluded: GD library has limited BMP support, not reliable
-            // SVG excluded: GD library does not support SVG (requires Imagick or other tools)
-        ];
-        
-        // Supported extensions - ONLY formats that GD library can actually process
-        $supportedExtensions = [
-            'jpg',
-            'jpeg',
-            'png',
-            'gif',
-            'webp',
-            // TIFF excluded: GD library does not support TIFF
-            // BMP excluded: GD library has limited BMP support
-            // SVG excluded: GD library does not support SVG
-        ];
-        
-        // AVIF support check is handled above - if we reach here, it's not AVIF
-        
-        // Check MIME type first
-        if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
-            return true;
-        }
-        
-        // Fallback to extension check
-        if ($extension && in_array($extension, $supportedExtensions)) {
-            return true;
-        }
-        
-        return false;
+        return true;
     }
     
     /**
@@ -819,6 +785,41 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     protected function determineSkipReason(string $mimeType, string $extension): string
     {
+        // Use FileTypeService to determine skip reason
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        
+        // Check if file type is explicitly unsupported
+        $unsupported = $fileTypeService->getUnsupportedReason($mimeType, $extension);
+        if ($unsupported) {
+            return $unsupported['skip_reason'] ?? 'unsupported_file_type';
+        }
+        
+        // Detect file type
+        $fileType = $fileTypeService->detectFileType($mimeType, $extension);
+        
+        if (!$fileType) {
+            return 'unsupported_file_type';
+        }
+        
+        // Check requirements to determine specific skip reason
+        $requirements = $fileTypeService->checkRequirements($fileType);
+        if (!$requirements['met']) {
+            // Check for specific missing requirements
+            foreach ($requirements['missing'] as $missing) {
+                if (str_contains($missing, 'FFmpeg')) {
+                    return 'unsupported_format:video_ffmpeg_missing';
+                }
+                if (str_contains($missing, 'Imagick')) {
+                    if ($fileType === 'tiff') {
+                        return 'unsupported_format:tiff';
+                    }
+                    if ($fileType === 'avif') {
+                        return 'unsupported_format:avif';
+                    }
+                }
+            }
+        }
+        
         // TIFF - Check if Imagick is available, otherwise mark as unsupported
         if ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') {
             // If Imagick is not available, mark as unsupported
@@ -839,6 +840,11 @@ class GenerateThumbnailsJob implements ShouldQueue
             // If Imagick is available, AVIF should be supported - return generic reason
             // (This shouldn't normally be reached if supportsThumbnailGeneration works correctly)
             return 'unsupported_file_type';
+        }
+        
+        // Video - Check if FFmpeg is missing
+        if (str_starts_with($mimeType, 'video/') || in_array($extension, ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'])) {
+            return 'unsupported_format:video_ffmpeg_missing';
         }
         
         // BMP - GD library has limited BMP support, not reliable

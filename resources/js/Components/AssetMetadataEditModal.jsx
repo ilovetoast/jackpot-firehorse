@@ -131,6 +131,7 @@ export default function AssetMetadataEditModal({ assetId, field, onClose, onSave
                                 onChange={setValue}
                                 disabled={saving}
                                 showError={false}
+                                isUploadContext={false}
                             />
                         </div>
                     </div>

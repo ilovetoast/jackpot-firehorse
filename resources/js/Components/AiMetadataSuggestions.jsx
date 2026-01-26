@@ -13,6 +13,7 @@ import {
     PencilIcon,
 } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
+import { usePermission } from '../hooks/usePermission'
 
 export default function AiMetadataSuggestions({ assetId }) {
     const [suggestions, setSuggestions] = useState([])
@@ -20,10 +21,17 @@ export default function AiMetadataSuggestions({ assetId }) {
     const [editingFieldId, setEditingFieldId] = useState(null)
     const [editedValue, setEditedValue] = useState(null)
     const [processing, setProcessing] = useState(new Set())
+    
+    // Permission checks
+    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
+    const { hasPermission: canApply } = usePermission('metadata.suggestions.apply')
 
     // Fetch AI suggestions
     useEffect(() => {
-        if (!assetId) return
+        if (!assetId || !canView) {
+            setLoading(false)
+            return
+        }
 
         setLoading(true)
         fetch(`/app/assets/${assetId}/metadata/ai-suggestions`, {
@@ -43,11 +51,17 @@ export default function AiMetadataSuggestions({ assetId }) {
                 console.error('[AiMetadataSuggestions] Failed to fetch suggestions', err)
                 setLoading(false)
             })
-    }, [assetId])
+    }, [assetId, canView])
 
     // Handle approve (accept as-is)
     const handleApprove = async (fieldId, suggestionId) => {
         if (processing.has(suggestionId)) return
+        
+        // Check permission before approving
+        if (!canApply) {
+            alert('You do not have permission to approve suggestions.')
+            return
+        }
 
         setProcessing((prev) => new Set(prev).add(suggestionId))
 
@@ -88,6 +102,12 @@ export default function AiMetadataSuggestions({ assetId }) {
     // Handle edit & accept
     const handleEditAndAccept = async (fieldId, suggestionId, field) => {
         if (processing.has(suggestionId)) return
+        
+        // Check permission before accepting
+        if (!canApply) {
+            alert('You do not have permission to approve suggestions.')
+            return
+        }
 
         // Validate edited value
         if (editedValue === null || editedValue === undefined) {
@@ -192,6 +212,11 @@ export default function AiMetadataSuggestions({ assetId }) {
         return 'bg-orange-500'
     }
 
+    // Hide component if user doesn't have view permission
+    if (!canView) {
+        return null
+    }
+
     if (loading) {
         return (
             <div className="px-6 py-4">
@@ -281,6 +306,7 @@ export default function AiMetadataSuggestions({ assetId }) {
                                         onChange={(value) => setEditedValue(value)}
                                         disabled={isProcessing}
                                         showError={false}
+                                        isUploadContext={false}
                                     />
                                     <div className="flex items-center gap-2">
                                         <button
@@ -316,8 +342,8 @@ export default function AiMetadataSuggestions({ assetId }) {
                                     <button
                                         type="button"
                                         onClick={() => handleApprove(fieldId, suggestionId)}
-                                        disabled={isProcessing || !canEdit}
-                                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                        disabled={isProcessing || !canApply}
+                                        title={!canApply ? "You don't have permission to approve suggestions" : undefined}
                                         className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <CheckIcon className="h-4 w-4" />
@@ -329,8 +355,8 @@ export default function AiMetadataSuggestions({ assetId }) {
                                             setEditingFieldId(fieldId)
                                             setEditedValue(suggestedValue)
                                         }}
-                                        disabled={isProcessing || !canEdit}
-                                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                        disabled={isProcessing || !canApply}
+                                        title={!canApply ? "You don't have permission to approve suggestions" : undefined}
                                         className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-indigo-700 bg-indigo-100 rounded-md hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <PencilIcon className="h-4 w-4" />

@@ -96,15 +96,17 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [toastMessage, setToastMessage] = useState(null)
     const [toastType, setToastType] = useState('success')
     
-    // Phase 3.1: Get assets with thumbnail support for carousel (images and PDFs)
+    // Phase 3.1: Get assets with thumbnail support or video support for carousel (images, PDFs, and videos)
     const imageAssets = useMemo(() => {
         if (!assets || assets.length === 0) return []
         return assets.filter(a => {
             const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
-            // Include images and PDFs (both support thumbnail generation)
-            return a.mime_type?.startsWith('image/') || 
-                   a.mime_type === 'application/pdf' ||
-                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF'].includes(ext)
+            const mimeType = a.mime_type || ''
+            // Include images, PDFs (both support thumbnail generation), and videos
+            return mimeType.startsWith('image/') || 
+                   mimeType === 'application/pdf' ||
+                   mimeType.startsWith('video/') ||
+                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF', 'MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
         })
     }, [assets])
 
@@ -316,6 +318,16 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Use drawerAsset (with live updates) for thumbnail display
     // Fallback to prop asset if drawerAsset not yet initialized
     const displayAsset = drawerAsset || asset
+
+    // Phase V-1: Detect if asset is a video
+    const isVideo = useMemo(() => {
+        if (!displayAsset) return false
+        const mimeType = displayAsset.mime_type || ''
+        const filename = displayAsset.original_filename || ''
+        const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+        const ext = filename.split('.').pop()?.toLowerCase() || ''
+        return mimeType.startsWith('video/') || videoExtensions.includes(ext)
+    }, [displayAsset])
 
     // Use displayAsset for carousel (with live updates)
     const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
@@ -790,11 +802,40 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 <div className="space-y-3">                    
                     
                     {/* Phase 3.0C: Thumbnail preview with state machine and fade-in */}
+                    {/* Phase V-1: Video playback support */}
                     <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative" style={{ aspectRatio: '16/9', minHeight: '240px' }}>
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >
-                            {hasThumbnailSupport && displayAsset.id ? (
+                            {isVideo && displayAsset.storage_root_path ? (
+                                // Phase V-1: Video playback with enlarge support
+                                <div
+                                    className="w-full h-full cursor-pointer group relative"
+                                    onClick={() => {
+                                        // Allow zoom/fullscreen for videos
+                                        setShowZoomModal(true)
+                                    }}
+                                >
+                                    <video
+                                        className="w-full h-full object-contain bg-black"
+                                        controls
+                                        poster={displayAsset.video_poster_url || undefined}
+                                        preload="metadata"
+                                        playsInline
+                                        onClick={(e) => {
+                                            // Prevent video controls from triggering zoom
+                                            e.stopPropagation()
+                                        }}
+                                    >
+                                        <source src={`/app/assets/${displayAsset.id}/download`} type={displayAsset.mime_type || 'video/mp4'} />
+                                        Your browser does not support the video tag.
+                                    </video>
+                                    {/* Enlarge overlay (only shown when hovering) */}
+                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                                        <span className="text-white text-sm font-medium">Click to enlarge</span>
+                                    </div>
+                                </div>
+                            ) : hasThumbnailSupport && displayAsset.id ? (
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
                                 <div
@@ -1520,8 +1561,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 
             </div>
 
-            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) */}
-            {showZoomModal && hasThumbnailSupport && currentCarouselAsset?.id && (
+            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) or Videos */}
+            {showZoomModal && (hasThumbnailSupport || isVideo) && currentCarouselAsset?.id && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                     onClick={() => setShowZoomModal(false)}
@@ -1560,25 +1601,63 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         </button>
                     )}
 
-                    {/* Image with smooth slide transition */}
+                    {/* Image or Video with smooth slide transition */}
                     <div 
                         className="relative w-full h-full flex items-center justify-center overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <img
-                            key={currentCarouselAsset.id} // Key forces remount for clean transition
-                            src={`/app/assets/${currentCarouselAsset.id}/thumbnail/large`}
-                            alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
-                            className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out"
-                            style={{
-                                transform: transitionDirection === 'left' 
-                                    ? 'translateX(30px)' 
-                                    : transitionDirection === 'right' 
-                                    ? 'translateX(-30px)' 
-                                    : 'translateX(0)',
-                                opacity: transitionDirection ? 0 : 1,
-                            }}
-                        />
+                        {/* Phase V-1: Check if current asset is a video */}
+                        {(() => {
+                            const currentMimeType = currentCarouselAsset.mime_type || ''
+                            const currentFilename = currentCarouselAsset.original_filename || ''
+                            const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+                            const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
+                            const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
+                            
+                            if (isCurrentVideo && currentCarouselAsset.storage_root_path) {
+                                // Video playback in fullscreen modal
+                                return (
+                                    <video
+                                        key={currentCarouselAsset.id} // Key forces remount for clean transition
+                                        className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out bg-black"
+                                        controls
+                                        autoPlay
+                                        poster={currentCarouselAsset.video_poster_url || undefined}
+                                        preload="auto"
+                                        playsInline
+                                        style={{
+                                            transform: transitionDirection === 'left' 
+                                                ? 'translateX(30px)' 
+                                                : transitionDirection === 'right' 
+                                                ? 'translateX(-30px)' 
+                                                : 'translateX(0)',
+                                            opacity: transitionDirection ? 0 : 1,
+                                        }}
+                                    >
+                                        <source src={`/app/assets/${currentCarouselAsset.id}/download`} type={currentCarouselAsset.mime_type || 'video/mp4'} />
+                                        Your browser does not support the video tag.
+                                    </video>
+                                )
+                            } else {
+                                // Image/PDF thumbnail
+                                return (
+                                    <img
+                                        key={currentCarouselAsset.id} // Key forces remount for clean transition
+                                        src={`/app/assets/${currentCarouselAsset.id}/thumbnail/large`}
+                                        alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
+                                        className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out"
+                                        style={{
+                                            transform: transitionDirection === 'left' 
+                                                ? 'translateX(30px)' 
+                                                : transitionDirection === 'right' 
+                                                ? 'translateX(-30px)' 
+                                                : 'translateX(0)',
+                                            opacity: transitionDirection ? 0 : 1,
+                                        }}
+                                    />
+                                )
+                            }
+                        })()}
                     </div>
 
                     {/* Title at bottom center - subtle and small */}

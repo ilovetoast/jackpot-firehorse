@@ -65,6 +65,16 @@ class UploadController extends Controller
             );
         }
 
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
+                403,
+                []
+            );
+        }
+
         // Validate request
         $validated = $request->validate([
             'file_name' => 'required|string|max:255',
@@ -138,6 +148,13 @@ class UploadController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
+        // Check upload permission - viewers cannot check storage limits (they can't upload)
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json([
+                'error' => 'You do not have permission to upload assets.',
+            ], 403);
+        }
+
         try {
             // Get storage information
             $storageInfo = $this->planService->getStorageInfo($tenant);
@@ -183,6 +200,13 @@ class UploadController extends Controller
         // Verify user belongs to tenant
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json([
+                'error' => 'You do not have permission to upload assets.',
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -277,6 +301,16 @@ class UploadController extends Controller
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
                 403,
                 []
             );
@@ -434,6 +468,16 @@ class UploadController extends Controller
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
                 403,
                 []
             );
@@ -657,6 +701,16 @@ class UploadController extends Controller
             );
         }
 
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
+                403,
+                []
+            );
+        }
+
         // Verify upload session belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
@@ -762,6 +816,16 @@ class UploadController extends Controller
             );
         }
 
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
+                403,
+                []
+            );
+        }
+
         // Verify upload session belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
@@ -825,6 +889,16 @@ class UploadController extends Controller
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
                 403,
                 []
             );
@@ -912,6 +986,16 @@ class UploadController extends Controller
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
                 403,
                 []
             );
@@ -1075,6 +1159,16 @@ class UploadController extends Controller
             );
         }
 
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
+                403,
+                []
+            );
+        }
+
         // Verify upload session belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
@@ -1161,6 +1255,16 @@ class UploadController extends Controller
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
                 403,
                 []
             );
@@ -1260,6 +1364,16 @@ class UploadController extends Controller
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
+                403,
+                []
+            );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
                 403,
                 []
             );
@@ -1384,6 +1498,16 @@ class UploadController extends Controller
             );
         }
 
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
+                403,
+                []
+            );
+        }
+
         // Verify upload session belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
         if ($uploadSession->tenant_id !== $tenant->id) {
@@ -1496,6 +1620,13 @@ class UploadController extends Controller
                 403,
                 []
             );
+        }
+
+        // Check upload permission - viewers cannot upload
+        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json([
+                'message' => 'You do not have permission to upload assets.',
+            ], 403);
         }
 
         // Validate request structure
@@ -1733,18 +1864,45 @@ class UploadController extends Controller
                 );
 
                 // Phase 2 – Step 4: Persist metadata to asset_metadata table (after asset creation)
+                // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
+                // This ensures approval logic runs only after asset exists, not during upload
                 if (!empty($metadataFields)) {
                     try {
+                        // UX-2: Assertion - Asset must exist before metadata persistence
+                        // This guard ensures approval logic runs only after asset creation
+                        if (!$asset || !$asset->id) {
+                            Log::error('[UploadController::finalize] Asset not created before metadata persistence', [
+                                'upload_key' => $uploadKey,
+                                'upload_session_id' => $uploadSessionId,
+                            ]);
+                            throw new \RuntimeException('Asset must be created before metadata persistence');
+                        }
+
                         // Determine asset type for schema resolution (file type, not category asset_type)
                         // Default to 'image' - can be enhanced to detect from file MIME type
                         $fileAssetType = 'image';
 
+                        // UX-2: Log batch upload metadata handling (dev-only)
+                        if (config('app.env') !== 'production') {
+                            Log::debug('[UploadController::finalize] Persisting upload metadata', [
+                                'asset_id' => $asset->id,
+                                'upload_key' => $uploadKey,
+                                'category_id' => $categoryId,
+                                'field_count' => count($metadataFields),
+                                'context' => 'upload',
+                            ]);
+                        }
+
+                        // UX-2: CRITICAL - Pass autoApprove=false to allow approval resolver to check
+                        // Approval is determined AFTER upload, not during metadata entry
+                        // This ensures contributors can enter metadata, which is then reviewed
                         $this->metadataPersistenceService->persistMetadata(
                             $asset,
                             $category,
                             $metadataFields,
                             $user->id,
-                            $fileAssetType
+                            $fileAssetType,
+                            false // autoApprove=false: Let approval resolver determine if approval needed
                         );
                     } catch (\Exception $e) {
                         // Persistence failure - log but don't fail entire finalize

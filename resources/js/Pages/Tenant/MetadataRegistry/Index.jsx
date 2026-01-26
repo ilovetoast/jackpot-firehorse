@@ -14,6 +14,7 @@ import {
     ChevronRightIcon,
     CheckCircleIcon,
     PlusIcon,
+    PencilIcon,
 } from '@heroicons/react/24/outline'
 
 /**
@@ -45,6 +46,7 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
     const [modalOpen, setModalOpen] = useState(false)
     const [editingField, setEditingField] = useState(null)
+    const [loadingFieldData, setLoadingFieldData] = useState(false)
 
     const { system_fields = [], tenant_fields = [] } = registry || {}
     const allFields = [...system_fields, ...tenant_fields]
@@ -322,6 +324,68 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
         // Field is "active" if visible in at least one context
         const isActive = effectiveUpload || effectiveEdit || effectiveFilter
         return isActive ? 'Active' : 'Hidden'
+    }
+
+    const handleEditField = async (field) => {
+        setLoadingFieldData(true)
+        
+        try {
+            // Check if it's a custom field (tenant field)
+            const isCustom = !system_fields.some(sf => sf.id === field.id)
+            
+            if (isCustom && field.id) {
+                // Load field data from API for custom fields
+                const response = await fetch(`/app/tenant/metadata/fields/${field.id}`)
+                const data = await response.json()
+                if (data.field) {
+                    setEditingField(data.field)
+                    setModalOpen(true)
+                } else {
+                    console.error('Field not found')
+                }
+            } else {
+                // For system fields, fetch full field data including options and ai_eligible
+                try {
+                    // Fetch field details including options and ai_eligible
+                    const fieldResponse = await fetch(`/app/tenant/metadata/fields/${field.id}`)
+                    if (fieldResponse.ok) {
+                        const fieldData = await fieldResponse.json()
+                        setEditingField({
+                            ...field,
+                            ...fieldData.field,
+                            scope: 'system',
+                            is_system: true,
+                            // Ensure ai_eligible is included from API response or field prop
+                            ai_eligible: fieldData.field?.ai_eligible !== undefined 
+                                ? fieldData.field.ai_eligible 
+                                : (field.ai_eligible !== undefined ? field.ai_eligible : false),
+                        })
+                        setModalOpen(true)
+                    } else {
+                        // Fallback: use field data as-is
+                        setEditingField({
+                            ...field,
+                            scope: 'system',
+                            is_system: true,
+                        })
+                        setModalOpen(true)
+                    }
+                } catch (error) {
+                    console.error('Failed to load field data:', error)
+                    // Fallback: use field data as-is
+                    setEditingField({
+                        ...field,
+                        scope: 'system',
+                        is_system: true,
+                    })
+                    setModalOpen(true)
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load field data:', error)
+        } finally {
+            setLoadingFieldData(false)
+        }
     }
 
     const renderAdvancedDetails = (field) => {
@@ -690,22 +754,36 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-3 align-top">
-                                                            <button
-                                                                onClick={() => setExpandedField(expandedField === field.id ? null : field.id)}
-                                                                className="text-sm text-gray-600 hover:text-gray-900"
-                                                            >
-                                                                {expandedField === field.id ? (
-                                                                    <span className="flex items-center gap-1">
-                                                                        <ChevronDownIcon className="w-4 h-4" />
-                                                                        Hide Details
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className="flex items-center gap-1">
-                                                                        <ChevronRightIcon className="w-4 h-4" />
-                                                                        Advanced
-                                                                    </span>
+                                                            <div className="flex items-center gap-3">
+                                                                {/* Edit Button */}
+                                                                {(canManageFields || !isSystem) && (
+                                                                    <button
+                                                                        onClick={() => handleEditField(field)}
+                                                                        disabled={loadingFieldData}
+                                                                        className="text-gray-400 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-md p-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        title="Edit field"
+                                                                    >
+                                                                        <PencilIcon className="h-4 w-4" />
+                                                                    </button>
                                                                 )}
-                                                            </button>
+                                                                {/* Advanced Details Toggle */}
+                                                                <button
+                                                                    onClick={() => setExpandedField(expandedField === field.id ? null : field.id)}
+                                                                    className="text-sm text-gray-600 hover:text-gray-900"
+                                                                >
+                                                                    {expandedField === field.id ? (
+                                                                        <span className="flex items-center gap-1">
+                                                                            <ChevronDownIcon className="w-4 h-4" />
+                                                                            Hide Details
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="flex items-center gap-1">
+                                                                            <ChevronRightIcon className="w-4 h-4" />
+                                                                            Advanced
+                                                                        </span>
+                                                                    )}
+                                                                </button>
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                     {renderAdvancedDetails(field)}

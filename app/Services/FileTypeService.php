@@ -120,10 +120,20 @@ class FileTypeService
             }
         }
 
-        // Check external tools (future - for FFmpeg, LibreOffice, etc.)
+        // Check external tools (FFmpeg, LibreOffice, etc.)
         if (isset($requirements['external_tools'])) {
-            // @todo Implement external tool checking when needed
-            // For now, external tools are not checked (they're future requirements)
+            foreach ($requirements['external_tools'] as $tool) {
+                if ($tool === 'ffmpeg') {
+                    // Check if FFmpeg is available
+                    $ffmpegPath = $this->findFFmpegPath();
+                    if (!$ffmpegPath) {
+                        $missing[] = "External tool: FFmpeg (required for video processing)";
+                    }
+                } elseif ($tool === 'libreoffice') {
+                    // @todo Implement LibreOffice checking when needed
+                    // For now, LibreOffice is not checked (future requirement)
+                }
+            }
         }
 
         return [
@@ -187,6 +197,39 @@ class FileTypeService
             'show_placeholder' => true,
             'disable_upload_reason' => null,
         ];
+    }
+
+    /**
+     * Find FFmpeg executable path.
+     * 
+     * @return string|null Path to FFmpeg executable or null if not found
+     */
+    protected function findFFmpegPath(): ?string
+    {
+        // Common FFmpeg paths
+        $possiblePaths = [
+            'ffmpeg', // In PATH
+            '/usr/bin/ffmpeg',
+            '/usr/local/bin/ffmpeg',
+            '/opt/homebrew/bin/ffmpeg', // macOS Homebrew
+        ];
+
+        foreach ($possiblePaths as $path) {
+            // Check if command exists and is executable
+            if ($path === 'ffmpeg') {
+                // Check if ffmpeg is in PATH
+                $output = [];
+                $returnCode = 0;
+                exec('which ffmpeg 2>&1', $output, $returnCode);
+                if ($returnCode === 0 && !empty($output[0]) && file_exists($output[0])) {
+                    return $output[0];
+                }
+            } elseif (file_exists($path) && is_executable($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     /**

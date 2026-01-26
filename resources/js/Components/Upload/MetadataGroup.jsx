@@ -77,6 +77,7 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
                                 onChange={(value) => onChange(field.key, value)}
                                 disabled={disabled}
                                 showError={showErrors && !!groupErrors[field.key]}
+                                isUploadContext={true}
                             />
                         ))}
                     </div>

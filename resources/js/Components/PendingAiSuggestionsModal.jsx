@@ -8,6 +8,8 @@
 import { useState, useEffect } from 'react'
 import { XMarkIcon, CheckIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
+import ThumbnailPreview from './ThumbnailPreview'
+import { usePermission } from '../hooks/usePermission'
 
 export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
     const { auth, tenant } = usePage().props
@@ -15,10 +17,17 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
     const [items, setItems] = useState([])
     const [currentIndex, setCurrentIndex] = useState(0)
     const [processing, setProcessing] = useState(new Set())
+    
+    // Permission checks
+    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
+    const { hasPermission: canApply } = usePermission('metadata.suggestions.apply')
 
     // Fetch all pending suggestions
     useEffect(() => {
-        if (!isOpen) return
+        if (!isOpen || !canView) {
+            setLoading(false)
+            return
+        }
 
         setLoading(true)
         fetch('/app/api/pending-ai-suggestions', {
@@ -48,6 +57,12 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
     // Handle approve
     const handleApprove = async (item) => {
         if (processing.has(item.id)) return
+        
+        // Check permission before approving
+        if (!canApply) {
+            alert('You do not have permission to approve suggestions.')
+            return
+        }
 
         setProcessing((prev) => new Set(prev).add(item.id))
 
@@ -191,6 +206,11 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
     }
 
     if (!isOpen) return null
+    
+    // Hide modal if user doesn't have view permission
+    if (!canView) {
+        return null
+    }
 
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
@@ -253,24 +273,25 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                     {/* Asset info with thumbnail */}
                                     <div className="mb-3 pb-3 border-b border-gray-200">
                                         <div className="flex items-start gap-3">
-                                            {/* Thumbnail - larger size for better quality */}
-                                            {currentItem.thumbnail_url ? (
-                                                <div className="flex-shrink-0">
-                                                    <img
-                                                        src={currentItem.thumbnail_url}
-                                                        alt={currentItem.asset_title || currentItem.asset_filename || 'Asset'}
-                                                        className="w-32 h-32 object-cover rounded border border-gray-200"
-                                                        onError={(e) => {
-                                                            // Hide image if it fails to load
-                                                            e.target.style.display = 'none'
-                                                        }}
-                                                    />
-                                                </div>
-                                            ) : (
-                                                <div className="flex-shrink-0 w-32 h-32 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
-                                                    <span className="text-xs text-gray-400">No image</span>
-                                                </div>
-                                            )}
+                                            {/* Thumbnail - use ThumbnailPreview component for consistent thumbnail handling (same as AssetGrid) */}
+                                            <div className="flex-shrink-0 w-32 h-32 rounded border border-gray-200 overflow-hidden">
+                                                <ThumbnailPreview
+                                                    asset={{
+                                                        id: currentItem.asset_id,
+                                                        title: currentItem.asset_title,
+                                                        original_filename: currentItem.asset_filename,
+                                                        final_thumbnail_url: currentItem.final_thumbnail_url || null,
+                                                        preview_thumbnail_url: currentItem.preview_thumbnail_url || null,
+                                                        thumbnail_status: currentItem.thumbnail_status || 'pending',
+                                                        metadata: currentItem.metadata || {},
+                                                        mime_type: currentItem.mime_type || null,
+                                                        file_extension: currentItem.file_extension || null,
+                                                    }}
+                                                    alt={currentItem.asset_title || currentItem.asset_filename || 'Asset'}
+                                                    className="w-full h-full"
+                                                    size="md"
+                                                />
+                                            </div>
                                             {/* Asset details */}
                                             <div className="flex-1 min-w-0">
                                                 <div className="text-xs text-gray-500 mb-1">Asset</div>
@@ -319,15 +340,17 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
 
                                     {/* Actions */}
                                     <div className="flex items-center gap-3">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleApprove(currentItem)}
-                                            disabled={processing.has(currentItem.id)}
-                                            className="flex-1 inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <CheckIcon className="h-4 w-4 mr-2" />
-                                            Approve
-                                        </button>
+                                        {canApply && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleApprove(currentItem)}
+                                                disabled={processing.has(currentItem.id)}
+                                                className="flex-1 inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                <CheckIcon className="h-4 w-4 mr-2" />
+                                                Approve
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => handleReject(currentItem)}

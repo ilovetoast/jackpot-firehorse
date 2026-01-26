@@ -12,6 +12,7 @@ import {
     ClockIcon,
     InformationCircleIcon,
 } from '@heroicons/react/24/outline'
+import { usePermission } from '../hooks/usePermission'
 
 export default function MetadataCandidateReview({ assetId }) {
     const [reviewItems, setReviewItems] = useState([])
@@ -19,10 +20,17 @@ export default function MetadataCandidateReview({ assetId }) {
     const [processing, setProcessing] = useState(new Set())
     const [showConfirmApprove, setShowConfirmApprove] = useState(null)
     const [showConfirmReject, setShowConfirmReject] = useState(null)
+    
+    // Check if user can view metadata suggestions
+    const { hasPermission: canViewSuggestions } = usePermission('metadata.suggestions.view')
+    const { hasPermission: canApplySuggestions } = usePermission('metadata.suggestions.apply')
 
     // Fetch reviewable candidates
     useEffect(() => {
-        if (!assetId) return
+        if (!assetId || !canViewSuggestions) {
+            setLoading(false)
+            return
+        }
 
         setLoading(true)
         fetch(`/app/assets/${assetId}/metadata/review`, {
@@ -42,11 +50,11 @@ export default function MetadataCandidateReview({ assetId }) {
                 console.error('[MetadataCandidateReview] Failed to fetch review items', err)
                 setLoading(false)
             })
-    }, [assetId])
+    }, [assetId, canViewSuggestions])
 
     // Refresh review items after actions
     const refreshReview = () => {
-        if (!assetId) return
+        if (!assetId || !canViewSuggestions) return
         fetch(`/app/assets/${assetId}/metadata/review`, {
             method: 'GET',
             headers: {
@@ -69,6 +77,12 @@ export default function MetadataCandidateReview({ assetId }) {
     // Handle approve candidate
     const handleApprove = async (candidateId) => {
         if (processing.has(candidateId)) return
+        
+        // Check permission before approving
+        if (!canApplySuggestions) {
+            alert('You do not have permission to approve metadata suggestions.')
+            return
+        }
 
         setProcessing((prev) => new Set(prev).add(candidateId))
         setShowConfirmApprove(null)
@@ -126,6 +140,12 @@ export default function MetadataCandidateReview({ assetId }) {
     // Handle reject candidate
     const handleReject = async (candidateId) => {
         if (processing.has(candidateId)) return
+        
+        // Check permission before rejecting
+        if (!canApplySuggestions) {
+            alert('You do not have permission to reject metadata suggestions.')
+            return
+        }
 
         setProcessing((prev) => new Set(prev).add(candidateId))
         setShowConfirmReject(null)
@@ -303,6 +323,11 @@ export default function MetadataCandidateReview({ assetId }) {
         return `${Math.round(confidence * 100)}%`
     }
 
+    // Don't render at all if user doesn't have permission to view suggestions
+    if (!canViewSuggestions) {
+        return null
+    }
+
     if (loading) {
         return (
             <div className="px-6 py-4 border-t border-gray-200">
@@ -378,35 +403,37 @@ export default function MetadataCandidateReview({ assetId }) {
                                                         </span>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2 ml-4">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowConfirmApprove(candidate.id)}
-                                                        disabled={processing.has(candidate.id)}
-                                                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        <CheckIcon className="h-3 w-3 mr-1" />
-                                                        Approve
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowConfirmReject(candidate.id)}
-                                                        disabled={processing.has(candidate.id)}
-                                                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        <XMarkIcon className="h-3 w-3 mr-1" />
-                                                        Reject
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleDefer(candidate.id)}
-                                                        disabled={processing.has(candidate.id)}
-                                                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        <ClockIcon className="h-3 w-3 mr-1" />
-                                                        Defer
-                                                    </button>
-                                                </div>
+                                                {canApplySuggestions && (
+                                                    <div className="flex items-center gap-2 ml-4">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowConfirmApprove(candidate.id)}
+                                                            disabled={processing.has(candidate.id)}
+                                                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            <CheckIcon className="h-3 w-3 mr-1" />
+                                                            Approve
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowConfirmReject(candidate.id)}
+                                                            disabled={processing.has(candidate.id)}
+                                                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            <XMarkIcon className="h-3 w-3 mr-1" />
+                                                            Reject
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDefer(candidate.id)}
+                                                            disabled={processing.has(candidate.id)}
+                                                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            <ClockIcon className="h-3 w-3 mr-1" />
+                                                            Defer
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     ))}

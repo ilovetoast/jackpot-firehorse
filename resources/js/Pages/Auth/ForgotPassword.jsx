@@ -1,7 +1,10 @@
-import { useForm } from '@inertiajs/react'
+import { useForm, usePage } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
 
 export default function ForgotPassword({ status }) {
+    const { flash } = usePage().props
+    // Use status prop if provided, otherwise check flash.status
+    const displayStatus = status || flash?.status
     const { data, setData, post, processing, errors } = useForm({
         email: '',
     })
@@ -54,9 +57,9 @@ export default function ForgotPassword({ status }) {
                         </p>
                     </div>
 
-                    {status && (
+                    {displayStatus && (
                         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-md">
-                            <p className="text-sm text-green-800">{status}</p>
+                            <p className="text-sm text-green-800">{displayStatus}</p>
                         </div>
                     )}
 
