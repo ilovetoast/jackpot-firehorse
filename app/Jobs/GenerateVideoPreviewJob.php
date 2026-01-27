@@ -114,10 +114,13 @@ class GenerateVideoPreviewJob implements ShouldQueue
             }
 
             // Idempotency: Check if preview already generated
-            if ($asset->video_preview_url) {
+            // CRITICAL: Check raw database value, not accessor (accessor generates presigned URL which may fail)
+            // The accessor can return null even if a preview path exists (if S3 URL generation fails)
+            $rawPreviewUrl = $asset->getAttributes()['video_preview_url'] ?? null;
+            if ($rawPreviewUrl) {
                 Log::info('[GenerateVideoPreviewJob] Preview already generated', [
                     'asset_id' => $asset->id,
-                    'preview_url' => $asset->video_preview_url,
+                    'preview_path' => $rawPreviewUrl,
                 ]);
                 
                 // Log activity: Video preview skipped (already generated)
@@ -142,13 +145,40 @@ class GenerateVideoPreviewJob implements ShouldQueue
             // Generate preview
             $previewPath = $previewService->generatePreview($asset);
 
+            // Verify preview file exists in S3 before marking as complete
+            $bucket = $asset->storageBucket;
+            $s3Client = $this->createS3Client();
+            
+            try {
+                $result = $s3Client->headObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $previewPath,
+                ]);
+                
+                $fileSize = $result['ContentLength'] ?? 0;
+                if ($fileSize < 1000) { // Minimum 1KB for valid video file
+                    throw new \RuntimeException("Preview file too small (likely corrupted): {$fileSize} bytes");
+                }
+                
+                Log::info('[GenerateVideoPreviewJob] Preview file verified in S3', [
+                    'asset_id' => $asset->id,
+                    'preview_path' => $previewPath,
+                    'file_size' => $fileSize,
+                ]);
+            } catch (\Aws\S3\Exception\S3Exception $e) {
+                if ($e->getStatusCode() === 404) {
+                    throw new \RuntimeException("Preview file not found in S3 after generation: {$previewPath}");
+                }
+                throw new \RuntimeException("Failed to verify preview file in S3: {$e->getMessage()}", 0, $e);
+            }
+
             // Update asset with preview path (stored as S3 key, not signed URL)
             // Signed URLs will be generated on-demand in the frontend/API
             $asset->update([
                 'video_preview_url' => $previewPath, // Store S3 key path
             ]);
 
-            Log::info('[GenerateVideoPreviewJob] Preview generated successfully', [
+            Log::info('[GenerateVideoPreviewJob] Preview generated and verified successfully', [
                 'asset_id' => $asset->id,
                 'preview_path' => $previewPath,
             ]);
@@ -256,10 +286,40 @@ class GenerateVideoPreviewJob implements ShouldQueue
             Log::warning('[GenerateVideoPreviewJob] Preview generation failed after all retries (non-fatal)', [
                 'asset_id' => $asset->id,
                 'error' => $exception->getMessage(),
+                'exception_class' => get_class($exception),
             ]);
 
             // Don't record as processing failure - preview is non-critical
             // Asset upload and processing can complete successfully without preview
         }
+    }
+
+    /**
+     * Create S3 client instance for file verification.
+     *
+     * @return \Aws\S3\S3Client
+     */
+    protected function createS3Client(): \Aws\S3\S3Client
+    {
+        if (!class_exists(\Aws\S3\S3Client::class)) {
+            throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
+        }
+
+        $config = [
+            'version' => 'latest',
+            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+            'credentials' => [
+                'key' => env('AWS_ACCESS_KEY_ID'),
+                'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            ],
+        ];
+
+        // Support MinIO for local development
+        if (env('AWS_ENDPOINT')) {
+            $config['endpoint'] = env('AWS_ENDPOINT');
+            $config['use_path_style_endpoint'] = env('AWS_USE_PATH_STYLE_ENDPOINT', true);
+        }
+
+        return new \Aws\S3\S3Client($config);
     }
 }

@@ -110,8 +110,11 @@ export function supportsThumbnail(mimeType, fileExtension) {
 export function getThumbnailVersion(asset) {
     if (!asset) return '0'
     
-    // Primary: thumbnail_url (most reliable signal)
+    // Primary: thumbnail URLs (most reliable signal)
+    // Include all thumbnail URL fields so version changes when any becomes available
     const thumbnailUrl = asset.thumbnail_url || ''
+    const finalThumbnailUrl = asset.final_thumbnail_url || ''
+    const previewThumbnailUrl = asset.preview_thumbnail_url || ''
     
     // Secondary: thumbnail_status (changes when processing completes)
     const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || ''
@@ -121,7 +124,7 @@ export function getThumbnailVersion(asset) {
     
     // Combine into stable version string
     // This will change when any thumbnail-related field changes
-    return `${thumbnailUrl}|${thumbnailStatus}|${updatedAt}`
+    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${thumbnailStatus}|${updatedAt}`
 }
 
 /**

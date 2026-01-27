@@ -47,6 +47,14 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_hidden' => false,
                 'sort_order' => 2,
             ],
+            [
+                'name' => 'Video',
+                'slug' => 'video',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 3,
+            ],
             // Deliverable asset type system categories
             [
                 'name' => 'Catalogs',

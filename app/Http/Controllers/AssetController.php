@@ -1130,6 +1130,9 @@ class AssetController extends Controller
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
+                    // Phase V-1: Video preview URLs (hover preview videos for video assets)
+                    'video_preview_url' => $asset->video_preview_url, // Presigned S3 URL for hover preview video (generated on-demand via accessor)
+                    'video_poster_url' => $asset->video_poster_url, // Presigned S3 URL for video poster/thumbnail (generated on-demand via accessor)
                     // TODO: Future enhancement - Add pending_metadata_count to asset grid items
                     // This would enable grid-level badges/indicators for assets with pending metadata
                     // Currently, pending metadata is only visible in the asset drawer

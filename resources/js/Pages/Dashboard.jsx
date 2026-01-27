@@ -26,7 +26,6 @@ import PendingMetadataTile from '../Components/PendingMetadataTile'
 import PendingAssetTile from '../Components/PendingAssetTile'
 import RecentlyViewedCarousel from '../Components/RecentlyViewedCarousel'
 import AssetStatsCarousel from '../Components/AssetStatsCarousel'
-import AssetStatsParallaxSlider from '../Components/AssetStatsParallaxSlider'
 
 export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, pending_assets_count = 0, contributor_pending_count = 0, contributor_rejected_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
@@ -188,17 +187,6 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
             <AppNav brand={authFromPage?.activeBrand || auth.activeBrand} tenant={tenant} />
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                {/* New Full-Width Parallax Slider */}
-                {(showMostViewed || showMostDownloaded) && (
-                    <div className="mb-12 -mx-4 sm:-mx-6 lg:-mx-8">
-                        <AssetStatsParallaxSlider
-                            mostViewedAssets={showMostViewed ? most_viewed_assets : []}
-                            mostDownloadedAssets={showMostDownloaded ? most_downloaded_assets : []}
-                            viewAllLink="/app/assets"
-                        />
-                    </div>
-                )}
-                
                 <div className="mb-8">
                     <div className="flex items-center justify-between">
                         <div>

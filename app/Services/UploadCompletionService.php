@@ -522,19 +522,46 @@ class UploadCompletionService
                         'published_by_id' => $userId,
                     ]);
                 } else {
-                    // Category not found - asset remains unpublished
-                    Log::warning('[UploadCompletionService] Category not found for approval check', [
-                        'asset_id' => $asset->id,
-                        'category_id' => $categoryId,
-                    ]);
+                    // Category not found - auto-publish if user ID is available (same as assets)
+                    // Deliverables should be published by default, just like assets
+                    if ($userId !== null) {
+                        $asset->published_at = now();
+                        $asset->published_by_id = $userId;
+                        $asset->save();
+                        
+                        Log::info('[UploadCompletionService] Asset auto-published (category not found, defaulting to published)', [
+                            'asset_id' => $asset->id,
+                            'category_id' => $categoryId,
+                            'published_by_id' => $userId,
+                        ]);
+                    } else {
+                        Log::warning('[UploadCompletionService] Category not found and no user ID for approval check', [
+                            'asset_id' => $asset->id,
+                            'category_id' => $categoryId,
+                        ]);
+                    }
                 }
             } else {
-                // No category or user ID - asset remains unpublished
-                Log::info('[UploadCompletionService] Asset not auto-published (no category or user ID)', [
-                    'asset_id' => $asset->id,
-                    'category_id' => $categoryId,
-                    'user_id' => $userId,
-                ]);
+                // No category or user ID - auto-publish if user ID is available (same as assets)
+                // Deliverables should be published by default, just like assets
+                if ($userId !== null) {
+                    $asset->published_at = now();
+                    $asset->published_by_id = $userId;
+                    $asset->save();
+                    
+                    Log::info('[UploadCompletionService] Asset auto-published (no category, defaulting to published)', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $categoryId,
+                        'user_id' => $userId,
+                        'published_by_id' => $userId,
+                    ]);
+                } else {
+                    Log::info('[UploadCompletionService] Asset not auto-published (no category or user ID)', [
+                        'asset_id' => $asset->id,
+                        'category_id' => $categoryId,
+                        'user_id' => $userId,
+                    ]);
+                }
             }
 
             // Phase AF-1: Check brand_user.requires_approval flag

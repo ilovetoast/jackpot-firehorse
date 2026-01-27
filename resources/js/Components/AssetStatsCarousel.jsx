@@ -251,14 +251,14 @@ export default function AssetStatsCarousel({
                                                     size="medium"
                                                 />
                                                 
-                                                {/* Hover Gradient - Gradient on bottom 1/4 only */}
+                                                {/* Hover Gradient - Softer, longer transition */}
                                                 <div 
                                                     className={`absolute bottom-0 left-0 right-0 transition-opacity duration-300 ${
                                                         isHovered ? 'opacity-100' : 'opacity-0'
                                                     }`}
                                                     style={{
-                                                        height: '25%',
-                                                        background: 'linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.4), transparent)',
+                                                        height: '40%',
+                                                        background: 'linear-gradient(to top, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.3) 30%, rgba(0, 0, 0, 0.15) 60%, rgba(0, 0, 0, 0.05) 85%, transparent 100%)',
                                                         zIndex: 10,
                                                     }}
                                                 />

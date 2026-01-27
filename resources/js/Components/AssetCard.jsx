@@ -236,25 +236,19 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     />
                 )}
                 
-                {/* Phase V-1: Use video poster if available, otherwise use ThumbnailPreview */}
-                {isVideo && asset.video_poster_url ? (
-                    <img
-                        src={asset.video_poster_url}
-                        alt={asset.title || asset.original_filename || 'Video'}
-                        className={`w-full h-full object-cover ${isHovering && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
-                    />
-                ) : (
-                    <ThumbnailPreview
-                        asset={asset}
-                        alt={asset.title || asset.original_filename || 'Asset'}
-                        className="w-full h-full"
-                        retryCount={0}
-                        onRetry={null}
-                        size="lg"
-                        thumbnailVersion={thumbnailVersion}
-                        shouldAnimateThumbnail={shouldAnimateThumbnail}
-                    />
-                )}
+                {/* Phase V-1: Use ThumbnailPreview for videos (same as drawer) */}
+                {/* ThumbnailPreview handles route-based URLs (final_thumbnail_url) which work correctly */}
+                {/* The drawer uses ThumbnailPreview for videos, so we do the same in the grid */}
+                <ThumbnailPreview
+                    asset={asset}
+                    alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
+                    className={`w-full h-full ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                    retryCount={0}
+                    onRetry={null}
+                    size="lg"
+                    thumbnailVersion={thumbnailVersion}
+                    shouldAnimateThumbnail={shouldAnimateThumbnail}
+                />
                 
                 {/* Phase V-1: Play icon overlay for videos */}
                 {isVideo && (

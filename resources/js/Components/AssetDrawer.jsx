@@ -507,9 +507,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates
+    // CRITICAL: Include final_thumbnail_url and preview_thumbnail_url so version changes when poll updates them
     const thumbnailVersion = useMemo(() => getThumbnailVersion(displayAsset), [
         displayAsset?.id,
         displayAsset?.thumbnail_url,
+        displayAsset?.final_thumbnail_url, // Include final URL so version changes when poll updates it
+        displayAsset?.preview_thumbnail_url, // Include preview URL so version changes when poll updates it
         displayAsset?.thumbnail_status?.value || displayAsset?.thumbnail_status,
         displayAsset?.updated_at,
     ])

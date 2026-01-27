@@ -605,7 +605,59 @@ class MetadataFieldsSeeder extends Seeder
                 // - logo_type: only logos
                 // - scene_classification: only photography
                 // - photo_type: only photography (disabled for logos)
+                // - Video category: Only tags and collection enabled (all other fields disabled)
                 $fieldsToRestrict = ['expiration_date', 'usage_rights', 'logo_type', 'scene_classification', 'photo_type'];
+                
+                // Configure Video category: Only tags and collection enabled, all other fields disabled
+                $videoCategory = DB::table('categories')
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->where('slug', 'video')
+                    ->where('is_system', true)
+                    ->first();
+                
+                if ($videoCategory) {
+                    // Get all metadata fields except tags and collection
+                    $allFields = DB::table('metadata_fields')->get();
+                    $tagsField = DB::table('metadata_fields')->where('key', 'tags')->first();
+                    $collectionField = DB::table('metadata_fields')->where('key', 'collection')->first();
+                    
+                    foreach ($allFields as $field) {
+                        // Skip tags and collection (enabled by default)
+                        if ($field->key === 'tags' || $field->key === 'collection') {
+                            continue;
+                        }
+                        
+                        // Disable all other fields for video category
+                        $visibility = DB::table('metadata_field_visibility')
+                            ->where('metadata_field_id', $field->id)
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->where('category_id', $videoCategory->id)
+                            ->first();
+                        
+                        $visibilityData = [
+                            'metadata_field_id' => $field->id,
+                            'tenant_id' => $tenant->id,
+                            'brand_id' => $brand->id,
+                            'category_id' => $videoCategory->id,
+                            'is_hidden' => true, // Disable for video category
+                            'is_upload_hidden' => false,
+                            'is_filter_hidden' => false,
+                            'is_primary' => null,
+                            'updated_at' => now(),
+                        ];
+                        
+                        if ($visibility) {
+                            DB::table('metadata_field_visibility')
+                                ->where('id', $visibility->id)
+                                ->update($visibilityData);
+                        } else {
+                            $visibilityData['created_at'] = now();
+                            DB::table('metadata_field_visibility')->insert($visibilityData);
+                        }
+                    }
+                }
                 
                 foreach ($fieldsToRestrict as $fieldKey) {
                     $field = DB::table('metadata_fields')
