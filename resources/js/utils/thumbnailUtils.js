@@ -10,14 +10,15 @@
 /**
  * File types that support thumbnail generation.
  * 
- * Step 5: ONLY formats that GD library can actually process.
- * GD library supports: JPEG, PNG, WEBP, GIF
+ * Includes formats that backend can process:
+ * - GD library: JPEG, PNG, WEBP, GIF
+ * - Imagick: TIFF, AVIF, PSD/PSB
+ * - PDF: via spatie/pdf-to-image
  * 
- * Excluded formats (require Imagick or other tools):
- * - TIFF: GD library does not support TIFF
+ * Excluded formats:
  * - BMP: GD library has limited BMP support, not reliable
  * - SVG: GD library does not support SVG
- * - AVIF: Backend pipeline does not support it yet
+ * - HEIC/HEIF: backend pipeline may not support these yet
  * 
  * These formats will be marked as SKIPPED with appropriate skip reasons.
  */
@@ -27,15 +28,15 @@ export const THUMBNAIL_SUPPORTED_TYPES = [
     'image/png',
     'image/gif',
     'image/webp',
-    // TIFF excluded: GD library does not support TIFF (requires Imagick)
-    // 'image/tiff',
-    // 'image/tif',
+    'image/tiff',
+    'image/tif',
+    'image/avif',
+    'image/vnd.adobe.photoshop', // PSD/PSB files
+    'application/pdf',
     // BMP excluded: GD library has limited BMP support, not reliable
     // 'image/bmp',
     // SVG excluded: GD library does not support SVG (requires Imagick or other tools)
     // 'image/svg+xml',
-    // AVIF excluded: backend pipeline does not support it yet
-    // 'image/avif',
     // HEIC/HEIF excluded: backend pipeline may not support these yet
     // 'image/heic',
     // 'image/heif',
@@ -45,8 +46,10 @@ export const THUMBNAIL_SUPPORTED_TYPES = [
  * File extensions that support thumbnail generation.
  * Used as fallback when mime_type is not available.
  * 
- * Step 5: ONLY formats that GD library can actually process.
- * GD library supports: jpg, jpeg, png, gif, webp
+ * Includes formats that backend can process:
+ * - GD library: jpg, jpeg, png, gif, webp
+ * - Imagick: tiff, tif, avif, psd, psb
+ * - PDF: pdf
  */
 export const THUMBNAIL_SUPPORTED_EXTENSIONS = [
     'jpg',
@@ -54,15 +57,16 @@ export const THUMBNAIL_SUPPORTED_EXTENSIONS = [
     'png',
     'gif',
     'webp',
-    // TIFF excluded: GD library does not support TIFF
-    // 'tiff',
-    // 'tif',
+    'tiff',
+    'tif',
+    'avif',
+    'psd',
+    'psb',
+    'pdf',
     // BMP excluded: GD library has limited BMP support
     // 'bmp',
     // SVG excluded: GD library does not support SVG
     // 'svg',
-    // AVIF excluded: backend pipeline does not support it yet
-    // 'avif',
     // HEIC/HEIF excluded: backend pipeline may not support these yet
     // 'heic',
     // 'heif',

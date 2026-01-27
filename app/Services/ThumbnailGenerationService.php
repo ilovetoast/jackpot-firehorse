@@ -1481,26 +1481,130 @@ class ThumbnailGenerationService
     /**
      * Generate thumbnail for PSD/PSB files (flattened preview).
      *
-     * @todo Implement PSD / PSB thumbnail generation (Imagick)
-     *   - Option 1: Use Imagick with PSD support (Imagick::readImage)
-     *   - Option 2: Use external tool (e.g., ImageMagick convert command)
-     *   - Note: PSD files are complex layered formats - need to flatten layers
-     *   - Best-effort: Extract embedded preview if available
+     * Uses Imagick to read PSD files and flatten layers into a preview image.
+     * ImageMagick automatically flattens PSD layers when reading the file.
      *
-     * NOTE: Requires Imagick with PSD support or external tool.
-     * This is a placeholder implementation.
+     * NOTE: Requires Imagick PHP extension with ImageMagick that supports PSD.
      *
-     * @param string $sourcePath
-     * @param array $styleConfig
-     * @return string|null Path to generated thumbnail, or null if not supported
+     * @param string $sourcePath Local path to PSD/PSB file
+     * @param array $styleConfig Thumbnail style configuration (width, height, quality, fit)
+     * @return string Path to generated thumbnail image
+     * @throws \RuntimeException If PSD processing fails
      */
-    protected function generatePsdThumbnail(string $sourcePath, array $styleConfig): ?string
+    protected function generatePsdThumbnail(string $sourcePath, array $styleConfig): string
     {
-        Log::info('PSD thumbnail generation not yet implemented', [
+        // Verify Imagick extension is loaded
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('PSD thumbnail generation requires Imagick PHP extension');
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating PSD thumbnail', [
             'source_path' => $sourcePath,
+            'psd_size_bytes' => filesize($sourcePath),
+            'style_config' => $styleConfig,
         ]);
-        
-        return null;
+
+        try {
+            // Verify PSD file is readable
+            if (!is_readable($sourcePath)) {
+                throw new \RuntimeException("PSD file is not readable: {$sourcePath}");
+            }
+
+            // Create Imagick instance and read PSD file
+            // ImageMagick automatically flattens PSD layers when reading
+            $imagick = new \Imagick();
+            $imagick->setResolution(72, 72); // Set resolution before reading
+            
+            try {
+                $imagick->readImage($sourcePath);
+            } catch (\ImagickException $e) {
+                Log::error('[ThumbnailGenerationService] Failed to read PSD file with Imagick', [
+                    'source_path' => $sourcePath,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException("Failed to read PSD file: {$e->getMessage()}", 0, $e);
+            }
+
+            // Get first image (PSD files may have multiple layers, but we want the flattened result)
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+
+            // Get dimensions
+            $sourceWidth = $imagick->getImageWidth();
+            $sourceHeight = $imagick->getImageHeight();
+
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('PSD file has invalid dimensions');
+            }
+
+            Log::info('[ThumbnailGenerationService] PSD file read successfully', [
+                'source_path' => $sourcePath,
+                'source_width' => $sourceWidth,
+                'source_height' => $sourceHeight,
+            ]);
+
+            // Calculate target dimensions
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            // Resize image
+            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+
+            // Apply blur for preview thumbnails if configured
+            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                $imagick->blurImage(0, 2); // Moderate blur
+            }
+
+            // Determine output format based on config (default to WebP for better compression)
+            $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
+            $quality = $styleConfig['quality'] ?? 85;
+            $imagick->setImageFormat($outputFormat);
+            $imagick->setImageCompressionQuality($quality);
+
+            // Create temporary output file
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $outputPath = tempnam(sys_get_temp_dir(), 'psd_thumb_') . '.' . $extension;
+
+            // Write to file
+            $imagick->writeImage($outputPath);
+            $imagick->clear();
+            $imagick->destroy();
+
+            // Verify output file was created
+            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+                throw new \RuntimeException('PSD thumbnail generation failed - output file is missing or empty');
+            }
+
+            Log::info('[ThumbnailGenerationService] PSD thumbnail generated successfully', [
+                'source_path' => $sourcePath,
+                'output_path' => $outputPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+            ]);
+
+            return $outputPath;
+        } catch (\ImagickException $e) {
+            Log::error('[ThumbnailGenerationService] PSD thumbnail generation failed (ImagickException)', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("PSD thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] PSD thumbnail generation error', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("PSD thumbnail generation error: {$e->getMessage()}", 0, $e);
+        }
     }
 
     /**

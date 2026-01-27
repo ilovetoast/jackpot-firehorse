@@ -9,10 +9,11 @@
  * @param {boolean} props.loading - Loading state
  * @param {Function} props.onThumbnailRetry - Callback for thumbnail retry (UI only, max 2 retries)
  * @param {number} props.thumbnailRetryCount - Current retry count
+ * @param {Function} props.onVideoPreviewRetry - Callback for video preview retry
  */
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 
-export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0 }) {
+export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0, onVideoPreviewRetry = null }) {
     // Format event type to human-readable description
     const formatEventType = (eventType, metadata = {}) => {
         const eventMap = {
@@ -24,6 +25,10 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             'asset.thumbnail.failed': 'Thumbnail generation failed',
             'asset.thumbnail.skipped': 'Thumbnail generation skipped (unsupported format)',
             'asset.thumbnail.retry_requested': 'Thumbnail generation retry requested',
+            'asset.video_preview.started': 'Video preview generation started',
+            'asset.video_preview.completed': 'Video preview generation completed',
+            'asset.video_preview.failed': 'Video preview generation failed',
+            'asset.video_preview.skipped': 'Video preview generation skipped',
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
             'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,
@@ -58,6 +63,13 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                 e.event_type === 'asset.thumbnail.completed' || 
                 e.event_type === 'asset.thumbnail.failed' ||
                 e.event_type === 'asset.thumbnail.skipped'
+            )
+        }
+        if (eventType.includes('video_preview.started')) {
+            return allEvents.some(e => 
+                e.event_type === 'asset.video_preview.completed' || 
+                e.event_type === 'asset.video_preview.failed' ||
+                e.event_type === 'asset.video_preview.skipped'
             )
         }
         // Add other started event types here if needed
@@ -214,6 +226,22 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                                 : event.metadata.reason}
                                                         </p>
                                                     )}
+                                                    {/* Show error details for video preview failures */}
+                                                    {event.event_type === 'asset.video_preview.failed' && event.metadata.error && (
+                                                        <p className="text-xs text-red-600 mt-1">
+                                                            {event.metadata.error}
+                                                        </p>
+                                                    )}
+                                                    {/* Show reason for video preview skipped */}
+                                                    {event.event_type === 'asset.video_preview.skipped' && event.metadata.reason && (
+                                                        <p className="text-blue-600">
+                                                            {event.metadata.reason === 'not_a_video' 
+                                                                ? 'Not a video file' 
+                                                                : event.metadata.reason === 'already_generated'
+                                                                ? 'Preview already generated'
+                                                                : event.metadata.reason}
+                                                        </p>
+                                                    )}
                                                     {/* Show manual trigger indicator for thumbnail started events */}
                                                     {event.metadata.triggered_by === 'user_manual_request' && event.event_type === 'asset.thumbnail.started' && (
                                                         <p className="text-indigo-600 italic">
@@ -272,6 +300,22 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                     >
                                                         <ArrowPathIcon className="h-3.5 w-3.5" />
                                                         Retry thumbnail generation
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {/* Retry affordance for failed video preview events */}
+                                            {event.event_type === 'asset.video_preview.failed' && onVideoPreviewRetry && (
+                                                <div className="mt-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            onVideoPreviewRetry()
+                                                        }}
+                                                        className="inline-flex items-center gap-1.5 rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                                                    >
+                                                        <ArrowPathIcon className="h-3.5 w-3.5" />
+                                                        Retry video preview generation
                                                     </button>
                                                 </div>
                                             )}

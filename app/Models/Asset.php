@@ -229,6 +229,7 @@ class Asset extends Model
         'video_height', // Phase V-1: Video height in pixels
         'video_poster_url', // Phase V-1: URL to video poster thumbnail
         'video_preview_url', // Phase V-1: URL to hover preview video
+        'dominant_color_bucket', // Quantized LAB bucket for filtering (format: "L{L}_A{A}_B{B}")
     ];
 
     /**
@@ -545,6 +546,47 @@ class Asset extends Model
         }
         
         return null;
+    }
+
+    /**
+     * Get the video preview URL (generated on-demand from S3 path).
+     *
+     * video_preview_url stores the S3 path in the database, and this accessor generates
+     * a presigned URL on-demand (max 7 days expiration per AWS limits).
+     *
+     * When setting: $asset->video_preview_url = 'path/to/file.mp4' - stores raw path
+     * When getting: $asset->video_preview_url - returns presigned URL generated from path
+     *
+     * @param mixed $value Raw database value (S3 path or legacy URL)
+     * @return string|null Presigned S3 URL to video preview, or null if not available
+     */
+    public function getVideoPreviewUrlAttribute($value): ?string
+    {
+        // If value is null or empty, return null
+        if (!$value) {
+            return null;
+        }
+
+        // If value is already a URL (legacy data from before fix), return it as-is
+        // This handles existing assets that may have URLs stored
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        // Value is an S3 path - generate presigned URL on-demand
+        try {
+            // Generate presigned URL with maximum allowed expiration (7 days)
+            // AWS S3 presigned URLs have a maximum expiration of 7 days
+            return \Illuminate\Support\Facades\Storage::disk('s3')
+                ->temporaryUrl($value, now()->addDays(7));
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('[Asset] Failed to generate signed S3 URL for video preview', [
+                'asset_id' => $this->id,
+                'preview_path' => $value,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**

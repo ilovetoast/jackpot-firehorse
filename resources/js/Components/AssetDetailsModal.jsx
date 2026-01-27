@@ -16,7 +16,7 @@
  * @param {Function} props.onClose - Callback when modal should close
  */
 import { useEffect, useState, useRef, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, PlayIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
@@ -995,6 +995,24 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                             />
                                         )}
                                     </div>
+                                    
+                                    {/* Video Preview Link - Only show for videos with preview available */}
+                                    {isVideo && asset?.video_preview_url && (
+                                        <div className="mt-3">
+                                            <a
+                                                href={asset.video_preview_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center justify-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                                            >
+                                                <PlayIcon className="h-4 w-4 mr-2" />
+                                                View Preview Video
+                                            </a>
+                                            <p className="mt-2 text-xs text-gray-500">
+                                                Opens the quick preview video (2-4 seconds, low FPS) generated for hover previews.
+                                            </p>
+                                        </div>
+                                    )}
                                     
                                     {/* Success/Error Messages */}
                                     {systemMetadataSuccess && (

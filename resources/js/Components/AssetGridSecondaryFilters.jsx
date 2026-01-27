@@ -56,7 +56,7 @@ export default function AssetGridSecondaryFilters({
     assetType = 'asset',
 }) {
     const pageProps = usePage().props
-    const { auth } = pageProps
+    const { auth, available_file_types = [] } = pageProps
     
     // Phase L.5.1: Check permissions for lifecycle filters
     // Pending Publication (pending_publication) requires asset.publish
@@ -74,7 +74,10 @@ export default function AssetGridSecondaryFilters({
     // User filter state
     const [userFilter, setUserFilter] = useState(null)
     
-    // Check URL for lifecycle filters and user filter on mount
+    // File type filter state
+    const [fileTypeFilter, setFileTypeFilter] = useState('all')
+    
+    // Check URL for lifecycle filters, user filter, and file type filter on mount
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search)
         const lifecycle = urlParams.get('lifecycle')
@@ -85,6 +88,10 @@ export default function AssetGridSecondaryFilters({
         // Check for user filter
         const uploadedBy = urlParams.get('uploaded_by')
         setUserFilter(uploadedBy || null)
+        
+        // Check for file type filter
+        const fileType = urlParams.get('file_type')
+        setFileTypeFilter(fileType || 'all')
     }, [])
     
     // Sync with URL changes
@@ -99,6 +106,10 @@ export default function AssetGridSecondaryFilters({
             // Sync user filter
             const uploadedBy = urlParams.get('uploaded_by')
             setUserFilter(uploadedBy || null)
+            
+            // Sync file type filter
+            const fileType = urlParams.get('file_type')
+            setFileTypeFilter(fileType || 'all')
         }
         
         // Listen for URL changes
@@ -111,6 +122,7 @@ export default function AssetGridSecondaryFilters({
             const newUnpublished = lifecycle === 'unpublished'
             const newArchived = lifecycle === 'archived'
             const newUploadedBy = urlParams.get('uploaded_by') || null
+            const newFileType = urlParams.get('file_type') || 'all'
             
             if (newPending !== pendingPublicationFilter) {
                 setPendingPublicationFilter(newPending)
@@ -124,13 +136,16 @@ export default function AssetGridSecondaryFilters({
             if (newUploadedBy !== userFilter) {
                 setUserFilter(newUploadedBy)
             }
+            if (newFileType !== fileTypeFilter) {
+                setFileTypeFilter(newFileType)
+            }
         }, 200)
         
         return () => {
             window.removeEventListener('popstate', handleUrlChange)
             clearInterval(interval)
         }
-    }, [pendingPublicationFilter, unpublishedFilter, archivedFilter, userFilter])
+    }, [pendingPublicationFilter, unpublishedFilter, archivedFilter, userFilter, fileTypeFilter])
     
     // Handle pending publication filter toggle
     const handlePendingPublicationFilterToggle = () => {
@@ -214,6 +229,26 @@ export default function AssetGridSecondaryFilters({
         } else {
             urlParams.delete('uploaded_by')
             setUserFilter(null)
+        }
+        
+        // Update URL and reload assets
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets'],
+        })
+    }
+    
+    // Handle file type filter change
+    const handleFileTypeFilterChange = (fileType) => {
+        const urlParams = new URLSearchParams(window.location.search)
+        
+        if (fileType && fileType !== 'all') {
+            urlParams.set('file_type', fileType)
+            setFileTypeFilter(fileType)
+        } else {
+            urlParams.delete('file_type')
+            setFileTypeFilter('all')
         }
         
         // Update URL and reload assets
@@ -427,7 +462,7 @@ export default function AssetGridSecondaryFilters({
     const metadataFilterCount = Object.values(filters).filter(
         (f) => f && f.value !== null && f.value !== '' && (!Array.isArray(f.value) || f.value.length > 0)
     ).length
-    const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0) + (userFilter ? 1 : 0)
+    const activeFilterCount = metadataFilterCount + (pendingPublicationFilter ? 1 : 0) + (unpublishedFilter ? 1 : 0) + (archivedFilter ? 1 : 0) + (fileTypeFilter && fileTypeFilter !== 'all' ? 1 : 0) + (userFilter ? 1 : 0)
     
     // Always render the "More filters" bar container
     // Content changes based on category, but bar persists
@@ -529,6 +564,27 @@ export default function AssetGridSecondaryFilters({
                         </div>
                     )}
                     
+                    {/* File Type Filter */}
+                    {available_file_types && available_file_types.length > 0 && (
+                        <div className="mb-4 pb-4 border-b border-gray-200">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                                File Type
+                            </label>
+                            <select
+                                value={fileTypeFilter}
+                                onChange={(e) => handleFileTypeFilterChange(e.target.value)}
+                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                            >
+                                <option value="all">All</option>
+                                {available_file_types.map((fileType) => (
+                                    <option key={fileType} value={fileType}>
+                                        {fileType.toUpperCase()}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                    
                     {/* User Filter - Created By */}
                     {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 && (
                         <div className="mb-4 pb-4 border-b border-gray-200">
@@ -581,6 +637,18 @@ export default function AssetGridSecondaryFilters({
                                             type="button"
                                             onClick={handleArchivedFilterToggle}
                                             className="text-gray-600 hover:text-gray-800"
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                )}
+                                {fileTypeFilter && fileTypeFilter !== 'all' && (
+                                    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded">
+                                        <span>File Type: {fileTypeFilter.toUpperCase()}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleFileTypeFilterChange('all')}
+                                            className="text-blue-600 hover:text-blue-800"
                                         >
                                             <XMarkIcon className="h-3 w-3" />
                                         </button>

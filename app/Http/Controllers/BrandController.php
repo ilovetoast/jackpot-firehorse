@@ -587,12 +587,18 @@ class BrandController extends Controller
         $settings = $validated['settings'] ?? [];
         unset($validated['settings']);
         
+        // Always merge settings to ensure all settings are preserved
+        $currentSettings = $brand->settings ?? [];
         if (!empty($settings)) {
-            // Merge settings with existing settings
-            $currentSettings = $brand->settings ?? [];
+            // Merge new settings with existing settings
             $mergedSettings = array_merge($currentSettings, $settings);
-            $validated['settings'] = $mergedSettings;
+        } else {
+            // If no settings provided, keep existing settings
+            $mergedSettings = $currentSettings;
         }
+        
+        // Always set settings (even if empty) to ensure the column is updated
+        $validated['settings'] = $mergedSettings;
 
         try {
             $this->brandService->update($brand, $validated);

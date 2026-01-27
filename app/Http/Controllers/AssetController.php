@@ -543,6 +543,42 @@ class AssetController extends Controller
             $assetsQuery->where('user_id', (int) $uploadedBy);
         }
 
+        // Filter by file type (extension)
+        $fileType = $request->get('file_type');
+        if ($fileType && $fileType !== 'all') {
+            // Normalize extension (remove leading dot, lowercase)
+            $extension = strtolower(trim($fileType, '.'));
+            
+            // Filter by file extension from original_filename
+            $assetsQuery->where(function ($query) use ($extension) {
+                // Match extension in original_filename (case-insensitive)
+                $query->whereRaw('LOWER(SUBSTRING_INDEX(original_filename, ".", -1)) = ?', [$extension])
+                      // Also match mime_type for common formats
+                      ->orWhere(function ($q) use ($extension) {
+                          $mimeMap = [
+                              'jpg' => ['image/jpeg', 'image/jpg'],
+                              'jpeg' => ['image/jpeg', 'image/jpg'],
+                              'png' => ['image/png'],
+                              'gif' => ['image/gif'],
+                              'webp' => ['image/webp'],
+                              'svg' => ['image/svg+xml'],
+                              'pdf' => ['application/pdf'],
+                              'tiff' => ['image/tiff', 'image/tif'],
+                              'tif' => ['image/tiff', 'image/tif'],
+                              'psd' => ['image/vnd.adobe.photoshop'],
+                              'mp4' => ['video/mp4'],
+                              'mov' => ['video/quicktime'],
+                              'avi' => ['video/x-msvideo'],
+                              'webm' => ['video/webm'],
+                          ];
+                          
+                          if (isset($mimeMap[$extension])) {
+                              $q->whereIn('mime_type', $mimeMap[$extension]);
+                          }
+                      });
+            });
+        }
+
         // Phase 2 – Step 8: Apply metadata filters
         // Filters can come as JSON string (from URL query param) or array (from Inertia)
         $filtersParam = $request->get('filters', []);
@@ -614,6 +650,9 @@ class AssetController extends Controller
                 $asset->refresh();
             }
         }
+        
+        // Get available file types from assets (before mapping to arrays)
+        $availableFileTypes = $this->getAvailableFileTypes($assets);
         
         // AUDIT: Log query results and sample asset brand_ids for comparison
         if ($assets->count() > 0) {
@@ -828,6 +867,11 @@ class AssetController extends Controller
                     } elseif ($skipReason === 'unsupported_format:avif' && 
                               ($mimeType === 'image/avif' || $extension === 'avif') &&
                               extension_loaded('imagick')) {
+                        $isNowSupported = true;
+                    } elseif (($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') && 
+                              ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') &&
+                              extension_loaded('imagick')) {
+                        // PSD files are now supported via Imagick
                         $isNowSupported = true;
                     }
                     
@@ -1359,6 +1403,7 @@ class AssetController extends Controller
                     'avatar_url' => $user->avatar_url,
                 ];
             }),
+            'available_file_types' => $availableFileTypes,
         ]);
     }
 
@@ -1949,6 +1994,63 @@ class AssetController extends Controller
 
             return response()->json([
                 'message' => 'Failed to generate download URL',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get signed view URL for an asset (for viewing/streaming, not downloading).
+     * This endpoint returns a signed URL without tracking a download metric.
+     *
+     * GET /assets/{asset}/view
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function view(Asset $asset): JsonResponse
+    {
+        $this->authorize('view', $asset);
+
+        try {
+            // Generate signed S3 URL for viewing (not downloading)
+            if (!$asset->storage_root_path) {
+                return response()->json([
+                    'message' => 'Asset storage path not found',
+                ], 404);
+            }
+
+            $s3Client = $this->createS3ClientForVerification();
+            $bucket = $asset->storageBucket;
+            
+            // Generate presigned URL WITHOUT Content-Disposition header (for viewing/streaming)
+            $command = $s3Client->getCommand('GetObject', [
+                'Bucket' => $bucket->name,
+                'Key' => $asset->storage_root_path,
+                // No ResponseContentDisposition - allows inline viewing/streaming
+            ]);
+            
+            $presignedRequest = $s3Client->createPresignedRequest(
+                $command,
+                now()->addMinutes(15) // URL valid for 15 minutes
+            );
+            
+            $signedUrl = (string) $presignedRequest->getUri();
+
+            // NOTE: We do NOT track a download metric here - this is for viewing only
+            // View tracking should be handled separately via the metrics API
+
+            return response()->json([
+                'url' => $signedUrl,
+                'expires_at' => now()->addMinutes(15)->toIso8601String(),
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to generate view URL', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate view URL',
             ], 500);
         }
     }
@@ -2644,5 +2746,90 @@ class AssetController extends Controller
                 'error' => 'Failed to initiate file replacement: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Get available file types from the loaded assets.
+     * 
+     * Extracts unique file extensions from assets and returns them as an array.
+     * Uses the same extension extraction logic as the asset mapping to ensure consistency.
+     * 
+     * @param \Illuminate\Support\Collection $assets
+     * @return array Array of file extension strings (e.g., ['jpg', 'png', 'pdf'])
+     */
+    protected function getAvailableFileTypes($assets): array
+    {
+        $fileTypes = [];
+        $mimeToExt = [
+            'image/jpeg' => 'jpg',
+            'image/jpg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            'image/svg+xml' => 'svg',
+            'image/tiff' => 'tif',
+            'image/tif' => 'tif',
+            'image/bmp' => 'bmp',
+            'application/pdf' => 'pdf',
+            'application/zip' => 'zip',
+            'application/x-zip-compressed' => 'zip',
+            'video/mpeg' => 'mpg',
+            'video/mp4' => 'mp4',
+            'video/quicktime' => 'mov',
+            'video/x-msvideo' => 'avi',
+            'video/webm' => 'webm',
+            'image/vnd.adobe.photoshop' => 'psd',
+            'application/vnd.adobe.illustrator' => 'ai',
+        ];
+
+        foreach ($assets as $asset) {
+            $fileExtension = null;
+            
+            // Handle both object and array access (assets may be mapped to arrays)
+            $originalFilename = is_array($asset) ? ($asset['original_filename'] ?? null) : ($asset->original_filename ?? null);
+            $mimeType = is_array($asset) ? ($asset['mime_type'] ?? null) : ($asset->mime_type ?? null);
+            
+            // Try to get extension from original_filename (same logic as asset mapping)
+            if ($originalFilename && $originalFilename !== 'unknown') {
+                $ext = pathinfo($originalFilename, PATHINFO_EXTENSION);
+                if ($ext && !empty(trim($ext))) {
+                    $fileExtension = strtolower(trim($ext, '.'));
+                }
+            }
+            
+            // Fallback to mime_type if extension not found (same logic as asset mapping)
+            if (empty($fileExtension) && $mimeType) {
+                $mimeTypeLower = strtolower(trim($mimeType));
+                $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
+                
+                // If not in map, try extracting from mime type subtype
+                if (empty($fileExtension) && strpos($mimeTypeLower, '/') !== false) {
+                    $mimeParts = explode('/', $mimeTypeLower);
+                    $subtype = $mimeParts[1] ?? null;
+                    if ($subtype) {
+                        // Remove "+xml" suffix if present (e.g., "svg+xml" -> "svg")
+                        $subtype = str_replace('+xml', '', $subtype);
+                        $subtype = str_replace('+zip', '', $subtype);
+                        // Normalize common subtypes (same as asset mapping)
+                        if ($subtype === 'jpeg') {
+                            $subtype = 'jpg';
+                        } elseif ($subtype === 'tiff') {
+                            $subtype = 'tif';
+                        }
+                        $fileExtension = $subtype;
+                    }
+                }
+            }
+            
+            // Add to list if we found a valid extension
+            if ($fileExtension && !in_array($fileExtension, $fileTypes, true)) {
+                $fileTypes[] = $fileExtension;
+            }
+        }
+        
+        // Sort for consistent output
+        sort($fileTypes);
+        
+        return $fileTypes;
     }
 }

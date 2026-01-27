@@ -203,11 +203,11 @@ return [
             'extensions' => ['psd', 'psb'],
             
             'capabilities' => [
-                'thumbnail' => false, // @todo Implement
+                'thumbnail' => true, // Enabled - uses Imagick to flatten and generate preview
                 'metadata' => false,
-                'preview' => false,
+                'preview' => true,
                 'ai_analysis' => false,
-                'download_only' => true, // Store but don't process
+                'download_only' => false,
             ],
             
             'handlers' => [
@@ -219,13 +219,15 @@ return [
             ],
             
             'errors' => [
-                'not_implemented' => 'PSD thumbnail generation is not yet implemented.',
+                'processing_failed' => 'Unable to process PSD file. The file may be corrupted or require ImageMagick with PSD support.',
+                'imagick_not_found' => 'PSD processing requires Imagick PHP extension with ImageMagick.',
+                'corrupted' => 'Unable to read PSD file. The file may be corrupted.',
             ],
             
             'frontend_hints' => [
-                'can_preview_inline' => false,
-                'preview_component' => 'placeholder',
-                'show_placeholder' => true,
+                'can_preview_inline' => true,
+                'preview_component' => 'image',
+                'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
         ],

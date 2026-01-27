@@ -73,8 +73,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Check company-level capability toggle first, then brand-level setting
     // Use companies[0] if activeCompany is not available (fallback)
     const activeCompany = auth?.activeCompany || auth?.companies?.[0]
-    const companyAllowsContributorApproval = activeCompany?.settings?.features?.contributor_asset_approval ?? false
-    const brandRequiresContributorApproval = auth?.activeBrand?.settings?.contributor_upload_requires_approval ?? false
+    // Normalize boolean values (handle string '0'/'1' from backend)
+    const companyAllowsContributorApproval = activeCompany?.settings?.features?.contributor_asset_approval === true || 
+                                             activeCompany?.settings?.features?.contributor_asset_approval === '1' || 
+                                             activeCompany?.settings?.features?.contributor_asset_approval === 1
+    const brandRequiresContributorApproval = auth?.activeBrand?.settings?.contributor_upload_requires_approval === true || 
+                                             auth?.activeBrand?.settings?.contributor_upload_requires_approval === '1' || 
+                                             auth?.activeBrand?.settings?.contributor_upload_requires_approval === 1
     const assetApprovalRequired = isContributor && 
                                   companyAllowsContributorApproval && 
                                   brandRequiresContributorApproval &&

@@ -116,18 +116,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [toastMessage, setToastMessage] = useState(null)
     const [toastType, setToastType] = useState('success')
     
-    // Phase 3.1: Get assets with thumbnail support or video support for carousel (images, PDFs, and videos)
+    // Phase 3.1: Get assets with thumbnail support or video support for carousel (images, PDFs, PSDs, and videos)
     const imageAssets = useMemo(() => {
         if (!assets || assets.length === 0) return []
         return assets.filter(a => {
             const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
             const mimeType = a.mime_type || ''
             const isVideoFile = mimeType.startsWith('video/') || ['MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
-            // Include images, PDFs (both support thumbnail generation), and videos with posters
+            // Include images, PDFs, PSDs (all support thumbnail generation), and videos with posters
             return mimeType.startsWith('image/') || 
                    mimeType === 'application/pdf' ||
+                   mimeType === 'image/vnd.adobe.photoshop' || // PSD/PSB files
                    (isVideoFile && (a.video_poster_url || a.thumbnail_url || a.final_thumbnail_url)) ||
-                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF'].includes(ext)
+                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF', 'PSD', 'PSB'].includes(ext)
         })
     }, [assets])
 
@@ -377,10 +378,60 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [displayAsset])
 
+    // Phase V-1: Hover video preview state (for drawer)
+    const [isHoveringVideo, setIsHoveringVideo] = useState(false)
+    const [videoPreviewLoaded, setVideoPreviewLoaded] = useState(false)
+    const videoPreviewRef = useRef(null)
+    const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
+    
+    // Phase V-1: Video view URL state (for gallery view)
+    const [videoViewUrl, setVideoViewUrl] = useState(null)
+    const [videoViewUrlLoading, setVideoViewUrlLoading] = useState(false)
+
     // Use displayAsset for carousel (with live updates)
     const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
     const canNavigateLeft = carouselIndex > 0
     const canNavigateRight = carouselIndex < imageAssets.length - 1
+
+    // Phase V-1: Fetch view URL for video when gallery opens
+    // NOTE: Must be after currentCarouselAsset is defined
+    useEffect(() => {
+        if (showZoomModal && currentCarouselAsset?.id) {
+            const currentMimeType = currentCarouselAsset.mime_type || ''
+            const currentFilename = currentCarouselAsset.original_filename || ''
+            const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+            const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
+            const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
+            
+            if (isCurrentVideo) {
+                // Fetch view URL (not download URL) for video
+                setVideoViewUrlLoading(true)
+                fetch(`/app/assets/${currentCarouselAsset.id}/view`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.url) {
+                            setVideoViewUrl(data.url)
+                        } else {
+                            console.warn('[AssetDrawer] Failed to get view URL for video:', data)
+                            setVideoViewUrl(null)
+                        }
+                    })
+                    .catch(err => {
+                        console.error('[AssetDrawer] Error fetching view URL:', err)
+                        setVideoViewUrl(null)
+                    })
+                    .finally(() => {
+                        setVideoViewUrlLoading(false)
+                    })
+            } else {
+                setVideoViewUrl(null)
+                setVideoViewUrlLoading(false)
+            }
+        } else {
+            setVideoViewUrl(null)
+            setVideoViewUrlLoading(false)
+        }
+    }, [showZoomModal, currentCarouselAsset?.id, currentCarouselAsset?.mime_type, currentCarouselAsset?.original_filename])
 
     // Phase 3.1: Carousel navigation handlers with smooth transitions
     const handlePrevious = (e) => {
@@ -446,8 +497,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const fileExtension = displayAsset.file_extension || displayAsset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
     const isImage = displayAsset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
     
-    // Assets that support thumbnail preview (images and PDFs)
-    const hasThumbnailSupport = isImage || displayAsset.mime_type === 'application/pdf' || fileExtension.toUpperCase() === 'PDF'
+    // Assets that support thumbnail preview (images, PDFs, and PSDs)
+    const hasThumbnailSupport = isImage || 
+                                displayAsset.mime_type === 'application/pdf' || 
+                                displayAsset.mime_type === 'image/vnd.adobe.photoshop' ||
+                                fileExtension.toUpperCase() === 'PDF' ||
+                                fileExtension.toUpperCase() === 'PSD' ||
+                                fileExtension.toUpperCase() === 'PSB'
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates
@@ -526,6 +582,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
         if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
         return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+    }
+
+    // Format video duration (seconds to MM:SS or HH:MM:SS)
+    const formatVideoDuration = (seconds) => {
+        if (!seconds || seconds <= 0) return null
+        const hours = Math.floor(seconds / 3600)
+        const minutes = Math.floor((seconds % 3600) / 60)
+        const secs = Math.floor(seconds % 60)
+        
+        if (hours > 0) {
+            return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+        }
+        return `${minutes}:${secs.toString().padStart(2, '0')}`
     }
 
     // Format date
@@ -811,6 +880,51 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         }
     }
 
+    // Video preview retry handler
+    const [videoPreviewRetryLoading, setVideoPreviewRetryLoading] = useState(false)
+    const handleRetryVideoPreview = async () => {
+        if (!displayAsset?.id || !isVideo) return
+        
+        setVideoPreviewRetryLoading(true)
+        
+        try {
+            const response = await window.axios.post(`/app/assets/${displayAsset.id}/thumbnails/regenerate-video-preview`)
+            
+            if (response.data.success) {
+                // Refresh activity events to show new "started" event
+                fetchActivityEvents()
+                // Show success message
+                setToastMessage('Video preview regeneration started')
+                setToastType('success')
+            } else {
+                setToastMessage(response.data.error || 'Failed to retry video preview generation')
+                setToastType('error')
+            }
+        } catch (error) {
+            console.error('Video preview retry error:', error)
+            
+            if (error.response) {
+                const status = error.response.status
+                const errorMessage = error.response.data?.error || 'Failed to retry video preview generation'
+                
+                if (status === 403) {
+                    setToastMessage('You do not have permission to regenerate video previews')
+                } else if (status === 404) {
+                    setToastMessage('Asset not found')
+                } else if (status === 422) {
+                    setToastMessage(errorMessage)
+                } else {
+                    setToastMessage(errorMessage)
+                }
+            } else {
+                setToastMessage('Network error. Please try again.')
+            }
+            setToastType('error')
+        } finally {
+            setVideoPreviewRetryLoading(false)
+        }
+    }
+
     return (
         <div
             ref={drawerRef}
@@ -912,33 +1026,60 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         <div 
                             className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
                         >
-                            {isVideo && displayAsset.id && (displayAsset.video_poster_url || displayAsset.thumbnail_url || displayAsset.final_thumbnail_url) ? (
-                                // Phase V-1: Video playback with enlarge support
-                                // Only show video player if poster/thumbnail exists
+                            {isVideo && displayAsset.id ? (
+                                // Phase V-1: Video thumbnail with hover preview (same as other assets)
+                                // Show thumbnail (icon > medium thumbnail) with hover video auto-play
                                 <div
                                     className="w-full h-full cursor-pointer group relative"
                                     onClick={() => {
-                                        // Allow zoom/fullscreen for videos
+                                        // Open gallery view (zoom modal) for videos
                                         setShowZoomModal(true)
                                     }}
+                                    onMouseEnter={() => !isMobile && setIsHoveringVideo(true)}
+                                    onMouseLeave={() => {
+                                        setIsHoveringVideo(false)
+                                        // Pause and reset video on mouse leave
+                                        if (videoPreviewRef.current) {
+                                            videoPreviewRef.current.pause()
+                                            videoPreviewRef.current.currentTime = 0
+                                        }
+                                        setVideoPreviewLoaded(false)
+                                    }}
                                 >
-                                    <video
-                                        className="w-full h-full object-contain bg-black"
-                                        controls
-                                        poster={displayAsset.video_poster_url || displayAsset.thumbnail_url || displayAsset.final_thumbnail_url || undefined}
-                                        preload="metadata"
-                                        playsInline
-                                        onClick={(e) => {
-                                            // Prevent video controls from triggering zoom
-                                            e.stopPropagation()
+                                    {/* Hover video preview (auto-play loop, no controls, no audio) */}
+                                    {isHoveringVideo && displayAsset.video_preview_url && !isMobile && (
+                                        <video
+                                            ref={videoPreviewRef}
+                                            src={displayAsset.video_preview_url}
+                                            className="absolute inset-0 w-full h-full object-cover z-10"
+                                            autoPlay
+                                            muted
+                                            loop
+                                            playsInline
+                                            onLoadedData={() => setVideoPreviewLoaded(true)}
+                                            style={{ opacity: videoPreviewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
+                                        />
+                                    )}
+                                    
+                                    {/* Thumbnail preview (same as other assets) */}
+                                    <ThumbnailPreview
+                                        asset={displayAsset}
+                                        alt={displayAsset.title || displayAsset.original_filename || 'Video preview'}
+                                        className={`w-full h-full ${isHoveringVideo && displayAsset.video_preview_url && !isMobile && videoPreviewLoaded ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                                        retryCount={thumbnailRetryCount}
+                                        onRetry={() => {
+                                            if (thumbnailRetryCount < 2) {
+                                                setThumbnailRetryCount(prev => prev + 1)
+                                            }
                                         }}
-                                    >
-                                        <source src={`/app/assets/${displayAsset.id}/download`} type={displayAsset.mime_type || 'video/mp4'} />
-                                        Your browser does not support the video tag.
-                                    </video>
-                                    {/* Enlarge overlay (only shown when hovering) */}
-                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
-                                        <span className="text-white text-sm font-medium">Click to enlarge</span>
+                                        size="lg"
+                                        thumbnailVersion={thumbnailVersion}
+                                        shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                    />
+                                    
+                                    {/* Zoom overlay (only shown when hovering) */}
+                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none z-20">
+                                        <span className="text-white text-sm font-medium">Click to play</span>
                                     </div>
                                 </div>
                             ) : hasThumbnailSupport && displayAsset.id ? (
@@ -1460,6 +1601,27 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 {formatFileSize(displayAsset.size_bytes)}
                             </dd>
                         </div>
+                        {/* Video-specific metadata */}
+                        {isVideo && (
+                            <>
+                                {displayAsset.video_duration && (
+                                    <div className="flex justify-between">
+                                        <dt className="text-sm text-gray-500">Duration</dt>
+                                        <dd className="text-sm font-semibold text-gray-900">
+                                            {formatVideoDuration(displayAsset.video_duration)}
+                                        </dd>
+                                    </div>
+                                )}
+                                {displayAsset.video_width && displayAsset.video_height && (
+                                    <div className="flex justify-between">
+                                        <dt className="text-sm text-gray-500">Resolution</dt>
+                                        <dd className="text-sm font-semibold text-gray-900">
+                                            {displayAsset.video_width.toLocaleString()} × {displayAsset.video_height.toLocaleString()} px
+                                        </dd>
+                                    </div>
+                                )}
+                            </>
+                        )}
                         <div className="flex justify-between">
                             <dt className="text-sm text-gray-500">Status</dt>
                             <dd className="text-sm font-medium">
@@ -1806,14 +1968,15 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 }
                             }}
                             thumbnailRetryCount={thumbnailRetryCount}
+                            onVideoPreviewRetry={handleRetryVideoPreview}
                         />
                     </CollapsibleSection>
                 </div>
                 
             </div>
 
-            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) or Videos with Posters */}
-            {showZoomModal && (hasThumbnailSupport || (isVideo && currentCarouselAsset?.video_poster_url)) && currentCarouselAsset?.id && (
+            {/* Phase 3.1: Zoom Modal with Carousel for Assets with Thumbnails (Images and PDFs) or Videos */}
+            {showZoomModal && (hasThumbnailSupport || isVideo) && currentCarouselAsset?.id && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                     onClick={() => setShowZoomModal(false)}
@@ -1865,15 +2028,32 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
                             const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
                             
-                            if (isCurrentVideo && currentCarouselAsset.id && currentCarouselAsset.video_poster_url) {
-                                // Video playback in fullscreen modal (only if poster exists)
+                            if (isCurrentVideo && currentCarouselAsset.id) {
+                                // Video playback in fullscreen modal
+                                // Use view URL (not download URL) to avoid tracking download
+                                if (videoViewUrlLoading) {
+                                    return (
+                                        <div className="flex items-center justify-center text-white">
+                                            <ArrowPathIcon className="h-8 w-8 animate-spin" />
+                                        </div>
+                                    )
+                                }
+                                
+                                if (!videoViewUrl) {
+                                    return (
+                                        <div className="flex items-center justify-center text-white">
+                                            <p>Video not available</p>
+                                        </div>
+                                    )
+                                }
+                                
                                 return (
                                     <video
                                         key={currentCarouselAsset.id} // Key forces remount for clean transition
                                         className="max-w-full max-h-full object-contain transition-all duration-300 ease-in-out bg-black"
                                         controls
                                         autoPlay
-                                        poster={currentCarouselAsset.video_poster_url || undefined}
+                                        poster={currentCarouselAsset.video_poster_url || currentCarouselAsset.thumbnail_url || currentCarouselAsset.final_thumbnail_url || undefined}
                                         preload="auto"
                                         playsInline
                                         style={{
@@ -1885,7 +2065,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             opacity: transitionDirection ? 0 : 1,
                                         }}
                                     >
-                                        <source src={`/app/assets/${currentCarouselAsset.id}/download`} type={currentCarouselAsset.mime_type || 'video/mp4'} />
+                                        <source src={videoViewUrl} type={currentCarouselAsset.mime_type || 'video/mp4'} />
                                         Your browser does not support the video tag.
                                     </video>
                                 )

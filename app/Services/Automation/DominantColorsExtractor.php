@@ -11,6 +11,37 @@ use Illuminate\Support\Facades\Log;
  *
  * Extracts the top 3 dominant colors from color analysis cluster data
  * and persists them as a system automated metadata field (dominant_colors).
+ * Also computes and persists dominant_color_bucket for efficient filtering.
+ *
+ * ═══════════════════════════════════════════════════════════════
+ * DOMINANT COLOR SYSTEM — CANONICAL RULES (LOCKED CONTRACT)
+ * ═══════════════════════════════════════════════════════════════
+ *
+ * dominant_color_hex (via dominant_colors field)
+ * - Truthful, per-asset, human-visible
+ * - Filterable only if tenant explicitly enables
+ * - Stored in asset_metadata as JSON array of color objects
+ *
+ * dominant_color_lab
+ * - Internal only (stored in asset.metadata['_color_analysis']['clusters'])
+ * - Used for deltaE calculations and future brand compliance
+ * - Never filterable, never visible
+ *
+ * dominant_color_bucket
+ * - Derived from highest-coverage cluster's LAB values
+ * - Deterministic, non-editable (system automated)
+ * - Filter-only field (hidden from asset views)
+ * - Default color filter source
+ * - Format: "L{L}_A{A}_B{B}" (canonical, e.g., "L50_A10_B20")
+ * - Quantization: L_STEP=10, A_STEP=10, B_STEP=10
+ * - Stored as scalar string in asset_metadata.value_json (no JSON path traversal needed)
+ *
+ * ARCHITECTURAL CONSTRAINTS:
+ * - No query-time color grouping
+ * - No semantic color naming
+ * - No bucket exposure in asset UI
+ * - All changes additive (never modify existing extraction)
+ * - System fields are never user-editable
  *
  * Rules:
  * - Only processes image assets
@@ -71,6 +102,9 @@ class DominantColorsExtractor
 
         // Persist to asset_metadata table
         $this->persistDominantColors($asset, $dominantColors);
+        
+        // Compute and persist dominant_color_bucket from first dominant color's LAB value
+        $this->computeAndPersistBucket($asset, $dominantColors);
     }
 
     /**
@@ -136,8 +170,12 @@ class DominantColorsExtractor
     /**
      * Filter clusters by coverage threshold and select top N by coverage.
      *
+     * Returns clusters sorted by coverage descending (highest first).
+     * The first cluster in the returned array is guaranteed to be the highest-coverage cluster.
+     * This ensures bucket computation uses the most representative color.
+     *
      * @param array $clusters Array of cluster data
-     * @return array Filtered and sorted clusters
+     * @return array Filtered and sorted clusters (coverage descending, highest first)
      */
     protected function filterAndSelectTopClusters(array $clusters): array
     {
@@ -148,13 +186,14 @@ class DominantColorsExtractor
         });
 
         // Sort by coverage descending (clusters should already be sorted, but ensure it)
+        // CRITICAL: First cluster after sorting is highest-coverage (used for bucket computation)
         usort($filtered, function ($a, $b) {
             $coverageA = $a['coverage'] ?? 0.0;
             $coverageB = $b['coverage'] ?? 0.0;
             return $coverageB <=> $coverageA;
         });
 
-        // Take top N
+        // Take top N (first element is highest-coverage)
         return array_slice($filtered, 0, self::MAX_COLORS);
     }
 
@@ -317,6 +356,214 @@ class DominantColorsExtractor
             'field_id' => $field->id,
             'colors_count' => count($colors),
         ]);
+    }
+
+    /**
+     * Compute and persist dominant_color_bucket from the highest-coverage dominant color's LAB value.
+     *
+     * Uses the first color from $colors array, which is guaranteed to be the highest-coverage
+     * cluster (sorted by coverage descending in filterAndSelectTopClusters).
+     *
+     * Bucket format: "L{L}_A{A}_B{B}" where L, A, B are quantized LAB values.
+     * Quantization steps: L_STEP = 10, A_STEP = 10, B_STEP = 10
+     * Example: "L50_A10_B20"
+     *
+     * @param Asset $asset
+     * @param array $colors Array of color objects (first color is highest-coverage, primary)
+     * @return void
+     */
+    protected function computeAndPersistBucket(Asset $asset, array $colors): void
+    {
+        if (empty($colors)) {
+            // Clear bucket if no colors
+            $asset->update(['dominant_color_bucket' => null]);
+            return;
+        }
+
+        $metadata = $asset->metadata ?? [];
+        
+        // Get LAB value from color analysis cluster data (highest-coverage dominant color)
+        if (!isset($metadata['_color_analysis']['clusters']) || !is_array($metadata['_color_analysis']['clusters'])) {
+            Log::debug('[DominantColorsExtractor] No cluster data for bucket computation', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        $clusters = $metadata['_color_analysis']['clusters'];
+        
+        // Get the first (primary) dominant color's cluster
+        // Find cluster matching first color's RGB
+        $firstColor = $colors[0];
+        $firstRgb = $firstColor['rgb'] ?? null;
+        
+        if (!$firstRgb || count($firstRgb) < 3) {
+            Log::debug('[DominantColorsExtractor] Invalid RGB for bucket computation', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Find matching cluster by RGB (with tolerance for rounding)
+        $matchingCluster = null;
+        foreach ($clusters as $cluster) {
+            $clusterRgb = $cluster['rgb'] ?? null;
+            if (!$clusterRgb || count($clusterRgb) < 3) {
+                continue;
+            }
+            
+            // Check if RGB matches (within 5 units tolerance for rounding)
+            $rDiff = abs($clusterRgb[0] - $firstRgb[0]);
+            $gDiff = abs($clusterRgb[1] - $firstRgb[1]);
+            $bDiff = abs($clusterRgb[2] - $firstRgb[2]);
+            
+            if ($rDiff <= 5 && $gDiff <= 5 && $bDiff <= 5) {
+                $matchingCluster = $cluster;
+                break;
+            }
+        }
+
+        if (!$matchingCluster || !isset($matchingCluster['lab']) || !is_array($matchingCluster['lab'])) {
+            Log::debug('[DominantColorsExtractor] No matching LAB cluster found for bucket', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        $lab = $matchingCluster['lab'];
+        if (count($lab) < 3) {
+            Log::debug('[DominantColorsExtractor] Invalid LAB array for bucket', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Quantize LAB values
+        $bucket = $this->quantizeLabToBucket($lab[0], $lab[1], $lab[2]);
+        
+        // Persist to assets table (for direct queries)
+        $asset->update(['dominant_color_bucket' => $bucket]);
+        
+        // Also persist to asset_metadata table (for metadata field system and filtering)
+        $this->persistBucketToMetadata($asset, $bucket);
+        
+        Log::debug('[DominantColorsExtractor] Dominant color bucket computed and persisted', [
+            'asset_id' => $asset->id,
+            'bucket' => $bucket,
+            'lab' => $lab,
+        ]);
+    }
+
+    /**
+     * Persist dominant_color_bucket to asset_metadata table for filtering.
+     *
+     * Stores bucket as a scalar string in value_json (not nested).
+     * Format: "L50_A10_B20" (canonical format L{L}_A{A}_B{B})
+     * This allows direct string matching in filter queries without JSON path traversal.
+     *
+     * @param Asset $asset
+     * @param string $bucket Bucket string in canonical format "L{L}_A{A}_B{B}" (e.g., "L50_A10_B20")
+     * @return void
+     */
+    protected function persistBucketToMetadata(Asset $asset, string $bucket): void
+    {
+        // Get the dominant_color_bucket metadata field
+        $field = DB::table('metadata_fields')
+            ->where('key', 'dominant_color_bucket')
+            ->where('scope', 'system')
+            ->first();
+
+        if (!$field) {
+            Log::warning('[DominantColorsExtractor] dominant_color_bucket metadata field not found', [
+                'asset_id' => $asset->id,
+            ]);
+            return;
+        }
+
+        // Check if metadata record already exists
+        $existing = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $field->id)
+            ->where('source', 'automatic')
+            ->first();
+
+        if ($existing) {
+            // Update existing record
+            DB::table('asset_metadata')
+                ->where('id', $existing->id)
+                ->update([
+                    'value_json' => json_encode($bucket),
+                    'confidence' => 0.95,
+                    'approved_at' => null, // Automatic fields are authoritative without approval
+                    'updated_at' => now(),
+                ]);
+
+            // Create audit history entry
+            DB::table('asset_metadata_history')->insert([
+                'asset_metadata_id' => $existing->id,
+                'old_value_json' => $existing->value_json,
+                'new_value_json' => json_encode($bucket),
+                'source' => 'automatic',
+                'changed_by' => null,
+                'created_at' => now(),
+            ]);
+        } else {
+            // Create new record
+            // Store bucket as scalar string (json_encode converts string to JSON string)
+            // This allows direct string matching in filter queries
+            $assetMetadataId = DB::table('asset_metadata')->insertGetId([
+                'asset_id' => $asset->id,
+                'metadata_field_id' => $field->id,
+                'value_json' => json_encode($bucket), // Scalar string, not nested JSON
+                'source' => 'automatic',
+                'confidence' => 0.95,
+                'producer' => 'system',
+                'approved_at' => now(), // Automatic metadata always auto-approves
+                'approved_by' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Create audit history entry
+            DB::table('asset_metadata_history')->insert([
+                'asset_metadata_id' => $assetMetadataId,
+                'old_value_json' => null,
+                'new_value_json' => json_encode($bucket),
+                'source' => 'automatic',
+                'changed_by' => null,
+                'created_at' => now(),
+            ]);
+        }
+    }
+
+    /**
+     * Quantize LAB values to bucket format.
+     *
+     * L_STEP = 10, A_STEP = 10, B_STEP = 10
+     * Format: "L{L}_A{A}_B{B}"
+     *
+     * @param float $l L value (0-100)
+     * @param float $a A value (typically -128 to 127)
+     * @param float $b B value (typically -128 to 127)
+     * @return string Bucket string like "L50_A10_B20"
+     */
+    protected function quantizeLabToBucket(float $l, float $a, float $b): string
+    {
+        const L_STEP = 10;
+        const A_STEP = 10;
+        const B_STEP = 10;
+
+        // Quantize by rounding to nearest step
+        $quantizedL = (int) round($l / L_STEP) * L_STEP;
+        $quantizedA = (int) round($a / A_STEP) * A_STEP;
+        $quantizedB = (int) round($b / B_STEP) * B_STEP;
+
+        // Clamp L to 0-100 range
+        $quantizedL = max(0, min(100, $quantizedL));
+        
+        // Format as "L{L}_A{A}_B{B}" (canonical format with underscores)
+        // Example: "L50_A10_B20"
+        return sprintf('L%d_A%d_B%d', $quantizedL, $quantizedA, $quantizedB);
     }
 
     /**

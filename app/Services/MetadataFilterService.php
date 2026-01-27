@@ -299,6 +299,8 @@ class MetadataFilterService
                 // For dominant_colors, value_json is: [{hex: "#FF0000", rgb: [...], coverage: 0.45}, ...]
                 // Filter value is array of hex strings: ["#FF0000", "#00FF00"]
                 // We need to check if any color object in the array has a hex matching selected hexes
+                // NOTE: Default color filtering should use dominant_color_bucket (text field) for better performance
+                // dominant_colors filtering is available if tenant explicitly enables it
                 if ($fieldKey === 'dominant_colors' && is_array($value) && count($value) > 0) {
                     // Filter by hex values: check if any color object in value_json has hex matching selected values
                     $query->where(function ($q) use ($value) {

@@ -554,16 +554,26 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         accent_color: brand.accent_color || '',
         nav_color: brand.nav_color || brand.primary_color || '',
         settings: {
+            // Preserve any other settings that might exist first
             ...(brand.settings || {}),
-            metadata_approval_enabled: brand.settings?.metadata_approval_enabled ?? false, // Phase M-2
-            contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval ?? false, // Phase J.3.1
+            // Then explicitly set boolean values (convert string '0'/'1' to boolean)
+            metadata_approval_enabled: brand.settings?.metadata_approval_enabled === true || brand.settings?.metadata_approval_enabled === '1' || brand.settings?.metadata_approval_enabled === 1, // Phase M-2
+            contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval === true || brand.settings?.contributor_upload_requires_approval === '1' || brand.settings?.contributor_upload_requires_approval === 1, // Phase J.3.1
         },
     })
 
     const submit = (e) => {
         e.preventDefault()
+        
+        console.log('[Brands/Edit] Submitting form with data:', {
+            settings: data.settings,
+            contributor_upload_requires_approval: data.settings?.contributor_upload_requires_approval,
+        })
+        
         put(`/app/brands/${brand.id}`, {
             forceFormData: true, // Important for file uploads
+            // Inertia will automatically flatten nested objects when using forceFormData
+            // settings.contributor_upload_requires_approval will be sent as a nested field
             onSuccess: () => {
                 // Cleanup preview URLs
                 if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
@@ -572,6 +582,9 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                 if (data.icon_preview && data.icon_preview.startsWith('blob:')) {
                     URL.revokeObjectURL(data.icon_preview)
                 }
+            },
+            onError: (errors) => {
+                console.error('[Brands/Edit] Form submission errors:', errors)
             },
         })
     }
@@ -1341,16 +1354,31 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                     <div className="ml-4">
                                                         <button
                                                             type="button"
-                                                            onClick={() => setData('settings.contributor_upload_requires_approval', !data.settings?.contributor_upload_requires_approval)}
+                                                            onClick={(e) => {
+                                                                e.preventDefault()
+                                                                e.stopPropagation()
+                                                                // Handle both boolean and string '0'/'1' values
+                                                                const currentValue = data.settings?.contributor_upload_requires_approval
+                                                                const isCurrentlyEnabled = currentValue === true || currentValue === '1' || currentValue === 1
+                                                                const newValue = !isCurrentlyEnabled
+                                                                console.log('[Brands/Edit] Toggling contributor_upload_requires_approval:', isCurrentlyEnabled, '->', newValue, 'Current data.settings:', data.settings)
+                                                                // Ensure settings object exists, then update the specific field
+                                                                const updatedSettings = {
+                                                                    ...(data.settings || {}),
+                                                                    contributor_upload_requires_approval: newValue,
+                                                                }
+                                                                setData('settings', updatedSettings)
+                                                                console.log('[Brands/Edit] Updated settings:', updatedSettings)
+                                                            }}
                                                             className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-                                                                data.settings?.contributor_upload_requires_approval ? 'bg-indigo-600' : 'bg-gray-200'
+                                                                (data.settings?.contributor_upload_requires_approval === true || data.settings?.contributor_upload_requires_approval === '1' || data.settings?.contributor_upload_requires_approval === 1) ? 'bg-indigo-600' : 'bg-gray-200'
                                                             }`}
                                                             role="switch"
-                                                            aria-checked={data.settings?.contributor_upload_requires_approval}
+                                                            aria-checked={data.settings?.contributor_upload_requires_approval === true || data.settings?.contributor_upload_requires_approval === '1' || data.settings?.contributor_upload_requires_approval === 1}
                                                         >
                                                             <span
                                                                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                                    data.settings?.contributor_upload_requires_approval ? 'translate-x-5' : 'translate-x-0'
+                                                                    (data.settings?.contributor_upload_requires_approval === true || data.settings?.contributor_upload_requires_approval === '1' || data.settings?.contributor_upload_requires_approval === 1) ? 'translate-x-5' : 'translate-x-0'
                                                                 }`}
                                                             />
                                                         </button>

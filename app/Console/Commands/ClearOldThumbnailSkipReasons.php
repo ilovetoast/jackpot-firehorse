@@ -20,7 +20,7 @@ class ClearOldThumbnailSkipReasons extends Command
      * @var string
      */
     protected $signature = 'thumbnails:clear-skip-reasons 
-                            {--format= : Specific format to clear (tiff, avif, or all)}
+                            {--format= : Specific format to clear (tiff, avif, psd, or all)}
                             {--dry-run : Show what would be cleared without making changes}
                             {--force : Force regeneration by setting status to PENDING}';
 
@@ -29,7 +29,7 @@ class ClearOldThumbnailSkipReasons extends Command
      *
      * @var string
      */
-    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, AVIF)';
+    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, AVIF, PSD)';
 
     /**
      * Execute the console command.
@@ -42,7 +42,7 @@ class ClearOldThumbnailSkipReasons extends Command
 
         // Check if Imagick is available
         if (!extension_loaded('imagick')) {
-            $this->warn('Imagick extension is not loaded. TIFF/AVIF support requires Imagick.');
+            $this->warn('Imagick extension is not loaded. TIFF/AVIF/PSD support requires Imagick.');
             if (!$this->confirm('Continue anyway? (Skip reasons will be cleared but thumbnails cannot be generated)')) {
                 return 0;
             }
@@ -90,6 +90,16 @@ class ClearOldThumbnailSkipReasons extends Command
                 if (extension_loaded('imagick')) {
                     $shouldClear = true;
                     $formatName = 'AVIF';
+                }
+            }
+
+            // Check PSD/PSB
+            if (($format === 'all' || $format === 'psd') && 
+                ($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') &&
+                ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb')) {
+                if (extension_loaded('imagick')) {
+                    $shouldClear = true;
+                    $formatName = 'PSD';
                 }
             }
 

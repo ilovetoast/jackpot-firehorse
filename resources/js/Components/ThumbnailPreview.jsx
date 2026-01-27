@@ -32,6 +32,7 @@
  * @param {number|null} props.thumbnailVersion - Thumbnail version (ignored in grid context)
  * @param {boolean} props.shouldAnimateThumbnail - Whether to animate thumbnail appearance
  * @param {string|null} props.primaryColor - Brand primary color for placeholder
+ * @param {string|null} props.forceObjectFit - Force object-fit value ('cover' or 'contain'), overrides category-based logic
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
@@ -48,7 +49,8 @@ export default function ThumbnailPreview({
     size = 'md',
     thumbnailVersion = null,
     shouldAnimateThumbnail = false,
-    primaryColor = null
+    primaryColor = null,
+    forceObjectFit = null
 }) {
     const { auth } = usePage().props
     // Use current brand's primary color, fallback to default if not provided
@@ -286,9 +288,11 @@ export default function ThumbnailPreview({
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     className={`w-full h-full ${
-                        asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
-                            ? 'object-contain' 
-                            : 'object-cover'
+                        forceObjectFit 
+                            ? `object-${forceObjectFit}`
+                            : (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
+                                ? 'object-contain' 
+                                : 'object-cover')
                     }`}
                     loading="eager"
                     style={{
@@ -341,9 +345,11 @@ export default function ThumbnailPreview({
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     className={`w-full h-full ${
-                        asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
-                            ? 'object-contain' 
-                            : 'object-cover'
+                        forceObjectFit 
+                            ? `object-${forceObjectFit}`
+                            : (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
+                                ? 'object-contain' 
+                                : 'object-cover')
                     }`}
                     loading="eager"
                     style={{
@@ -442,9 +448,11 @@ export default function ThumbnailPreview({
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     className={`w-full h-full ${
-                        asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
-                            ? 'object-contain' 
-                            : 'object-cover'
+                        forceObjectFit 
+                            ? `object-${forceObjectFit}`
+                            : (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
+                                ? 'object-contain' 
+                                : 'object-cover')
                     }`}
                     loading="eager"
                     style={{

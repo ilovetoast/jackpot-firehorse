@@ -183,6 +183,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                       ($mimeType === 'image/avif' || $extension === 'avif') &&
                       extension_loaded('imagick')) {
                 $isNowSupported = true;
+            } elseif (($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') && 
+                      ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') &&
+                      extension_loaded('imagick')) {
+                // PSD files are now supported via Imagick
+                $isNowSupported = true;
             }
             
             if ($isNowSupported) {
@@ -835,6 +840,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                     if ($fileType === 'avif') {
                         return 'unsupported_format:avif';
                     }
+                    if ($fileType === 'psd') {
+                        return 'unsupported_format:psd';
+                    }
                 }
             }
         }
@@ -857,6 +865,17 @@ class GenerateThumbnailsJob implements ShouldQueue
                 return 'unsupported_format:avif';
             }
             // If Imagick is available, AVIF should be supported - return generic reason
+            // (This shouldn't normally be reached if supportsThumbnailGeneration works correctly)
+            return 'unsupported_file_type';
+        }
+        
+        // PSD/PSB - Check if Imagick is available, otherwise mark as unsupported
+        if ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') {
+            // If Imagick is not available, mark as unsupported
+            if (!extension_loaded('imagick')) {
+                return 'unsupported_format:psd';
+            }
+            // If Imagick is available, PSD should be supported - return generic reason
             // (This shouldn't normally be reached if supportsThumbnailGeneration works correctly)
             return 'unsupported_file_type';
         }

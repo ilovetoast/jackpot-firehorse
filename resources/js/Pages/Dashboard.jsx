@@ -25,6 +25,8 @@ import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../Components/PendingMetadataTile'
 import PendingAssetTile from '../Components/PendingAssetTile'
 import RecentlyViewedCarousel from '../Components/RecentlyViewedCarousel'
+import AssetStatsCarousel from '../Components/AssetStatsCarousel'
+import AssetStatsParallaxSlider from '../Components/AssetStatsParallaxSlider'
 
 export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, pending_assets_count = 0, contributor_pending_count = 0, contributor_rejected_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
@@ -186,6 +188,17 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
             <AppNav brand={authFromPage?.activeBrand || auth.activeBrand} tenant={tenant} />
 
             <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                {/* New Full-Width Parallax Slider */}
+                {(showMostViewed || showMostDownloaded) && (
+                    <div className="mb-12 -mx-4 sm:-mx-6 lg:-mx-8">
+                        <AssetStatsParallaxSlider
+                            mostViewedAssets={showMostViewed ? most_viewed_assets : []}
+                            mostDownloadedAssets={showMostDownloaded ? most_downloaded_assets : []}
+                            viewAllLink="/app/assets"
+                        />
+                    </div>
+                )}
+                
                 <div className="mb-8">
                     <div className="flex items-center justify-between">
                         <div>
@@ -549,75 +562,15 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                     )}
                 </div>
 
-                {/* Most Viewed - Full Width */}
-                {showMostViewed && (
+                {/* Combined Most Viewed / Most Downloaded with Tabs */}
+                {(showMostViewed || showMostDownloaded) && (
                     <div className="mt-8 -mx-4 sm:-mx-6 lg:-mx-8 overflow-visible">
-                        <RecentlyViewedCarousel
-                            assets={most_viewed_assets}
-                            title="Most Viewed"
-                            maxItems={9}
+                        <AssetStatsCarousel
+                            mostViewedAssets={showMostViewed ? most_viewed_assets : []}
+                            mostDownloadedAssets={showMostDownloaded ? most_downloaded_assets : []}
+                            maxItems={7}
                             viewAllLink="/app/assets"
                         />
-                    </div>
-                )}
-
-                {/* Most Downloaded Assets */}
-                {showMostDownloaded && (
-                    <div className="mt-8">
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                            <div className="px-4 py-5 sm:p-6">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-base font-semibold leading-6 text-gray-900 flex items-center gap-2">
-                                        <CloudArrowDownIcon className="h-5 w-5 text-gray-400" />
-                                        Most Downloaded
-                                    </h3>
-                                    {most_downloaded_assets.length > 0 && (
-                                        <Link
-                                            href="/app/assets"
-                                            className="text-sm text-indigo-600 hover:text-indigo-900"
-                                        >
-                                            View All
-                                        </Link>
-                                    )}
-                                </div>
-                                {most_downloaded_assets.length > 0 ? (
-                                    <div className="space-y-3">
-                                        {most_downloaded_assets.map((asset) => (
-                                            <Link
-                                                key={asset.id}
-                                                href="/app/assets"
-                                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
-                                            >
-                                                <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-gray-100">
-                                                    <ThumbnailPreview
-                                                        asset={asset}
-                                                        alt={asset.title}
-                                                        className="w-full h-full object-cover"
-                                                        size="sm"
-                                                    />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
-                                                        {asset.title}
-                                                    </p>
-                                                    <div className="flex items-center gap-1 mt-1">
-                                                        <CloudArrowDownIcon className="h-4 w-4 text-gray-400" />
-                                                        <span className="text-xs text-gray-500">
-                                                            {asset.download_count.toLocaleString()} {asset.download_count === 1 ? 'download' : 'downloads'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </Link>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="text-center py-8">
-                                        <CloudArrowDownIcon className="mx-auto h-8 w-8 text-gray-400" />
-                                        <p className="mt-2 text-sm text-gray-500">No downloads yet</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
                     </div>
                 )}
 

@@ -390,6 +390,24 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false, // Visible in UI
             'ai_eligible' => false, // Not AI eligible (system calculated)
         ]);
+
+        // Dominant Color Bucket (system automated field - for filtering only)
+        // Stores quantized LAB bucket: "L{L}_A{A}_B{B}" format
+        // Never shown in asset views, only used for filtering
+        $this->getOrCreateField([
+            'key' => 'dominant_color_bucket',
+            'system_label' => 'Dominant Color Bucket',
+            'type' => 'text', // String field for bucket value
+            'applies_to' => 'image', // Only applies to image assets
+            'scope' => 'system',
+            'group_key' => 'technical',
+            'is_filterable' => true, // Used for filtering
+            'is_user_editable' => false, // Read-only (system populated)
+            'is_ai_trainable' => false,
+            'is_upload_visible' => false, // Hidden from upload form
+            'is_internal_only' => true, // Hidden from asset views (filtering only)
+            'ai_eligible' => false, // Not AI eligible (system calculated)
+        ]);
     }
 
     /**
@@ -411,19 +429,20 @@ class MetadataFieldsSeeder extends Seeder
             'color_space',
             'resolution_class',
             'dominant_colors', // System automated - extracted from color analysis
+            'dominant_color_bucket', // System automated - quantized LAB bucket for filtering
         ];
 
         foreach ($automaticFields as $fieldKey) {
-            // All automatic fields should be visible in edit/drawer view (read-only display)
-            // Users can see system-computed values like orientation, color_space, resolution_class, and dominant_colors
-            $showOnEdit = true;
+            // Most automatic fields should be visible in edit/drawer view (read-only display)
+            // Exception: dominant_color_bucket is hidden from asset views (filtering only)
+            $showOnEdit = ($fieldKey !== 'dominant_color_bucket');
             
             DB::table('metadata_fields')
                 ->where('key', $fieldKey)
                 ->update([
                     'population_mode' => 'automatic',
                     'show_on_upload' => false, // Hidden from upload form
-                    'show_on_edit' => $showOnEdit, // Visible in drawer with "Auto" label (read-only)
+                    'show_on_edit' => $showOnEdit, // Visible in drawer with "Auto" label (read-only), except bucket
                     'show_in_filters' => true, // Available in grid filters
                     'readonly' => true, // Read-only for users (system can populate)
                     'updated_at' => now(),
@@ -488,6 +507,17 @@ class MetadataFieldsSeeder extends Seeder
                     'is_primary' => true, // Primary field for Logos category
                     'ai_eligible' => true, // AI suggestions enabled for Logos category
                 ],
+            ],
+            // Dominant color fields configuration
+            // Note: dominant_colors is the existing field (array of colors)
+            // dominant_color_hex would be extracted from first color if needed
+            // For now, we configure dominant_colors and dominant_color_bucket
+            'dominant_colors' => [
+                // Enabled for all image categories by default (handled below)
+            ],
+            'dominant_color_bucket' => [
+                // Enabled for all image categories by default (handled below)
+                // Always hidden from asset views, only used for filtering
             ],
             // Tags: Not in config = enabled for all categories by default
             // Quality Rating: Not in config = enabled for all categories by default
@@ -627,6 +657,80 @@ class MetadataFieldsSeeder extends Seeder
                                 $visibilityData['created_at'] = now();
                                 DB::table('metadata_field_visibility')->insert($visibilityData);
                             }
+                        }
+                    }
+                }
+                
+                // Configure dominant color fields for all image categories
+                // Defaults per requirements:
+                // - dominant_colors: enabled=true, upload=false, quick_view=true, filter=false
+                // - dominant_color_bucket: enabled=true, upload=false, quick_view=false, filter=true
+                $colorFields = ['dominant_colors', 'dominant_color_bucket'];
+                
+                foreach ($colorFields as $fieldKey) {
+                    $field = DB::table('metadata_fields')
+                        ->where('key', $fieldKey)
+                        ->first();
+                    
+                    if (!$field) {
+                        continue;
+                    }
+                    
+                    // Get all image categories for this brand
+                    $imageCategories = DB::table('categories')
+                        ->where('tenant_id', $tenant->id)
+                        ->where('brand_id', $brand->id)
+                        ->where('is_system', true)
+                        ->where('asset_type', 'asset') // Only asset categories (images)
+                        ->get();
+                    
+                    foreach ($imageCategories as $category) {
+                        // Check if visibility record exists
+                        $visibility = DB::table('metadata_field_visibility')
+                            ->where('metadata_field_id', $field->id)
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->where('category_id', $category->id)
+                            ->first();
+                        
+                        // Configure defaults based on field type
+                        if ($fieldKey === 'dominant_colors') {
+                            // dominant_colors: enabled, not in upload, visible in edit, NOT filterable by default
+                            $visibilityData = [
+                                'metadata_field_id' => $field->id,
+                                'tenant_id' => $tenant->id,
+                                'brand_id' => $brand->id,
+                                'category_id' => $category->id,
+                                'is_hidden' => false, // Enabled
+                                'is_upload_hidden' => true, // Hidden from upload
+                                'is_filter_hidden' => true, // NOT filterable by default (tenant can enable)
+                                'is_primary' => null,
+                                'updated_at' => now(),
+                            ];
+                        } else { // dominant_color_bucket
+                            // dominant_color_bucket: enabled, not in upload, hidden from edit, filterable
+                            $visibilityData = [
+                                'metadata_field_id' => $field->id,
+                                'tenant_id' => $tenant->id,
+                                'brand_id' => $brand->id,
+                                'category_id' => $category->id,
+                                'is_hidden' => false, // Enabled
+                                'is_upload_hidden' => true, // Hidden from upload
+                                'is_filter_hidden' => false, // Filterable
+                                'is_primary' => null,
+                                'updated_at' => now(),
+                            ];
+                        }
+                        
+                        if ($visibility) {
+                            // Update existing visibility record
+                            DB::table('metadata_field_visibility')
+                                ->where('id', $visibility->id)
+                                ->update($visibilityData);
+                        } else {
+                            // Create new visibility record
+                            $visibilityData['created_at'] = now();
+                            DB::table('metadata_field_visibility')->insert($visibilityData);
                         }
                     }
                 }

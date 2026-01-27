@@ -254,10 +254,18 @@ class DashboardController extends Controller
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    if (!empty($thumbnails) && isset($thumbnails['medium'])) {
+                    // Prefer large, then medium (at least medium size)
+                    $thumbnailStyle = null;
+                    if (!empty($thumbnails) && isset($thumbnails['large'])) {
+                        $thumbnailStyle = 'large';
+                    } elseif (!empty($thumbnails) && isset($thumbnails['medium'])) {
+                        $thumbnailStyle = 'medium';
+                    }
+                    
+                    if ($thumbnailStyle) {
                         $finalThumbnailUrl = route('assets.thumbnail.final', [
                             'asset' => $asset->id,
-                            'style' => 'medium',
+                            'style' => $thumbnailStyle,
                         ]);
                         if ($thumbnailVersion) {
                             $finalThumbnailUrl .= '?v=' . $thumbnailVersion;
@@ -362,10 +370,18 @@ class DashboardController extends Controller
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnails = $metadata['thumbnails'] ?? [];
-                    if (!empty($thumbnails) && isset($thumbnails['medium'])) {
+                    // Prefer large, then medium (at least medium size)
+                    $thumbnailStyle = null;
+                    if (!empty($thumbnails) && isset($thumbnails['large'])) {
+                        $thumbnailStyle = 'large';
+                    } elseif (!empty($thumbnails) && isset($thumbnails['medium'])) {
+                        $thumbnailStyle = 'medium';
+                    }
+                    
+                    if ($thumbnailStyle) {
                         $finalThumbnailUrl = route('assets.thumbnail.final', [
                             'asset' => $asset->id,
-                            'style' => 'medium',
+                            'style' => $thumbnailStyle,
                         ]);
                         if ($thumbnailVersion) {
                             $finalThumbnailUrl .= '?v=' . $thumbnailVersion;

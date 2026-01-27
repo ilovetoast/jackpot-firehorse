@@ -154,6 +154,8 @@ class GenerateVideoPreviewJob implements ShouldQueue
             ]);
             
             // Log activity: Video preview generation completed
+            // IMPORTANT: Log completion event AFTER successful generation and update
+            // This ensures the timeline shows completion even if there are subsequent errors
             try {
                 \App\Services\ActivityRecorder::logAsset(
                     $asset,
@@ -162,10 +164,16 @@ class GenerateVideoPreviewJob implements ShouldQueue
                         'preview_path' => $previewPath,
                     ]
                 );
+                
+                Log::info('[GenerateVideoPreviewJob] Video preview completed event logged', [
+                    'asset_id' => $asset->id,
+                ]);
             } catch (\Exception $e) {
-                Log::error('Failed to log video preview completed event', [
+                // Log error but don't fail the job - preview was successfully generated
+                Log::error('[GenerateVideoPreviewJob] Failed to log video preview completed event', [
                     'asset_id' => $asset->id,
                     'error' => $e->getMessage(),
+                    'note' => 'Preview was generated successfully, but activity event logging failed',
                 ]);
             }
         } catch (\Illuminate\Database\QueryException $e) {
