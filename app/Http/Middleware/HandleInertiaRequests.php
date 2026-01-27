@@ -400,7 +400,14 @@ class HandleInertiaRequests extends Middleware
                     'name' => $tenant->name,
                     'slug' => $tenant->slug,
                     'is_active' => $tenant->id == $currentTenantId,
+                    'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
                 ]) : [],
+                'activeCompany' => $tenant ? [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'slug' => $tenant->slug,
+                    'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
+                ] : null,
                 'activeBrand' => $activeBrand ? [
                     'id' => $activeBrand->id,
                     'name' => $activeBrand->name,
@@ -409,6 +416,7 @@ class HandleInertiaRequests extends Middleware
                     'primary_color' => $activeBrand->primary_color,
                     'nav_color' => $activeBrand->nav_color,
                     'logo_filter' => $activeBrand->logo_filter ?? 'none',
+                    'settings' => $activeBrand->settings ?? [], // Phase J.3.1: Include brand settings for approval checks
                 ] : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts

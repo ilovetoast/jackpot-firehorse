@@ -108,6 +108,16 @@ class UploadCompletionService
         // Refresh to get latest state
         $uploadSession->refresh();
 
+        // Phase J.3.1: Handle replace mode (file-only replacement for rejected assets)
+        if ($uploadSession->mode === 'replace' && $uploadSession->asset_id) {
+            // For replace mode, comment is passed via metadata array (hacky but works with existing finalize flow)
+            $comment = null;
+            if (is_array($metadata) && isset($metadata['comment'])) {
+                $comment = $metadata['comment'];
+            }
+            return $this->completeReplace($uploadSession, $s3Key, $userId, $comment);
+        }
+
         // IDEMPOTENT CHECK: If upload session is already COMPLETED, check for existing asset
         if ($uploadSession->status === UploadStatus::COMPLETED) {
             $existingAsset = Asset::where('upload_session_id', $uploadSession->id)->first();
@@ -543,7 +553,18 @@ class UploadCompletionService
                 
                 // Phase MI-1: Use activeBrandMembership to get requires_approval flag
                 $membership = $user ? $user->activeBrandMembership($brand) : null;
-                $requiresApproval = $approvalsEnabled && $membership && ($membership['requires_approval'] ?? false);
+                $userRequiresApproval = $approvalsEnabled && $membership && ($membership['requires_approval'] ?? false);
+                
+                // Phase J.3.1: Check company capability toggle first, then brand-level contributor approval setting
+                // Company toggle must be enabled for brand toggle to take effect
+                $companyAllowsContributorApproval = $tenant && ($tenant->settings['features']['contributor_asset_approval'] ?? false);
+                $isContributor = $membership && ($membership['role'] ?? null) === 'contributor';
+                $brandRequiresContributorApproval = $brand && $brand->requiresContributorApproval();
+                // Only enforce brand-level setting if company capability is enabled
+                $contributorRequiresApproval = $approvalsEnabled && $companyAllowsContributorApproval && $isContributor && $brandRequiresContributorApproval;
+                
+                // Approval required if either user-level flag OR brand-level contributor setting requires it
+                $requiresApproval = $userRequiresApproval || $contributorRequiresApproval;
                 
                     if ($requiresApproval) {
                         // User requires approval - set approval_status to pending
@@ -562,11 +583,15 @@ class UploadCompletionService
                         $notificationService = app(\App\Services\ApprovalNotificationService::class);
                         $notificationService->notifyOnSubmitted($asset, $user);
                         
-                        Log::info('[UploadCompletionService] Asset requires approval (brand_user.requires_approval=true)', [
+                        $approvalReason = $contributorRequiresApproval ? 'brand.contributor_upload_requires_approval' : 'brand_user.requires_approval';
+                        Log::info('[UploadCompletionService] Asset requires approval', [
                             'asset_id' => $asset->id,
                             'user_id' => $userId,
                             'brand_id' => $targetBrandId,
                             'approval_status' => 'pending',
+                            'approval_reason' => $approvalReason,
+                            'is_contributor' => $isContributor,
+                            'brand_requires_contributor_approval' => $brandRequiresContributorApproval,
                         ]);
                     }
                 // If not required, approval_status already set to NOT_REQUIRED during creation
@@ -1168,6 +1193,253 @@ class UploadCompletionService
         }
 
         return new S3Client($config);
+    }
+
+    /**
+     * Complete an upload session in replace mode.
+     * 
+     * Phase J.3.1: File-only replacement for rejected contributor assets
+     * 
+     * Replaces the S3 file for an existing asset without modifying metadata.
+     * Updates asset file properties and resets approval status.
+     * 
+     * @param UploadSession $uploadSession Upload session with mode='replace' and asset_id set
+     * @param string|null $s3Key Optional S3 key if known
+     * @param int|null $userId User ID performing the replacement
+     * @param string|null $comment Optional comment for resubmission
+     * @return Asset The updated asset
+     * @throws \Exception
+     */
+    protected function completeReplace(
+        UploadSession $uploadSession,
+        ?string $s3Key = null,
+        ?int $userId = null,
+        ?string $comment = null
+    ): Asset {
+        Log::info('[UploadCompletionService] Starting replace file completion', [
+            'upload_session_id' => $uploadSession->id,
+            'asset_id' => $uploadSession->asset_id,
+            'user_id' => $userId,
+        ]);
+
+        // Load the asset being replaced
+        $asset = Asset::findOrFail($uploadSession->asset_id);
+
+        // Verify asset belongs to same tenant/brand as upload session
+        if ($asset->tenant_id !== $uploadSession->tenant_id || $asset->brand_id !== $uploadSession->brand_id) {
+            throw new \RuntimeException('Asset does not belong to the same tenant/brand as upload session.');
+        }
+
+        // Verify upload session can transition to COMPLETED
+        if (!$uploadSession->canTransitionTo(UploadStatus::COMPLETED)) {
+            throw new \RuntimeException(
+                "Cannot transition upload session from {$uploadSession->status->value} to COMPLETED."
+            );
+        }
+
+        // Finalize multipart upload if needed
+        if ($uploadSession->type === UploadType::CHUNKED && $uploadSession->multipart_upload_id) {
+            Log::info('[UploadCompletionService] Finalizing multipart upload for replace', [
+                'upload_session_id' => $uploadSession->id,
+                'multipart_upload_id' => $uploadSession->multipart_upload_id,
+            ]);
+            
+            try {
+                $this->finalizeMultipartUpload($uploadSession);
+            } catch (\Exception $e) {
+                Log::error('[UploadCompletionService] Failed to finalize multipart upload for replace', [
+                    'upload_session_id' => $uploadSession->id,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException("Failed to finalize multipart upload: {$e->getMessage()}", 0, $e);
+            }
+        }
+
+        // Get file info from S3 (temp upload location)
+        $tempS3Key = $s3Key ?? $this->generateTempUploadPath($uploadSession);
+        $fileInfo = $this->getFileInfoFromS3($uploadSession, $tempS3Key, null);
+
+        // Get S3 client and bucket
+        $bucket = $uploadSession->storageBucket;
+        if (!$bucket) {
+            throw new \RuntimeException('Storage bucket not found for upload session');
+        }
+        $s3Client = $this->createS3Client();
+        $bucketName = $bucket->name;
+
+        // Get the asset's current S3 path
+        $assetS3Key = $asset->storage_root_path;
+
+        // Replace the file: Copy from temp location to asset's permanent location
+        // This overwrites the existing file at the asset's storage path
+        try {
+            // CopySource must be a string in format "bucket/key" for AWS SDK
+            $copySource = $bucketName . '/' . $tempS3Key;
+            
+            $s3Client->copyObject([
+                'Bucket' => $bucketName,
+                'CopySource' => $copySource,
+                'Key' => $assetS3Key,
+                'MetadataDirective' => 'REPLACE',
+                'ContentType' => $fileInfo['mime_type'],
+            ]);
+
+            Log::info('[UploadCompletionService] File replaced in S3', [
+                'asset_id' => $asset->id,
+                'from_path' => $tempS3Key,
+                'to_path' => $assetS3Key,
+                'new_size' => $fileInfo['size_bytes'],
+                'new_mime_type' => $fileInfo['mime_type'],
+            ]);
+        } catch (S3Exception $e) {
+            Log::error('[UploadCompletionService] Failed to replace file in S3', [
+                'asset_id' => $asset->id,
+                'from_path' => $tempS3Key,
+                'to_path' => $assetS3Key,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("Failed to replace file in S3: {$e->getMessage()}", 0, $e);
+        }
+
+        // Update asset file properties (file size, mime type, dimensions if available)
+        // DO NOT touch metadata, title, category, or any other properties
+        DB::transaction(function () use ($asset, $fileInfo, $uploadSession, $userId) {
+            // Update file properties
+            $asset->size_bytes = $fileInfo['size_bytes'];
+            $asset->mime_type = $fileInfo['mime_type'];
+            
+            // Update dimensions if available in fileInfo
+            if (isset($fileInfo['width']) && isset($fileInfo['height'])) {
+                $asset->width = $fileInfo['width'];
+                $asset->height = $fileInfo['height'];
+            }
+
+            // Reset approval status to pending (asset re-enters review queue)
+            $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
+            $asset->rejected_at = null;
+            $asset->rejection_reason = null;
+            
+            // Keep unpublished until approved
+            $asset->published_at = null;
+            $asset->published_by_id = null;
+            
+            // Reset thumbnail status to pending (new file needs new thumbnails)
+            // Also clear old thumbnail paths from metadata to prevent 404 errors
+            // Phase J.3.1: Check if file type supports thumbnails (not just images)
+            $fileTypeService = app(\App\Services\FileTypeService::class);
+            $fileType = $fileTypeService->detectFileType($fileInfo['mime_type'] ?? '', pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+            $supportsThumbnails = $fileType && $fileTypeService->supportsCapability($fileType, 'thumbnail');
+            
+            if ($supportsThumbnails) {
+                $asset->thumbnail_status = \App\Enums\ThumbnailStatus::PENDING;
+                
+                // Clear old thumbnail paths from metadata (prevents frontend from trying to load non-existent thumbnails)
+                $metadata = $asset->metadata ?? [];
+                if (isset($metadata['thumbnails'])) {
+                    unset($metadata['thumbnails']);
+                }
+                if (isset($metadata['preview_thumbnails'])) {
+                    unset($metadata['preview_thumbnails']);
+                }
+                
+                // Phase J.3.1: Clear processing flags to allow ProcessAssetJob to run again
+                // This is critical - without clearing these, ProcessAssetJob will skip the asset
+                // and thumbnails will never be regenerated, causing infinite polling loops
+                if (isset($metadata['processing_started'])) {
+                    unset($metadata['processing_started']);
+                }
+                if (isset($metadata['processing_started_at'])) {
+                    unset($metadata['processing_started_at']);
+                }
+                // Clear other processing flags that might prevent reprocessing
+                if (isset($metadata['thumbnails_generated'])) {
+                    unset($metadata['thumbnails_generated']);
+                }
+                if (isset($metadata['thumbnails_generated_at'])) {
+                    unset($metadata['thumbnails_generated_at']);
+                }
+                if (isset($metadata['metadata_extracted'])) {
+                    unset($metadata['metadata_extracted']);
+                }
+                
+                $asset->metadata = $metadata;
+                
+                Log::info('[UploadCompletionService] Reset thumbnail status to PENDING for replaced file', [
+                    'asset_id' => $asset->id,
+                    'file_type' => $fileType,
+                    'mime_type' => $fileInfo['mime_type'] ?? 'unknown',
+                ]);
+            }
+
+            $asset->save();
+
+            // Update upload session status
+            $uploadSession->update([
+                'status' => UploadStatus::COMPLETED,
+                'uploaded_size' => $fileInfo['size_bytes'],
+            ]);
+
+            // Phase J.3.1: Record resubmission comment (optional comment from UI)
+            if ($userId) {
+                $user = \App\Models\User::find($userId);
+                if ($user) {
+                    $commentService = app(\App\Services\AssetApprovalCommentService::class);
+                    $commentText = $comment ?? 'File replaced';
+                    $commentService->recordResubmitted($asset, $user, $commentText);
+                    
+                    // Notify approvers
+                    $notificationService = app(\App\Services\ApprovalNotificationService::class);
+                    $notificationService->notifyOnResubmitted($asset, $user);
+                }
+            }
+
+            Log::info('[UploadCompletionService] Asset file replaced successfully', [
+                'asset_id' => $asset->id,
+                'upload_session_id' => $uploadSession->id,
+                'new_size' => $asset->size_bytes,
+                'new_mime_type' => $asset->mime_type,
+                'approval_status' => 'pending',
+            ]);
+        });
+
+        // Refresh asset to get latest state
+        $asset->refresh();
+
+        // Phase J.3.1: Verify file exists at storage_root_path before dispatching events
+        // This ensures thumbnail generation job can access the file
+        $bucket = $uploadSession->storageBucket;
+        if ($bucket) {
+            $s3Client = $this->createS3Client();
+            try {
+                $s3Client->headObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $asset->storage_root_path,
+                ]);
+                Log::info('[UploadCompletionService] Verified replaced file exists in S3', [
+                    'asset_id' => $asset->id,
+                    'storage_path' => $asset->storage_root_path,
+                ]);
+            } catch (S3Exception $e) {
+                Log::error('[UploadCompletionService] Replaced file not found in S3 - thumbnail generation may fail', [
+                    'asset_id' => $asset->id,
+                    'storage_path' => $asset->storage_root_path,
+                    'error' => $e->getMessage(),
+                ]);
+                // Don't throw - let the job handle the error
+            }
+        }
+
+        // Emit events for processing (thumbnails, metadata extraction, etc.)
+        // The new file needs to be processed just like a new upload
+        Log::info('[UploadCompletionService] Dispatching AssetUploaded event for replaced file', [
+            'asset_id' => $asset->id,
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+            'processing_started_cleared' => !isset($asset->metadata['processing_started']),
+        ]);
+        event(new AssetUploaded($asset));
+        event(new AssetProcessingCompleteEvent($asset));
+
+        return $asset;
     }
     
     /**

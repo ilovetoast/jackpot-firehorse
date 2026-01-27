@@ -34,6 +34,7 @@ export default function AssetGrid({
     selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
     onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
     isPendingApprovalMode = false, // Phase L.6.2: Approval inbox mode
+    isPendingPublicationFilter = false, // Phase J.3.1: Pending publication filter active
     onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
 }) {
     // Console log assets when they change
@@ -64,6 +65,7 @@ export default function AssetGrid({
                     isBulkSelected={selectedAssetIds.includes(asset.id)} // Phase 2 – Step 7
                     onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null} // Phase 2 – Step 7
                     isPendingApprovalMode={isPendingApprovalMode} // Phase L.6.2
+                    isPendingPublicationFilter={isPendingPublicationFilter} // Phase J.3.1
                     onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null} // Phase L.6.2
                 />
             ))}

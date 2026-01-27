@@ -37,7 +37,15 @@ export function useThumbnailPolling(assets, onThumbnailUpdate) {
             if (!asset || !asset.id) return false
 
             const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
-            const hasThumbnail = !!(asset.thumbnail_url || asset.preview_url)
+            const hasThumbnail = !!(asset.thumbnail_url || asset.preview_url || asset.preview_thumbnail_url || asset.final_thumbnail_url)
+            const isPending = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
+
+            // Don't poll if status is pending AND no thumbnails exist (prevents 404 loops)
+            // This prevents polling for assets that just had files replaced and thumbnails
+            // haven't been generated yet (would cause thousands of 404 errors)
+            if (isPending && !hasThumbnail) {
+                return false // Skip polling for pending assets without any thumbnails
+            }
 
             // Qualify only if:
             // 1. Not completed

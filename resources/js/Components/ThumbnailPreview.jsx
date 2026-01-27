@@ -286,7 +286,7 @@ export default function ThumbnailPreview({
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     className={`w-full h-full ${
-                        asset?.category?.slug === 'logos' 
+                        asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
                             ? 'object-contain' 
                             : 'object-cover'
                     }`}
@@ -341,7 +341,7 @@ export default function ThumbnailPreview({
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     className={`w-full h-full ${
-                        asset?.category?.slug === 'logos' 
+                        asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
                             ? 'object-contain' 
                             : 'object-cover'
                     }`}
@@ -442,7 +442,7 @@ export default function ThumbnailPreview({
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     className={`w-full h-full ${
-                        asset?.category?.slug === 'logos' 
+                        asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics'
                             ? 'object-contain' 
                             : 'object-cover'
                     }`}

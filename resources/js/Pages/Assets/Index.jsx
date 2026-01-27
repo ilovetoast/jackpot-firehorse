@@ -499,6 +499,16 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         return false
     })
     
+    // Phase J.3.1: Detect pending_publication filter for contributor micro-indicators
+    const [isPendingPublicationFilter, setIsPendingPublicationFilter] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search)
+            const lifecycle = urlParams.get('lifecycle')
+            return lifecycle === 'pending_publication'
+        }
+        return false
+    })
+    
     // Update when URL changes (e.g., when filter is toggled)
     useEffect(() => {
         const checkUrl = () => {
@@ -506,6 +516,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 const urlParams = new URLSearchParams(window.location.search)
                 const lifecycle = urlParams.get('lifecycle')
                 setIsPendingApprovalMode(lifecycle === 'pending_approval' || lifecycle === 'unpublished')
+                setIsPendingPublicationFilter(lifecycle === 'pending_publication')
             }
         }
         
@@ -809,6 +820,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         )
                                     }) : null}
                                     isPendingApprovalMode={isPendingApprovalMode}
+                                    isPendingPublicationFilter={isPendingPublicationFilter}
                                     onAssetApproved={(assetId) => {
                                         // Remove approved asset from local state
                                         setLocalAssets((prev) => prev.filter(a => a.id !== assetId))
@@ -820,20 +832,30 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
                                 </div>
                                 <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                    {selectedCategoryId ? 'No assets in this category yet' : 'No assets yet'}
+                                    {isPendingPublicationFilter 
+                                        ? (auth?.user?.brand_role === 'contributor' && !['admin', 'owner'].includes(auth?.user?.tenant_role?.toLowerCase() || ''))
+                                            ? "You don't have any assets awaiting review right now."
+                                            : 'No assets are currently awaiting review.'
+                                        : selectedCategoryId 
+                                            ? 'No assets in this category yet' 
+                                            : 'No assets yet'}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
-                                    {selectedCategoryId
-                                        ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
-                                        : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
+                                    {isPendingPublicationFilter
+                                        ? 'Assets that require approval will appear here once submitted.'
+                                        : selectedCategoryId
+                                            ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
+                                            : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
                                 </p>
-                                <div className="mt-8">
-                                    <AddAssetButton 
-                                        defaultAssetType="asset" 
-                                        onClick={handleOpenUploadDialog}
-                                        disabled={isAutoClosing}
-                                    />
-                                </div>
+                                {!isPendingPublicationFilter && (
+                                    <div className="mt-8">
+                                        <AddAssetButton 
+                                            defaultAssetType="asset" 
+                                            onClick={handleOpenUploadDialog}
+                                            disabled={isAutoClosing}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         )}
                         </div>

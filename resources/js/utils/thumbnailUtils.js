@@ -215,7 +215,8 @@ export function getThumbnailState(asset, retryCount = 0) {
     // ============================================================================
     
     // Priority 1: Final thumbnail (permanent, full-quality, versioned)
-    if (asset?.final_thumbnail_url) {
+    // CRITICAL: Only use final thumbnail if status is completed (prevents loading stale URLs after file replacement)
+    if (asset?.final_thumbnail_url && thumbnailStatus === 'completed') {
         return {
             state: 'AVAILABLE',
             thumbnailUrl: asset.final_thumbnail_url,
@@ -226,7 +227,8 @@ export function getThumbnailState(asset, retryCount = 0) {
     }
     
     // Priority 2: Preview thumbnail (temporary, low-quality)
-    if (asset?.preview_thumbnail_url) {
+    // Only use preview if status is not failed/skipped (allows preview during processing)
+    if (asset?.preview_thumbnail_url && thumbnailStatus !== 'failed' && thumbnailStatus !== 'skipped') {
         return {
             state: 'PENDING', // Still processing, but preview available
             thumbnailUrl: asset.preview_thumbnail_url,
@@ -237,14 +239,13 @@ export function getThumbnailState(asset, retryCount = 0) {
     }
     
     // Legacy support: fallback to thumbnail_url if new fields not available
-    if (asset?.thumbnail_url) {
-        // Assume it's final if thumbnail_status is completed
-        const isFinal = thumbnailStatus === 'completed'
+    // CRITICAL: Only use if status is completed (prevents loading stale URLs after file replacement)
+    if (asset?.thumbnail_url && thumbnailStatus === 'completed') {
         return {
             state: 'AVAILABLE',
             thumbnailUrl: asset.thumbnail_url,
-            previewThumbnailUrl: isFinal ? null : asset.thumbnail_url,
-            finalThumbnailUrl: isFinal ? asset.thumbnail_url : null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: asset.thumbnail_url,
             canRetry: false,
         }
     }

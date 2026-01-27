@@ -43,7 +43,7 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -53,9 +53,11 @@ import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
+import ReplaceFileModal from './ReplaceFileModal'
 import AssetDetailsModal from './AssetDetailsModal'
 import CollapsibleSection from './CollapsibleSection'
 import ApprovalHistory from './ApprovalHistory'
+import PendingAssetReviewModal from './PendingAssetReviewModal'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
@@ -92,6 +94,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [showResubmitModal, setShowResubmitModal] = useState(false)
     const [resubmitComment, setResubmitComment] = useState('')
     const [resubmitLoading, setResubmitLoading] = useState(false)
+    const [resubmitFile, setResubmitFile] = useState(null)
+    const [resubmitUploadProgress, setResubmitUploadProgress] = useState(0)
+    const [resubmitError, setResubmitError] = useState(null)
+    const resubmitFileInputRef = useRef(null)
+    // Quick approve/reject modal state
+    const [showReviewModal, setShowReviewModal] = useState(false)
+    
+    // Phase J.3.1: Replace file state
+    const [showReplaceFileModal, setShowReplaceFileModal] = useState(false)
+    
+    // Phase J.3: Approval comments for rejection role display
+    const [approvalComments, setApprovalComments] = useState([])
+    const [commentsLoading, setCommentsLoading] = useState(false)
     
     // Metadata approval state
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
@@ -265,6 +280,33 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 setActivityLoading(false)
             })
     }, [asset])
+
+    // Phase J.3: Fetch approval comments for rejected assets (to get rejecting user role)
+    useEffect(() => {
+        if (!asset || !asset.id || !auth?.activeBrand || asset.approval_status !== 'rejected') {
+            setApprovalComments([])
+            setCommentsLoading(false)
+            return
+        }
+
+        setCommentsLoading(true)
+        fetch(`/app/brands/${auth.activeBrand.id}/assets/${asset.id}/approval-history`)
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error('Failed to load approval history')
+                }
+                return res.json()
+            })
+            .then(data => {
+                setApprovalComments(data.comments || [])
+                setCommentsLoading(false)
+            })
+            .catch(err => {
+                console.error('Failed to load approval comments:', err)
+                setApprovalComments([])
+                setCommentsLoading(false)
+            })
+    }, [asset?.id, asset?.approval_status, auth?.activeBrand?.id])
 
     // Dominant colors are now displayed as a metadata field, no longer needed in File Information
 
@@ -805,6 +847,62 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
             {/* Content */}
             <div className="px-4 py-4 space-y-4">
+                {/* Phase J.3: Status Banners for Contributors */}
+                {auth?.approval_features?.approvals_enabled && displayAsset?.approval_status && (
+                    <>
+                        {/* Pending Status Banner */}
+                        {displayAsset.approval_status === 'pending' && (
+                            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md">
+                                <div className="flex">
+                                    <div className="flex-shrink-0">
+                                        <ClockIcon className="h-5 w-5 text-yellow-400" />
+                                    </div>
+                                    <div className="ml-3">
+                                        <p className="text-sm font-medium text-yellow-800">
+                                            This asset is awaiting review
+                                        </p>
+                                        <p className="mt-1 text-sm text-yellow-700">
+                                            Your asset has been submitted and is waiting for approval from an admin or brand manager.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Rejected Status Banner */}
+                        {displayAsset.approval_status === 'rejected' && (
+                            <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-md">
+                                <div className="flex">
+                                    <div className="flex-shrink-0">
+                                        <XCircleIcon className="h-5 w-5 text-red-400" />
+                                    </div>
+                                    <div className="ml-3 flex-1">
+                                        <p className="text-sm font-medium text-red-800">
+                                            This asset was rejected
+                                        </p>
+                                        {displayAsset.rejection_reason && (
+                                            <p className="mt-1 text-sm text-red-700">
+                                                {displayAsset.rejection_reason}
+                                            </p>
+                                        )}
+                                        {displayAsset.rejected_at && (
+                                            <p className="mt-1 text-xs text-red-600">
+                                                Rejected {new Date(displayAsset.rejected_at).toLocaleDateString('en-US', {
+                                                    year: 'numeric',
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    hour: 'numeric',
+                                                    minute: '2-digit',
+                                                })}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+                
                 {/* Large Preview */}
                 <div className="space-y-3">                    
                     
@@ -938,7 +1036,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </>
                         )}
                         {/* Phase AF-5: Only show if approvals are enabled */}
-                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && displayAsset.approval_capable && (
+                        {/* Phase J.3: Show rejected badge for contributors too */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && (
                             <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-red-100 text-red-700 border border-red-300">
                                 Rejected
                             </span>
@@ -968,8 +1067,111 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     {/* Action Buttons */}
                     {displayAsset?.id && (
                         <div className="space-y-2">
+                            {/* Quick Review/Approve/Reject button - show FIRST for approvers viewing pending assets */}
+                            {(() => {
+                                // Brand-based permission check (primary check)
+                                // IMPORTANT: Roles are at auth.brand_role and auth.tenant_role, NOT auth.user.brand_role
+                                // Match backend logic: RoleRegistry::isBrandApproverRole() checks for 'admin' or 'brand_manager' (case-insensitive)
+                                const brandRole = auth?.brand_role?.toLowerCase()
+                                const tenantRole = auth?.tenant_role?.toLowerCase()
+                                
+                                // Check if user can approve based on brand role (brand_manager or admin)
+                                // Brand roles that can approve: 'brand_manager', 'admin' (brand admin)
+                                // This matches RoleRegistry::brandApproverRoles() which returns ['admin', 'brand_manager']
+                                const isBrandApprover = brandRole === 'brand_manager' || brandRole === 'admin'
+                                
+                                // Tenant owners/admins can also approve as they have access to all brands
+                                // This matches backend logic in AssetApprovalController
+                                const isTenantOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
+                                
+                                const canApprove = isBrandApprover || isTenantOwnerOrAdmin
+                                
+                                // Check approval status (case-insensitive, also check for 'PENDING' uppercase)
+                                const approvalStatus = displayAsset.approval_status?.toLowerCase()
+                                const isPending = approvalStatus === 'pending' || displayAsset.approval_status === 'PENDING'
+                                
+                                // Check if approvals are enabled
+                                const approvalsEnabled = auth?.approval_features?.approvals_enabled
+                                
+                                // Debug logging
+                                if (displayAsset?.id) {
+                                    console.log('[AssetDrawer] Review button check:', {
+                                        assetId: displayAsset.id,
+                                        approvalsEnabled,
+                                        approvalStatus,
+                                        rawApprovalStatus: displayAsset.approval_status,
+                                        isPending,
+                                        brandRole: brandRole || 'null/undefined',
+                                        tenantRole: tenantRole || 'null/undefined',
+                                        rawBrandRole: auth?.brand_role,
+                                        rawTenantRole: auth?.tenant_role,
+                                        isBrandApprover,
+                                        isTenantOwnerOrAdmin,
+                                        canApprove,
+                                        shouldShow: approvalsEnabled && isPending && canApprove,
+                                        authObject: { brand_role: auth?.brand_role, tenant_role: auth?.tenant_role },
+                                    })
+                                }
+                                
+                                return approvalsEnabled && isPending && canApprove
+                            })() && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        console.log('[AssetDrawer] Opening review modal for asset:', displayAsset.id)
+                                        setShowReviewModal(true)
+                                    }}
+                                    className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                >
+                                    <CheckCircleIcon className="h-5 w-5 mr-2" />
+                                    Review & Approve
+                                </button>
+                            )}
+                            
                             {/* Publish button - show if unpublished and not archived */}
-                            {canPublish && !displayAsset.published_at && !displayAsset.archived_at && (
+                            {/* Phase J.3.1: Contributors cannot publish assets when approval is enabled */}
+                            {(() => {
+                                // Check if approvals are enabled
+                                const approvalsEnabled = auth?.approval_features?.approvals_enabled;
+                                
+                                // Check if asset is pending approval
+                                const isPendingApproval = approvalsEnabled && 
+                                                         displayAsset.approval_status === 'pending';
+                                
+                                // Check if asset is rejected
+                                const isRejected = approvalsEnabled && 
+                                                   displayAsset.approval_status === 'rejected';
+                                
+                                // Check if user is an approver (owner, admin, or brand_manager)
+                                const isApprover = 
+                                    auth?.user?.tenant_role === 'owner' || 
+                                    auth?.user?.tenant_role === 'admin' || 
+                                    auth?.user?.brand_role === 'admin' || 
+                                    auth?.user?.brand_role === 'brand_manager';
+                                
+                                // Check if user is a contributor
+                                const isContributor = auth?.user?.brand_role === 'contributor' && 
+                                                      !['owner', 'admin'].includes(auth?.user?.tenant_role?.toLowerCase() || '');
+                                
+                                // Contributors cannot publish when approval is enabled (regardless of status)
+                                // This matches the same permission check used for upload approval
+                                const contributorBlocked = isContributor && approvalsEnabled;
+                                
+                                // Show publish button if:
+                                // 1. User has publish permission AND
+                                // 2. Asset is not published AND
+                                // 3. Asset is not archived AND
+                                // 4. Contributors are blocked when approval is enabled
+                                // 5. If asset is pending approval or rejected, only approvers can publish
+                                const canShowPublishButton = canPublish && 
+                                                             !displayAsset.published_at && 
+                                                             !displayAsset.archived_at &&
+                                                             !contributorBlocked &&
+                                                             (!isPendingApproval || isApprover) &&
+                                                             (!isRejected || isApprover);
+                                
+                                return canShowPublishButton;
+                            })() && (
                                 <button
                                     type="button"
                                     onClick={async () => {
@@ -1042,7 +1244,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </button>
                             )}
                             
-                            {/* Phase AF-2: Resubmit button - show if asset is rejected and user is uploader or admin */}
+                            {/* Phase J.3: Resubmit button - show if asset is rejected and user is uploader or admin */}
                             {/* Phase AF-5: Only show if approvals are enabled */}
                             {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && (
                                 (displayAsset.uploaded_by?.id === auth?.user?.id) || 
@@ -1055,7 +1257,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     className="w-full inline-flex items-center justify-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2"
                                 >
                                     <ArrowUturnLeftIcon className="h-4 w-4 mr-2" />
-                                    Resubmit for Approval
+                                    Resubmit Asset
+                                </button>
+                            )}
+                            
+                            {/* Phase J.3.1: Replace File button - show if asset is rejected, user is contributor and uploader */}
+                            {auth?.approval_features?.approvals_enabled && 
+                             displayAsset.approval_status === 'rejected' &&
+                             displayAsset.uploaded_by?.id === auth?.user?.id &&
+                             auth?.user?.brand_role === 'contributor' &&
+                             !['admin', 'owner'].includes(auth?.user?.tenant_role?.toLowerCase() || '') && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowReplaceFileModal(true)}
+                                    className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                >
+                                    <CloudArrowUpIcon className="h-4 w-4 mr-2" />
+                                    Replace File
                                 </button>
                             )}
                             
@@ -1213,14 +1431,17 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             ) : (
                                 <div className="h-6 w-6 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
                                     <span className="text-xs font-medium text-gray-600">
-                                        {(displayAsset.uploaded_by.first_name?.[0] || displayAsset.uploaded_by.name?.[0] || '?').toUpperCase()}
+                                        {(displayAsset.uploaded_by.first_name?.[0] || displayAsset.uploaded_by.name?.[0] || displayAsset.uploaded_by.email?.[0] || '?').toUpperCase()}
                                     </span>
                                 </div>
                             )}
                             <p className="text-sm text-gray-600">
                                 Created by{' '}
                                 <span className="font-medium text-gray-900">
-                                    {displayAsset.uploaded_by.name || `${displayAsset.uploaded_by.first_name || ''} ${displayAsset.uploaded_by.last_name || ''}`.trim() || 'Unknown User'}
+                                    {(displayAsset.uploaded_by.name && displayAsset.uploaded_by.name.trim()) || 
+                                     (displayAsset.uploaded_by.first_name && displayAsset.uploaded_by.last_name && `${displayAsset.uploaded_by.first_name} ${displayAsset.uploaded_by.last_name}`.trim()) ||
+                                     displayAsset.uploaded_by.email || 
+                                     'Unknown User'}
                                 </span>
                             </p>
                         </div>
@@ -1320,7 +1541,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </div>
                         )}
                         {/* Phase AF-5: Only show if approvals are enabled */}
-                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && displayAsset.rejected_at && displayAsset.approval_capable && (
+                        {/* Phase J.3: Show rejected info for contributors too */}
+                        {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && displayAsset.rejected_at && (
                             <div className="flex justify-between">
                                 <dt className="text-sm text-gray-500">Rejected on</dt>
                                 <dd className="text-sm font-semibold text-gray-900">
@@ -1883,19 +2105,39 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             
             {/* Phase AF-2: Resubmit Modal */}
             {/* Phase AF-5: Only show if approvals are enabled */}
+            {/* Phase J.3.1: Updated to include file uploader */}
             {auth?.approval_features?.approvals_enabled && showResubmitModal && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowResubmitModal(false)} />
+                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => {
+                            if (!resubmitLoading) {
+                                setShowResubmitModal(false)
+                                setResubmitComment('')
+                                setResubmitFile(null)
+                                setResubmitUploadProgress(0)
+                                setResubmitError(null)
+                                if (resubmitFileInputRef.current) {
+                                    resubmitFileInputRef.current.value = ''
+                                }
+                            }
+                        }} />
                         <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                             <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
                                 <button
                                     type="button"
                                     className="rounded-md bg-white text-gray-400 hover:text-gray-500"
                                     onClick={() => {
-                                        setShowResubmitModal(false)
-                                        setResubmitComment('')
+                                        if (!resubmitLoading) {
+                                            setShowResubmitModal(false)
+                                            setResubmitComment('')
+                                            setResubmitFile(null)
+                                            setResubmitUploadProgress(0)
+                                            if (resubmitFileInputRef.current) {
+                                                resubmitFileInputRef.current.value = ''
+                                            }
+                                        }
                                     }}
+                                    disabled={resubmitLoading}
                                 >
                                     <XMarkIcon className="h-6 w-6" />
                                 </button>
@@ -1905,34 +2147,125 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     <h3 className="text-base font-semibold leading-6 text-gray-900 mb-4">
                                         Resubmit Asset for Approval
                                     </h3>
-                                    <div className="mt-2">
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        Replace the file for this asset. Metadata will remain unchanged and the asset will be reviewed again before publishing.
+                                    </p>
+
+                                    {/* File Input */}
+                                    <div className="mt-4">
+                                        <label htmlFor="resubmit-file-input" className="block text-sm font-medium text-gray-700 mb-2">
+                                            Select File
+                                        </label>
+                                        <input
+                                            ref={resubmitFileInputRef}
+                                            id="resubmit-file-input"
+                                            type="file"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0]
+                                                if (file) {
+                                                    setResubmitFile(file)
+                                                }
+                                            }}
+                                            disabled={resubmitLoading}
+                                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100"
+                                        />
+                                        {resubmitFile && (
+                                            <p className="mt-2 text-sm text-gray-600">
+                                                Selected: {resubmitFile.name} ({(resubmitFile.size / 1024 / 1024).toFixed(2)} MB)
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {/* Optional Comment */}
+                                    <div className="mt-4">
                                         <label htmlFor="resubmit-comment" className="block text-sm font-medium text-gray-700 mb-2">
                                             Comment (optional)
                                         </label>
                                         <textarea
                                             id="resubmit-comment"
-                                            rows={4}
+                                            rows={3}
                                             value={resubmitComment}
                                             onChange={(e) => setResubmitComment(e.target.value)}
+                                            disabled={resubmitLoading}
                                             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-yellow-500 focus:ring-yellow-500 sm:text-sm"
                                             placeholder="Add a comment explaining changes or addressing feedback..."
                                         />
                                     </div>
+
+                                    {/* Upload Progress */}
+                                    {resubmitLoading && (
+                                        <div className="mt-4">
+                                            <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
+                                                <span>Uploading...</span>
+                                                <span>{resubmitUploadProgress}%</span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-2">
+                                                <div
+                                                    className="bg-yellow-600 h-2 rounded-full transition-all duration-300"
+                                                    style={{ width: `${resubmitUploadProgress}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse gap-2">
                                 <button
                                     type="button"
-                                    disabled={resubmitLoading}
+                                    disabled={!resubmitFile || resubmitLoading}
                                     onClick={async () => {
+                                        if (!resubmitFile || resubmitLoading) return
+
                                         setResubmitLoading(true)
+                                        setResubmitUploadProgress(0)
+                                        setResubmitError(null)
+
                                         try {
-                                            const response = await window.axios.post(
-                                                `/app/brands/${auth?.activeBrand?.id}/assets/${displayAsset.id}/resubmit`,
-                                                { comment: resubmitComment || null }
+                                            // Step 1: Initiate replace upload session
+                                            const initiateResponse = await window.axios.post(
+                                                `/app/assets/${displayAsset.id}/replace-file`,
+                                                {
+                                                    file_name: resubmitFile.name,
+                                                    file_size: resubmitFile.size,
+                                                    mime_type: resubmitFile.type,
+                                                }
                                             )
-                                            
-                                            if (response.data && response.data.message) {
+
+                                            const { upload_session_id, upload_type, upload_url } = initiateResponse.data
+
+                                            // Step 2: Upload file directly to S3
+                                            if (upload_type === 'direct' && upload_url) {
+                                                // Direct upload: PUT file to S3 using fetch (pre-signed URL)
+                                                const uploadResponse = await fetch(upload_url, {
+                                                    method: 'PUT',
+                                                    body: resubmitFile,
+                                                    headers: {
+                                                        'Content-Type': resubmitFile.type || 'application/octet-stream',
+                                                    },
+                                                })
+
+                                                if (!uploadResponse.ok) {
+                                                    throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`)
+                                                }
+                                                setResubmitUploadProgress(100)
+                                            } else if (upload_type === 'chunked') {
+                                                throw new Error('Large file uploads (chunked) are not yet supported for file replacement. Please use a smaller file.')
+                                            } else {
+                                                throw new Error(`Unsupported upload type: ${upload_type}`)
+                                            }
+
+                                            // Step 3: Finalize upload (replace file)
+                                            const finalizeResponse = await window.axios.post('/app/uploads/finalize', {
+                                                manifest: [
+                                                    {
+                                                        upload_key: `temp/uploads/${upload_session_id}/original`,
+                                                        expected_size: resubmitFile.size,
+                                                        comment: resubmitComment.trim() || null,
+                                                    },
+                                                ],
+                                            })
+
+                                            if (finalizeResponse.data?.results?.[0]?.status === 'success') {
                                                 setToastMessage('Asset resubmitted successfully.')
                                                 setToastType('success')
                                                 setTimeout(() => {
@@ -1941,16 +2274,37 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 
                                                 setShowResubmitModal(false)
                                                 setResubmitComment('')
+                                                setResubmitFile(null)
+                                                setResubmitUploadProgress(0)
+                                                if (resubmitFileInputRef.current) {
+                                                    resubmitFileInputRef.current.value = ''
+                                                }
                                                 
                                                 setTimeout(() => {
                                                     router.reload({ preserveState: true, preserveScroll: true })
                                                 }, 500)
+                                            } else {
+                                                // Extract error message from error object (may be string or object with message property)
+                                                const errorData = finalizeResponse.data?.results?.[0]?.error
+                                                const errorMessage = typeof errorData === 'string' 
+                                                    ? errorData 
+                                                    : errorData?.message || 'Finalization failed'
+                                                throw new Error(errorMessage)
                                             }
                                         } catch (err) {
                                             console.error('Failed to resubmit asset:', err)
+                                            // Extract error message safely (handle objects, arrays, etc.)
                                             let errorMessage = 'Failed to resubmit asset.'
-                                            if (err.response) {
-                                                errorMessage = err.response.data?.error || err.response.data?.message || errorMessage
+                                            if (err.response?.data?.error) {
+                                                errorMessage = typeof err.response.data.error === 'string' 
+                                                    ? err.response.data.error 
+                                                    : err.response.data.error?.message || JSON.stringify(err.response.data.error)
+                                            } else if (err.response?.data?.message) {
+                                                errorMessage = typeof err.response.data.message === 'string'
+                                                    ? err.response.data.message
+                                                    : JSON.stringify(err.response.data.message)
+                                            } else if (err.message) {
+                                                errorMessage = err.message
                                             }
                                             setToastMessage(errorMessage)
                                             setToastType('error')
@@ -1959,19 +2313,28 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             }, 5000)
                                         } finally {
                                             setResubmitLoading(false)
+                                            setResubmitUploadProgress(0)
                                         }
                                     }}
-                                    className="inline-flex w-full justify-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500 sm:ml-3 sm:w-auto disabled:opacity-50"
+                                    className="inline-flex w-full justify-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500 sm:ml-3 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {resubmitLoading ? 'Resubmitting...' : 'Resubmit'}
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        setShowResubmitModal(false)
-                                        setResubmitComment('')
+                                        if (!resubmitLoading) {
+                                            setShowResubmitModal(false)
+                                            setResubmitComment('')
+                                            setResubmitFile(null)
+                                            setResubmitUploadProgress(0)
+                                            if (resubmitFileInputRef.current) {
+                                                resubmitFileInputRef.current.value = ''
+                                            }
+                                        }
                                     }}
-                                    className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                                    disabled={resubmitLoading}
+                                    className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:opacity-50"
                                 >
                                     Cancel
                                 </button>
@@ -2025,6 +2388,45 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         </div>
                     </div>
                 </div>
+            )}
+            
+            {/* Phase J.3.1: Replace File Modal */}
+            {showReplaceFileModal && displayAsset && (
+                <ReplaceFileModal
+                    asset={displayAsset}
+                    isOpen={showReplaceFileModal}
+                    onClose={() => setShowReplaceFileModal(false)}
+                    onSuccess={() => {
+                        setShowReplaceFileModal(false)
+                        setToastMessage('File replaced successfully. Asset has been resubmitted for review.')
+                        setToastType('success')
+                        setTimeout(() => {
+                            setToastMessage(null)
+                        }, 5000)
+                        // Reload asset drawer to show updated status
+                        setTimeout(() => {
+                            router.reload({ preserveState: true, preserveScroll: true })
+                        }, 500)
+                    }}
+                />
+            )}
+            
+            {/* Quick Review Modal - opened from drawer */}
+            {showReviewModal && displayAsset && (
+                <PendingAssetReviewModal
+                    isOpen={showReviewModal}
+                    onClose={() => {
+                        setShowReviewModal(false)
+                        // Reload to refresh asset status
+                        router.reload({ preserveState: true, preserveScroll: true })
+                    }}
+                    initialAssetId={displayAsset.id}
+                    initialAsset={{
+                        ...displayAsset,
+                        // Ensure approval_status is set correctly
+                        approval_status: displayAsset.approval_status || 'pending',
+                    }}
+                />
             )}
         </div>
     )

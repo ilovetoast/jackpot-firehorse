@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Models\ActivityEvent;
@@ -21,6 +22,7 @@ use App\Services\SystemCategoryService;
 use App\Support\Roles\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -324,6 +326,7 @@ class AssetController extends Controller
         // Phase L.5.1: Lifecycle filter - Check early to determine visibility rules
         // SECURITY: Apply lifecycle filters based on specific permissions
         // - pending_approval: Requires asset.publish (approvers)
+        // - pending_publication: Phase J - Contributors can see their own, approvers see all
         // - unpublished: Requires metadata.bypass_approval (full viewing privileges)
         // - archived: Requires asset.archive (users who can archive assets)
         // - expired: Requires asset.archive (users who can archive assets, similar lifecycle management)
@@ -338,6 +341,10 @@ class AssetController extends Controller
                 'brand_id' => $brand->id,
             ]);
             $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'pending_publication') {
+            // Phase J: Pending Publication filter - Contributors and approvers can access
+            // No additional permission check needed - visibility rules handle access control
+            // (Contributors see only their own, approvers see all)
         } elseif ($lifecycleFilter === 'unpublished' && !$canBypassApproval) {
             // User doesn't have metadata.bypass_approval permission - ignore filter and log security event
             \Log::warning('[AssetController] Unauthorized unpublished filter access attempt', [
@@ -382,6 +389,49 @@ class AssetController extends Controller
                 'user_id' => $user?->id,
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
+            ]);
+        } elseif ($lifecycleFilter === 'pending_publication') {
+            // Phase J: Pending Publication - Show assets with approval_status = pending or rejected
+            // Visibility rules:
+            // - Contributors: Only their own pending/rejected assets
+            // - Admin/Owner/Brand Manager: All pending/rejected assets
+            $userRole = $user ? $user->getRoleForTenant($tenant) : null;
+            $isTenantOwnerOrAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
+            
+            // Check if user is a brand manager
+            $isBrandManager = false;
+            if ($user && $brand) {
+                $membership = $user->activeBrandMembership($brand);
+                $isBrandManager = $membership && ($membership['role'] ?? null) === 'brand_manager';
+            }
+            
+            // Check if user is a contributor
+            $isContributor = false;
+            if ($user && $brand) {
+                $membership = $user->activeBrandMembership($brand);
+                $isContributor = $membership && ($membership['role'] ?? null) === 'contributor';
+            }
+            
+            // Approvers (Admin/Owner/Brand Manager) see all pending/rejected assets
+            // Contributors see only their own pending/rejected assets
+            if ($isContributor && !$isTenantOwnerOrAdmin && !$isBrandManager) {
+                // Contributor: Only their own assets
+                $assetsQuery->where('user_id', $user->id);
+            }
+            // Admin/Owner/Brand Manager: No user_id filter (see all)
+            
+            // Filter by approval_status = pending or rejected
+            $assetsQuery->where(function ($query) {
+                $query->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
+                      ->orWhere('approval_status', \App\Enums\ApprovalStatus::REJECTED);
+            });
+            
+            \Log::info('[AssetController] Applied pending_publication lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'is_contributor' => $isContributor,
+                'is_approver' => $isTenantOwnerOrAdmin || $isBrandManager,
             ]);
         } elseif ($lifecycleFilter === 'unpublished' && $canBypassApproval) {
             // Unpublished filter: Show all unpublished assets (both VISIBLE and HIDDEN status)
@@ -453,14 +503,15 @@ class AssetController extends Controller
         }
 
         // Phase AF-1: Exclude pending and rejected assets from main grid
-        // Pending assets are visible only in approval queue
-        // Rejected assets never appear in main grid
-        // Note: This applies to default view only - approval queue uses separate endpoint
-        $assetsQuery->where(function ($query) {
-            $query->where('approval_status', 'not_required')
-                  ->orWhere('approval_status', 'approved')
-                  ->orWhereNull('approval_status'); // Handle legacy assets without approval_status
-        });
+        // Phase J: Pending/rejected assets are visible only in "Pending Publication" lifecycle filter
+        // Note: This applies to default view only - lifecycle filter handles pending/rejected separately
+        if ($lifecycleFilter !== 'pending_publication') {
+            $assetsQuery->where(function ($query) {
+                $query->where('approval_status', 'not_required')
+                      ->orWhere('approval_status', 'approved')
+                      ->orWhereNull('approval_status'); // Handle legacy assets without approval_status
+            });
+        }
 
         // Exclude soft-deleted assets only
         $assetsQuery->whereNull('deleted_at');
@@ -712,7 +763,7 @@ class AssetController extends Controller
                     if ($user) {
                         $uploadedBy = [
                             'id' => $user->id,
-                            'name' => $user->name,
+                            'name' => trim($user->name) ?: null, // Convert empty string to null for proper fallback
                             'first_name' => $user->first_name,
                             'last_name' => $user->last_name,
                             'email' => $user->email,
@@ -2461,6 +2512,136 @@ class AssetController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to delete asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Initiate file replacement for a rejected asset.
+     * 
+     * Phase J.3.1: File-only replacement for rejected contributor assets
+     * 
+     * POST /assets/{asset}/replace-file
+     * 
+     * Creates an upload session in 'replace' mode for replacing the file
+     * of an existing rejected asset without modifying metadata.
+     * 
+     * @param Request $request
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function initiateReplaceFile(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        // Verify user belongs to tenant
+        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json([
+                'error' => 'Unauthorized. Please check your account permissions.',
+            ], 403);
+        }
+
+        // Verify asset belongs to tenant + brand
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json([
+                'error' => 'Asset does not belong to this tenant.',
+            ], 403);
+        }
+
+        // Verify asset is rejected
+        if ($asset->approval_status !== \App\Enums\ApprovalStatus::REJECTED) {
+            return response()->json([
+                'error' => 'Asset is not rejected. Only rejected assets can have their files replaced.',
+                'current_status' => $asset->approval_status->value,
+            ], 422);
+        }
+
+        // Phase MI-1: Verify active brand membership
+        $brand = $asset->brand;
+        if (!$brand) {
+            return response()->json([
+                'error' => 'Asset does not have an associated brand.',
+            ], 422);
+        }
+
+        $membership = $user->activeBrandMembership($brand);
+        if (!$membership) {
+            return response()->json([
+                'error' => 'You do not have active membership for this brand.',
+            ], 403);
+        }
+
+        // Check permissions: User must be contributor AND uploader
+        $brandRole = $membership['role'];
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        $isContributor = $brandRole === 'contributor' && !$isTenantOwnerOrAdmin;
+        $isUploader = $asset->user_id === $user->id;
+
+        if (!$isContributor || !$isUploader) {
+            return response()->json([
+                'error' => 'Only the contributor who uploaded this asset can replace its file.',
+                'required' => 'Must be contributor and original uploader',
+            ], 403);
+        }
+
+        // Verify brand requires contributor approval
+        if (!$brand->requiresContributorApproval()) {
+            return response()->json([
+                'error' => 'Brand does not require contributor approval. File replacement is only available for assets requiring approval.',
+            ], 422);
+        }
+
+        // Validate request
+        $validated = $request->validate([
+            'file_name' => 'required|string|max:255',
+            'file_size' => 'required|integer|min:1',
+            'mime_type' => 'nullable|string|max:255',
+            'client_reference' => 'nullable|uuid',
+        ]);
+
+        try {
+            // Use UploadInitiationService to create upload session in replace mode
+            $uploadService = app(\App\Services\UploadInitiationService::class);
+            $result = $uploadService->initiateReplace(
+                $tenant,
+                $brand,
+                $asset,
+                $validated['file_name'],
+                $validated['file_size'],
+                $validated['mime_type'] ?? null,
+                $validated['client_reference'] ?? null
+            );
+
+            Log::info('[AssetController] Replace file upload session initiated', [
+                'asset_id' => $asset->id,
+                'upload_session_id' => $result['upload_session_id'],
+                'user_id' => $user->id,
+            ]);
+
+            return response()->json([
+                'upload_session_id' => $result['upload_session_id'],
+                'client_reference' => $result['client_reference'],
+                'upload_session_status' => $result['upload_session_status'],
+                'upload_type' => $result['upload_type'],
+                'upload_url' => $result['upload_url'],
+                'multipart_upload_id' => $result['multipart_upload_id'],
+                'chunk_size' => $result['chunk_size'],
+                'expires_at' => $result['expires_at'],
+            ], 201);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 403);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to initiate replace file upload', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to initiate file replacement: ' . $e->getMessage(),
             ], 500);
         }
     }

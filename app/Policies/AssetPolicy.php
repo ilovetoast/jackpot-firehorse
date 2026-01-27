@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Asset;
 use App\Models\User;
+use App\Support\Roles\PermissionMap;
 
 /**
  * Asset Policy
@@ -185,6 +186,47 @@ class AssetPolicy
             }
         }
 
+        // Phase J.3.1: Contributors cannot publish assets when approval is enabled
+        // Check if brand requires contributor approval
+        if ($asset->brand_id) {
+            $brand = $asset->brand;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            // Check brand role
+            $membership = $user->activeBrandMembership($brand);
+            $brandRole = $membership['role'] ?? null;
+            $isContributor = $brandRole === 'contributor' && !$isTenantOwnerOrAdmin;
+            
+            // If brand requires contributor approval, contributors cannot publish
+            if ($isContributor && $brand->requiresContributorApproval()) {
+                return false;
+            }
+        }
+        
+        // Phase J.3.1: Contributors cannot publish assets with approval_status = pending
+        // Only approvers (owner, admin, brand_manager) can publish pending assets
+        if ($asset->approval_status === \App\Enums\ApprovalStatus::PENDING) {
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            // Check brand role if asset has a brand
+            $brandRole = null;
+            if ($asset->brand_id) {
+                $membership = $user->activeBrandMembership($asset->brand);
+                $brandRole = $membership['role'] ?? null;
+            }
+            
+            // Only allow if user is an approver (owner, admin, or brand_manager)
+            // Contributors cannot bypass the approval workflow
+            $isApprover = $isTenantOwnerOrAdmin || 
+                         ($brandRole && PermissionMap::canApproveAssets($brandRole));
+            
+            if (!$isApprover) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -269,6 +311,24 @@ class AssetPolicy
         // Cannot archive failed assets
         if ($asset->status === \App\Enums\AssetStatus::FAILED) {
             return false;
+        }
+
+        // Phase J.3.1: Contributors cannot archive assets when approval is enabled
+        // Check if brand requires contributor approval
+        if ($asset->brand_id) {
+            $brand = $asset->brand;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+            
+            // Check brand role
+            $membership = $user->activeBrandMembership($brand);
+            $brandRole = $membership['role'] ?? null;
+            $isContributor = $brandRole === 'contributor' && !$isTenantOwnerOrAdmin;
+            
+            // If brand requires contributor approval, contributors cannot archive
+            if ($isContributor && $brand->requiresContributorApproval()) {
+                return false;
+            }
         }
 
         // Brand/tenant scoping: User must be assigned to the brand (or be tenant admin/owner)

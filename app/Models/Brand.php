@@ -144,4 +144,18 @@ class Brand extends Model
     {
         return $this->belongsToMany(Ticket::class)->withTimestamps();
     }
+
+    /**
+     * Check if contributor uploads require approval for this brand.
+     * 
+     * Phase J: Brand-level setting for contributor upload approval.
+     * When enabled, contributor uploads create assets with approval_status = pending.
+     * 
+     * @return bool True if contributor uploads require approval
+     */
+    public function requiresContributorApproval(): bool
+    {
+        $settings = $this->settings ?? [];
+        return (bool) ($settings['contributor_upload_requires_approval'] ?? false);
+    }
 }

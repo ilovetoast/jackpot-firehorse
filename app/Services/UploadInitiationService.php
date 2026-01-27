@@ -164,6 +164,103 @@ class UploadInitiationService
     }
 
     /**
+     * Initiate an upload session in replace mode.
+     * 
+     * Phase J.3.1: File-only replacement for rejected contributor assets
+     * 
+     * Creates an upload session with mode='replace' and asset_id set.
+     * The upload will replace the file of the existing asset without
+     * modifying metadata or creating a new asset.
+     * 
+     * @param Tenant $tenant
+     * @param Brand $brand
+     * @param Asset $asset The asset whose file will be replaced
+     * @param string $fileName
+     * @param int $fileSize
+     * @param string|null $mimeType
+     * @param string|null $clientReference Optional client reference UUID for frontend mapping
+     * @return array{upload_session_id: string, client_reference: string|null, upload_type: string, upload_url: string|null, multipart_upload_id: string|null, chunk_size: int|null, expires_at: string}
+     * @throws PlanLimitExceededException
+     * @throws \Exception
+     */
+    public function initiateReplace(
+        Tenant $tenant,
+        Brand $brand,
+        \App\Models\Asset $asset,
+        string $fileName,
+        int $fileSize,
+        ?string $mimeType = null,
+        ?string $clientReference = null
+    ): array {
+        // Validate plan limits
+        $this->validatePlanLimits($tenant, $fileSize);
+
+        // Get or provision storage bucket
+        $bucket = $this->getOrProvisionBucket($tenant);
+
+        // Determine upload type
+        $uploadType = $this->determineUploadType($fileSize);
+
+        // Calculate expiration time
+        $expiresAt = now()->addMinutes(self::DEFAULT_EXPIRATION_MINUTES);
+
+        // Create upload session in replace mode
+        $uploadSession = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::INITIATING,
+            'type' => $uploadType,
+            'mode' => 'replace', // Phase J.3.1: Replace mode
+            'asset_id' => $asset->id, // Phase J.3.1: Asset being replaced
+            'expected_size' => $fileSize,
+            'uploaded_size' => null,
+            'expires_at' => $expiresAt,
+            'failure_reason' => null,
+            'client_reference' => $clientReference,
+            'last_activity_at' => now(),
+        ]);
+
+        // Generate S3 path using immutable contract: temp/uploads/{upload_session_id}/original
+        $path = $this->generateTempUploadPath($tenant, $brand, $uploadSession->id);
+
+        // Generate signed URLs
+        if ($uploadType === UploadType::DIRECT) {
+            $uploadUrl = $this->generateDirectUploadUrl($bucket, $path, $mimeType, $expiresAt);
+            $multipartUploadId = null;
+            $chunkSize = null;
+        } else {
+            $uploadUrl = null;
+            $multipartUploadId = null;
+            $chunkSize = self::DEFAULT_CHUNK_SIZE;
+        }
+
+        Log::info('[Upload Lifecycle] Replace file upload session initiated', [
+            'upload_session_id' => $uploadSession->id,
+            'asset_id' => $asset->id,
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'expected_size' => $fileSize,
+            'upload_type' => $uploadType->value,
+            'expires_at' => $expiresAt->toIso8601String(),
+            'client_reference' => $clientReference,
+            'lifecycle_stage' => 'initiated',
+            'mode' => 'replace',
+        ]);
+
+        return [
+            'upload_session_id' => $uploadSession->id,
+            'client_reference' => $clientReference,
+            'upload_session_status' => $uploadSession->status->value,
+            'upload_type' => $uploadType->value,
+            'upload_url' => $uploadUrl,
+            'multipart_upload_id' => $multipartUploadId,
+            'chunk_size' => $chunkSize,
+            'expires_at' => $expiresAt->toIso8601String(),
+        ];
+    }
+
+    /**
      * Initiate multiple upload sessions in parallel (batch upload).
      *
      * Each file is processed in its own transaction to ensure isolation.

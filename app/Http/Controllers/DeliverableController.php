@@ -328,7 +328,7 @@ class DeliverableController extends Controller
                     if ($user) {
                         $uploadedBy = [
                             'id' => $user->id,
-                            'name' => $user->name,
+                            'name' => trim($user->name) ?: null, // Convert empty string to null for proper fallback
                             'first_name' => $user->first_name,
                             'last_name' => $user->last_name,
                             'email' => $user->email,

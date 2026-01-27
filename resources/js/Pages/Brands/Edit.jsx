@@ -556,6 +556,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         settings: {
             ...(brand.settings || {}),
             metadata_approval_enabled: brand.settings?.metadata_approval_enabled ?? false, // Phase M-2
+            contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval ?? false, // Phase J.3.1
         },
     })
 
@@ -1322,6 +1323,50 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                         ? 'Metadata approval workflows require a Pro or Enterprise plan.'
                                                         : 'Metadata approval must be enabled at the company level first.'}
                                                 </p>
+                                            </div>
+                                        )}
+
+                                        {/* Phase J.3.1: Contributor Upload Approval Toggle */}
+                                        {current_plan === 'enterprise' && tenant_settings?.features?.contributor_asset_approval && (
+                                            <div className="border-t border-gray-200 pt-6">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex-1">
+                                                        <label htmlFor="contributor_upload_requires_approval" className="block text-sm font-medium leading-6 text-gray-900">
+                                                            Require approval before contributor uploads are published
+                                                        </label>
+                                                        <p className="mt-1 text-sm text-gray-500">
+                                                            When enabled, assets uploaded by contributors will require approval from an admin or brand manager before they are published and visible in the asset grid.
+                                                        </p>
+                                                    </div>
+                                                    <div className="ml-4">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setData('settings.contributor_upload_requires_approval', !data.settings?.contributor_upload_requires_approval)}
+                                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                                data.settings?.contributor_upload_requires_approval ? 'bg-indigo-600' : 'bg-gray-200'
+                                                            }`}
+                                                            role="switch"
+                                                            aria-checked={data.settings?.contributor_upload_requires_approval}
+                                                        >
+                                                            <span
+                                                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                    data.settings?.contributor_upload_requires_approval ? 'translate-x-5' : 'translate-x-0'
+                                                                }`}
+                                                            />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {(!(current_plan === 'enterprise' && tenant_settings?.features?.contributor_asset_approval)) && (
+                                            <div className="border-t border-gray-200 pt-6">
+                                                <div className="rounded-md bg-gray-50 p-4">
+                                                    <p className="text-sm text-gray-600">
+                                                        {current_plan !== 'enterprise'
+                                                            ? 'Contributor upload approval requires an Enterprise plan.'
+                                                            : 'Contributor upload approval must be enabled at the company level first.'}
+                                                    </p>
+                                                </div>
                                             </div>
                                         )}
 

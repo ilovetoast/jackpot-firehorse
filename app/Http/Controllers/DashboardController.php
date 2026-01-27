@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
@@ -187,7 +188,7 @@ class DashboardController extends Controller
             ->select('assets.id', DB::raw('COUNT(asset_metrics.id) as view_count'))
             ->groupBy('assets.id')
             ->orderByDesc('view_count')
-            ->limit(20) // Get more to filter by permissions
+            ->limit(25) // Get more to filter by permissions and allow up to 15 displayed
             ->pluck('view_count', 'id');
         
         $mostViewedAssets = collect();
@@ -273,8 +274,13 @@ class DashboardController extends Controller
                     'thumbnail_url' => $finalThumbnailUrl ?? null,
                     'thumbnail_status' => $thumbnailStatus,
                     'view_count' => (int) $viewCount,
+                    'category' => $category ? [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'slug' => $category->slug,
+                    ] : null,
                 ];
-            })->filter()->take(6)->values(); // Take top 6 after filtering
+            })->filter()->take(15)->values(); // Take top 15 after filtering
         }
         
         // Get most downloaded assets (top 6) - only visible, non-deleted assets
@@ -290,7 +296,7 @@ class DashboardController extends Controller
             ->select('assets.id', DB::raw('COUNT(asset_metrics.id) as download_count'))
             ->groupBy('assets.id')
             ->orderByDesc('download_count')
-            ->limit(20) // Get more to filter by permissions
+            ->limit(25) // Get more to filter by permissions and allow up to 15 displayed
             ->pluck('download_count', 'id');
         
         $mostDownloadedAssets = collect();
@@ -376,8 +382,13 @@ class DashboardController extends Controller
                     'thumbnail_url' => $finalThumbnailUrl ?? null,
                     'thumbnail_status' => $thumbnailStatus,
                     'download_count' => (int) $downloadCount,
+                    'category' => $category ? [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'slug' => $category->slug,
+                    ] : null,
                 ];
-            })->filter()->take(6)->values(); // Take top 6 after filtering
+            })->filter()->take(15)->values(); // Take top 15 after filtering
         }
         
         // Phase M-1: Get pending AI suggestions count (ONLY candidates, not asset_metadata)
@@ -453,11 +464,72 @@ class DashboardController extends Controller
                 ->count();
         }
         
+        // Phase J: Count pending assets for approval workflow
+        // Approvers (Admin/Owner/Brand Manager) see all pending/rejected assets
+        // Contributors see only their own pending/rejected assets
+        $userRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
+        
+        // Check if user is a brand manager
+        $isBrandManager = false;
+        $membership = $user->activeBrandMembership($brand);
+        $isBrandManager = $membership && ($membership['role'] ?? null) === 'brand_manager';
+        
+        // Check if user is a contributor
+        $isContributor = $membership && ($membership['role'] ?? null) === 'contributor';
+        
+        $pendingAssetsCount = 0;
+        $contributorPendingCount = 0;
+        $contributorRejectedCount = 0;
+        
+        if ($isTenantOwnerOrAdmin || $isBrandManager) {
+            // Approvers: Count all pending/rejected assets in brand
+            $pendingAssetsCount = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', \App\Enums\AssetType::ASSET)
+                ->where(function ($query) {
+                    $query->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
+                          ->orWhere('approval_status', \App\Enums\ApprovalStatus::REJECTED);
+                })
+                ->whereNull('deleted_at')
+                ->count();
+        } elseif ($isContributor) {
+            // Phase J.3: Contributors: Count only their own pending/rejected assets
+            $contributorPendingCount = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', \App\Enums\AssetType::ASSET)
+                ->where('user_id', $user->id)
+                ->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
+                ->whereNull('deleted_at')
+                ->count();
+                
+            $contributorRejectedCount = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', \App\Enums\AssetType::ASSET)
+                ->where('user_id', $user->id)
+                ->where('approval_status', \App\Enums\ApprovalStatus::REJECTED)
+                ->whereNull('deleted_at')
+                ->count();
+                
+            $pendingAssetsCount = $contributorPendingCount + $contributorRejectedCount;
+        }
+        
         // Get recent company activity (last 5) - only if user has permission
         $recentActivity = null;
         if ($user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
+            // Filter out events with invalid/null subject_type to avoid MorphTo errors
+            $validSubjectTypes = [
+                \App\Models\Asset::class,
+                \App\Models\User::class,
+                \App\Models\Tenant::class,
+                \App\Models\Brand::class,
+                \App\Models\Category::class,
+            ];
+            
             $activityEvents = ActivityEvent::where('tenant_id', $tenant->id)
                 ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT) // Exclude system-level AI insights
+                ->whereNotNull('subject_type')
+                ->whereIn('subject_type', $validSubjectTypes)
                 ->orderBy('created_at', 'desc')
                 ->limit(5)
                 ->with(['brand', 'subject']) // Load relationships (excluding actor for polymorphic issues)
@@ -540,6 +612,7 @@ class DashboardController extends Controller
                 'most_downloaded' => true,
                 'pending_ai_suggestions' => true,
                 'pending_metadata_approvals' => true,
+                'pending_asset_approvals' => true, // Phase J.3.1: Pending asset approvals visible to approvers
             ],
             'admin' => [
                 'total_assets' => true,
@@ -549,6 +622,7 @@ class DashboardController extends Controller
                 'most_downloaded' => true,
                 'pending_ai_suggestions' => true,
                 'pending_metadata_approvals' => true,
+                'pending_asset_approvals' => true, // Phase J.3.1: Pending asset approvals visible to approvers
             ],
             'brand_manager' => [
                 'total_assets' => true,
@@ -558,6 +632,7 @@ class DashboardController extends Controller
                 'most_downloaded' => true,
                 'pending_ai_suggestions' => true,
                 'pending_metadata_approvals' => true,
+                'pending_asset_approvals' => true, // Phase J.3.1: Pending asset approvals visible to approvers
             ],
             'contributor' => [
                 'total_assets' => false, // Contributors don't see company widgets
@@ -567,6 +642,7 @@ class DashboardController extends Controller
                 'most_downloaded' => true,
                 'pending_ai_suggestions' => false, // Permission-based widgets hidden by default for contributors
                 'pending_metadata_approvals' => false,
+                'pending_asset_approvals' => false, // Phase J.3.1: Contributors don't see admin approval widget
             ],
             'viewer' => [
                 'total_assets' => false, // Viewers only see Most Viewed and Most Downloaded
@@ -576,6 +652,7 @@ class DashboardController extends Controller
                 'most_downloaded' => true,
                 'pending_ai_suggestions' => false, // Permission-based widgets hidden by default for viewers
                 'pending_metadata_approvals' => false,
+                'pending_asset_approvals' => false, // Phase J.3.1: Viewers don't see approval widgets
             ],
         ];
         
@@ -632,6 +709,10 @@ class DashboardController extends Controller
             ],
             'pending_metadata_approvals_count' => $pendingMetadataApprovalsCount, // Count of pending metadata approvals (for approvers only)
             'unpublished_assets_count' => $unpublishedAssetsCount, // Phase L.5.1: Count of unpublished assets
+            'pending_assets_count' => $pendingAssetsCount, // Phase J: Count of pending/rejected assets (approvers see all, contributors see own)
+            // Phase J.3: Contributor-specific counts (informational only)
+            'contributor_pending_count' => $contributorPendingCount, // Contributor's own pending assets
+            'contributor_rejected_count' => $contributorRejectedCount, // Contributor's own rejected assets
         ]);
     }
 

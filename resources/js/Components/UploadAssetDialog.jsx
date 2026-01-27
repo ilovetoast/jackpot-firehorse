@@ -68,6 +68,17 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
     const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
     const isContributor = !canApproveMetadata
+    
+    // Phase J.3.1: Check if brand requires contributor approval
+    // Check company-level capability toggle first, then brand-level setting
+    // Use companies[0] if activeCompany is not available (fallback)
+    const activeCompany = auth?.activeCompany || auth?.companies?.[0]
+    const companyAllowsContributorApproval = activeCompany?.settings?.features?.contributor_asset_approval ?? false
+    const brandRequiresContributorApproval = auth?.activeBrand?.settings?.contributor_upload_requires_approval ?? false
+    const assetApprovalRequired = isContributor && 
+                                  companyAllowsContributorApproval && 
+                                  brandRequiresContributorApproval &&
+                                  auth?.approval_features?.approvals_enabled
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef(null)
     const dropZoneRef = useRef(null)
@@ -4039,10 +4050,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 </div>
                             )}
 
-                            {/* TASK 1: Approval notice for contributors (non-blocking, informational only) */}
-                            {isContributor && (
+                            {/* Phase J.3.1: Approval notice for contributors (non-blocking, informational only) */}
+                            {/* Show if asset approval is required OR metadata approval is required */}
+                            {isContributor && (assetApprovalRequired || approvalInfo.approvalRequired) && (
                                 <ApprovalNotice 
-                                    approvalRequired={approvalInfo.approvalRequired}
+                                    assetApprovalRequired={assetApprovalRequired}
+                                    metadataApprovalRequired={approvalInfo.approvalRequired}
                                     pendingMetadataCount={approvalInfo.pendingMetadataCount}
                                 />
                             )}

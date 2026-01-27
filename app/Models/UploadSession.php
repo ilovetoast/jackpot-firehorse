@@ -25,6 +25,8 @@ class UploadSession extends Model
         'storage_bucket_id',
         'status',
         'type',
+        'mode', // Phase J.3.1: 'create' or 'replace'
+        'asset_id', // Phase J.3.1: Asset ID when mode = 'replace'
         'expected_size',
         'uploaded_size',
         'expires_at',
@@ -89,6 +91,15 @@ class UploadSession extends Model
     public function assets(): HasMany
     {
         return $this->hasMany(Asset::class);
+    }
+
+    /**
+     * Get the asset being replaced (when mode = 'replace').
+     * Phase J.3.1: File-only replacement support
+     */
+    public function replaceAsset(): BelongsTo
+    {
+        return $this->belongsTo(Asset::class, 'asset_id');
     }
 
     /**

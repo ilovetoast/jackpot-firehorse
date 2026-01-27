@@ -23,8 +23,10 @@ import AppNav from '../Components/AppNav'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../Components/PendingMetadataTile'
+import PendingAssetTile from '../Components/PendingAssetTile'
+import RecentlyViewedCarousel from '../Components/RecentlyViewedCarousel'
 
-export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, widget_visibility = {} }) {
+export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, pending_assets_count = 0, contributor_pending_count = 0, contributor_rejected_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
 
     // Default stats if not provided
@@ -43,6 +45,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
     const showMostDownloaded = widget_visibility.most_downloaded !== false
     const showPendingAiSuggestions = widget_visibility.pending_ai_suggestions !== false
     const showPendingMetadataApprovals = widget_visibility.pending_metadata_approvals !== false
+    const showPendingAssetApprovals = widget_visibility.pending_asset_approvals !== false // Phase J.3.1: Widget visibility for pending asset approvals
 
     // Format storage size with appropriate unit
     const formatStorage = (mb) => {
@@ -387,6 +390,46 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                         <PendingMetadataTile pendingCount={pending_metadata_approvals_count || 0} />
                     )}
 
+                    {/* Phase J.2: Pending Asset Review Tile (Approvers only) */}
+                    {/* Phase J.3.1: Respect widget visibility setting */}
+                    {showPendingAssetApprovals && pending_assets_count > 0 && (
+                        <PendingAssetTile pendingCount={pending_assets_count || 0} />
+                    )}
+
+                    {/* Phase J.3.1: Contributor Status Counts (Clickable shortcuts) */}
+                    {(contributor_pending_count > 0 || contributor_rejected_count > 0) && (
+                        <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                    <DocumentIcon className="h-6 w-6 text-gray-400" aria-hidden="true" />
+                                </div>
+                                <div className="ml-5 w-0 flex-1">
+                                    <dt className="text-sm font-medium text-gray-500 truncate">
+                                        Your Assets
+                                    </dt>
+                                    <dd className="mt-1 space-y-1">
+                                        {contributor_pending_count > 0 && (
+                                            <Link
+                                                href="/app/assets?lifecycle=pending_publication"
+                                                className="text-sm text-gray-600 hover:text-indigo-600 cursor-pointer block"
+                                            >
+                                                <span className="font-semibold text-gray-900">{contributor_pending_count}</span> pending review
+                                            </Link>
+                                        )}
+                                        {contributor_rejected_count > 0 && (
+                                            <Link
+                                                href="/app/assets?lifecycle=pending_publication"
+                                                className="text-sm text-gray-600 hover:text-indigo-600 cursor-pointer block"
+                                            >
+                                                <span className="font-semibold text-gray-900">{contributor_rejected_count}</span> rejected
+                                            </Link>
+                                        )}
+                                    </dd>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* AI Tagging Card - Only show if user has permission and data is available */}
                     {ai_usage && (
                         <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
@@ -506,125 +549,76 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                     )}
                 </div>
 
-                {/* Most Viewed and Most Downloaded Blocks */}
-                {(showMostViewed || showMostDownloaded) && (
-                <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-                    {/* Most Viewed Assets */}
-                    {showMostViewed && (
-                    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-4 py-5 sm:p-6">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-base font-semibold leading-6 text-gray-900 flex items-center gap-2">
-                                    <EyeIcon className="h-5 w-5 text-gray-400" />
-                                    Most Viewed
-                                </h3>
-                                {most_viewed_assets.length > 0 && (
-                                    <Link
-                                        href="/app/assets"
-                                        className="text-sm text-indigo-600 hover:text-indigo-900"
-                                    >
-                                        View All
-                                    </Link>
-                                )}
-                            </div>
-                            {most_viewed_assets.length > 0 ? (
-                                <div className="space-y-3">
-                                    {most_viewed_assets.map((asset) => (
-                                        <Link
-                                            key={asset.id}
-                                            href="/app/assets"
-                                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
-                                        >
-                                            <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-gray-100">
-                                                <ThumbnailPreview
-                                                    asset={asset}
-                                                    alt={asset.title}
-                                                    className="w-full h-full object-cover"
-                                                    size="sm"
-                                                />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
-                                                    {asset.title}
-                                                </p>
-                                                <div className="flex items-center gap-1 mt-1">
-                                                    <EyeIcon className="h-4 w-4 text-gray-400" />
-                                                    <span className="text-xs text-gray-500">
-                                                        {asset.view_count.toLocaleString()} {asset.view_count === 1 ? 'view' : 'views'}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </Link>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <EyeIcon className="mx-auto h-8 w-8 text-gray-400" />
-                                    <p className="mt-2 text-sm text-gray-500">No views yet</p>
-                                </div>
-                            )}
-                        </div>
+                {/* Most Viewed - Full Width */}
+                {showMostViewed && (
+                    <div className="mt-8 -mx-4 sm:-mx-6 lg:-mx-8 overflow-visible">
+                        <RecentlyViewedCarousel
+                            assets={most_viewed_assets}
+                            title="Most Viewed"
+                            maxItems={9}
+                            viewAllLink="/app/assets"
+                        />
                     </div>
-                    )}
+                )}
 
-                    {/* Most Downloaded Assets */}
-                    {showMostDownloaded && (
-                    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-4 py-5 sm:p-6">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-base font-semibold leading-6 text-gray-900 flex items-center gap-2">
-                                    <CloudArrowDownIcon className="h-5 w-5 text-gray-400" />
-                                    Most Downloaded
-                                </h3>
-                                {most_downloaded_assets.length > 0 && (
-                                    <Link
-                                        href="/app/assets"
-                                        className="text-sm text-indigo-600 hover:text-indigo-900"
-                                    >
-                                        View All
-                                    </Link>
+                {/* Most Downloaded Assets */}
+                {showMostDownloaded && (
+                    <div className="mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="px-4 py-5 sm:p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900 flex items-center gap-2">
+                                        <CloudArrowDownIcon className="h-5 w-5 text-gray-400" />
+                                        Most Downloaded
+                                    </h3>
+                                    {most_downloaded_assets.length > 0 && (
+                                        <Link
+                                            href="/app/assets"
+                                            className="text-sm text-indigo-600 hover:text-indigo-900"
+                                        >
+                                            View All
+                                        </Link>
+                                    )}
+                                </div>
+                                {most_downloaded_assets.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {most_downloaded_assets.map((asset) => (
+                                            <Link
+                                                key={asset.id}
+                                                href="/app/assets"
+                                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
+                                            >
+                                                <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-gray-100">
+                                                    <ThumbnailPreview
+                                                        asset={asset}
+                                                        alt={asset.title}
+                                                        className="w-full h-full object-cover"
+                                                        size="sm"
+                                                    />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
+                                                        {asset.title}
+                                                    </p>
+                                                    <div className="flex items-center gap-1 mt-1">
+                                                        <CloudArrowDownIcon className="h-4 w-4 text-gray-400" />
+                                                        <span className="text-xs text-gray-500">
+                                                            {asset.download_count.toLocaleString()} {asset.download_count === 1 ? 'download' : 'downloads'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </Link>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-8">
+                                        <CloudArrowDownIcon className="mx-auto h-8 w-8 text-gray-400" />
+                                        <p className="mt-2 text-sm text-gray-500">No downloads yet</p>
+                                    </div>
                                 )}
                             </div>
-                            {most_downloaded_assets.length > 0 ? (
-                                <div className="space-y-3">
-                                    {most_downloaded_assets.map((asset) => (
-                                        <Link
-                                            key={asset.id}
-                                            href="/app/assets"
-                                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors group"
-                                        >
-                                            <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-gray-100">
-                                                <ThumbnailPreview
-                                                    asset={asset}
-                                                    alt={asset.title}
-                                                    className="w-full h-full object-cover"
-                                                    size="sm"
-                                                />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-gray-900 truncate group-hover:text-indigo-600">
-                                                    {asset.title}
-                                                </p>
-                                                <div className="flex items-center gap-1 mt-1">
-                                                    <CloudArrowDownIcon className="h-4 w-4 text-gray-400" />
-                                                    <span className="text-xs text-gray-500">
-                                                        {asset.download_count.toLocaleString()} {asset.download_count === 1 ? 'download' : 'downloads'}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </Link>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <CloudArrowDownIcon className="mx-auto h-8 w-8 text-gray-400" />
-                                    <p className="mt-2 text-sm text-gray-500">No downloads yet</p>
-                                </div>
-                            )}
                         </div>
                     </div>
-                    )}
-                </div>
                 )}
 
                 {/* Recent Activity - Only show if user has permission */}

@@ -41,6 +41,9 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         timezone: tenant.timezone || 'UTC',
         settings: {
             enable_metadata_approval: tenant.settings?.enable_metadata_approval ?? false, // Phase M-2
+            features: {
+                contributor_asset_approval: tenant.settings?.features?.contributor_asset_approval ?? false, // Phase J.3.1
+            },
         },
     })
 
@@ -505,6 +508,39 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                                     <span
                                                         className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                                                             data.settings?.enable_metadata_approval ? 'translate-x-5' : 'translate-x-0'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Phase J.3.1: Contributor Asset Approval Capability Toggle (Enterprise only) */}
+                                {billing.current_plan === 'enterprise' && (
+                                    <div className="border-t border-gray-200 pt-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex-1">
+                                                <label htmlFor="contributor_asset_approval" className="block text-sm font-medium leading-6 text-gray-900">
+                                                    Allow brands to require approval for contributor uploads
+                                                </label>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    When enabled, brands can require approval before contributor uploads are published. This is a capability toggle - individual brands must also enable the feature.
+                                                </p>
+                                            </div>
+                                            <div className="ml-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setData('settings.features.contributor_asset_approval', !data.settings?.features?.contributor_asset_approval)}
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                        data.settings?.features?.contributor_asset_approval ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    }`}
+                                                    role="switch"
+                                                    aria-checked={data.settings?.features?.contributor_asset_approval}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                            data.settings?.features?.contributor_asset_approval ? 'translate-x-5' : 'translate-x-0'
                                                         }`}
                                                     />
                                                 </button>

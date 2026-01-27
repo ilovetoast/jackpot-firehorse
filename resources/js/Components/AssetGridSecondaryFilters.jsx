@@ -59,7 +59,7 @@ export default function AssetGridSecondaryFilters({
     const { auth } = pageProps
     
     // Phase L.5.1: Check permissions for lifecycle filters
-    // Pending Publication (pending_approval) requires asset.publish
+    // Pending Publication (pending_publication) requires asset.publish
     // Unpublished requires metadata.bypass_approval
     // Archived requires asset.archive
     const { hasPermission: canPublish } = usePermission('asset.publish')
@@ -78,7 +78,7 @@ export default function AssetGridSecondaryFilters({
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search)
         const lifecycle = urlParams.get('lifecycle')
-        setPendingPublicationFilter(lifecycle === 'pending_approval')
+        setPendingPublicationFilter(lifecycle === 'pending_publication')
         setUnpublishedFilter(lifecycle === 'unpublished')
         setArchivedFilter(lifecycle === 'archived')
         
@@ -92,7 +92,7 @@ export default function AssetGridSecondaryFilters({
         const handleUrlChange = () => {
             const urlParams = new URLSearchParams(window.location.search)
             const lifecycle = urlParams.get('lifecycle')
-            setPendingPublicationFilter(lifecycle === 'pending_approval')
+            setPendingPublicationFilter(lifecycle === 'pending_publication')
             setUnpublishedFilter(lifecycle === 'unpublished')
             setArchivedFilter(lifecycle === 'archived')
             
@@ -107,7 +107,7 @@ export default function AssetGridSecondaryFilters({
         const interval = setInterval(() => {
             const urlParams = new URLSearchParams(window.location.search)
             const lifecycle = urlParams.get('lifecycle')
-            const newPending = lifecycle === 'pending_approval'
+            const newPending = lifecycle === 'pending_publication'
             const newUnpublished = lifecycle === 'unpublished'
             const newArchived = lifecycle === 'archived'
             const newUploadedBy = urlParams.get('uploaded_by') || null
@@ -139,7 +139,7 @@ export default function AssetGridSecondaryFilters({
         
         // Only one lifecycle filter can be active at a time
         if (newFilterState) {
-            urlParams.set('lifecycle', 'pending_approval')
+            urlParams.set('lifecycle', 'pending_publication')
             setPendingPublicationFilter(true)
             setUnpublishedFilter(false)
             setArchivedFilter(false)
@@ -438,7 +438,7 @@ export default function AssetGridSecondaryFilters({
             <button
                 type="button"
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full px-4 py-3 sm:px-6 flex items-center justify-between text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-inset"
+                className="w-full px-4 py-3 sm:px-6 flex items-center justify-between text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-inset border-b-2 border-indigo-500"
             >
                 <div className="flex items-center gap-2">
                     <FunnelIcon className="h-5 w-5 text-gray-400" />
@@ -477,9 +477,10 @@ export default function AssetGridSecondaryFilters({
                     {/* SECURITY: Only available to users with appropriate permissions */}
                     {(canPublish || canBypassApproval || canArchive) && (
                         <div className="mb-4 pb-4 border-b border-gray-200">
-                            <label className="text-xs font-medium text-gray-700 mb-2 block">Lifecycle</label>
+                            <label className="text-xs font-medium text-gray-700 mb-3 block" style={{ paddingLeft: '0' }}>Lifecycle</label>
                             <div className="flex flex-col gap-2">
                                 {/* Pending Publication filter - requires asset.publish */}
+                                {/* Phase J.3.1: Uses pending_publication (not pending_approval) to match dashboard links and backend */}
                                 {canPublish && (
                                     <label className="flex items-center gap-2 cursor-pointer">
                                         <input

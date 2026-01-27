@@ -12,10 +12,13 @@
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
 import { useMemo, useState, useEffect, useRef } from 'react'
+import { usePage } from '@inertiajs/react'
+import { EyeSlashIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isPendingApprovalMode = false, onAssetApproved = null }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null }) {
+    const { auth } = usePage().props
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
         // First try explicit file_extension field
@@ -283,30 +286,17 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                 {/* File type badge overlay - top right - Conditionally hidden based on showInfo prop */}
                 {showInfo && (
                     <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
-                        <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
-                            {fileExtension}
-                        </span>
-                        
-                        {/* Phase L.4: Lifecycle Indicators (read-only, subtle badges) */}
-                        {/* Archived badge takes precedence */}
-                        {asset.archived_at && (
-                            <span className="inline-flex items-center rounded-md bg-gray-700/80 backdrop-blur-sm px-2 py-0.5 text-xs font-medium text-white">
-                                Archived
+                        <div className="inline-flex items-center gap-1.5">
+                            <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
+                                {fileExtension}
                             </span>
-                        )}
-                        {/* Unpublished badge - only show if not archived */}
-                        {!asset.archived_at && !asset.published_at && (
-                            <div className="inline-flex items-center gap-1.5">
-                                <span className="inline-flex items-center rounded-md bg-yellow-600/80 backdrop-blur-sm px-2 py-0.5 text-xs font-medium text-white">
-                                    Unpublished
-                                </span>
-                                {(asset.category_name || asset.category?.name) && (
-                                    <span className="text-xs text-white/70 font-normal">
-                                        {asset.category_name || asset.category?.name}
-                                    </span>
-                                )}
-                            </div>
-                        )}
+                            {/* Subtle unpublished icon */}
+                            {!asset.archived_at && !asset.published_at && (
+                                <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
+                            )}
+                        </div>
+                        
+                        {/* Labels removed for clean grid view */}
                     </div>
                 )}
             </div>

@@ -82,10 +82,12 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
         // Check if we should stop polling
         const thumbnailStatus = currentAsset.thumbnail_status?.value || currentAsset.thumbnail_status
         const hasFinal = !!currentAsset.final_thumbnail_url
+        const hasPreview = !!currentAsset.preview_thumbnail_url
         const isCompleted = thumbnailStatus === 'completed'
         const isFailed = thumbnailStatus === 'failed'
         const isSkipped = thumbnailStatus === 'skipped'
         const hasError = !!currentAsset.thumbnail_error
+        const isPending = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
 
         // Stop conditions
         if (isCompleted && hasFinal) {
@@ -96,6 +98,19 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
         if (isFailed || isSkipped || hasError) {
             // Terminal error state - stop polling
             return
+        }
+
+        // Stop polling if status is pending but no preview or final URL exists
+        // This prevents infinite polling for assets that just had files replaced
+        // and thumbnails haven't been generated yet
+        if (isPending && !hasPreview && !hasFinal) {
+            // Only poll if we haven't exceeded max attempts (allows initial check)
+            // After first few attempts, stop if no thumbnails are available
+            if (pollAttemptRef.current >= 2) {
+                // Stop polling after 2 attempts if no thumbnails are available
+                // This prevents infinite loops for replaced files waiting for thumbnail generation
+                return
+            }
         }
 
         // Check if asset supports thumbnails
@@ -189,10 +204,12 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
         // Check if we should even start polling
         const thumbnailStatus = currentAsset.thumbnail_status?.value || currentAsset.thumbnail_status
         const hasFinal = !!currentAsset.final_thumbnail_url
+        const hasPreview = !!currentAsset.preview_thumbnail_url
         const isCompleted = thumbnailStatus === 'completed'
         const isFailed = thumbnailStatus === 'failed'
         const isSkipped = thumbnailStatus === 'skipped'
         const hasError = !!currentAsset.thumbnail_error
+        const isPending = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
 
         // Don't poll if already completed with final
         if (isCompleted && hasFinal) {
@@ -201,6 +218,16 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
 
         // Don't poll if terminal error state
         if (isFailed || isSkipped || hasError) {
+            return
+        }
+
+        // Don't start polling if status is pending but no preview or final URL exists
+        // This prevents starting polls for assets that just had files replaced
+        // and thumbnails haven't been generated yet (would cause 404 loops)
+        if (isPending && !hasPreview && !hasFinal) {
+            // Only start polling if we expect thumbnails to be generated soon
+            // For file replacements, thumbnails may take time to generate
+            // We'll let the asset reconciliation handle checking for new thumbnails
             return
         }
 

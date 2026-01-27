@@ -536,6 +536,7 @@ class BrandController extends Controller
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
+            'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
         ]);
 
         // Handle logo file upload

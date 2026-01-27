@@ -119,6 +119,19 @@ export const filterQueryOwnership = {
         notes: 'Date range filters are global and context-independent. User expects date filters to persist when switching categories.',
     },
     
+    /**
+     * Lifecycle filter parameter
+     * 
+     * Lifecycle filter for asset status (e.g., pending_publication, unpublished, archived).
+     * Global filter that persists across category changes as it represents asset state, not category-specific metadata.
+     */
+    lifecycle: {
+        owner: 'global',
+        persistence: 'persist',
+        reset_behavior: 'clear',
+        notes: 'Lifecycle filters represent asset state (pending, unpublished, archived) which is global and not category-specific. User expects lifecycle filters to persist when switching categories.',
+    },
+    
     // ============================================================================
     // CATEGORY-SCOPED FILTERS (purged on category change)
     // ============================================================================

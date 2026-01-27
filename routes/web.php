@@ -366,6 +366,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Phase L.6.1: Asset approval actions (publish/unpublish)
             Route::post('/assets/{asset}/publish', [\App\Http\Controllers\AssetController::class, 'publish'])->name('assets.publish');
             Route::post('/assets/{asset}/unpublish', [\App\Http\Controllers\AssetController::class, 'unpublish'])->name('assets.unpublish');
+            // Phase J.3.1: File replacement for rejected contributor assets
+            Route::post('/assets/{asset}/replace-file', [\App\Http\Controllers\AssetController::class, 'initiateReplaceFile'])->name('assets.replace-file');
             // Phase L.3: Asset archive & restore actions
             Route::post('/assets/{asset}/archive', [\App\Http\Controllers\AssetController::class, 'archive'])->name('assets.archive');
             Route::post('/assets/{asset}/restore', [\App\Http\Controllers\AssetController::class, 'restore'])->name('assets.restore');
@@ -394,6 +396,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/uploads/{uploadSession}/cancel', [\App\Http\Controllers\UploadController::class, 'cancel'])->name('uploads.cancel');
             Route::post('/assets/upload/complete', [\App\Http\Controllers\UploadController::class, 'complete'])->name('assets.upload.complete');
             Route::post('/assets/upload/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('assets.upload.finalize');
+            // Phase J.3.1: Alias route for finalize (used by replace file modal)
+            Route::post('/uploads/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('uploads.finalize');
 
             // Brand routes (tenant-scoped)
             Route::resource('brands', \App\Http\Controllers\BrandController::class);
@@ -410,6 +414,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Phase AF-1: Asset approval workflow
             Route::get('/brands/{brand}/approvals', [\App\Http\Controllers\BrandController::class, 'approvals'])->name('brands.approvals');
             Route::get('/api/brands/{brand}/approvals', [\App\Http\Controllers\AssetApprovalController::class, 'index'])->name('api.brands.approvals');
+            // Phase J.2: Pending assets for review modal
+            Route::get('/api/brands/{brand}/pending-assets', [\App\Http\Controllers\AssetApprovalController::class, 'pendingAssets'])->name('api.brands.pending-assets');
             Route::post('/brands/{brand}/assets/{asset}/approve', [\App\Http\Controllers\AssetApprovalController::class, 'approve'])->name('brands.assets.approve');
             Route::post('/brands/{brand}/assets/{asset}/reject', [\App\Http\Controllers\AssetApprovalController::class, 'reject'])->name('brands.assets.reject');
             // Phase AF-2: Re-submission and comments

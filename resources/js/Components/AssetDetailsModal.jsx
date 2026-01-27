@@ -43,11 +43,22 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const isOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
     const canRegenerateAiMetadataForTroubleshooting = canRegenerateAiMetadata || isOwnerOrAdmin
     
+    // Check if user is a contributor
+    const isContributor = auth?.user?.brand_role === 'contributor' && 
+                          !['owner', 'admin'].includes(auth?.user?.tenant_role?.toLowerCase() || '');
+    
+    // Check if approvals are enabled
+    const approvalsEnabled = auth?.approval_features?.approvals_enabled;
+    
+    // Contributors cannot publish/archive when approval is enabled
+    const contributorBlocked = isContributor && approvalsEnabled;
+    
     // Tenant admins/owners typically have all asset permissions, so allow them to see lifecycle actions
     // This is a fallback in case permissions aren't properly assigned to the role
-    const canPublishWithFallback = canPublish || isOwnerOrAdmin
+    // But contributors are blocked when approval is enabled
+    const canPublishWithFallback = (canPublish || isOwnerOrAdmin) && !contributorBlocked
     const canUnpublishWithFallback = canUnpublish || isOwnerOrAdmin
-    const canArchiveWithFallback = canArchive || isOwnerOrAdmin
+    const canArchiveWithFallback = (canArchive || isOwnerOrAdmin) && !contributorBlocked
     const canRestoreWithFallback = canRestore || isOwnerOrAdmin
     
     // System Metadata Regeneration state

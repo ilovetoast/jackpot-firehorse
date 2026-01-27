@@ -273,15 +273,25 @@ class CompanyController extends Controller
             'timezone' => 'required|string|max:255',
             'settings' => 'nullable|array',
             'settings.enable_metadata_approval' => 'nullable|boolean', // Phase M-2
+            'settings.features' => 'nullable|array', // Phase J.3.1
+            'settings.features.contributor_asset_approval' => 'nullable|boolean', // Phase J.3.1
         ]);
 
         // Phase M-2: Handle settings separately
         $settings = $validated['settings'] ?? [];
         unset($validated['settings']);
         
-        // Merge settings with existing settings
+        // Phase J.3.1: Deep merge settings to preserve nested structure
         $currentSettings = $tenant->settings ?? [];
-        $mergedSettings = array_merge($currentSettings, $settings);
+        $mergedSettings = array_merge_recursive($currentSettings, $settings);
+        
+        // Fix array_merge_recursive behavior for boolean values (it creates arrays)
+        if (isset($settings['enable_metadata_approval'])) {
+            $mergedSettings['enable_metadata_approval'] = $settings['enable_metadata_approval'];
+        }
+        if (isset($settings['features']['contributor_asset_approval'])) {
+            $mergedSettings['features']['contributor_asset_approval'] = $settings['features']['contributor_asset_approval'];
+        }
         
         $tenant->update($validated);
         $tenant->update(['settings' => $mergedSettings]);

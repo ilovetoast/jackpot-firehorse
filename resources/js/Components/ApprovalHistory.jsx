@@ -119,7 +119,7 @@ export default function ApprovalHistory({ asset, brand }) {
                         </div>
                         {comment.user && (
                             <div className="text-xs text-gray-600 mb-1">
-                                by {comment.user.name || comment.user.email || 'Unknown'}
+                                <span>by {comment.user.name || comment.user.email || 'Unknown'}</span>
                             </div>
                         )}
                         {comment.comment && (

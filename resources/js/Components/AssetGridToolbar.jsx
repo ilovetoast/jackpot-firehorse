@@ -28,7 +28,7 @@
 import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
-import { InformationCircleIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 
 export default function AssetGridToolbar({
@@ -49,12 +49,97 @@ export default function AssetGridToolbar({
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
+    const brand = auth?.activeBrand
     
     // Lifecycle filters moved to "More filters" section (AssetGridSecondaryFilters)
     
     // Static filter chip placeholders (non-functional)
     const filterChips = ['Nature', 'Space', 'Color-grading', 'Amsterdam', 'Summer']
     const [isSearchFocused, setIsSearchFocused] = useState(false)
+    
+    // Pending assets callout state
+    const [pendingAssetsCount, setPendingAssetsCount] = useState(0)
+    const [pendingTagsCount, setPendingTagsCount] = useState(0)
+    const [loadingPendingCounts, setLoadingPendingCounts] = useState(false)
+    
+    // Check if user can approve assets (admin/brand_manager)
+    const brandRole = auth?.brand_role?.toLowerCase()
+    const tenantRole = auth?.tenant_role?.toLowerCase()
+    const isTenantOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
+    const isBrandApprover = brandRole === 'brand_manager' || brandRole === 'admin'
+    const canApprove = isBrandApprover || isTenantOwnerOrAdmin
+    const approvalsEnabled = auth?.approval_features?.approvals_enabled
+    
+    // Fetch pending assets count for current category
+    useEffect(() => {
+        // Debug logging
+        console.log('[AssetGridToolbar] Pending assets check:', {
+            canApprove,
+            approvalsEnabled,
+            brandId: brand?.id,
+            selectedCategoryId,
+            brandRole,
+            tenantRole,
+        })
+        
+        if (!canApprove || !approvalsEnabled || !brand?.id || !selectedCategoryId) {
+            setPendingAssetsCount(0)
+            setPendingTagsCount(0)
+            return
+        }
+        
+        setLoadingPendingCounts(true)
+        
+        // Fetch pending assets for this category (API filters by category_id)
+        // Ensure category_id is a number
+        const categoryId = typeof selectedCategoryId === 'string' ? parseInt(selectedCategoryId, 10) : selectedCategoryId
+        const url = `/app/api/brands/${brand.id}/pending-assets?category_id=${categoryId}`
+        console.log('[AssetGridToolbar] Fetching pending assets from:', url, 'categoryId:', categoryId)
+        
+        fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin',
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const errorText = await res.text()
+                    console.error('[AssetGridToolbar] API error response:', res.status, errorText)
+                    throw new Error(`HTTP ${res.status}: ${errorText}`)
+                }
+                return res.json()
+            })
+            .then((data) => {
+                // API already filters by category, so all returned assets are for this category
+                const count = data.count || data.assets?.length || 0
+                console.log('[AssetGridToolbar] Pending assets count:', count, 'for category', selectedCategoryId)
+                setPendingAssetsCount(count)
+                setLoadingPendingCounts(false)
+            })
+            .catch((err) => {
+                console.error('[AssetGridToolbar] Failed to fetch pending assets count', err)
+                setPendingAssetsCount(0)
+                setLoadingPendingCounts(false)
+            })
+        
+        // TODO: Fetch pending tag suggestions count for this category
+        // For now, set to 0
+        setPendingTagsCount(0)
+    }, [canApprove, approvalsEnabled, brand?.id, selectedCategoryId, brandRole, tenantRole])
+    
+    // Handle click on pending assets callout - enable 'Pending Publication' filter
+    const handlePendingAssetsClick = () => {
+        const currentUrl = new URL(window.location.href)
+        currentUrl.searchParams.set('lifecycle', 'pending_publication')
+        router.visit(currentUrl.toString(), {
+            preserveState: false,
+            preserveScroll: false,
+        })
+    }
     
     // Grid size button group - 4 discrete settings
     const SIZE_PRESETS = [160, 220, 280, 360] // 4 discrete size options
@@ -75,36 +160,6 @@ export default function AssetGridToolbar({
         // Different grid patterns for each size
         const gridPatterns = {
             small: (
-                <svg className={className} fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="6" height="6" rx="0.5" />
-                    <rect x="9" y="1" width="6" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="6" height="6" rx="0.5" />
-                    <rect x="9" y="9" width="6" height="6" rx="0.5" />
-                </svg>
-            ),
-            medium: (
-                <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="5" height="6" rx="0.5" />
-                    <rect x="7.5" y="1" width="5" height="6" rx="0.5" />
-                    <rect x="14" y="1" width="5" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="5" height="6" rx="0.5" />
-                    <rect x="7.5" y="9" width="5" height="6" rx="0.5" />
-                    <rect x="14" y="9" width="5" height="6" rx="0.5" />
-                </svg>
-            ),
-            large: (
-                <svg className={className} fill="none" viewBox="0 0 24 16" stroke="currentColor" strokeWidth={1.5}>
-                    <rect x="1" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="6.5" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="12" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="17.5" y="1" width="4.5" height="6" rx="0.5" />
-                    <rect x="1" y="9" width="4.5" height="6" rx="0.5" />
-                    <rect x="6.5" y="9" width="4.5" height="6" rx="0.5" />
-                    <rect x="12" y="9" width="4.5" height="6" rx="0.5" />
-                    <rect x="17.5" y="9" width="4.5" height="6" rx="0.5" />
-                </svg>
-            ),
-            xlarge: (
                 <svg className={className} fill="none" viewBox="0 0 28 16" stroke="currentColor" strokeWidth={1.5}>
                     <rect x="1" y="1" width="4" height="6" rx="0.5" />
                     <rect x="6" y="1" width="4" height="6" rx="0.5" />
@@ -116,7 +171,38 @@ export default function AssetGridToolbar({
                     <rect x="11" y="9" width="4" height="6" rx="0.5" />
                     <rect x="16" y="9" width="4" height="6" rx="0.5" />
                     <rect x="21" y="9" width="4" height="6" rx="0.5" />
+                </svg>                
+            ),
+            medium: (
+                <svg className={className} fill="none" viewBox="0 0 24 16" stroke="currentColor" strokeWidth={1.5}>
+                    <rect x="1" y="1" width="4.5" height="6" rx="0.5" />
+                    <rect x="6.5" y="1" width="4.5" height="6" rx="0.5" />
+                    <rect x="12" y="1" width="4.5" height="6" rx="0.5" />
+                    <rect x="17.5" y="1" width="4.5" height="6" rx="0.5" />
+                    <rect x="1" y="9" width="4.5" height="6" rx="0.5" />
+                    <rect x="6.5" y="9" width="4.5" height="6" rx="0.5" />
+                    <rect x="12" y="9" width="4.5" height="6" rx="0.5" />
+                    <rect x="17.5" y="9" width="4.5" height="6" rx="0.5" />
                 </svg>
+            ),
+            large: (
+                <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5}>
+                    <rect x="1" y="1" width="5" height="6" rx="0.5" />
+                    <rect x="7.5" y="1" width="5" height="6" rx="0.5" />
+                    <rect x="14" y="1" width="5" height="6" rx="0.5" />
+                    <rect x="1" y="9" width="5" height="6" rx="0.5" />
+                    <rect x="7.5" y="9" width="5" height="6" rx="0.5" />
+                    <rect x="14" y="9" width="5" height="6" rx="0.5" />
+                </svg>
+                
+            ),
+            xlarge: (
+                <svg className={className} fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                    <rect x="1" y="1" width="6" height="6" rx="0.5" />
+                    <rect x="9" y="1" width="6" height="6" rx="0.5" />
+                    <rect x="1" y="9" width="6" height="6" rx="0.5" />
+                    <rect x="9" y="9" width="6" height="6" rx="0.5" />
+                </svg>                
             ),
         }
         
@@ -125,6 +211,33 @@ export default function AssetGridToolbar({
 
     return (
         <div className={`bg-white ${showMoreFilters ? 'border-b border-gray-200' : 'border-b border-gray-200'}`}>
+            {/* Pending Assets Callout - Above search bar */}
+            {canApprove && approvalsEnabled && selectedCategoryId && (pendingAssetsCount > 0 || pendingTagsCount > 0) && (
+                <div className="px-4 pt-3 pb-2 sm:px-6">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {pendingAssetsCount > 0 && (
+                            <button
+                                type="button"
+                                onClick={handlePendingAssetsClick}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 transition-colors"
+                            >
+                                <ClockIcon className="h-3.5 w-3.5" />
+                                <span>{pendingAssetsCount} {pendingAssetsCount === 1 ? 'asset' : 'assets'} for review</span>
+                            </button>
+                        )}
+                        {pendingTagsCount > 0 && (
+                            <button
+                                type="button"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                            >
+                                <TagIcon className="h-3.5 w-3.5" />
+                                <span>{pendingTagsCount} {pendingTagsCount === 1 ? 'tag' : 'tags'} suggested</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+            
             {/* Primary Toolbar Row */}
             <div className="px-4 py-4 sm:px-6">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -216,7 +329,10 @@ export default function AssetGridToolbar({
                             <div className="inline-flex rounded-md shadow-sm" role="group" aria-label="Grid size">
                                 {SIZE_PRESETS.map((size, index) => {
                                     const isSelected = currentPresetIndex === index
-                                    const iconSizes = ['small', 'medium', 'large', 'xlarge']
+                                    // Reverse icon order: leftmost shows densest (xlarge), rightmost shows sparsest (small)
+                                    const iconSizes = ['xlarge', 'large', 'medium', 'small']
+                                    // Reverse the index for icon selection (so index 0 gets xlarge, index 3 gets small)
+                                    const reversedIndex = SIZE_PRESETS.length - 1 - index
                                     
                                     return (
                                         <button
@@ -241,10 +357,10 @@ export default function AssetGridToolbar({
                                                 '--tw-ring-color': primaryColor,
                                             } : {}}
                                             aria-pressed={isSelected}
-                                            aria-label={`${iconSizes[index]} size`}
-                                            title={`${iconSizes[index].charAt(0).toUpperCase() + iconSizes[index].slice(1)} size`}
+                                            aria-label={`${iconSizes[reversedIndex]} size`}
+                                            title={`${iconSizes[reversedIndex].charAt(0).toUpperCase() + iconSizes[reversedIndex].slice(1)} size`}
                                         >
-                                            <SizeIcon size={iconSizes[index]} />
+                                            <SizeIcon size={iconSizes[reversedIndex]} />
                                         </button>
                                     )
                                 })}

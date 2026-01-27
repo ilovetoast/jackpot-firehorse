@@ -28,6 +28,152 @@ use Illuminate\Support\Facades\Validator;
 class AssetApprovalController extends Controller
 {
     /**
+     * Get pending assets for review modal (Phase J.2).
+     * 
+     * GET /api/brands/{brand}/pending-assets
+     * 
+     * Returns assets with approval_status = pending or rejected for review.
+     * Approvers see all, contributors see only their own.
+     */
+    public function pendingAssets(Request $request, Brand $brand): JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        // Verify brand belongs to tenant
+        if ($brand->tenant_id !== $tenant->id) {
+            return response()->json(['error' => 'Brand does not belong to this tenant.'], 403);
+        }
+
+        // Phase AF-5: Gate approval queue access based on plan feature
+        $featureGate = app(FeatureGate::class);
+        if (!$featureGate->approvalsEnabled($tenant)) {
+            return response()->json([
+                'error' => 'Approval workflows are not available on your current plan.',
+            ], 403);
+        }
+
+        // Phase MI-1: Verify active brand membership first
+        $membership = $user->activeBrandMembership($brand);
+        if (!$membership) {
+            return response()->json([
+                'error' => 'You do not have active membership for this brand.',
+            ], 403);
+        }
+        
+        // Check permissions: Only Owner/Admin/Brand Manager can access
+        $brandRole = $membership['role'];
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        $isBrandManager = $brandRole === 'brand_manager';
+        $isContributor = $brandRole === 'contributor';
+        
+        // Contributors should never see this endpoint
+        if ($isContributor && !$isTenantOwnerOrAdmin && !$isBrandManager) {
+            return response()->json([
+                'error' => 'You do not have permission to view pending assets.',
+            ], 403);
+        }
+
+        // Query pending/rejected assets
+        $query = Asset::where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->where(function ($q) {
+                $q->where('approval_status', ApprovalStatus::PENDING)
+                  ->orWhere('approval_status', ApprovalStatus::REJECTED);
+            })
+            ->whereNull('deleted_at')
+            ->with(['user'])
+            ->orderBy('created_at', 'desc');
+        
+        // Filter by category if provided
+        if ($request->has('category_id') && $request->category_id) {
+            $categoryId = (int) $request->category_id;
+            // Filter assets where metadata->category_id matches the category ID
+            // Use direct JSON path comparison for exact integer match
+            // Cast categoryId to integer to ensure type matching with JSON integer values
+            // Note: category_id is stored in metadata JSON, not as a direct column
+            $query->whereNotNull('metadata')
+                ->where('metadata->category_id', $categoryId);
+        }
+        
+        // Approvers see all, contributors see only their own (though they shouldn't reach here)
+        if ($isContributor && !$isTenantOwnerOrAdmin && !$isBrandManager) {
+            $query->where('user_id', $user->id);
+        }
+        
+        $assets = $query->get()->map(function ($asset) {
+            // Get thumbnail URLs
+            $metadata = $asset->metadata ?? [];
+            $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
+                ? $asset->thumbnail_status->value 
+                : ($asset->thumbnail_status ?? 'pending');
+            
+            $previewThumbnailUrl = null;
+            $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+            if (!empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+                $previewThumbnailUrl = route('assets.thumbnail.preview', [
+                    'asset' => $asset->id,
+                    'style' => 'preview',
+                ]);
+            }
+            
+            $finalThumbnailUrl = null;
+            if ($thumbnailStatus === 'completed') {
+                $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                $thumbnails = $metadata['thumbnails'] ?? [];
+                if (!empty($thumbnails) && isset($thumbnails['medium'])) {
+                    $finalThumbnailUrl = route('assets.thumbnail.final', [
+                        'asset' => $asset->id,
+                        'style' => 'medium',
+                    ]);
+                    if ($thumbnailVersion) {
+                        $finalThumbnailUrl .= '?v=' . $thumbnailVersion;
+                    }
+                }
+            }
+            
+            // Get category_id from asset (could be in category_id column or metadata)
+            $categoryId = $asset->category_id ?? ($asset->metadata['category_id'] ?? null);
+            
+            return [
+                'id' => $asset->id,
+                'title' => $asset->title ?? $asset->original_filename ?? 'Untitled',
+                'original_filename' => $asset->original_filename,
+                'mime_type' => $asset->mime_type,
+                'size_bytes' => $asset->size_bytes,
+                'created_at' => $asset->created_at?->toISOString(),
+                'category_id' => $categoryId,
+                'category' => $asset->category ? [
+                    'id' => $asset->category->id,
+                    'name' => $asset->category->name,
+                ] : null,
+                'uploader' => $asset->user ? [
+                    'id' => $asset->user->id,
+                    'name' => trim($asset->user->name) ?: null, // Convert empty string to null for proper fallback
+                    'first_name' => $asset->user->first_name,
+                    'last_name' => $asset->user->last_name,
+                    'email' => $asset->user->email,
+                    'avatar_url' => $asset->user->avatar_url,
+                ] : null,
+                'approval_status' => $asset->approval_status->value,
+                'rejected_at' => $asset->rejected_at?->toISOString(),
+                'rejection_reason' => $asset->rejection_reason,
+                'metadata' => $asset->metadata,
+                'final_thumbnail_url' => $finalThumbnailUrl,
+                'preview_thumbnail_url' => $previewThumbnailUrl,
+                'thumbnail_status' => $thumbnailStatus,
+            ];
+        });
+
+        return response()->json([
+            'assets' => $assets,
+            'count' => $assets->count(),
+        ]);
+    }
+
+    /**
      * Get approval queue (pending assets).
      * 
      * GET /brands/{brand}/approvals
@@ -93,8 +239,11 @@ class AssetApprovalController extends Controller
                     'created_at' => $asset->created_at?->toISOString(),
                     'uploader' => $asset->user ? [
                         'id' => $asset->user->id,
-                        'name' => $asset->user->name,
+                        'name' => trim($asset->user->name) ?: null, // Convert empty string to null for proper fallback
+                        'first_name' => $asset->user->first_name,
+                        'last_name' => $asset->user->last_name,
                         'email' => $asset->user->email,
+                        'avatar_url' => $asset->user->avatar_url,
                     ] : null,
                     'approval_status' => $asset->approval_status->value,
                     'metadata' => $asset->metadata,
@@ -149,18 +298,26 @@ class AssetApprovalController extends Controller
             ], 403);
         }
 
-        // Verify asset is in pending state
-        if ($asset->approval_status !== ApprovalStatus::PENDING) {
+        // Phase J.2: Allow approving pending or rejected assets
+        if ($asset->approval_status !== ApprovalStatus::PENDING && $asset->approval_status !== ApprovalStatus::REJECTED) {
             return response()->json([
-                'error' => 'Asset is not pending approval.',
+                'error' => 'Asset is not pending or rejected approval.',
                 'current_status' => $asset->approval_status->value,
             ], 422);
+        }
+
+        // Update title if provided in request
+        if ($request->has('title') && $request->input('title') !== null) {
+            $asset->title = $request->input('title');
         }
 
         // Approve the asset
         $asset->approval_status = ApprovalStatus::APPROVED;
         $asset->approved_at = now();
         $asset->approved_by_user_id = $user->id;
+        // Phase J.2: Clear rejection fields when approving
+        $asset->rejected_at = null;
+        $asset->rejection_reason = null;
         // Auto-publish when approved
         if (!$asset->published_at) {
             $asset->published_at = now();
@@ -175,6 +332,61 @@ class AssetApprovalController extends Controller
         // Phase AF-3: Notify uploader
         $notificationService = app(\App\Services\ApprovalNotificationService::class);
         $notificationService->notifyOnApproved($asset, $user);
+
+        // Dispatch AI jobs after approval (tags and metadata suggestions)
+        // These jobs run after approval so assets going through approval workflow get AI processing
+        try {
+            // Refresh asset to get latest state (including thumbnail_status)
+            $asset->refresh();
+            
+            // Check if thumbnails are ready (AI jobs require thumbnails)
+            $thumbnailReady = $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED;
+            
+            if ($thumbnailReady) {
+                $policyService = app(\App\Services\AiTagPolicyService::class);
+                $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
+                
+                if ($policyCheck['should_proceed']) {
+                    // Check if AI jobs have already run (idempotency)
+                    $metadata = $asset->metadata ?? [];
+                    $aiTaggingCompleted = $metadata['ai_tagging_completed'] ?? false;
+                    $aiMetadataCompleted = $metadata['ai_metadata_generation_completed'] ?? false;
+                    
+                    // Only dispatch if not already completed
+                    if (!$aiTaggingCompleted) {
+                        \App\Jobs\AITaggingJob::dispatch($asset->id);
+                    }
+                    
+                    if (!$aiMetadataCompleted) {
+                        \App\Jobs\AiMetadataGenerationJob::dispatch($asset->id);
+                        \App\Jobs\AiTagAutoApplyJob::dispatch($asset->id);
+                        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
+                    }
+                    
+                    Log::info('[AssetApprovalController] AI jobs dispatched after approval', [
+                        'asset_id' => $asset->id,
+                        'ai_tagging_dispatched' => !$aiTaggingCompleted,
+                        'ai_metadata_dispatched' => !$aiMetadataCompleted,
+                    ]);
+                } else {
+                    Log::info('[AssetApprovalController] AI jobs skipped after approval due to policy', [
+                        'asset_id' => $asset->id,
+                        'reason' => $policyCheck['reason'] ?? 'policy_denied',
+                    ]);
+                }
+            } else {
+                Log::info('[AssetApprovalController] AI jobs skipped after approval - thumbnails not ready', [
+                    'asset_id' => $asset->id,
+                    'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                ]);
+            }
+        } catch (\Exception $e) {
+            // Don't fail approval if AI job dispatch fails
+            Log::error('[AssetApprovalController] Failed to dispatch AI jobs after approval', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         // Log activity
         try {
@@ -261,9 +473,10 @@ class AssetApprovalController extends Controller
             ], 422);
         }
 
-        // Validate rejection reason
+        // Phase J.2: Validate rejection reason (min 10 chars)
         $validator = Validator::make($request->all(), [
-            'rejection_reason' => 'required|string|max:1000',
+            'rejection_reason' => 'required|string|min:10|max:1000',
+            'title' => 'nullable|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -271,6 +484,11 @@ class AssetApprovalController extends Controller
                 'error' => 'Validation failed.',
                 'errors' => $validator->errors(),
             ], 422);
+        }
+
+        // Update title if provided in request
+        if ($request->has('title') && $request->input('title') !== null) {
+            $asset->title = $request->input('title');
         }
 
         // Reject the asset
@@ -505,9 +723,26 @@ class AssetApprovalController extends Controller
         // Get approval history
         $comments = \App\Models\AssetApprovalComment::where('asset_id', $asset->id)
             ->with('user')
-            ->orderBy('created_at', 'asc')
+            ->orderBy('created_at', 'desc') // Phase J.3: Sort newest → oldest
             ->get()
-            ->map(function ($comment) {
+            ->map(function ($comment) use ($brand, $tenant) {
+                // Phase J.3: Determine user role for badge display
+                $userRole = null;
+                $isApprover = false;
+                if ($comment->user) {
+                    $membership = $comment->user->activeBrandMembership($brand);
+                    $brandRole = $membership['role'] ?? null;
+                    $tenantRole = $comment->user->getRoleForTenant($tenant);
+                    
+                    if (in_array($tenantRole, ['owner', 'admin'])) {
+                        $userRole = $tenantRole === 'owner' ? 'Owner' : 'Admin';
+                        $isApprover = true;
+                    } elseif ($brandRole && PermissionMap::canApproveAssets($brandRole)) {
+                        $userRole = $brandRole === 'brand_manager' ? 'Brand Manager' : 'Admin';
+                        $isApprover = true;
+                    }
+                }
+                
                 return [
                     'id' => $comment->id,
                     'action' => $comment->action->value,
@@ -518,6 +753,8 @@ class AssetApprovalController extends Controller
                         'name' => $comment->user->name,
                         'email' => $comment->user->email,
                     ] : null,
+                    'user_role' => $userRole, // Phase J.3: Role for badge display
+                    'is_approver' => $isApprover, // Phase J.3: Whether user is an approver
                     'created_at' => $comment->created_at?->toISOString(),
                 ];
             });

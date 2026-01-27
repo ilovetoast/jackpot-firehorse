@@ -1603,14 +1603,16 @@ class UploadController extends Controller
         }
 
         // Validate request structure
+        // Phase J.3.1: For replace mode, category_id and metadata are not required
         $validated = $request->validate([
             'manifest' => 'required|array|min:1',
             'manifest.*.upload_key' => 'required|string',
             'manifest.*.expected_size' => 'required|integer|min:1',
-            'manifest.*.category_id' => 'required|integer|exists:categories,id',
+            'manifest.*.category_id' => 'nullable|integer|exists:categories,id', // Phase J.3.1: Optional for replace mode
             'manifest.*.metadata' => 'nullable|array',
             'manifest.*.title' => 'nullable|string|max:255',
             'manifest.*.resolved_filename' => 'nullable|string|max:255',
+            'manifest.*.comment' => 'nullable|string|max:1000', // Phase J.3.1: Optional comment for replace mode
         ]);
 
         $manifest = $validated['manifest'];
@@ -1620,7 +1622,7 @@ class UploadController extends Controller
         foreach ($manifest as $item) {
             $uploadKey = $item['upload_key'];
             $expectedSize = $item['expected_size'];
-            $categoryId = $item['category_id'];
+            $categoryId = $item['category_id'] ?? null; // Phase J.3.1: Optional for replace mode
             // CRITICAL: Extract metadata - handle both array and object formats from JSON
             $metadata = $item['metadata'] ?? [];
             // If metadata is an object (stdClass from JSON), convert to array
@@ -1651,16 +1653,27 @@ class UploadController extends Controller
                     throw new \RuntimeException("Upload session not found: {$uploadSessionId}");
                 }
 
+                // Phase J.3.1: For replace mode, skip category validation and metadata persistence
+                $isReplaceMode = $uploadSession->mode === 'replace' && $uploadSession->asset_id;
+
                 // CRITICAL: Verify category belongs to tenant and ACTIVE BRAND (not upload_session->brand_id)
                 // The user is selecting a category in the UI, which is scoped to the active brand
                 // Assets are created with the active brand_id to match UI queries
-                $category = Category::where('id', $categoryId)
-                    ->where('tenant_id', $tenant->id)
-                    ->where('brand_id', $brand->id)
-                    ->first();
+                // Phase J.3.1: Skip category validation for replace mode
+                $category = null;
+                if (!$isReplaceMode) {
+                    if (!$categoryId) {
+                        throw new \RuntimeException("Category ID is required for new asset uploads");
+                    }
+                    
+                    $category = Category::where('id', $categoryId)
+                        ->where('tenant_id', $tenant->id)
+                        ->where('brand_id', $brand->id)
+                        ->first();
 
-                if (!$category) {
-                    throw new \RuntimeException("Category not found or does not belong to tenant/brand");
+                    if (!$category) {
+                        throw new \RuntimeException("Category not found or does not belong to tenant/brand");
+                    }
                 }
 
                 // IDEMPOTENCY CHECK: Check if asset already exists for this upload_session_id
@@ -1773,141 +1786,157 @@ class UploadController extends Controller
                     }
                 }
 
-                // Create asset using UploadCompletionService
-                // Determine asset type from category
-                $assetType = $category->asset_type->value;
+                // Phase J.3.1: For replace mode, skip category/asset type and metadata handling
+                if ($isReplaceMode) {
+                    // Replace mode: Pass comment via metadata array (hacky but works with existing complete method signature)
+                    $comment = $item['comment'] ?? null;
+                    $asset = $this->completionService->complete(
+                        $uploadSession,
+                        null, // assetType not needed for replace
+                        $resolvedFilename, // filename
+                        null, // title not needed for replace (keep existing)
+                        $uploadKey, // s3Key
+                        null, // categoryId not needed for replace (keep existing)
+                        $comment ? ['comment' => $comment] : null, // Pass comment via metadata array
+                        $user->id
+                    );
+                } else {
+                    // Create mode: Normal asset creation flow
+                    // Determine asset type from category
+                    $assetType = $category->asset_type->value;
 
-                // Phase 2 – Step 4: Extract and validate metadata fields BEFORE asset creation
-                // Frontend sends: { fieldKey: value } (only valid fields, no empty values)
-                $metadataFields = [];
-                // Handle both array and object formats
-                if (!empty($metadata)) {
-                    // Convert object to array if needed
-                    $metadataArray = is_object($metadata) ? (array)$metadata : $metadata;
-                    
-                    if (is_array($metadataArray)) {
-                        if (isset($metadataArray['fields']) && is_array($metadataArray['fields'])) {
-                            // Legacy format: { fields: {...} }
-                            $metadataFields = $metadataArray['fields'];
-                        } elseif (isset($metadataArray['category_id'])) {
-                            // Metadata has category_id mixed in - extract fields only
-                            $metadataFields = $metadataArray;
-                            unset($metadataFields['category_id']);
-                        } else {
-                            // Direct format: { fieldKey: value } (Phase 2 – Step 4 format)
-                            $metadataFields = $metadataArray;
-                        }
-                    }
-                }
-
-                // Phase 2 – Step 4: Validate metadata against schema BEFORE asset creation
-                if (!empty($metadataFields)) {
-                    try {
-                        // Determine asset type for schema resolution (file type, not category asset_type)
-                        // Default to 'image' - can be enhanced to detect from file MIME type
-                        $fileAssetType = 'image';
-
-                        // Resolve schema to validate fields
-                        $schema = $this->uploadMetadataSchemaResolver->resolve(
-                            $tenant->id,
-                            $brand->id,
-                            $category->id,
-                            $fileAssetType
-                        );
-
-                        // Build allowlist of valid field keys
-                        $allowedFieldKeys = [];
-                        foreach ($schema['groups'] ?? [] as $group) {
-                            foreach ($group['fields'] ?? [] as $field) {
-                                $allowedFieldKeys[] = $field['key'];
+                    // Phase 2 – Step 4: Extract and validate metadata fields BEFORE asset creation
+                    // Frontend sends: { fieldKey: value } (only valid fields, no empty values)
+                    $metadataFields = [];
+                    // Handle both array and object formats
+                    if (!empty($metadata)) {
+                        // Convert object to array if needed
+                        $metadataArray = is_object($metadata) ? (array)$metadata : $metadata;
+                        
+                        if (is_array($metadataArray)) {
+                            if (isset($metadataArray['fields']) && is_array($metadataArray['fields'])) {
+                                // Legacy format: { fields: {...} }
+                                $metadataFields = $metadataArray['fields'];
+                            } elseif (isset($metadataArray['category_id'])) {
+                                // Metadata has category_id mixed in - extract fields only
+                                $metadataFields = $metadataArray;
+                                unset($metadataFields['category_id']);
+                            } else {
+                                // Direct format: { fieldKey: value } (Phase 2 – Step 4 format)
+                                $metadataFields = $metadataArray;
                             }
                         }
+                    }
 
-                        // Validate all provided field keys are in the allowlist
-                        $invalidKeys = array_diff(array_keys($metadataFields), $allowedFieldKeys);
-                        if (!empty($invalidKeys)) {
-                            throw new \InvalidArgumentException(
-                                'Invalid metadata fields: ' . implode(', ', $invalidKeys) . '. ' .
-                                'Fields must be present in the resolved upload schema.'
+                    // Phase 2 – Step 4: Validate metadata against schema BEFORE asset creation
+                    if (!empty($metadataFields)) {
+                        try {
+                            // Determine asset type for schema resolution (file type, not category asset_type)
+                            // Default to 'image' - can be enhanced to detect from file MIME type
+                            $fileAssetType = 'image';
+
+                            // Resolve schema to validate fields
+                            $schema = $this->uploadMetadataSchemaResolver->resolve(
+                                $tenant->id,
+                                $brand->id,
+                                $category->id,
+                                $fileAssetType
                             );
-                        }
-                    } catch (\InvalidArgumentException $e) {
-                        // Validation failure - return error BEFORE creating asset
-                        Log::error('[UploadController::finalize] Metadata validation failed', [
-                            'upload_key' => $uploadKey,
-                            'error' => $e->getMessage(),
-                            'metadata_fields' => array_keys($metadataFields),
-                        ]);
 
-                        $results[] = [
-                            'upload_key' => $uploadKey,
-                            'status' => 'error',
-                            'error' => 'Metadata validation failed: ' . $e->getMessage(),
-                        ];
-                        continue; // Skip to next manifest item
-                    }
-                }
+                            // Build allowlist of valid field keys
+                            $allowedFieldKeys = [];
+                            foreach ($schema['groups'] ?? [] as $group) {
+                                foreach ($group['fields'] ?? [] as $field) {
+                                    $allowedFieldKeys[] = $field['key'];
+                                }
+                            }
 
-                $asset = $this->completionService->complete(
-                    $uploadSession,
-                    $assetType,
-                    $resolvedFilename, // filename - use resolvedFilename from frontend, fallback to S3 if null
-                    $title, // title - use title from frontend, fallback to filename if null
-                    $uploadKey, // s3Key
-                    $categoryId,
-                    null, // Do NOT pass metadata here - persist separately below with approval check
-                    $user->id
-                );
-
-                // IMPORTANT:
-                // Metadata MUST be persisted exactly once during upload.
-                // UploadController::finalize() is the single source of truth for
-                // metadata persistence so that approval logic is always enforced.
-                // Do NOT persist metadata inside UploadCompletionService.
-                // Phase 2 – Step 4: Persist metadata to asset_metadata table (after asset creation)
-                // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
-                // This ensures approval logic runs only after asset exists, not during upload
-                if (!empty($metadataFields)) {
-                    try {
-                        // UX-2: Assertion - Asset must exist before metadata persistence
-                        // This guard ensures approval logic runs only after asset creation
-                        if (!$asset || !$asset->id) {
-                            Log::error('[UploadController::finalize] Asset not created before metadata persistence', [
+                            // Validate all provided field keys are in the allowlist
+                            $invalidKeys = array_diff(array_keys($metadataFields), $allowedFieldKeys);
+                            if (!empty($invalidKeys)) {
+                                throw new \InvalidArgumentException(
+                                    'Invalid metadata fields: ' . implode(', ', $invalidKeys) . '. ' .
+                                    'Fields must be present in the resolved upload schema.'
+                                );
+                            }
+                        } catch (\InvalidArgumentException $e) {
+                            // Validation failure - return error BEFORE creating asset
+                            Log::error('[UploadController::finalize] Metadata validation failed', [
                                 'upload_key' => $uploadKey,
-                                'upload_session_id' => $uploadSessionId,
+                                'error' => $e->getMessage(),
+                                'metadata_fields' => array_keys($metadataFields),
                             ]);
-                            throw new \RuntimeException('Asset must be created before metadata persistence');
+
+                            $results[] = [
+                                'upload_key' => $uploadKey,
+                                'status' => 'error',
+                                'error' => 'Metadata validation failed: ' . $e->getMessage(),
+                            ];
+                            continue; // Skip to next manifest item
                         }
-
-                        // Determine asset type for schema resolution (file type, not category asset_type)
-                        // Default to 'image' - can be enhanced to detect from file MIME type
-                        $fileAssetType = 'image';
-
-                        // UX-2: CRITICAL - Pass autoApprove=false to allow approval resolver to check
-                        // Approval is determined AFTER upload, not during metadata entry
-                        // This ensures contributors can enter metadata, which is then reviewed
-                        $this->metadataPersistenceService->persistMetadata(
-                            $asset,
-                            $category,
-                            $metadataFields,
-                            $user->id,
-                            $fileAssetType,
-                            false // autoApprove=false: Let approval resolver determine if approval needed
-                        );
-                    } catch (\Exception $e) {
-                        // Persistence failure - log but don't fail entire finalize
-                        // Asset is already created, metadata persistence is best-effort
-                        // Transaction rollback in service handles partial writes
-                        Log::error('[UploadController::finalize] Metadata persistence failed', [
-                            'asset_id' => $asset->id,
-                            'error' => $e->getMessage(),
-                            'trace' => $e->getTraceAsString(),
-                        ]);
-
-                        // Continue - asset is created, metadata persistence failed
-                        // This is acceptable as metadata can be added later via edit
                     }
-                }
+
+                    $asset = $this->completionService->complete(
+                        $uploadSession,
+                        $assetType,
+                        $resolvedFilename, // filename - use resolvedFilename from frontend, fallback to S3 if null
+                        $title, // title - use title from frontend, fallback to filename if null
+                        $uploadKey, // s3Key
+                        $categoryId,
+                        null, // Do NOT pass metadata here - persist separately below with approval check
+                        $user->id
+                    );
+
+                    // IMPORTANT:
+                    // Metadata MUST be persisted exactly once during upload.
+                    // UploadController::finalize() is the single source of truth for
+                    // metadata persistence so that approval logic is always enforced.
+                    // Do NOT persist metadata inside UploadCompletionService.
+                    // Phase 2 – Step 4: Persist metadata to asset_metadata table (after asset creation)
+                    // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
+                    // This ensures approval logic runs only after asset exists, not during upload
+                    if (!empty($metadataFields)) {
+                        try {
+                            // UX-2: Assertion - Asset must exist before metadata persistence
+                            // This guard ensures approval logic runs only after asset creation
+                            if (!$asset || !$asset->id) {
+                                Log::error('[UploadController::finalize] Asset not created before metadata persistence', [
+                                    'upload_key' => $uploadKey,
+                                    'upload_session_id' => $uploadSessionId,
+                                ]);
+                                throw new \RuntimeException('Asset must be created before metadata persistence');
+                            }
+
+                            // Determine asset type for schema resolution (file type, not category asset_type)
+                            // Default to 'image' - can be enhanced to detect from file MIME type
+                            $fileAssetType = 'image';
+
+                            // UX-2: CRITICAL - Pass autoApprove=false to allow approval resolver to check
+                            // Approval is determined AFTER upload, not during metadata entry
+                            // This ensures contributors can enter metadata, which is then reviewed
+                            $this->metadataPersistenceService->persistMetadata(
+                                $asset,
+                                $category,
+                                $metadataFields,
+                                $user->id,
+                                $fileAssetType,
+                                false // autoApprove=false: Let approval resolver determine if approval needed
+                            );
+                        } catch (\Exception $e) {
+                            // Persistence failure - log but don't fail entire finalize
+                            // Asset is already created, metadata persistence is best-effort
+                            // Transaction rollback in service handles partial writes
+                            Log::error('[UploadController::finalize] Metadata persistence failed', [
+                                'asset_id' => $asset->id,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
+
+                            // Continue - asset is created, metadata persistence failed
+                            // This is acceptable as metadata can be added later via edit
+                        }
+                    }
+                } // Phase J.3.1: Close else block for create mode
 
                 // TASK 1: Check if metadata requires approval (UI-only, read-only information)
                 // This does not modify approval logic or persistence - only exposes data for UI
@@ -2087,12 +2116,17 @@ class UploadController extends Controller
                 // Unexpected errors - log and return as failed item
                 Log::error('Unexpected error finalizing upload', [
                     'upload_key' => $uploadKey,
+                    'upload_session_id' => $uploadSession?->id,
                     'error' => $e->getMessage(),
+                    'exception_class' => get_class($e),
                     'trace' => $e->getTraceAsString(),
                 ]);
 
                 $errorCode = 'server_error';
-                $errorMessage = 'An unexpected error occurred';
+                // Include actual error message for debugging (can be made more user-friendly later)
+                $errorMessage = config('app.debug') 
+                    ? $e->getMessage() 
+                    : 'An unexpected error occurred';
 
                 $results[] = [
                     'upload_key' => $uploadKey,

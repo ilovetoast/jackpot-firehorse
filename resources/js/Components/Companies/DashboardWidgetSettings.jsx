@@ -16,6 +16,7 @@ const WIDGETS = [
     { key: 'most_downloaded', label: 'Most Downloaded Assets', description: 'Shows most downloaded assets' },
     { key: 'pending_ai_suggestions', label: 'Pending AI Suggestions', description: 'Shows pending AI tag and metadata suggestions' },
     { key: 'pending_metadata_approvals', label: 'Pending Metadata Approvals', description: 'Shows pending metadata fields requiring approval' },
+    { key: 'pending_asset_approvals', label: 'Pending Asset Approvals', description: 'Shows pending contributor asset uploads requiring approval' },
 ]
 
 const ROLES = [
@@ -42,7 +43,7 @@ export default function DashboardWidgetSettings({ tenant, canEdit }) {
                 } else {
                     // Defaults: company widgets hidden for contributor/viewer, visible for others
                     const isCompanyWidget = ['total_assets', 'storage', 'download_links'].includes(widget.key)
-                    const isPermissionWidget = ['pending_ai_suggestions', 'pending_metadata_approvals'].includes(widget.key)
+                    const isPermissionWidget = ['pending_ai_suggestions', 'pending_metadata_approvals', 'pending_asset_approvals'].includes(widget.key)
                     
                     if (isCompanyWidget) {
                         config[role.key][widget.key] = !['contributor', 'viewer'].includes(role.key)
@@ -115,7 +116,7 @@ export default function DashboardWidgetSettings({ tenant, canEdit }) {
             defaultConfig[role.key] = {}
             WIDGETS.forEach(widget => {
                 const isCompanyWidget = ['total_assets', 'storage', 'download_links'].includes(widget.key)
-                const isPermissionWidget = ['pending_ai_suggestions', 'pending_metadata_approvals'].includes(widget.key)
+                const isPermissionWidget = ['pending_ai_suggestions', 'pending_metadata_approvals', 'pending_asset_approvals'].includes(widget.key)
                 
                 if (isCompanyWidget) {
                     defaultConfig[role.key][widget.key] = !['contributor', 'viewer'].includes(role.key)
