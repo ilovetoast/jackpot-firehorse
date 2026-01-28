@@ -2,14 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Models\Asset;
 use App\Models\Category;
+use App\Services\AiMetadataConfidenceService;
+use App\Services\MetadataFilterService;
+use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -17,7 +22,10 @@ class DeliverableController extends Controller
 {
     public function __construct(
         protected SystemCategoryService $systemCategoryService,
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected MetadataFilterService $metadataFilterService,
+        protected MetadataSchemaResolver $metadataSchemaResolver,
+        protected AiMetadataConfidenceService $confidenceService
     ) {
     }
 
@@ -142,6 +150,22 @@ class DeliverableController extends Controller
         $currentPlan = $this->planService->getCurrentPlan($tenant);
         $showAllButton = $currentPlan !== 'free';
 
+        // Phase L.5.1: Permission checks for lifecycle filters (match AssetController)
+        // - asset.publish: Required for "Pending Approval" filter (approvers can see pending assets)
+        // - metadata.bypass_approval: Required for "Unpublished" filter (full viewing privileges)
+        // - asset.archive: Required for "Archived" filter (users who can archive assets)
+        $canPublish = $user && $user->hasPermissionForTenant($tenant, 'asset.publish');
+        $canBypassApproval = $user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval');
+        // Check tenant permission first, then brand permission (matches AssetPolicy pattern)
+        $canArchive = $user && (
+            $user->hasPermissionForTenant($tenant, 'asset.archive') ||
+            ($brand && $user->hasPermissionForBrand($brand, 'asset.archive'))
+        );
+        
+        // For backward compatibility and default visibility: users with asset.publish can see unpublished
+        // But unpublished filter specifically requires metadata.bypass_approval (full viewing privileges)
+        $canSeeUnpublished = $canPublish || $canBypassApproval;
+
         // Resolve category slug → ID for filtering (slug-based URLs: ?category=rarr)
         $categorySlug = $request->get('category');
         $category = null;
@@ -158,15 +182,177 @@ class DeliverableController extends Controller
             }
         }
 
-        // Query deliverables - show all visible assets regardless of processing state
-        // This matches the behavior of the regular Assets page
-        // Assets are visible immediately after upload, processing happens in background
+        // Query deliverables - match Assets page behavior with lifecycle filters
         // Note: assets must be top-level prop for Inertia to pass to frontend component
         $assetsQuery = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', AssetType::DELIVERABLE)
-            ->where('status', AssetStatus::VISIBLE) // Only visible assets
             ->whereNull('deleted_at'); // Exclude soft-deleted assets
+
+        // Phase L.5.1: Lifecycle filter - Check early to determine visibility rules
+        // SECURITY: Apply lifecycle filters based on specific permissions (match AssetController)
+        // - pending_approval: Requires asset.publish (approvers)
+        // - pending_publication: Phase J - Contributors can see their own, approvers see all
+        // - unpublished: Requires metadata.bypass_approval (full viewing privileges)
+        // - archived: Requires asset.archive (users who can archive assets)
+        // - expired: Requires asset.archive (users who can archive assets, similar lifecycle management)
+        $lifecycleFilter = $request->get('lifecycle');
+        if ($lifecycleFilter === 'pending_approval' && !$canPublish) {
+            // User doesn't have asset.publish permission - ignore filter and log security event
+            Log::warning('[DeliverableController] Unauthorized pending_approval filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'pending_publication') {
+            // Phase J: Pending Publication filter - Contributors and approvers can access
+            // No additional permission check needed - visibility rules handle access control
+        } elseif ($lifecycleFilter === 'unpublished' && !$canBypassApproval) {
+            // User doesn't have metadata.bypass_approval permission - ignore filter and log security event
+            Log::warning('[DeliverableController] Unauthorized unpublished filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'archived' && !$canArchive) {
+            // User doesn't have asset.archive permission - ignore filter and log security event
+            Log::warning('[DeliverableController] Unauthorized archived filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        } elseif ($lifecycleFilter === 'expired' && !$canArchive) {
+            // Phase M: User doesn't have asset.archive permission - ignore filter and log security event
+            Log::warning('[DeliverableController] Unauthorized expired filter access attempt', [
+                'user_id' => $user?->id,
+                'lifecycle_filter' => $lifecycleFilter,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+            $lifecycleFilter = null; // Reset to prevent filter application
+        }
+
+        // Phase L.5.1: Visibility filter (match AssetController logic)
+        // Users with asset.publish can see HIDDEN assets (pending approval)
+        // Other users only see VISIBLE assets
+        // When lifecycle filter is active, adjust status filter accordingly
+        if ($lifecycleFilter === 'pending_approval' && $canPublish) {
+            // Pending approval: Only HIDDEN status, unpublished
+            // Requires asset.publish permission (approvers)
+            $assetsQuery->where('status', AssetStatus::HIDDEN)
+                ->whereNull('published_at');
+            
+            Log::info('[DeliverableController] Applied pending_approval lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+        } elseif ($lifecycleFilter === 'pending_publication') {
+            // Phase J: Pending Publication - Show assets with approval_status = pending or rejected
+            // Visibility rules:
+            // - Contributors: Only their own pending/rejected assets
+            // - Admin/Owner/Brand Manager: All pending/rejected assets
+            $userRole = $user ? $user->getRoleForTenant($tenant) : null;
+            $isTenantOwnerOrAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
+            
+            // Check if user is a brand manager
+            $isBrandManager = false;
+            if ($user && $brand) {
+                $membership = $user->activeBrandMembership($brand);
+                $isBrandManager = $membership && ($membership['role'] ?? null) === 'brand_manager';
+            }
+            
+            // Check if user is a contributor
+            $isContributor = false;
+            if ($user && $brand) {
+                $membership = $user->activeBrandMembership($brand);
+                $isContributor = $membership && ($membership['role'] ?? null) === 'contributor';
+            }
+            
+            // Approvers (Admin/Owner/Brand Manager) see all pending/rejected assets
+            // Contributors see only their own pending/rejected assets
+            if ($isContributor && !$isTenantOwnerOrAdmin && !$isBrandManager) {
+                // Contributor: Only their own assets
+                $assetsQuery->where('user_id', $user->id);
+            }
+            // Admin/Owner/Brand Manager: No user_id filter (see all)
+            
+            // Filter by approval_status = pending or rejected
+            $assetsQuery->where(function ($query) {
+                $query->where('approval_status', ApprovalStatus::PENDING)
+                      ->orWhere('approval_status', ApprovalStatus::REJECTED);
+            });
+            
+            Log::info('[DeliverableController] Applied pending_publication lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'is_contributor' => $isContributor,
+                'is_approver' => $isTenantOwnerOrAdmin || $isBrandManager,
+            ]);
+        } elseif ($lifecycleFilter === 'unpublished' && $canBypassApproval) {
+            // Unpublished filter: Show all unpublished assets (both VISIBLE and HIDDEN status)
+            // Requires metadata.bypass_approval permission (full viewing privileges)
+            $assetsQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                ->whereNull('published_at');
+            
+            Log::info('[DeliverableController] Applied unpublished lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'can_bypass_approval' => $canBypassApproval,
+            ]);
+        } elseif ($lifecycleFilter === 'archived' && $canArchive) {
+            // Archived filter: Show only archived assets
+            // Requires asset.archive permission (users who can archive assets)
+            $assetsQuery->whereNotNull('archived_at');
+            
+            Log::info('[DeliverableController] Applied archived lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'can_archive' => $canArchive,
+            ]);
+        } elseif ($lifecycleFilter === 'expired' && $canArchive) {
+            // Phase M: Expired filter: Show only expired assets
+            // Requires asset.archive permission (users who can archive assets, similar lifecycle management)
+            $assetsQuery->whereNotNull('expires_at')
+                        ->where('expires_at', '<=', now());
+            
+            Log::info('[DeliverableController] Applied expired lifecycle filter', [
+                'user_id' => $user?->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'can_archive' => $canArchive,
+            ]);
+        } else {
+            // Default visibility rules (no lifecycle filter active)
+            // CRITICAL: Unpublished assets should NEVER show unless filter is explicitly active
+            // Even users with permissions should not see unpublished assets by default
+            // This matches AssetController behavior
+            if ($canSeeUnpublished) {
+                // Users with permissions can see HIDDEN assets (pending approval) that are published
+                // But still exclude unpublished assets unless filter is active
+                $assetsQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
+                    ->whereNotNull('published_at'); // Always exclude unpublished in default view
+            } else {
+                // Regular users only see VISIBLE, published assets
+                $assetsQuery->where('status', AssetStatus::VISIBLE)
+                    ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
+            }
+        }
+
+        // Phase L.3: Exclude archived assets by default (unless archived filter is active)
+        // Archived assets are hidden from the grid unless explicitly filtered
+        if ($lifecycleFilter !== 'archived') {
+            $assetsQuery->whereNull('archived_at');
+        }
         
         // HARD TERMINAL STATE: Check for stuck assets and repair them
         // This prevents infinite processing states by automatically failing
@@ -422,12 +608,185 @@ class DeliverableController extends Controller
             })
             ->values();
 
+        // Phase L.5.1: Enable filters in "All Categories" view
+        // Resolve schema even when categoryId is null to allow system-level filters
+        $filterableSchema = [];
+        if ($categoryId && $category) {
+            // Use 'image' as default file type for metadata schema resolution
+            // Category's asset_type is organizational, not a file type
+            $fileType = 'image'; // Default file type for metadata schema resolution
+            
+            $schema = $this->metadataSchemaResolver->resolve(
+                $tenant->id,
+                $brand->id,
+                $categoryId,
+                $fileType
+            );
+            
+            // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
+            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
+        } elseif (!$categoryId) {
+            // "All Categories" view: Resolve schema without category context
+            // This enables system-level metadata fields (orientation, color_space, resolution_class, dimensions)
+            // that are computed from assets themselves, not category-specific
+            $fileType = 'image'; // Default file type for metadata schema resolution
+            
+            $schema = $this->metadataSchemaResolver->resolve(
+                $tenant->id,
+                $brand->id,
+                null, // No category context
+                $fileType
+            );
+            
+            // Pass null category to mark system fields as global
+            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
+        }
+        
+        // available_values is required by Phase H filter visibility rules
+        // Do not remove without updating Phase H contract
+        // Compute distinct metadata values for the current asset grid result set
+        $availableValues = [];
+        
+        if (!empty($filterableSchema) && $assets->count() > 0) {
+            // Get asset IDs from the current grid result set
+            $assetIds = $assets->pluck('id')->toArray();
+            
+            // Build map of filterable field keys for quick lookup
+            // Note: filterableSchema from getFilterableFields() already contains only filterable fields,
+            // so we don't need to check is_filterable - all fields in the array are filterable
+            $filterableFieldKeys = [];
+            foreach ($filterableSchema as $field) {
+                $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+                if ($fieldKey) {
+                    $filterableFieldKeys[$fieldKey] = true;
+                }
+            }
+            
+            if (!empty($filterableFieldKeys)) {
+                // Source 1: Query asset_metadata table (Phase G.4 structure)
+                // This is the authoritative source for approved metadata values
+                // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
+                // They should be included in available_values regardless of approved_at
+                
+                // Get automatic field IDs (fields with population_mode = 'automatic')
+                $automaticFieldIds = \DB::table('metadata_fields')
+                    ->where('population_mode', 'automatic')
+                    ->pluck('id')
+                    ->toArray();
+                
+                // Build query: Include automatic fields regardless of approved_at, require approved_at for others
+                $assetMetadataValues = \DB::table('asset_metadata')
+                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                    ->whereIn('asset_metadata.asset_id', $assetIds)
+                    ->whereIn('metadata_fields.key', array_keys($filterableFieldKeys))
+                    ->whereNotNull('asset_metadata.value_json')
+                    ->where(function($query) use ($automaticFieldIds) {
+                        // Automatic fields: include if value exists (no approval required)
+                        if (!empty($automaticFieldIds)) {
+                            $query->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                  ->orWhere(function($q) use ($automaticFieldIds) {
+                                      // Non-automatic fields require approval
+                                      $q->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                        ->whereNotNull('asset_metadata.approved_at');
+                                  });
+                        } else {
+                            // No automatic fields, require approval for all
+                            $query->whereNotNull('asset_metadata.approved_at');
+                        }
+                    })
+                    ->select('metadata_fields.key', 'metadata_fields.population_mode', 'asset_metadata.value_json', 'asset_metadata.confidence')
+                    ->distinct()
+                    ->get();
+                
+                // Group values by field key (with confidence filtering for AI metadata)
+                foreach ($assetMetadataValues as $row) {
+                    $fieldKey = $row->key;
+                    $confidence = $row->confidence !== null ? (float) $row->confidence : null;
+                    $populationMode = $row->population_mode ?? 'manual';
+                    
+                    // CRITICAL: Confidence suppression applies ONLY to AI fields
+                    // Automatic/system fields are never suppressed (they are authoritative)
+                    $isAiField = $populationMode === 'ai';
+                    if ($isAiField && $this->confidenceService->shouldSuppress($fieldKey, $confidence)) {
+                        continue; // Skip this value - treat as if it doesn't exist
+                    }
+                    
+                    $value = json_decode($row->value_json, true);
+                    
+                    // Skip null values
+                    if ($value !== null) {
+                        if (!isset($availableValues[$fieldKey])) {
+                            $availableValues[$fieldKey] = [];
+                        }
+                        
+                        // Handle arrays (multiselect fields) and scalar values
+                        if (is_array($value)) {
+                            foreach ($value as $item) {
+                                if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                    $availableValues[$fieldKey][] = $item;
+                                }
+                            }
+                        } else {
+                            if (!in_array($value, $availableValues[$fieldKey], true)) {
+                                $availableValues[$fieldKey][] = $value;
+                            }
+                        }
+                    }
+                }
+                
+                // Source 2: Query metadata JSON column (legacy/fallback)
+                // Extract values from metadata->fields structure for assets not in asset_metadata
+                $assetsWithMetadata = $assets->filter(function ($asset) {
+                    return !empty($asset->metadata) && isset($asset->metadata['fields']);
+                });
+                
+                foreach ($assetsWithMetadata as $asset) {
+                    $fields = $asset->metadata['fields'] ?? [];
+                    foreach ($fields as $fieldKey => $value) {
+                        // Only include if field is filterable
+                        if (isset($filterableFieldKeys[$fieldKey]) && $value !== null) {
+                            // Initialize array if field doesn't exist yet
+                            if (!isset($availableValues[$fieldKey])) {
+                                $availableValues[$fieldKey] = [];
+                            }
+                            
+                            // Handle arrays (multiselect fields) and scalar values
+                            // Deduplicate values (values from asset_metadata are authoritative)
+                            if (is_array($value)) {
+                                foreach ($value as $item) {
+                                    if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
+                                        $availableValues[$fieldKey][] = $item;
+                                    }
+                                }
+                            } else {
+                                if (!in_array($value, $availableValues[$fieldKey], true)) {
+                                    $availableValues[$fieldKey][] = $value;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Remove empty arrays (filters with no values should not appear)
+                $availableValues = array_filter($availableValues, function ($values) {
+                    return !empty($values);
+                });
+                
+                // Sort values for consistent output
+                foreach ($availableValues as $fieldKey => $values) {
+                    sort($availableValues[$fieldKey]);
+                }
+            }
+        }
+
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
             'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
+            'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
+            'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
         ]);
     }
 }

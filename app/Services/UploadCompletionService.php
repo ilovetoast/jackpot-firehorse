@@ -569,6 +569,8 @@ class UploadCompletionService
             // Phase AF-5: Gate approval workflow based on plan feature
             // This is separate from category-based approval (which is locked phase)
             // Approval is required ONLY if uploader.brand_user.requires_approval === true AND approvals.enabled = true
+            // CRITICAL: Brand/user approval check runs AFTER category check, so it can override category publish decision
+            // If category already published, brand/user approval can still unpublish if approval is required
             if ($userId !== null && $targetBrandId !== null) {
                 $user = \App\Models\User::find($userId);
                 $brand = \App\Models\Brand::find($targetBrandId);
@@ -593,34 +595,86 @@ class UploadCompletionService
                 // Approval required if either user-level flag OR brand-level contributor setting requires it
                 $requiresApproval = $userRequiresApproval || $contributorRequiresApproval;
                 
-                    if ($requiresApproval) {
-                        // User requires approval - set approval_status to pending
-                        $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
-                        // Asset remains unpublished until approved
-                        $asset->published_at = null;
-                        $asset->published_by_id = null;
-                        // Status remains VISIBLE (approval doesn't change visibility status, just approval_status)
-                        $asset->save();
+                if ($requiresApproval) {
+                    // User requires approval - set approval_status to pending
+                    $asset->approval_status = \App\Enums\ApprovalStatus::PENDING;
+                    // Asset remains unpublished until approved (even if category check published it)
+                    // Brand/user approval takes precedence over category auto-publish
+                    $asset->published_at = null;
+                    $asset->published_by_id = null;
+                    // Status remains VISIBLE (approval doesn't change visibility status, just approval_status)
+                    $asset->save();
+                    
+                    // Phase AF-2: Record submitted action
+                    $commentService = app(\App\Services\AssetApprovalCommentService::class);
+                    $commentService->recordSubmitted($asset, $user);
+                    
+                    // Phase AF-3: Notify approvers
+                    $notificationService = app(\App\Services\ApprovalNotificationService::class);
+                    $notificationService->notifyOnSubmitted($asset, $user);
+                    
+                    $approvalReason = $contributorRequiresApproval ? 'brand.contributor_upload_requires_approval' : 'brand_user.requires_approval';
+                    Log::info('[UploadCompletionService] Asset requires approval', [
+                        'asset_id' => $asset->id,
+                        'user_id' => $userId,
+                        'brand_id' => $targetBrandId,
+                        'approval_status' => 'pending',
+                        'approval_reason' => $approvalReason,
+                        'is_contributor' => $isContributor,
+                        'brand_requires_contributor_approval' => $brandRequiresContributorApproval,
+                        'asset_type' => $asset->type->value,
+                    ]);
+                } else {
+                    // Approval not required - publish if asset is still unpublished
+                    // This ensures deliverables (and assets) are published by default when approval is not required
+                    // This matches the same workflow as assets and handles cases where category check didn't publish
+                    // Only publish if category doesn't require approval (check category first)
+                    // CRITICAL: If category check already published the asset, don't republish (idempotent)
+                    // If category check didn't publish (category not found, no categoryId, etc.), then publish here
+                    if (!$asset->isPublished()) {
+                        // Check if category requires approval (only if categoryId was provided)
+                        $categoryRequiresApproval = false;
+                        if ($categoryId !== null) {
+                            // Re-fetch category to check approval requirement
+                            // Note: Category was already fetched in category check block, but we need to check again
+                            // in case categoryId was null in that block
+                            $category = Category::find($categoryId);
+                            if ($category) {
+                                $categoryRequiresApproval = $category->requiresApproval();
+                            }
+                        }
                         
-                        // Phase AF-2: Record submitted action
-                        $commentService = app(\App\Services\AssetApprovalCommentService::class);
-                        $commentService->recordSubmitted($asset, $user);
-                        
-                        // Phase AF-3: Notify approvers
-                        $notificationService = app(\App\Services\ApprovalNotificationService::class);
-                        $notificationService->notifyOnSubmitted($asset, $user);
-                        
-                        $approvalReason = $contributorRequiresApproval ? 'brand.contributor_upload_requires_approval' : 'brand_user.requires_approval';
-                        Log::info('[UploadCompletionService] Asset requires approval', [
+                        // Only auto-publish if category doesn't require approval
+                        // If category requires approval, it was already set to unpublished above and should stay that way
+                        if (!$categoryRequiresApproval) {
+                            $asset->published_at = now();
+                            $asset->published_by_id = $userId;
+                            $asset->save();
+                            
+                            Log::info('[UploadCompletionService] Asset auto-published (approval not required, category does not require approval)', [
+                                'asset_id' => $asset->id,
+                                'user_id' => $userId,
+                                'brand_id' => $targetBrandId,
+                                'asset_type' => $asset->type->value,
+                                'category_id' => $categoryId,
+                                'published_by_id' => $userId,
+                            ]);
+                        } else {
+                            Log::info('[UploadCompletionService] Asset not auto-published (category requires approval)', [
+                                'asset_id' => $asset->id,
+                                'category_id' => $categoryId,
+                                'asset_type' => $asset->type->value,
+                            ]);
+                        }
+                    } else {
+                        // Asset already published (likely by category check) - no action needed
+                        Log::debug('[UploadCompletionService] Asset already published, skipping brand/user approval check publish', [
                             'asset_id' => $asset->id,
-                            'user_id' => $userId,
-                            'brand_id' => $targetBrandId,
-                            'approval_status' => 'pending',
-                            'approval_reason' => $approvalReason,
-                            'is_contributor' => $isContributor,
-                            'brand_requires_contributor_approval' => $brandRequiresContributorApproval,
+                            'published_at' => $asset->published_at?->toIso8601String(),
+                            'asset_type' => $asset->type->value,
                         ]);
                     }
+                }
                 // If not required, approval_status already set to NOT_REQUIRED during creation
             }
 

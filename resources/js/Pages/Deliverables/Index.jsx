@@ -7,7 +7,9 @@ import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
+import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
+import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import {
     TagIcon,
     SparklesIcon,
@@ -15,7 +17,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [] }) {
+export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [], filterable_schema = [], available_values = {} }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { hasPermission: canUpload } = usePermission('asset.upload')
@@ -23,17 +25,59 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
     
+    // FINAL FIX: Remount key to force page remount after finalize
+    const [remountKey, setRemountKey] = useState(0)
+    
     // Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
     // Do not convert back to prop-based visibility.
     const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
+    
+    // Prevent reopening dialog during auto-close timeout (400-700ms delay)
+    const [isAutoClosing, setIsAutoClosing] = useState(false)
+    
+    // Local asset state (same pattern as Assets/Index)
+    const [localAssets, setLocalAssets] = useState(assets)
+    
+    // Update local assets when props change (e.g., after Inertia reload)
+    // Guard: Protect completed thumbnails from being overwritten on refresh
+    useEffect(() => {
+        setLocalAssets(prevAssets => {
+            // If no previous assets, use new assets as-is
+            if (!prevAssets || prevAssets.length === 0) {
+                return assets
+            }
+            
+            // Merge new assets with field-level protection
+            return assets.map(newAsset => {
+                const prevAsset = prevAssets.find(a => a.id === newAsset.id)
+                if (!prevAsset) {
+                    return newAsset
+                }
+                
+                // Dev warning if attempting to overwrite completed thumbnail
+                warnIfOverwritingCompletedThumbnail(prevAsset, newAsset, 'refresh-sync')
+                
+                // Field-level merge: protects thumbnail fields but allows title, filename, metadata updates
+                return mergeAsset(prevAsset, newAsset)
+            })
+        })
+        
+        // Clear staleness flag when assets prop is reloaded (grid is now synced)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
+    }, [assets])
     
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
     
-    // Derive active asset from current assets array to prevent stale references
+    // Derive active asset from local assets array to prevent stale references
     // If asset no longer exists after reload, activeAsset will be null and drawer will close
-    const activeAsset = activeAssetId ? assets.find(asset => asset.id === activeAssetId) : null
+    const activeAsset = activeAssetId ? localAssets.find(asset => asset.id === activeAssetId) : null
     
     // Close drawer if active asset no longer exists in current assets array
     useEffect(() => {
@@ -157,7 +201,34 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     
     // FINAL FIX: Force page remount via key to prevent multiple instances
     // This ensures React unmounts the old page instance when props change
-    const pageKey = `deliverables-${selectedCategoryId || 'all'}-${assets?.length || 0}`
+    const pageKey = `deliverables-${selectedCategoryId || 'all'}-${assets?.length || 0}-${remountKey}`
+    
+    // Handle finalize complete - refresh asset grid after successful upload finalize
+    // Match Assets/Index behavior: preserve drawer state by only reloading assets prop
+    const handleFinalizeComplete = useCallback(() => {
+        // Set auto-closing flag to prevent reopening during timeout
+        setIsAutoClosing(true)
+        
+        // Ensure dialog stays closed during reload
+        setIsUploadDialogOpen(false)
+        
+        // Force page remount by incrementing remount key
+        setRemountKey(prev => prev + 1)
+        
+        // Reload assets to show newly uploaded assets
+        // Use preserveState: true to preserve activeAssetId (keeps drawer open if it was open)
+        // This matches Assets/Index behavior - drawer state is preserved via activeAssetId in state
+        router.reload({ 
+            only: ['assets'], 
+            preserveScroll: true,
+            preserveState: true, // Preserve drawer state (activeAssetId) - keeps drawer open
+            onSuccess: () => {
+                setIsUploadDialogOpen(false)
+                // Reset auto-closing flag after reload completes
+                setIsAutoClosing(false)
+            }
+        })
+    }, [])
     
     // Drag-and-drop state for files dropped on grid
     const [droppedFiles, setDroppedFiles] = useState(null)
@@ -165,16 +236,21 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     
     // BUGFIX: Single handler to open upload dialog
     const handleOpenUploadDialog = useCallback((files = null) => {
+        // Prevent opening if auto-close is in progress
+        if (isAutoClosing) {
+            return
+        }
         // Store dropped files if provided
         if (files) {
             setDroppedFiles(files)
         }
         setIsUploadDialogOpen(true)
-    }, [])
+    }, [isAutoClosing])
     
     // BUGFIX: Single handler to close upload dialog
     const handleCloseUploadDialog = useCallback(() => {
         setIsUploadDialogOpen(false)
+        setIsAutoClosing(false) // Reset flag if manually closed
         setDroppedFiles(null) // Clear dropped files when dialog closes
     }, [])
     
@@ -416,7 +492,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                         {/* Asset Grid Toolbar */}
-                        {assets && assets.length > 0 && (
+                        {localAssets && localAssets.length > 0 && (
                             <div className="mb-6">
                                 <AssetGridToolbar
                                     showInfo={showInfo}
@@ -424,14 +500,53 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                     cardSize={cardSize}
                                     onCardSizeChange={setCardSize}
                                     primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                    showMoreFilters={true}
+                                    moreFiltersContent={
+                                        /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
+                                        /* 
+                                            Secondary metadata filters are metadata fields NOT marked as primary.
+                                            These filters render in the "More filters" expandable section.
+                                            
+                                            Visibility rules (enforced by Phase H helpers):
+                                            - Field does NOT have is_primary === true (excluded from primary)
+                                            - Field is ENABLED for the current category (filterScopeRules.isFilterCompatible)
+                                            - Field has Filter = true (is_filterable) - enforced by backend filterable_schema
+                                            - Field has ≥1 value in current asset grid (filterVisibilityRules.hasAvailableValues)
+                                            
+                                            Phase H helpers used:
+                                            - normalizeFilterConfig: Normalizes Inertia props
+                                            - filterTierResolver.getSecondaryFilters: Gets metadata fields from schema (excludes is_primary === true)
+                                            - filterVisibilityRules.getVisibleFilters: Filters to visible only
+                                            
+                                            UI behavior:
+                                            - Bar always persists (content changes based on category)
+                                            - Shows "More filters" button always (disabled if no filters)
+                                            - Updates URL query params immediately on change
+                                            - Triggers grid refresh (only: ['assets'])
+                                            - Shows empty state if no filters available for current category
+                                            
+                                            Explicitly does NOT render:
+                                            - Category selectors (sidebar handles this)
+                                            - Asset type selectors (route/nav handles this)
+                                            - Brand selectors (never selectable)
+                                            - Primary metadata filters (is_primary === true) - handled by AssetGridMetadataPrimaryFilters
+                                        */
+                                        <AssetGridSecondaryFilters
+                                            filterable_schema={filterable_schema}
+                                            selectedCategoryId={selectedCategoryId}
+                                            available_values={available_values}
+                                            canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
+                                            assetType="image"
+                                        />
+                                    }
                                 />
                             </div>
                         )}
                         
                         {/* Deliverables Grid or Empty State */}
-                        {assets && assets.length > 0 ? (
+                        {localAssets && localAssets.length > 0 ? (
                             <AssetGrid 
-                                assets={assets} 
+                                assets={localAssets} 
                                 onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
                                 cardSize={cardSize}
                                 showInfo={showInfo}
@@ -468,8 +583,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
-                                assets={assets}
-                                currentAssetIndex={assets.findIndex(a => a.id === activeAsset.id)}
+                                assets={localAssets}
+                                currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
                             />
                         </div>
                     )}
@@ -482,8 +597,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                         <AssetDrawer
                             asset={activeAsset}
                             onClose={() => setActiveAssetId(null)}
-                            assets={assets}
-                            currentAssetIndex={assets.findIndex(a => a.id === activeAsset.id)}
+                            assets={localAssets}
+                            currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
                         />
                     </div>
                 )}
@@ -498,6 +613,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                     defaultAssetType="deliverable"
                     categories={categories || []}
                     initialCategoryId={selectedCategoryId}
+                    onFinalizeComplete={handleFinalizeComplete}
                     initialFiles={droppedFiles}
                 />
             )}
