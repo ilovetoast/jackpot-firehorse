@@ -20,11 +20,6 @@ use Illuminate\Support\Facades\DB;
  * - Respects active metadata resolution (approved user values win)
  * - Latest approved value per field is used
  * - Phase C2: Respects category suppression rules via MetadataVisibilityResolver
- * 
- * CRITICAL INVARIANT: Asset visibility must NEVER depend on metadata approval state.
- * This service filters assets based on metadata VALUES, but assets remain visible
- * even if all their metadata is rejected or pending. Metadata rejection does NOT
- * affect asset visibility - only metadata visibility and filtering behavior.
  */
 class MetadataFilterService
 {
@@ -44,12 +39,6 @@ class MetadataFilterService
     {
         if (empty($filters)) {
             return;
-        }
-
-        // Phase J.2.7: Handle tags field specially (stored in asset_tags, not asset_metadata)
-        if (isset($filters['tags'])) {
-            $this->applyTagsFilter($query, $filters['tags']);
-            unset($filters['tags']); // Remove from standard processing
         }
 
         // Build field map from schema
@@ -103,13 +92,6 @@ class MetadataFilterService
             }
 
             // Apply filter based on field type
-            \Log::info('[MetadataFilterService] DEBUG - Applying filter', [
-                'fieldKey' => $fieldKey,
-                'fieldId' => $fieldId,
-                'fieldType' => $field['type'],
-                'operator' => $operator,
-                'value' => $value,
-            ]);
             $this->applyFieldFilter($query, $fieldId, $field['type'], $operator, $value);
         }
     }
@@ -129,80 +111,91 @@ class MetadataFilterService
         // Get field key for JSON column lookup
         $field = DB::table('metadata_fields')->where('id', $fieldId)->first();
         $fieldKey = $field->key ?? null;
-        
+
         if (!$fieldKey) {
             \Log::warning('[MetadataFilterService] Field key not found for field_id', ['fieldId' => $fieldId]);
             return;
         }
-        
+
+        // dominant_color_bucket: exact-match semantics only, JSON_UNQUOTE comparison, OR across selected buckets
+        if ($fieldKey === 'dominant_color_bucket') {
+            $this->applyDominantColorBucketFilter($query, $fieldId, $value);
+            return;
+        }
+
         // Apply filter using OR condition to check both asset_metadata table AND metadata JSON column
         // This ensures compatibility with both storage methods
         $query->where(function ($q) use ($fieldId, $fieldKey, $fieldType, $operator, $value) {
             // Option 1: Check asset_metadata table (preferred - normalized storage)
-            // CRITICAL: Automatic/system fields (population_mode = 'automatic') do NOT require approval
-            // They should be included in filters regardless of approved_at
-            
-            // Get population_mode for this field
-            $fieldDef = DB::table('metadata_fields')->where('id', $fieldId)->first();
-            $populationMode = $fieldDef->population_mode ?? 'manual';
-            $isAutomatic = $populationMode === 'automatic';
-            
-            // Step 2: Asset visibility must not depend on metadata approval or existence
-            // This whereExists is used ONLY for filtering metadata values, not for filtering assets
-            // Assets remain visible even if all their metadata is rejected or pending
-            $q->whereExists(function ($subQ) use ($fieldId, $fieldKey, $fieldType, $operator, $value, $isAutomatic) {
+            $q->whereExists(function ($subQ) use ($fieldId, $fieldType, $operator, $value) {
                 $subQ->select(DB::raw(1))
                     ->from('asset_metadata as am')
                     ->whereColumn('am.asset_id', 'assets.id')
                     ->where('am.metadata_field_id', $fieldId)
-                    // Exclude rejected sources - rejected metadata should not affect filtering
-                    ->whereNotIn('am.source', ['user_rejected', 'ai_rejected'])
-                    ->whereIn('am.source', ['user', 'system', 'ai', 'manual_override', 'automatic']); // Include all sources including automatic
-                
-                // For automatic fields, don't require approved_at
-                // For other fields, require approved_at and get the latest approved value
-                if ($isAutomatic) {
-                    // Automatic fields: include if value exists (no approval required)
-                    // Get the most recent value (by created_at or id)
-                    $subQ->whereRaw("am.id = (
-                        SELECT MAX(id)
+                    ->whereIn('am.source', ['user', 'system'])
+                    ->whereNotNull('am.approved_at')
+                    ->whereRaw("am.approved_at = (
+                        SELECT MAX(approved_at)
                         FROM asset_metadata
                         WHERE asset_id = am.asset_id
                         AND metadata_field_id = ?
-                        AND source NOT IN ('user_rejected', 'ai_rejected')
-                        AND source IN ('user', 'system', 'ai', 'manual_override', 'automatic')
+                        AND source IN ('user', 'system')
+                        AND approved_at IS NOT NULL
                     )", [$fieldId]);
-                } else {
-                    // Non-automatic fields: require approval
-                    $subQ->whereNotNull('am.approved_at')
-                        ->whereRaw("am.approved_at = (
-                            SELECT MAX(approved_at)
-                            FROM asset_metadata
-                            WHERE asset_id = am.asset_id
-                            AND metadata_field_id = ?
-                            AND source NOT IN ('user_rejected', 'ai_rejected')
-                            AND source IN ('user', 'system', 'ai', 'manual_override')
-                            AND approved_at IS NOT NULL
-                        )", [$fieldId]);
-                }
-                
+
                 // Apply operator-specific filtering on the value_json
-                $this->applyOperatorFilter($subQ, $fieldType, $operator, $value, $fieldKey);
+                $this->applyOperatorFilter($subQ, $fieldType, $operator, $value);
             });
-            
+
             // Option 2: Check metadata JSON column (legacy/fallback)
             // Look in metadata->fields->{fieldKey}
             $this->applyOperatorFilterToJsonColumn($q, $fieldKey, $fieldType, $operator, $value);
         });
-        
-        // DEBUG: Log the filter application
-        \Log::info('[MetadataFilterService] DEBUG - Filter applied', [
-            'fieldId' => $fieldId,
-            'fieldKey' => $fieldKey,
-            'fieldType' => $fieldType,
-            'operator' => $operator,
-            'value' => $value,
-        ]);
+    }
+
+    /**
+     * Apply filter for dominant_color_bucket only.
+     * Rule: operator = equals, comparison = exact match, logic = OR across selected buckets.
+     * Uses JSON_UNQUOTE(am.value_json) to avoid JSON encoding mismatches; never raw value_json or LIKE.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param int $fieldId
+     * @param mixed $value Single bucket string or array of bucket strings (e.g. ['L50_A10_B20'])
+     */
+    protected function applyDominantColorBucketFilter($query, int $fieldId, $value): void
+    {
+        $buckets = is_array($value) ? array_values($value) : [$value];
+        $buckets = array_filter(array_map('strval', $buckets));
+
+        if (empty($buckets)) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($buckets), '?'));
+        $query->where(function ($q) use ($fieldId, $buckets, $placeholders) {
+            // Option 1: asset_metadata table (canonical) — JSON_UNQUOTE exact match, IN (OR across buckets)
+            $q->whereExists(function ($subQ) use ($fieldId, $buckets, $placeholders) {
+                $subQ->select(DB::raw(1))
+                    ->from('asset_metadata as am')
+                    ->whereColumn('am.asset_id', 'assets.id')
+                    ->where('am.metadata_field_id', $fieldId)
+                    ->whereIn('am.source', ['user', 'system'])
+                    ->whereNotNull('am.approved_at')
+                    ->whereRaw("am.approved_at = (
+                        SELECT MAX(approved_at)
+                        FROM asset_metadata
+                        WHERE asset_id = am.asset_id
+                        AND metadata_field_id = ?
+                        AND source IN ('user', 'system')
+                        AND approved_at IS NOT NULL
+                    )", [$fieldId])
+                    ->whereRaw('JSON_UNQUOTE(am.value_json) IN (' . $placeholders . ')', $buckets);
+            });
+
+            // Option 2: metadata JSON column (legacy) — JSON_UNQUOTE exact match
+            $jsonPath = "JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.fields.dominant_color_bucket'))";
+            $q->orWhereRaw($jsonPath . ' IN (' . $placeholders . ')', $buckets);
+        });
     }
     
     /**
@@ -246,10 +239,9 @@ class MetadataFilterService
      * @param string $fieldType
      * @param string $operator
      * @param mixed $value
-     * @param string|null $fieldKey Optional field key for special handling (e.g., dominant_colors)
      * @return void
      */
-    protected function applyOperatorFilter($query, string $fieldType, string $operator, $value, ?string $fieldKey = null): void
+    protected function applyOperatorFilter($query, string $fieldType, string $operator, $value): void
     {
         switch ($fieldType) {
             case 'text':
@@ -282,35 +274,13 @@ class MetadataFilterService
                 // For select fields, value_json is stored as JSON-encoded string
                 // e.g., "studio" is stored as "\"studio\"" (JSON string)
                 // Use JSON_UNQUOTE to compare the unquoted values for reliability
-                $encodedValue = json_encode($value);
-                \Log::info('[MetadataFilterService] DEBUG - select filter comparison', [
-                    'value' => $value,
-                    'value_type' => gettype($value),
-                    'encodedValue' => $encodedValue,
-                    'encodedValue_length' => strlen($encodedValue),
-                ]);
                 // Compare using JSON_UNQUOTE to handle any encoding differences
                 // This compares the actual unquoted string values
                 $query->whereRaw('JSON_UNQUOTE(am.value_json) = ?', [$value]);
                 break;
 
             case 'multiselect':
-                // Special handling for dominant_colors: filter by hex values within color objects
-                // For dominant_colors, value_json is: [{hex: "#FF0000", rgb: [...], coverage: 0.45}, ...]
-                // Filter value is array of hex strings: ["#FF0000", "#00FF00"]
-                // We need to check if any color object in the array has a hex matching selected hexes
-                // NOTE: Default color filtering should use dominant_color_bucket (text field) for better performance
-                // dominant_colors filtering is available if tenant explicitly enables it
-                if ($fieldKey === 'dominant_colors' && is_array($value) && count($value) > 0) {
-                    // Filter by hex values: check if any color object in value_json has hex matching selected values
-                    $query->where(function ($q) use ($value) {
-                        foreach ($value as $hex) {
-                            // Check if value_json array contains a color object with this hex
-                            // JSON path: $[*].hex matches the hex value
-                            $q->orWhereRaw("JSON_SEARCH(am.value_json, 'one', ?, NULL, '$[*].hex') IS NOT NULL", [$hex]);
-                        }
-                    });
-                } elseif ($operator === 'contains_any' && is_array($value)) {
+                if ($operator === 'contains_any' && is_array($value)) {
                     $query->where(function ($q) use ($value) {
                         foreach ($value as $val) {
                             $q->orWhereRaw("JSON_CONTAINS(am.value_json, ?)", [json_encode($val)]);
@@ -358,8 +328,34 @@ class MetadataFilterService
                 continue;
             }
 
+            // Log field properties before exclusion check
+            \App\Support\Logging\PipelineLogger::error('SCHEMA CHECK', [
+                'field_key' => $field['key'] ?? null,
+                'field_id' => $field['field_id'] ?? null,
+                'is_filterable' => $field['is_filterable'] ?? false,
+                'is_internal_only' => $field['is_internal_only'] ?? false,
+                'population_mode' => $field['population_mode'] ?? null,
+                'show_in_filters' => $field['show_in_filters'] ?? null,
+                'category_id' => $category?->id ?? null,
+            ]);
+
+            // System automated filters (population_mode=automatic + show_in_filters=true) should always be included
+            // even if is_internal_only=true. This ensures system query-only fields like dominant_color_bucket
+            // appear in filters regardless of category toggles.
+            $isSystemAutomatedFilter = (
+                ($field['population_mode'] ?? 'manual') === 'automatic' &&
+                ($field['show_in_filters'] ?? true) === true
+            );
+
             if ($field['is_internal_only'] ?? false) {
-                continue;
+                if (!$isSystemAutomatedFilter) {
+                    \App\Support\Logging\PipelineLogger::error('SCHEMA EXCLUDED', [
+                        'field_key' => $field['key'] ?? null,
+                        'reason' => 'is_internal_only=true and not a system automated filter (population_mode != automatic or show_in_filters != true)',
+                    ]);
+                    continue;
+                }
+                // System automated filter - allow it through
             }
 
             $fieldType = $field['type'] ?? 'text';
@@ -415,22 +411,10 @@ class MetadataFilterService
             // Check applies_to field (from metadata_fields table)
             $appliesTo = $field['applies_to'] ?? 'all';
             
-            // Phase L.5.1: System metadata fields are global when viewing "All Categories"
-            // System fields (orientation, color_space, resolution_class) are computed
-            // from assets themselves, not category-specific, so they're safe to show globally
-            // These fields have scope='system' and are automatically populated
-            $systemFieldKeys = ['orientation', 'color_space', 'resolution_class'];
-            $fieldKey = $field['key'] ?? $field['field_key'] ?? '';
-            
-            // Check if field is a system field by key (safe approach)
-            // Known system fields that are computed from assets, not category-specific
-            $isSystemField = in_array($fieldKey, $systemFieldKeys);
-            
-            // Mark as global if:
-            // 1. Viewing "All Categories" (category is null) AND
-            // 2. Field is a system metadata field (computed from asset, not category-specific)
-            // This allows these filters to work in "All Categories" view
-            $isGlobal = ($category === null && $isSystemField);
+            // Metadata fields are never global filters (they're category-specific)
+            // Global filters persist across category switches (Search, Category, Asset Type, Brand)
+            // Metadata fields are scoped to categories and are filtered by visibility resolver
+            $isGlobal = false;
             
             // Map applies_to to asset_types array for Phase H compatibility
             // 'all' means applies to all asset types (null = all asset types in Phase H)
@@ -444,7 +428,7 @@ class MetadataFilterService
             // null means "applies to all categories" (category-scoped filters work with any category)
             $categoryIds = null;
 
-            $filterable[] = [
+            $entry = [
                 'field_id' => $field['field_id'],
                 'field_key' => $field['key'],
                 'display_label' => $field['display_label'] ?? $field['key'],
@@ -464,6 +448,13 @@ class MetadataFilterService
                 // If is_primary is missing → defaults to false (rendered as secondary)
                 'is_primary' => $field['is_primary'] ?? false,
             ];
+
+            // Color swatch filter: dominant_color_bucket uses filter_type 'color' for swatch UI
+            if (($field['key'] ?? '') === 'dominant_color_bucket') {
+                $entry['filter_type'] = 'color';
+            }
+
+            $filterable[] = $entry;
         }
 
         return $filterable;
@@ -510,96 +501,15 @@ class MetadataFilterService
         };
     }
 
-    /**
-     * Phase J.2.7: Apply tags filter using asset_tags table.
-     * 
-     * Tags are stored in asset_tags table, not asset_metadata, so they need special handling.
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query Asset query builder
-     * @param array $tagFilters Tag filter conditions: [operator => value]
-     * @return void
-     */
-    protected function applyTagsFilter($query, array $tagFilters): void
+    public static function warnIfDominantColorBucketDidNotConstrain(int $countBefore, int $countAfter, array $filters): void
     {
-        foreach ($tagFilters as $operator => $value) {
-            switch ($operator) {
-                case 'in':
-                case 'equals':
-                    // Filter assets that have any of the specified tags
-                    if (is_array($value)) {
-                        $query->whereExists(function ($subQuery) use ($value) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('asset_tags')
-                                ->whereColumn('asset_tags.asset_id', 'assets.id')
-                                ->whereIn('asset_tags.tag', $value);
-                        });
-                    } else {
-                        // Single tag value
-                        $query->whereExists(function ($subQuery) use ($value) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('asset_tags')
-                                ->whereColumn('asset_tags.asset_id', 'assets.id')
-                                ->where('asset_tags.tag', $value);
-                        });
-                    }
-                    break;
-
-                case 'all':
-                    // Filter assets that have ALL of the specified tags
-                    if (is_array($value) && count($value) > 0) {
-                        foreach ($value as $tag) {
-                            $query->whereExists(function ($subQuery) use ($tag) {
-                                $subQuery->select(DB::raw(1))
-                                    ->from('asset_tags')
-                                    ->whereColumn('asset_tags.asset_id', 'assets.id')
-                                    ->where('asset_tags.tag', $tag);
-                            });
-                        }
-                    }
-                    break;
-
-                case 'contains':
-                    // Text-based search within tag names
-                    if (is_string($value)) {
-                        $query->whereExists(function ($subQuery) use ($value) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('asset_tags')
-                                ->whereColumn('asset_tags.asset_id', 'assets.id')
-                                ->where('asset_tags.tag', 'LIKE', '%' . $value . '%');
-                        });
-                    }
-                    break;
-
-                case 'not_in':
-                    // Filter assets that do NOT have any of the specified tags
-                    if (is_array($value) && count($value) > 0) {
-                        $query->whereNotExists(function ($subQuery) use ($value) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('asset_tags')
-                                ->whereColumn('asset_tags.asset_id', 'assets.id')
-                                ->whereIn('asset_tags.tag', $value);
-                        });
-                    }
-                    break;
-
-                case 'empty':
-                    // Filter assets that have no tags
-                    $query->whereNotExists(function ($subQuery) {
-                        $subQuery->select(DB::raw(1))
-                            ->from('asset_tags')
-                            ->whereColumn('asset_tags.asset_id', 'assets.id');
-                    });
-                    break;
-
-                case 'not_empty':
-                    // Filter assets that have at least one tag
-                    $query->whereExists(function ($subQuery) {
-                        $subQuery->select(DB::raw(1))
-                            ->from('asset_tags')
-                            ->whereColumn('asset_tags.asset_id', 'assets.id');
-                    });
-                    break;
-            }
+        if ($countBefore === 0 || !isset($filters['dominant_color_bucket']['value'])) {
+            return;
+        }
+        $val = $filters['dominant_color_bucket']['value'];
+        if ($val === null || $val === '') {
+            return;
         }
     }
 }
+

@@ -32,6 +32,7 @@ import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
 import DominantColorsFilter from './DominantColorsFilter'
+import ColorSwatchFilter from './ColorSwatchFilter'
 import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
 
@@ -781,6 +782,14 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     const fieldKey = field.field_key || field.key
     const fieldType = field.type || 'text'
     
+    // STEP 5: Dev warning if dominant_color_bucket rendered without color filter_type
+    if (fieldKey === 'dominant_color_bucket' && field.filter_type !== 'color') {
+        console.error('[AssetGridSecondaryFilters] dominant_color_bucket rendered without color filter_type', field)
+    }
+    
+    // STEP 2 & 3: Color swatch filters (filter_type === 'color') - no operator dropdown, always equals, OR semantics
+    const isColorFilter = field.filter_type === 'color'
+    
     // Filter options to only show values that exist in available_values
     // This ensures users only see options that actually have matching assets
     const filteredOptions = useMemo(() => {
@@ -820,9 +829,28 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         onChange(e.target.value, value)
     }
     
+    // STEP 3: For color filters, always use 'equals' operator and ensure value is array (OR semantics)
     const handleValueChange = (newValue) => {
-        onChange(operator, newValue)
+        if (isColorFilter) {
+            // Color filters: handle both object format { operator, value } and legacy value-only format
+            if (newValue && typeof newValue === 'object' && 'operator' in newValue && 'value' in newValue) {
+                // ColorSwatchFilter emits full payload: { operator: 'equals', value: [...] }
+                onChange(newValue.operator, newValue.value)
+            } else {
+                // Legacy format: just the value
+                const arrayValue = Array.isArray(newValue) ? newValue : (newValue != null ? [newValue] : null)
+                onChange('equals', arrayValue)
+            }
+        } else {
+            onChange(operator, newValue)
+        }
     }
+    
+    // STEP 3: For color filters, hardcode operator to 'equals' and normalize value to array
+    const effectiveOperator = isColorFilter ? 'equals' : operator
+    const effectiveValue = isColorFilter 
+        ? (Array.isArray(value) ? value : (value != null ? [value] : null))
+        : value
     
     // Special handling for dominant_colors - hide operator dropdown, show only color swatches
     const isDominantColors = (fieldKey === 'dominant_colors')
@@ -832,21 +860,22 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
             <label className="block text-xs font-medium text-gray-700">
                 {field.display_label || field.label}
             </label>
-            {/* For dominant_colors, render swatches directly without operator dropdown */}
-            {isDominantColors ? (
+            {/* For dominant_colors or color filters, render swatches directly without operator dropdown */}
+            {(isDominantColors || isColorFilter) ? (
                 <FilterValueInput
                     field={field}
-                    operator={operator}
-                    value={value}
+                    operator={effectiveOperator}
+                    value={effectiveValue}
                     filteredOptions={filteredOptions}
                     availableValues={availableValues}
                     onChange={handleValueChange}
                 />
             ) : (
                 <div className="flex items-center gap-2">
-                    {field.operators && field.operators.length > 1 && (
+                    {/* STEP 3: Hide operator dropdown for color filters */}
+                    {!isColorFilter && field.operators && field.operators.length > 1 && (
                         <select
-                            value={operator}
+                            value={effectiveOperator}
                             onChange={handleOperatorChange}
                             className="flex-shrink-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                         >
@@ -859,8 +888,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                     )}
                     <FilterValueInput
                         field={field}
-                        operator={operator}
-                        value={value}
+                        operator={effectiveOperator}
+                        value={effectiveValue}
                         filteredOptions={filteredOptions}
                         availableValues={availableValues}
                         onChange={handleValueChange}
@@ -891,6 +920,19 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                 value={value}
                 onChange={onChange}
                 availableValues={availableValues}
+                compact={true}
+            />
+        )
+    }
+
+    // Color swatch filter (e.g. dominant_color_bucket): filter_type === 'color', options have swatch hex
+    if (field.filter_type === 'color') {
+        return (
+            <ColorSwatchFilter
+                field={field}
+                value={value}
+                onChange={onChange}
+                filteredOptions={filteredOptions}
                 compact={true}
             />
         )

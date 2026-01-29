@@ -32,6 +32,12 @@ Route::middleware('guest')->group(function () {
     Route::post('/invite/complete/{token}/{tenant}', [\App\Http\Controllers\TeamController::class, 'completeInviteRegistration'])->name('invite.complete');
 });
 
+// CSRF token refresh endpoint (for handling stale tokens after session regeneration)
+// Accessible to authenticated users (session exists, just token may be stale)
+Route::get('/csrf-token', function (Request $request) {
+    return response()->json(['token' => csrf_token()]);
+})->middleware(['web']);
+
 Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     

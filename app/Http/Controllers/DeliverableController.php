@@ -638,6 +638,24 @@ class DeliverableController extends Controller
             }
         }
 
+        // Attach color swatch data to dominant_color_bucket filter options (filter_type = 'color')
+        $colorBucketService = app(\App\Services\ColorBucketService::class);
+        foreach ($filterableSchema as &$field) {
+            $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+            if ($fieldKey === 'dominant_color_bucket') {
+                $bucketValues = $availableValues['dominant_color_bucket'] ?? [];
+                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService) {
+                    return [
+                        'value' => $bucketValue,
+                        'label' => $bucketValue,
+                        'swatch' => $colorBucketService->bucketToHex((string) $bucketValue),
+                    ];
+                }, $bucketValues));
+                break;
+            }
+        }
+        unset($field);
+
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
             'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state

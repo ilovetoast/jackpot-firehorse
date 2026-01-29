@@ -2,31 +2,24 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
-use App\Models\Brand;
 use App\Models\Category;
 use App\Models\User;
 use App\Services\AiMetadataConfidenceService;
-use App\Services\ApprovalAgingService;
-use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
-use App\Services\AssetPublicationService;
 use App\Services\Lifecycle\LifecycleResolver;
+use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
-use App\Support\Roles\PermissionMap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Illuminate\Support\Facades\DB;
@@ -37,8 +30,6 @@ class AssetController extends Controller
         protected SystemCategoryService $systemCategoryService,
         protected PlanService $planService,
         protected AssetDeletionService $deletionService,
-        protected AssetPublicationService $publicationService,
-        protected AssetArchiveService $archiveService,
         protected MetadataFilterService $metadataFilterService,
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected AiMetadataConfidenceService $confidenceService,
@@ -54,23 +45,6 @@ class AssetController extends Controller
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
-
-        // Phase L.5.1: Permission checks for lifecycle filters
-        // - asset.publish: Required for "Pending Approval" filter (approvers can see pending assets)
-        // - metadata.bypass_approval: Required for "Unpublished" filter (full viewing privileges)
-        // - asset.archive: Required for "Archived" filter (users who can archive assets)
-        // Define early so they can be used in category count queries
-        $canPublish = $user && $user->hasPermissionForTenant($tenant, 'asset.publish');
-        $canBypassApproval = $user && $user->hasPermissionForTenant($tenant, 'metadata.bypass_approval');
-        // Check tenant permission first, then brand permission (matches AssetPolicy pattern)
-        $canArchive = $user && (
-            $user->hasPermissionForTenant($tenant, 'asset.archive') ||
-            ($brand && $user->hasPermissionForBrand($brand, 'asset.archive'))
-        );
-        
-        // For backward compatibility and default visibility: users with asset.publish can see unpublished
-        // But unpublished filter specifically requires metadata.bypass_approval (full viewing privileges)
-        $canSeeUnpublished = $canPublish || $canBypassApproval;
 
         if (!$tenant || !$brand) {
             // Handle case where tenant or brand is not resolved (e.g., no active tenant/brand)
@@ -89,18 +63,12 @@ class AssetController extends Controller
             ->where('asset_type', AssetType::ASSET)
             ->active(); // Filter out soft-deleted, templates, and deleted system categories
 
-        // IMPORTANT: Always get ALL categories (including hidden) to check for existence
-        // We'll filter hidden categories later when building the response, but we need
-        // to know if a category exists (even if hidden) to avoid adding templates
-        $allCategoriesIncludingHidden = $query->get();
-        
-        // Filter out hidden categories for users without 'manage categories' permission
-        // This is for the final response, but we keep allCategoriesIncludingHidden for template checking
+        // If user does not have 'manage categories' permission, filter out hidden categories
         if (! $user || ! $user->can('manage categories')) {
-            $categories = $allCategoriesIncludingHidden->filter(fn($cat) => !$cat->is_hidden)->values();
-        } else {
-            $categories = $allCategoriesIncludingHidden;
+            $query->visible();
         }
+
+        $categories = $query->get();
 
         // Filter out private categories that the user doesn't have access to
         // Use CategoryPolicy to check access for each category
@@ -162,10 +130,8 @@ class AssetController extends Controller
         }
 
         // Add system templates that don't have matching brand categories
-        // IMPORTANT: Check against allCategoriesIncludingHidden, not $categories
-        // This ensures we don't add a template if the category exists but is hidden
         foreach ($systemTemplates as $template) {
-            $exists = $allCategoriesIncludingHidden->contains(function ($category) use ($template) {
+            $exists = $categories->contains(function ($category) use ($template) {
                 return $category->slug === $template->slug && 
                        $category->asset_type->value === $template->asset_type->value;
             });
@@ -198,43 +164,12 @@ class AssetController extends Controller
         if (!empty($categoryIds)) {
             // Count assets per category using JSON path (single query with GROUP BY)
             // Use whereRaw for JSON extraction in WHERE clause
-            // Note: Only counts assets that have metadata with a valid category_id
-            // Assets without metadata or without category_id are excluded (consistent with grid filtering)
-            // Phase L.5.1: Count logic matches grid visibility (approvers see unpublished, others don't)
-            $countQuery = Asset::where('tenant_id', $tenant->id)
+            $counts = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::ASSET);
-            
-            // Apply same visibility rules as main query
-            // CRITICAL: Unpublished assets should NEVER be counted unless filter is explicitly active
-            // Even users with permissions should not see unpublished assets in counts by default
-            if ($canSeeUnpublished) {
-                // Users with permissions can see HIDDEN assets (pending approval) that are published
-                // But still exclude unpublished assets unless filter is active
-                $countQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
-                    ->whereNotNull('published_at'); // Always exclude unpublished in default counts
-            } else {
-                // Regular users only see VISIBLE, published assets
-                $countQuery->where('status', AssetStatus::VISIBLE)
-                    ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
-            }
-            
-            $counts = $countQuery
-                ->whereNull('archived_at') // Phase L.3: Exclude archived assets
-                ->where(function ($query) {
-                    // Phase M: Exclude expired assets
-                    $query->whereNull('expires_at')
-                          ->orWhere('expires_at', '>', now());
-                })
-                ->where(function ($query) {
-                    // Phase AF-1: Exclude pending and rejected assets
-                    $query->where('approval_status', 'not_required')
-                          ->orWhere('approval_status', 'approved')
-                          ->orWhereNull('approval_status'); // Handle legacy assets
-                })
+                ->where('type', AssetType::ASSET)
+                ->where('status', AssetStatus::VISIBLE)
                 ->whereNull('deleted_at')
                 ->whereNotNull('metadata')
-                ->whereRaw('JSON_EXTRACT(metadata, "$.category_id") IS NOT NULL')
                 ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) IN (' . implode(',', array_map('intval', $categoryIds)) . ')')
                 ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
                 ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
@@ -249,38 +184,10 @@ class AssetController extends Controller
         }
         
         // Get total asset count for "All" button
-        // Phase L.5.1: Count logic matches grid visibility (approvers see unpublished, others don't)
-        $totalCountQuery = Asset::where('tenant_id', $tenant->id)
+        $totalAssetCount = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET);
-        
-        // Apply same visibility rules as main query
-        // CRITICAL: Unpublished assets should NEVER be counted unless filter is explicitly active
-        // Even users with permissions should not see unpublished assets in counts by default
-        if ($canSeeUnpublished) {
-            // Users with permissions can see HIDDEN assets (pending approval) that are published
-            // But still exclude unpublished assets unless filter is active
-            $totalCountQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
-                ->whereNotNull('published_at'); // Always exclude unpublished in default counts
-        } else {
-            // Regular users only see VISIBLE, published assets
-            $totalCountQuery->where('status', AssetStatus::VISIBLE)
-                ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
-        }
-        
-        $totalAssetCount = $totalCountQuery
-            ->whereNull('archived_at') // Phase L.3: Exclude archived assets
-            ->where(function ($query) {
-                // Phase M: Exclude expired assets
-                $query->whereNull('expires_at')
-                      ->orWhere('expires_at', '>', now());
-            })
-            ->where(function ($query) {
-                // Phase AF-1: Exclude pending and rejected assets
-                $query->where('approval_status', 'not_required')
-                      ->orWhere('approval_status', 'approved')
-                      ->orWhereNull('approval_status'); // Handle legacy assets
-            })
+            ->where('type', AssetType::ASSET)
+            ->where('status', AssetStatus::VISIBLE)
             ->whereNull('deleted_at')
             ->count();
         
@@ -315,30 +222,18 @@ class AssetController extends Controller
         // Query visible assets for this brand and asset type
         // AssetStatus represents VISIBILITY only, not processing progress.
         // Processing state is tracked via thumbnail_status, metadata flags, and activity events.
-        // Step 2: Asset visibility must not depend on metadata approval or existence
-        // Assets remain visible regardless of metadata approval state, rejection, or presence
-
-        // Phase L.5.1: $canSeeUnpublished is already defined above (after $user is available)
 
         $assetsQuery = Asset::query()
         ->where('tenant_id', $tenant->id)
         ->where('brand_id', $brand->id)
-        ->where('type', AssetType::ASSET);
+        ->where('type', AssetType::ASSET)
+
+        // Visibility-only filter - assets with VISIBLE status are shown in grid
+        ->where('status', AssetStatus::VISIBLE)
 
         // Exclude soft-deleted assets only
-        $assetsQuery->whereNull('deleted_at');
+        ->whereNull('deleted_at');
 
-        // Default sort: recently added (created_at desc)
-        // This ensures newest assets appear first in the grid
-        $sortBy = $request->get('sort', 'created_at');
-        $sortOrder = $request->get('order', 'desc');
-        
-        if ($sortBy === 'created_at') {
-            $assetsQuery->orderBy('created_at', $sortOrder);
-        } else {
-            // Fallback to created_at desc if invalid sort
-            $assetsQuery->orderBy('created_at', 'desc');
-        }
 
         // Filter by category if provided (check metadata for category_id)
         if ($categoryId) {
@@ -349,97 +244,9 @@ class AssetController extends Controller
                 ->where('metadata->category_id', (int) $categoryId);
         }
 
-        // Filter by uploaded_by (user filter)
-        $uploadedBy = $request->get('uploaded_by');
-        if ($uploadedBy) {
-            $assetsQuery->where('user_id', (int) $uploadedBy);
-        }
-
-        // Filter by file type (extension)
-        $fileType = $request->get('file_type');
-        if ($fileType && $fileType !== 'all') {
-            // Normalize extension (remove leading dot, lowercase)
-            $extension = strtolower(trim($fileType, '.'));
-            
-            // Filter by file extension from original_filename
-            $assetsQuery->where(function ($query) use ($extension) {
-                // Match extension in original_filename (case-insensitive)
-                $query->whereRaw('LOWER(SUBSTRING_INDEX(original_filename, ".", -1)) = ?', [$extension])
-                      // Also match mime_type for common formats
-                      ->orWhere(function ($q) use ($extension) {
-                          $mimeMap = [
-                              'jpg' => ['image/jpeg', 'image/jpg'],
-                              'jpeg' => ['image/jpeg', 'image/jpg'],
-                              'png' => ['image/png'],
-                              'gif' => ['image/gif'],
-                              'webp' => ['image/webp'],
-                              'svg' => ['image/svg+xml'],
-                              'pdf' => ['application/pdf'],
-                              'tiff' => ['image/tiff', 'image/tif'],
-                              'tif' => ['image/tiff', 'image/tif'],
-                              'psd' => ['image/vnd.adobe.photoshop'],
-                              'mp4' => ['video/mp4'],
-                              'mov' => ['video/quicktime'],
-                              'avi' => ['video/x-msvideo'],
-                              'webm' => ['video/webm'],
-                          ];
-                          
-                          if (isset($mimeMap[$extension])) {
-                              $q->whereIn('mime_type', $mimeMap[$extension]);
-                          }
-                      });
-            });
-        }
-
-        // Phase 2 – Step 8: Apply metadata filters
-        // Filters can come as JSON string (from URL query param) or array (from Inertia)
-        $filtersParam = $request->get('filters', []);
-        $filters = [];
-        
-        // Parse filters if it's a JSON string
-        if (is_string($filtersParam)) {
-            $decoded = json_decode($filtersParam, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                $filters = $decoded;
-            } else {
-                \Log::warning('[AssetController] DEBUG - Failed to parse filters JSON', [
-                    'filtersParam' => $filtersParam,
-                    'json_error' => json_last_error_msg(),
-                ]);
-            }
-        } elseif (is_array($filtersParam)) {
-            $filters = $filtersParam;
-        }
-        
-        \Log::info('[AssetController] DEBUG - Filters parsing', [
-            'filtersParam_type' => gettype($filtersParam),
-            'filtersParam' => $filtersParam,
-            'parsed_filters' => $filters,
-            'filters_count' => count($filters),
-        ]);
-        
-        if (!empty($filters) && is_array($filters)) {
-            // Resolve metadata schema for filtering
-            // Note: asset_type in category is organizational (asset/deliverable/ai_generated),
-            // but MetadataSchemaResolver expects file type (image/video/document)
-            // For now, default to 'image' as most assets are images
-            // TODO: Could infer from actual assets in category or add file_type to categories
-            $assetType = 'image'; // Default file type for metadata schema resolution
-
-            $schema = $this->metadataSchemaResolver->resolve(
-                $tenant->id,
-                $brand->id,
-                $categoryId,
-                $assetType
-            );
-
-            // Apply filters
-            $this->metadataFilterService->applyFilters($assetsQuery, $filters, $schema);
-        }
-
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
         // This is the SINGLE SOURCE OF TRUTH for lifecycle logic
-        // CRITICAL: Lifecycle resolver MUST run LAST to override any other filters
+        // CRITICAL: Lifecycle resolver MUST run to ensure consistent asset scope
         // Used by both AssetController and DeliverableController for consistency
         $lifecycleFilter = $request->get('lifecycle');
         $this->lifecycleResolver->apply(
@@ -450,19 +257,49 @@ class AssetController extends Controller
             $brand
         );
 
-        $assets = $assetsQuery->get();
-        
-        // SECURITY: Filter assets through AssetPolicy to ensure user can view each asset
-        // This is critical for enterprise-level permission enforcement
-        // Even if query returns assets, user must have explicit permission to view them
-        if ($user) {
-            $assets = $assets->filter(function ($asset) use ($user) {
-                return \Illuminate\Support\Facades\Gate::forUser($user)->allows('view', $asset);
-            })->values();
-        } else {
-            // No user - filter out all assets (shouldn't happen in authenticated routes, but be defensive)
-            $assets = collect();
+        // Apply metadata filters from request
+        $filters = $request->input('filters', []);
+        if (is_string($filters)) {
+            $filters = json_decode($filters, true) ?? [];
         }
+        if (!empty($filters) && is_array($filters)) {
+            // Resolve schema for filter application (matches pattern used for filterableSchema)
+            // Use 'image' as default file type for metadata schema resolution
+            $fileType = 'image';
+            if ($categoryId && $category) {
+                $schema = $this->metadataSchemaResolver->resolve(
+                    $tenant->id,
+                    $brand->id,
+                    $categoryId,
+                    $fileType
+                );
+            } elseif (!$categoryId) {
+                // "All Categories" view: Resolve schema without category context
+                $schema = $this->metadataSchemaResolver->resolve(
+                    $tenant->id,
+                    $brand->id,
+                    null, // No category context
+                    $fileType
+                );
+            } else {
+                // Category ID provided but category not found - use null category
+                $schema = $this->metadataSchemaResolver->resolve(
+                    $tenant->id,
+                    $brand->id,
+                    null,
+                    $fileType
+                );
+            }
+            
+            // Apply filters to query
+            $this->metadataFilterService->applyFilters(
+                $assetsQuery,
+                $filters,
+                $schema
+            );
+        }
+
+        $assets = $assetsQuery->get();
         
         // HARD TERMINAL STATE: Check for stuck assets and repair them
         // This prevents infinite processing states by automatically failing
@@ -476,9 +313,6 @@ class AssetController extends Controller
             }
         }
         
-        // Get available file types from assets (before mapping to arrays)
-        $availableFileTypes = $this->getAvailableFileTypes($assets);
-        
         // AUDIT: Log query results and sample asset brand_ids for comparison
         if ($assets->count() > 0) {
             $sampleAssetBrandIds = $assets->take(5)->pluck('brand_id')->unique()->values()->toArray();
@@ -491,47 +325,11 @@ class AssetController extends Controller
                 'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
             ]);
         } else {
-            // Enhanced logging for empty results - check if assets exist that don't match filters
-            $totalAssetsInBrand = Asset::where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->whereNull('deleted_at')
-                ->count();
-            
-            $visibleAssetsInBrand = Asset::where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->where('status', AssetStatus::VISIBLE)
-                ->whereNull('deleted_at')
-                ->count();
-            
-            $assetTypeAssets = Asset::where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->where('type', AssetType::ASSET)
-                ->where('status', AssetStatus::VISIBLE)
-                ->whereNull('deleted_at')
-                ->count();
-            
-            // Get most recent asset for debugging
-            $mostRecentAsset = Asset::where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->whereNull('deleted_at')
-                ->latest('created_at')
-                ->first();
-            
             Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results (empty)', [
                 'query_tenant_id' => $tenant->id,
                 'query_brand_id' => $brand->id,
-                'category_filter' => $categoryId ?? 'none',
-                'total_assets_in_brand' => $totalAssetsInBrand,
-                'visible_assets_in_brand' => $visibleAssetsInBrand,
-                'asset_type_assets' => $assetTypeAssets,
-                'most_recent_asset' => $mostRecentAsset ? [
-                    'id' => $mostRecentAsset->id,
-                    'status' => $mostRecentAsset->status?->value ?? 'null',
-                    'type' => $mostRecentAsset->type?->value ?? 'null',
-                    'category_id' => $mostRecentAsset->metadata['category_id'] ?? 'null',
-                    'created_at' => $mostRecentAsset->created_at?->toIso8601String(),
-                ] : 'none',
-                'note' => 'No assets found - check status, type, brand_id, tenant_id, and category filter. If total_assets_in_brand > 0 but visible_assets_in_brand = 0, assets may have wrong status.',
+                'assets_count' => 0,
+                'note' => 'No assets found - cannot compare brand_ids',
             ]);
         }
         
@@ -627,37 +425,6 @@ class AssetController extends Controller
                     if ($user) {
                         $uploadedBy = [
                             'id' => $user->id,
-                            'name' => trim($user->name) ?: null, // Convert empty string to null for proper fallback
-                            'first_name' => $user->first_name,
-                            'last_name' => $user->last_name,
-                            'email' => $user->email,
-                            'avatar_url' => $user->avatar_url,
-                        ];
-                    }
-                }
-
-                // Phase L.4: Get lifecycle relationship data (published_by, archived_by)
-                $publishedBy = null;
-                if ($asset->published_by_id) {
-                    $user = \App\Models\User::find($asset->published_by_id);
-                    if ($user) {
-                        $publishedBy = [
-                            'id' => $user->id,
-                            'name' => $user->name,
-                            'first_name' => $user->first_name,
-                            'last_name' => $user->last_name,
-                            'email' => $user->email,
-                            'avatar_url' => $user->avatar_url,
-                        ];
-                    }
-                }
-
-                $archivedBy = null;
-                if ($asset->archived_by_id) {
-                    $user = \App\Models\User::find($asset->archived_by_id);
-                    if ($user) {
-                        $archivedBy = [
-                            'id' => $user->id,
                             'name' => $user->name,
                             'first_name' => $user->first_name,
                             'last_name' => $user->last_name,
@@ -672,124 +439,7 @@ class AssetController extends Controller
                 // Preview: /app/assets/{asset_id}/thumbnail/preview/preview (LQIP, real derivative)
                 // Final: /app/assets/{asset_id}/thumbnail/final/{style}?v={version} (permanent, full-quality)
                 
-                // Get metadata - refresh only if we suspect it might be stale
-                // (e.g., if thumbnail_status is completed but metadata seems incomplete)
-                // For most cases, the asset from the query is fresh enough
                 $metadata = $asset->metadata ?? [];
-                
-                // Clear old skip reasons for formats that are now supported (TIFF/AVIF via Imagick)
-                // This ensures UI shows correct status when viewing assets
-                if (isset($metadata['thumbnail_skip_reason'])) {
-                    $skipReason = $metadata['thumbnail_skip_reason'];
-                    $mimeType = strtolower($asset->mime_type ?? '');
-                    $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-                    
-                    $isNowSupported = false;
-                    if ($skipReason === 'unsupported_format:tiff' && 
-                        ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') &&
-                        extension_loaded('imagick')) {
-                        $isNowSupported = true;
-                    } elseif ($skipReason === 'unsupported_format:avif' && 
-                              ($mimeType === 'image/avif' || $extension === 'avif') &&
-                              extension_loaded('imagick')) {
-                        $isNowSupported = true;
-                    } elseif (($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') && 
-                              ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') &&
-                              extension_loaded('imagick')) {
-                        // PSD files are now supported via Imagick
-                        $isNowSupported = true;
-                    }
-                    
-                    if ($isNowSupported) {
-                        // Clear skip reason and reset status
-                        unset($metadata['thumbnail_skip_reason']);
-                        
-                        // Only dispatch job if not already processing or completed
-                        $currentStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                            ? $asset->thumbnail_status->value 
-                            : ($asset->thumbnail_status ?? 'pending');
-                        
-                        $shouldDispatch = $currentStatus !== 'processing' && $currentStatus !== 'completed';
-                        
-                        $asset->update([
-                            'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
-                            'thumbnail_error' => null,
-                            'metadata' => $metadata,
-                        ]);
-                        
-                        // Automatically dispatch thumbnail generation job for newly supported formats
-                        // Only if not already processing/completed to avoid duplicate jobs
-                        if ($shouldDispatch) {
-                            try {
-                                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id);
-                                \Illuminate\Support\Facades\Log::info('[AssetController] Dispatched thumbnail generation after clearing skip reason', [
-                                    'asset_id' => $asset->id,
-                                    'old_skip_reason' => $skipReason,
-                                    'format' => $mimeType . '/' . $extension,
-                                ]);
-                            } catch (\Exception $e) {
-                                \Illuminate\Support\Facades\Log::warning('[AssetController] Failed to dispatch thumbnail generation after clearing skip reason', [
-                                    'asset_id' => $asset->id,
-                                    'error' => $e->getMessage(),
-                                ]);
-                            }
-                        }
-                        
-                        // Refresh asset to get updated status and metadata
-                        $asset->refresh();
-                        $metadata = $asset->metadata ?? [];
-                        
-                        \Illuminate\Support\Facades\Log::info('[AssetController] Cleared old skip reason on asset load', [
-                            'asset_id' => $asset->id,
-                            'old_skip_reason' => $skipReason,
-                            'format' => $mimeType . '/' . $extension,
-                            'dispatched_job' => $shouldDispatch,
-                        ]);
-                    }
-                }
-                
-                // Only refresh if we're looking for dimensions and they're missing
-                // This avoids expensive refresh() calls for every asset in the grid
-                $needsRefresh = false;
-                if ($asset->mime_type && str_starts_with($asset->mime_type, 'image/')) {
-                    // For images, check if dimensions should exist but are missing
-                    $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
-                        ? $asset->thumbnail_status->value 
-                        : ($asset->thumbnail_status ?? 'pending');
-                    
-                    // If thumbnails are completed, dimensions should be available
-                    if ($thumbnailStatus === 'completed' && !isset($metadata['image_width']) && !isset($metadata['image_height'])) {
-                        $needsRefresh = true;
-                    }
-                }
-                
-                if ($needsRefresh) {
-                    $asset->refresh();
-                    $metadata = $asset->metadata ?? [];
-                }
-                
-                // Phase G.4: Merge asset_metadata table rows into metadata.fields structure
-                // This ensures automated fields (orientation, resolution_class, dominant_colors, etc.) appear in the UI
-                $assetMetadataRows = \DB::table('asset_metadata')
-                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
-                    ->where('asset_metadata.asset_id', $asset->id)
-                    ->whereNotNull('asset_metadata.approved_at') // Only approved values
-                    ->select('metadata_fields.key', 'asset_metadata.value_json')
-                    ->get();
-                
-                // Initialize fields structure if it doesn't exist
-                if (!isset($metadata['fields'])) {
-                    $metadata['fields'] = [];
-                }
-                
-                // Merge asset_metadata rows into fields (automated fields will be added here)
-                // Note: dominant_colors is included here as it's stored in asset_metadata table
-                foreach ($assetMetadataRows as $row) {
-                    $value = json_decode($row->value_json, true);
-                    // Use the most recent value if multiple exist (last one wins)
-                    $metadata['fields'][$row->key] = $value;
-                }
-                
                 $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus 
                     ? $asset->thumbnail_status->value 
                     : ($asset->thumbnail_status ?? 'pending');
@@ -809,97 +459,20 @@ class AssetController extends Controller
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
                 
-                // Final thumbnail URL provided when thumbnail_status === COMPLETED
-                // OR when thumbnails actually exist in metadata (handles status sync issues)
-                // Use 'medium' size for better quality in asset grid
-                $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && (isset($metadata['thumbnails']['thumb']) || isset($metadata['thumbnails']['medium']));
-                $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                
-                if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
-                    // Prefer medium size for better quality, fallback to thumb if medium not available
-                    $thumbnailStyle = 'medium';
-                    $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+                // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+                // Includes version query param (thumbnails_generated_at) for cache busting
+                if ($thumbnailStatus === 'completed') {
+                    $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     
-                    // Fallback to 'thumb' if medium doesn't exist
-                    if (!$thumbnailPath && !isset($metadata['thumbnails']['medium'])) {
-                        $thumbnailStyle = 'thumb';
-                        $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
-                    }
+                    $finalThumbnailUrl = route('assets.thumbnail.final', [
+                        'asset' => $asset->id,
+                        'style' => 'thumb',
+                    ]);
                     
-                    if ($thumbnailPath || $thumbnailsExistInMetadata) {
-                        $finalThumbnailUrl = route('assets.thumbnail.final', [
-                            'asset' => $asset->id,
-                            'style' => $thumbnailStyle,
-                        ]);
-                        
-                        // Add version query param if available (ensures browser refetches when version changes)
-                        if ($thumbnailVersion) {
-                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
-                        }
-                        
-                        // Auto-fix status if thumbnails exist but status is wrong
-                        if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
-                            \Illuminate\Support\Facades\Log::info('[AssetController] Auto-fixing thumbnail status - thumbnails exist but status was failed', [
-                                'asset_id' => $asset->id,
-                                'old_status' => $thumbnailStatus,
-                                'thumbnail_sizes' => array_keys($metadata['thumbnails'] ?? []),
-                            ]);
-                        }
-                    } else {
-                        // Thumbnail status says completed but no thumbnails found - log for debugging
-                        \Illuminate\Support\Facades\Log::warning('[AssetController] Thumbnail status mismatch', [
-                            'asset_id' => $asset->id,
-                            'thumbnail_status' => $thumbnailStatus,
-                            'metadata_thumbnails' => isset($metadata['thumbnails']) ? array_keys($metadata['thumbnails'] ?? []) : 'not set',
-                        ]);
+                    // Add version query param if available (ensures browser refetches when version changes)
+                    if ($thumbnailVersion) {
+                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
                     }
-                }
-
-                // Extract source dimensions if available
-                // Dimensions are stored in metadata during thumbnail generation (image_width, image_height)
-                // These are the actual pixel dimensions of the original source image
-                $sourceDimensions = null;
-                
-                // Check if dimensions are stored in metadata (from thumbnail generation)
-                // CRITICAL: Check both direct metadata and ensure asset is fresh from database
-                if (isset($metadata['image_width']) && isset($metadata['image_height'])) {
-                    $sourceDimensions = [
-                        'width' => (int) $metadata['image_width'],
-                        'height' => (int) $metadata['image_height'],
-                    ];
-                    
-                    // Debug: Log when dimensions are found (temporary - can be removed later)
-                    if (config('app.debug', false)) {
-                        Log::debug('[AssetController] Dimensions found in metadata', [
-                            'asset_id' => $asset->id,
-                            'source_dimensions' => $sourceDimensions,
-                        ]);
-                    }
-                } else {
-                    // Debug: Log if dimensions are missing (temporary - can be removed later)
-                    if (config('app.debug', false) && $asset->mime_type && str_starts_with($asset->mime_type, 'image/')) {
-                        Log::debug('[AssetController] Dimensions missing in metadata', [
-                            'asset_id' => $asset->id,
-                            'metadata_keys' => array_keys($metadata ?? []),
-                            'has_image_width' => isset($metadata['image_width']),
-                            'has_image_height' => isset($metadata['image_height']),
-                            'mime_type' => $asset->mime_type,
-                            'metadata_sample' => array_slice($metadata ?? [], 0, 10, true), // First 10 keys for debugging
-                        ]);
-                    }
-                }
-
-                // Phase AF-1: Get approval info
-                $approvedByUser = null;
-                if ($asset->approved_by_user_id) {
-                    $approvedByUser = \App\Models\User::find($asset->approved_by_user_id);
-                }
-
-                // Phase AF-4: Get aging metrics for pending assets
-                $agingMetrics = null;
-                if ($asset->approval_status === \App\Enums\ApprovalStatus::PENDING) {
-                    $agingService = app(ApprovalAgingService::class);
-                    $agingMetrics = $agingService->getAgingMetrics($asset);
                 }
 
                 return [
@@ -911,40 +484,12 @@ class AssetController extends Controller
                     'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status, // AssetStatus enum value
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
-                    'metadata' => $metadata, // Full metadata object (includes category_id and fields, with asset_metadata merged)
+                    'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
-                        'slug' => $category ? $category->slug : null, // Include slug for CSS class determination
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
-                    // Phase L.4: Lifecycle fields (read-only display)
-                    'published_at' => $asset->published_at?->toIso8601String(),
-                    'is_published' => $asset->published_at !== null, // Canonical boolean for publication state
-                    'published_by' => $publishedBy, // User who published the asset
-                    'archived_at' => $asset->archived_at?->toIso8601String(),
-                    'archived_by' => $archivedBy, // User who archived the asset
-                    // Phase AF-1: Approval workflow fields
-                    'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? 'not_required'),
-                    'approval_required' => $asset->approval_status === \App\Enums\ApprovalStatus::PENDING,
-                    'approved_at' => $asset->approved_at?->toIso8601String(),
-                    'approved_by' => $approvedByUser ? [
-                        'id' => $approvedByUser->id,
-                        'name' => $approvedByUser->name,
-                        'email' => $approvedByUser->email,
-                    ] : null,
-                    'rejected_at' => $asset->rejected_at?->toIso8601String(),
-                    'rejection_reason' => $asset->rejection_reason,
-                    'approval_capable' => $this->isApprovalCapable($user, $brand), // Current user can approve
-                    // Phase AF-6: Approval summary (AI-generated)
-                    'approval_summary' => $asset->approval_summary,
-                    'approval_summary_generated_at' => $asset->approval_summary_generated_at?->toISOString(),
-                    // Phase AF-4: Aging metrics (only for pending assets)
-                    'pending_since' => $agingMetrics['pending_since'] ?? null,
-                    'pending_days' => $agingMetrics['pending_days'] ?? null,
-                    'last_action_at' => $agingMetrics['last_action_at'] ?? null,
-                    'aging_label' => $agingMetrics['aging_label'] ?? null,
-                    'source_dimensions' => $sourceDimensions, // Source image dimensions (width x height) if available
                     // Thumbnail URLs - distinct paths prevent cache confusion
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
                     'final_thumbnail_url' => $finalThumbnailUrl, // Final thumbnail (permanent, full-quality, only when completed)
@@ -956,13 +501,6 @@ class AssetController extends Controller
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
-                    // Phase V-1: Video preview URLs (hover preview videos for video assets)
-                    'video_preview_url' => $asset->video_preview_url, // Presigned S3 URL for hover preview video (generated on-demand via accessor)
-                    'video_poster_url' => $asset->video_poster_url, // Presigned S3 URL for video poster/thumbnail (generated on-demand via accessor)
-                    // TODO: Future enhancement - Add pending_metadata_count to asset grid items
-                    // This would enable grid-level badges/indicators for assets with pending metadata
-                    // Currently, pending metadata is only visible in the asset drawer
-                    // Grid and filters remain unchanged - pending metadata does NOT affect filtering or search
                 ];
             })
             ->values();
@@ -971,7 +509,6 @@ class AssetController extends Controller
         // Note: asset_type in category is organizational (asset/marketing/ai_generated),
         // but MetadataSchemaResolver expects file type (image/video/document)
         // Default to 'image' for schema resolution when category context doesn't provide file type
-        // TODO: Could infer from actual assets in category or add file_type to categories
         $filterableSchema = [];
         
         // Phase L.5.1: Enable filters in "All Categories" view
@@ -992,7 +529,7 @@ class AssetController extends Controller
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
         } elseif (!$categoryId) {
             // "All Categories" view: Resolve schema without category context
-            // This enables system-level metadata fields (orientation, color_space, resolution_class, dimensions)
+            // This enables system-level metadata fields (orientation, color_space, resolution_class, dominant_color_bucket)
             // that are computed from assets themselves, not category-specific
             $fileType = 'image'; // Default file type for metadata schema resolution
             
@@ -1010,7 +547,30 @@ class AssetController extends Controller
         // available_values is required by Phase H filter visibility rules
         // Do not remove without updating Phase H contract
         // Compute distinct metadata values for the current asset grid result set
+        // 
+        // 🔍 CRITICAL: Filter harvesting MUST use the SAME asset query scope as the grid
+        // - Same lifecycle filtering (via LifecycleResolver)
+        // - Same category filtering
+        // - Same visibility rules
+        // If these differ, filter options won't match visible assets
         $availableValues = [];
+        
+        // 🔍 Step 1: Prove assets used for option harvesting
+        // CRITICAL: Use the SAME asset collection that appears in the grid
+        // This ensures filter options match what users see
+        foreach ($filterableSchema as $field) {
+            $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+            if ($fieldKey === 'dominant_color_bucket') {
+                \App\Support\Logging\PipelineLogger::warning('FILTER HARVEST: ASSET SET', [
+                    'field_key' => $fieldKey,
+                    'asset_count' => $assets->count(),
+                    'asset_ids' => $assets->pluck('id')->take(5)->all(),
+                    'category_id' => $categoryId,
+                    'lifecycle_filter' => $request->get('lifecycle'),
+                ]);
+                break;
+            }
+        }
         
         if (!empty($filterableSchema) && $assets->count() > 0) {
             // Get asset IDs from the current grid result set
@@ -1039,6 +599,12 @@ class AssetController extends Controller
                     ->pluck('id')
                     ->toArray();
                 
+                // Safeguard: Always include dominant_color_bucket so it's never excluded (e.g. if population_mode wasn't set)
+                $bucketField = \DB::table('metadata_fields')->where('key', 'dominant_color_bucket')->first();
+                if ($bucketField && !in_array($bucketField->id, $automaticFieldIds, true)) {
+                    $automaticFieldIds[] = (int) $bucketField->id;
+                }
+                
                 // Build query: Include automatic fields regardless of approved_at, require approved_at for others
                 $assetMetadataValues = \DB::table('asset_metadata')
                     ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
@@ -1063,6 +629,30 @@ class AssetController extends Controller
                     ->distinct()
                     ->get();
                 
+                // 🔍 Step 2: Log raw metadata rows used for harvesting
+                $dominantColorBucketRows = $assetMetadataValues->filter(function($row) {
+                    return $row->key === 'dominant_color_bucket';
+                });
+                if ($dominantColorBucketRows->isNotEmpty()) {
+                    \App\Support\Logging\PipelineLogger::warning('FILTER HARVEST: RAW VALUES', [
+                        'field_key' => 'dominant_color_bucket',
+                        'raw_values' => $dominantColorBucketRows->take(5)->map(function($row) {
+                            return [
+                                'raw_value_json' => $row->value_json,
+                                'decoded' => json_decode($row->value_json, true),
+                            ];
+                        })->toArray(),
+                    ]);
+                } else {
+                    \App\Support\Logging\PipelineLogger::warning('FILTER HARVEST: RAW VALUES (EMPTY)', [
+                        'field_key' => 'dominant_color_bucket',
+                        'total_rows' => $assetMetadataValues->count(),
+                        'field_keys_found' => $assetMetadataValues->pluck('key')->unique()->toArray(),
+                        'automatic_field_ids' => $automaticFieldIds,
+                        'asset_ids_count' => count($assetIds),
+                    ]);
+                }
+                
                 // Group values by field key (with confidence filtering for AI metadata)
                 foreach ($assetMetadataValues as $row) {
                     $fieldKey = $row->key;
@@ -1078,22 +668,59 @@ class AssetController extends Controller
                     
                     $value = json_decode($row->value_json, true);
                     
+                    // TASK: Debug logging for dominant_color_bucket value extraction
+                    if ($fieldKey === 'dominant_color_bucket') {
+                        \App\Support\Logging\PipelineLogger::warning('FILTER DEBUG: dominant_color_bucket value extraction', [
+                            'raw_value_json' => $row->value_json,
+                            'decoded_value' => $value,
+                            'decoded_type' => gettype($value),
+                            'is_array' => is_array($value),
+                            'population_mode' => $populationMode,
+                        ]);
+                    }
+                    
                     // Skip null values
                     if ($value !== null) {
                         if (!isset($availableValues[$fieldKey])) {
                             $availableValues[$fieldKey] = [];
                         }
                         
-                        // Handle arrays (multiselect fields) and scalar values
-                        if (is_array($value)) {
-                            foreach ($value as $item) {
-                                if ($item !== null && !in_array($item, $availableValues[$fieldKey], true)) {
-                                    $availableValues[$fieldKey][] = $item;
+                        // TASK 3: Use MetadataValueNormalizer for consistent normalization
+                        // This handles edge cases where values may have been incorrectly stored
+                        // For scalar fields (like dominant_color_bucket), normalize to scalar
+                        // For multiselect fields, keep as array
+                        $isMultiselectField = in_array($fieldKey, ['dominant_colors', 'tags']); // Known multiselect fields
+                        
+                        if ($isMultiselectField) {
+                            // Multiselect fields: keep as array, extract individual items
+                            if (is_array($value)) {
+                                foreach ($value as $item) {
+                                    $normalizedItem = MetadataValueNormalizer::normalizeScalar($item);
+                                    if ($normalizedItem !== null && !in_array($normalizedItem, $availableValues[$fieldKey], true)) {
+                                        $availableValues[$fieldKey][] = $normalizedItem;
+                                    }
+                                }
+                            } else {
+                                // Single value in multiselect field - normalize and add
+                                $normalized = MetadataValueNormalizer::normalizeScalar($value);
+                                if ($normalized !== null && !in_array($normalized, $availableValues[$fieldKey], true)) {
+                                    $availableValues[$fieldKey][] = $normalized;
                                 }
                             }
                         } else {
-                            if (!in_array($value, $availableValues[$fieldKey], true)) {
-                                $availableValues[$fieldKey][] = $value;
+                            // Scalar fields (like dominant_color_bucket): normalize to scalar
+                            $normalized = MetadataValueNormalizer::normalizeScalar($value);
+                            if ($normalized !== null) {
+                                if (!in_array($normalized, $availableValues[$fieldKey], true)) {
+                                    $availableValues[$fieldKey][] = $normalized;
+                                }
+                            } else {
+                                // Invalid format (e.g., array with multiple elements for scalar field)
+                                \App\Support\Logging\PipelineLogger::warning('FILTER DEBUG: invalid value format for scalar field', [
+                                    'field_key' => $fieldKey,
+                                    'value' => $value,
+                                    'value_type' => gettype($value),
+                                ]);
                             }
                         }
                     }
@@ -1132,6 +759,17 @@ class AssetController extends Controller
                     }
                 }
                 
+                // TASK 2: Log value availability check before removing empty arrays
+                foreach ($availableValues as $fieldKey => $values) {
+                    if (empty($values)) {
+                        \App\Support\Logging\PipelineLogger::warning('FILTER DEBUG: field excluded', [
+                            'key' => $fieldKey,
+                            'reason' => 'no_available_values',
+                            'values_count' => count($values),
+                        ]);
+                    }
+                }
+                
                 // Remove empty arrays (filters with no values should not appear)
                 $availableValues = array_filter($availableValues, function ($values) {
                     return !empty($values);
@@ -1144,56 +782,43 @@ class AssetController extends Controller
             }
         }
 
-        // Phase 2 – Step 8: Get saved views
-        $savedViews = [];
-        if ($user) {
-            $viewsQuery = DB::table('saved_views')
-                ->where('tenant_id', $tenant->id)
-                ->where(function ($q) use ($user) {
-                    $q->where('is_global', true)
-                        ->orWhere('user_id', $user->id);
-                });
-
-            if ($categoryId) {
-                $viewsQuery->where(function ($q) use ($categoryId) {
-                    $q->where('category_id', $categoryId)
-                        ->orWhereNull('category_id');
-                });
-            }
-
-            $savedViews = $viewsQuery->orderBy('name')
-                ->get()
-                ->map(function ($view) {
-                    return [
-                        'id' => $view->id,
-                        'name' => $view->name,
-                        'filters' => json_decode($view->filters, true),
-                        'category_id' => $view->category_id,
-                        'is_global' => (bool) $view->is_global,
-                    ];
-                })
-                ->toArray();
+        // 🔍 Step 4: Hard assert the invariant (temporary)
+        $bucketFieldInSchema = collect($filterableSchema)->first(function($field) {
+            return ($field['field_key'] ?? $field['key'] ?? null) === 'dominant_color_bucket';
+        });
+        if ($bucketFieldInSchema && empty($availableValues['dominant_color_bucket'] ?? [])) {
+            \App\Support\Logging\PipelineLogger::error('FILTER ERROR: dominant_color_bucket has no options but assets exist', [
+                'asset_count' => $assets->count(),
+                'filterable_schema_has_field' => true,
+                'available_values_keys' => array_keys($availableValues),
+            ]);
         }
 
-        // DEBUG: Log filterable_schema and available_values for debugging
-        $photoTypeInSchema = collect($filterableSchema)->first(function ($field) {
-            return ($field['field_key'] ?? $field['key'] ?? '') === 'photo_type';
-        });
-        \Log::info('[AssetController] DEBUG - filterable_schema', [
-            'count' => count($filterableSchema),
-            'photo_type' => $photoTypeInSchema ? [
-                'field_key' => $photoTypeInSchema['field_key'] ?? $photoTypeInSchema['key'] ?? 'unknown',
-                'is_primary' => $photoTypeInSchema['is_primary'] ?? 'NOT_SET',
-                'is_primary_type' => isset($photoTypeInSchema['is_primary']) ? gettype($photoTypeInSchema['is_primary']) : 'NOT_SET',
-            ] : 'NOT_FOUND',
-            'category_id' => $categoryId,
+        // 🔍 Step 5: UI payload confirmation (final proof)
+        \App\Support\Logging\PipelineLogger::warning('FILTER PAYLOAD FINAL', [
+            'dominant_color_bucket_in_schema' => $bucketFieldInSchema ? true : false,
+            'dominant_color_bucket_options' => $availableValues['dominant_color_bucket'] ?? [],
+            'options_count' => count($availableValues['dominant_color_bucket'] ?? []),
         ]);
-        \Log::info('[AssetController] DEBUG - available_values', [
-            'keys' => array_keys($availableValues),
-            'photo_type' => $availableValues['photo_type'] ?? 'NOT_SET',
-            'photo_type_count' => isset($availableValues['photo_type']) ? count($availableValues['photo_type']) : 0,
-        ]);
-        
+
+        // Attach color swatch data to dominant_color_bucket filter options (filter_type = 'color')
+        $colorBucketService = app(\App\Services\ColorBucketService::class);
+        foreach ($filterableSchema as &$field) {
+            $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+            if ($fieldKey === 'dominant_color_bucket') {
+                $bucketValues = $availableValues['dominant_color_bucket'] ?? [];
+                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService) {
+                    return [
+                        'value' => $bucketValue,
+                        'label' => $bucketValue,
+                        'swatch' => $colorBucketService->bucketToHex((string) $bucketValue),
+                    ];
+                }, $bucketValues));
+                break;
+            }
+        }
+        unset($field);
+
         return Inertia::render('Assets/Index', [
             'categories' => $allCategories,
             'categories_by_type' => [
@@ -1203,36 +828,9 @@ class AssetController extends Controller
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'total_asset_count' => $totalAssetCount, // Total count for "All" button
-            'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
-            'saved_views' => $savedViews, // Phase 2 – Step 8: Saved filter views
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
+            'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
-            'uploaded_by_users' => \App\Models\User::whereIn('id', function ($query) use ($tenant, $brand) {
-                $query->select('user_id')
-                      ->from('assets')
-                      ->where('tenant_id', $tenant->id)
-                      ->where('brand_id', $brand->id)
-                      ->where('type', AssetType::ASSET)
-                      ->whereNull('deleted_at')
-                      ->whereNotNull('user_id')
-                      ->distinct();
-            })
-            ->select('id', 'first_name', 'last_name', 'email', 'avatar_url')
-            ->orderBy('first_name')
-            ->orderBy('last_name')
-            ->orderBy('email')
-            ->get()
-            ->map(function ($user) {
-                return [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'email' => $user->email,
-                    'avatar_url' => $user->avatar_url,
-                ];
-            }),
-            'available_file_types' => $availableFileTypes,
         ]);
     }
 
@@ -1281,7 +879,7 @@ class AssetController extends Controller
                 ->whereNull('deleted_at')
                 ->orderBy('created_at', 'desc')
                 ->limit(100) // Reasonable limit
-                ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at', 'user_id'])
+                ->get(['id', 'title', 'original_filename', 'thumbnail_status', 'thumbnail_error', 'status', 'created_at'])
                 ->map(function ($asset) use ($now, $staleThreshold, &$staleCount) {
                     $ageMinutes = $asset->created_at->diffInMinutes($now);
                     $isStale = $ageMinutes > $staleThreshold;
@@ -1305,7 +903,6 @@ class AssetController extends Controller
                         'created_at' => $asset->created_at->toIso8601String(),
                         'age_minutes' => $ageMinutes,
                         'is_stale' => $isStale,
-                        'user_id' => $asset->user_id, // Include user_id to detect other users' uploads
                     ];
                 })
                 ->filter(function ($asset) {
@@ -1411,38 +1008,14 @@ class AssetController extends Controller
                     // Step 4: CRITICAL - Never return status COMPLETED if final thumbnail URL does not exist
                     // Verify thumbnail file exists before returning COMPLETED status
                     // This prevents UI from showing "completed" when files don't exist
-                    // ALSO handle cases where thumbnails exist but status is failed
                     $finalThumbnailUrl = null;
                     $verifiedStatus = $thumbnailStatus;
-                    $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
                     
-                    if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
+                    if ($thumbnailStatus === 'completed') {
                         // Verify thumbnail file actually exists before returning COMPLETED
-                        // OR if thumbnails exist in metadata, trust that they're valid
                         $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
                         
-                        if ($thumbnailsExistInMetadata) {
-                            // Thumbnails exist in metadata - provide URL without S3 verification
-                            // This handles cases where status is failed but thumbnails actually exist
-                            $finalThumbnailUrl = route('assets.thumbnail.final', [
-                                'asset' => $asset->id,
-                                'style' => 'thumb',
-                            ]);
-                            
-                            if ($thumbnailVersion) {
-                                $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
-                            }
-                            
-                            // Auto-fix status if it was wrong
-                            if ($thumbnailStatus !== 'completed') {
-                                Log::info('[batchThumbnailStatus] Auto-fixing thumbnail status - thumbnails exist in metadata', [
-                                    'asset_id' => $asset->id,
-                                    'old_status' => $thumbnailStatus,
-                                    'thumbnail_sizes' => array_keys($metadata['thumbnails'] ?? []),
-                                ]);
-                                $verifiedStatus = 'completed';
-                            }
-                        } elseif ($thumbnailPath && $asset->storageBucket) {
+                        if ($thumbnailPath && $asset->storageBucket) {
                             try {
                                 // Create S3 client for verification
                                 $s3Client = $this->createS3ClientForVerification();
@@ -1451,10 +1024,9 @@ class AssetController extends Controller
                                     'Key' => $thumbnailPath,
                                 ]);
                                 
-                                // Verify file size > minimum threshold (only catch broken/corrupted files)
-                                // Small valid thumbnails (e.g., 710 bytes for compressed WebP) are acceptable
+                                // Verify file size > minimum threshold (1KB)
                                 $contentLength = $result['ContentLength'] ?? 0;
-                                $minValidSize = 50; // Only catch broken/corrupted files - allow small valid thumbnails
+                                $minValidSize = 1024; // 1KB
                                 
                                 if ($contentLength >= $minValidSize) {
                                     // File exists and is valid - return final URL
@@ -1554,21 +1126,6 @@ class AssetController extends Controller
      *
      * @return \Aws\S3\S3Client
      */
-    /**
-     * Check if current user is approval_capable for the brand.
-     * 
-     * Phase AF-1: Approval authority derived from PermissionMap.
-     */
-    protected function isApprovalCapable(?User $user, ?Brand $brand): bool
-    {
-        if (!$user || !$brand) {
-            return false;
-        }
-
-        $brandRole = $user->getRoleForBrand($brand);
-        return $brandRole && PermissionMap::canApproveAssets($brandRole);
-    }
-
     protected function createS3ClientForVerification(): \Aws\S3\S3Client
     {
         if (!class_exists(\Aws\S3\S3Client::class)) {
@@ -1644,40 +1201,18 @@ class AssetController extends Controller
         $finalThumbnailUrl = null;
         $thumbnailVersion = null;
         
-        // Final thumbnail URL provided when thumbnail_status === COMPLETED
-        // OR when thumbnails actually exist in metadata (handles status sync issues)
-        // Use 'medium' size for better quality
-        $thumbnailsExistInMetadata = !empty($metadata['thumbnails']) && (isset($metadata['thumbnails']['thumb']) || isset($metadata['thumbnails']['medium']));
-        $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-        
-        if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
-            // Prefer medium size for better quality, fallback to thumb if medium not available
-            $thumbnailStyle = 'medium';
-            $thumbnailPath = $asset->thumbnailPathForStyle('medium');
-            
-            // Fallback to 'thumb' if medium doesn't exist
-            if (!$thumbnailPath && !isset($metadata['thumbnails']['medium'])) {
-                $thumbnailStyle = 'thumb';
-                $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
-            }
+        // Final thumbnail URL only provided when thumbnail_status === COMPLETED
+        if ($thumbnailStatus === 'completed') {
+            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
             
             $finalThumbnailUrl = route('assets.thumbnail.final', [
                 'asset' => $asset->id,
-                'style' => $thumbnailStyle,
+                'style' => 'thumb',
             ]);
             
             // Add version query param if available
             if ($thumbnailVersion) {
                 $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
-            }
-            
-            // Auto-fix status if thumbnails exist but status is wrong  
-            if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
-                Log::info('[AssetController::show] Auto-fixing thumbnail status - thumbnails exist but status was failed', [
-                    'asset_id' => $asset->id,
-                    'old_status' => $thumbnailStatus,
-                    'thumbnail_sizes' => array_keys($metadata['thumbnails'] ?? []),
-                ]);
             }
         }
 
@@ -1735,156 +1270,6 @@ class AssetController extends Controller
     }
 
     /**
-     * Download an asset.
-     *
-     * GET /assets/{asset}/download
-     *
-     * Phase 3.1 Step 4: Single file download endpoint (drawer).
-     * 
-     * Generates a signed S3 URL for the asset and tracks the download metric.
-     * No Download Group created - direct file download.
-     * 
-     * Responsibilities:
-     * - Validate asset access
-     * - Ensure asset is not archived (Phase 2.8: future-proof check)
-     * - Generate signed S3 URL
-     * - Redirect to S3
-     * - Emit placeholder hooks for analytics later
-     *
-     * @param Asset $asset
-     * @return \Illuminate\Http\RedirectResponse|JsonResponse
-     */
-    public function download(Asset $asset): \Illuminate\Http\RedirectResponse|JsonResponse
-    {
-        $this->authorize('view', $asset);
-
-        // Phase 2.8: Future-proof check for archived assets
-        // TODO: When Phase 2.8 is implemented, add check:
-        // if ($asset->isArchived()) {
-        //     return response()->json([
-        //         'message' => 'Archived assets cannot be downloaded',
-        //     ], 403);
-        // }
-
-        try {
-            // Generate signed S3 URL
-            // Asset path is stored in storage_root_path field
-            if (!$asset->storage_root_path) {
-                return response()->json([
-                    'message' => 'Asset storage path not found',
-                ], 404);
-            }
-
-            // Phase 3.1 Step 6 Fix: Force download behavior via ResponseContentDisposition
-            // Use S3Client directly to add Content-Disposition header to presigned URL
-            $s3Client = $this->createS3ClientForVerification();
-            $bucket = $asset->storageBucket;
-            
-            // Get filename for Content-Disposition
-            $filename = $asset->original_filename ?? basename($asset->storage_root_path);
-            // Ensure filename is properly encoded for Content-Disposition header
-            $filenameEncoded = rawurlencode($filename);
-            
-            // Generate presigned URL with ResponseContentDisposition to force download
-            $command = $s3Client->getCommand('GetObject', [
-                'Bucket' => $bucket->name,
-                'Key' => $asset->storage_root_path,
-                'ResponseContentDisposition' => "attachment; filename=\"{$filename}\"; filename*=UTF-8''{$filenameEncoded}",
-            ]);
-            
-            $presignedRequest = $s3Client->createPresignedRequest(
-                $command,
-                now()->addMinutes(15) // URL valid for 15 minutes
-            );
-            
-            $signedUrl = (string) $presignedRequest->getUri();
-
-            // Track download metric
-            $metricsService = app(\App\Services\AssetMetricsService::class);
-            $user = auth()->user();
-            $metricsService->recordMetric(
-                asset: $asset,
-                type: \App\Enums\MetricType::DOWNLOAD,
-                viewType: null,
-                metadata: null,
-                user: $user
-            );
-
-            // Phase 3.1 Step 5: Emit asset download requested event
-            \App\Services\DownloadEventEmitter::emitAssetDownloadRequested($asset);
-
-            // Redirect to signed URL
-            return redirect($signedUrl);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to generate download URL', [
-                'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to generate download URL',
-            ], 500);
-        }
-    }
-
-    /**
-     * Get signed view URL for an asset (for viewing/streaming, not downloading).
-     * This endpoint returns a signed URL without tracking a download metric.
-     *
-     * GET /assets/{asset}/view
-     *
-     * @param Asset $asset
-     * @return JsonResponse
-     */
-    public function view(Asset $asset): JsonResponse
-    {
-        $this->authorize('view', $asset);
-
-        try {
-            // Generate signed S3 URL for viewing (not downloading)
-            if (!$asset->storage_root_path) {
-                return response()->json([
-                    'message' => 'Asset storage path not found',
-                ], 404);
-            }
-
-            $s3Client = $this->createS3ClientForVerification();
-            $bucket = $asset->storageBucket;
-            
-            // Generate presigned URL WITHOUT Content-Disposition header (for viewing/streaming)
-            $command = $s3Client->getCommand('GetObject', [
-                'Bucket' => $bucket->name,
-                'Key' => $asset->storage_root_path,
-                // No ResponseContentDisposition - allows inline viewing/streaming
-            ]);
-            
-            $presignedRequest = $s3Client->createPresignedRequest(
-                $command,
-                now()->addMinutes(15) // URL valid for 15 minutes
-            );
-            
-            $signedUrl = (string) $presignedRequest->getUri();
-
-            // NOTE: We do NOT track a download metric here - this is for viewing only
-            // View tracking should be handled separately via the metrics API
-
-            return response()->json([
-                'url' => $signedUrl,
-                'expires_at' => now()->addMinutes(15)->toIso8601String(),
-            ], 200);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to generate view URL', [
-                'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to generate view URL',
-            ], 500);
-        }
-    }
-
-    /**
      * Get signed preview URL for an asset.
      *
      * GET /assets/{asset}/preview-url
@@ -1938,207 +1323,92 @@ class AssetController extends Controller
     }
 
     /**
-     * Regenerate AI metadata for an asset.
-     *
-     * POST /assets/{asset}/ai-metadata/regenerate
-     *
-     * @param Asset $asset
-     * @return JsonResponse
-     */
-    public function regenerateAiMetadata(Asset $asset): JsonResponse
-    {
-        $user = auth()->user();
-        $tenant = app('tenant');
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'error' => 'Asset not found',
-            ], 404);
-        }
-
-        // Permission check
-        if (!$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
-            // Check if user is owner/admin (bypass permission)
-            $tenantRole = $user->getRoleForTenant($tenant);
-            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-            
-            if (!$isTenantOwnerOrAdmin) {
-                return response()->json([
-                    'error' => 'You do not have permission to regenerate AI metadata.',
-                ], 403);
-            }
-        }
-
-        // Check plan limits
-        $usageService = app(\App\Services\AiUsageService::class);
-        try {
-            $usageService->checkUsage($tenant, 'tagging', 1);
-        } catch (\App\Exceptions\PlanLimitExceededException $e) {
-            return response()->json([
-                'error' => 'Plan limit exceeded',
-                'message' => $e->getMessage(),
-            ], 403);
-        }
-
-        // **CRITICAL:** Manual regenerate does NOT clear dismissals
-        // The _ai_suggestions_dismissed array must persist across regenerations
-        // This prevents users from seeing previously dismissed suggestions again
-
-        // Phase J.2.2: Check AI tagging policy before manual regeneration
-        $policyService = app(\App\Services\AiTagPolicyService::class);
-        $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
-        
-        if (!$policyCheck['should_proceed']) {
-            return response()->json([
-                'error' => 'AI tagging is disabled for this tenant',
-                'reason' => $policyCheck['reason'] ?? 'policy_denied',
-            ], 403);
-        }
-
-        // Clear previous status/error flags to allow fresh regeneration
-        $metadata = $asset->metadata ?? [];
-        unset($metadata['_ai_metadata_generated_at'], $metadata['_ai_metadata_status']);
-        unset($metadata['_ai_metadata_skipped'], $metadata['_ai_metadata_skip_reason'], $metadata['_ai_metadata_skipped_at']);
-        unset($metadata['_ai_metadata_failed'], $metadata['_ai_metadata_error'], $metadata['_ai_metadata_failed_at']);
-        $asset->update(['metadata' => $metadata]);
-
-        // Dispatch job with manual rerun flag (will update _ai_metadata_generated_at timestamp)
-        \App\Jobs\AiMetadataGenerationJob::dispatch($asset->id, isManualRerun: true);
-
-        // Log activity
-        \App\Services\ActivityRecorder::logAsset($asset, \App\Enums\EventType::ASSET_AI_METADATA_REGENERATED, [
-            'triggered_by' => $user->id,
-            'triggered_at' => now()->toIso8601String(),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'AI metadata regeneration queued',
-        ]);
-    }
-
-    /**
      * Regenerate system metadata for an asset.
      *
      * POST /assets/{asset}/system-metadata/regenerate
      *
-     * System metadata = orientation, color_space, resolution_class (automatically computed)
+     * Regenerates system-computed metadata fields:
+     * - orientation (landscape/portrait/square)
+     * - color_space (srgb/adobe_rgb/display_p3)
+     * - resolution_class (low/medium/high/ultra)
+     * - dimensions (widthxheight)
+     * - dominant_colors (top 3 dominant colors from image analysis)
+     * - dominant_color_bucket (quantized LAB bucket for filtering)
      *
      * @param Asset $asset
      * @return JsonResponse
      */
     public function regenerateSystemMetadata(Asset $asset): JsonResponse
     {
-        $user = auth()->user();
         $tenant = app('tenant');
+        $user = auth()->user();
 
         // Verify asset belongs to tenant
         if ($asset->tenant_id !== $tenant->id) {
             return response()->json([
+                'success' => false,
                 'error' => 'Asset not found',
             ], 404);
         }
 
-        // Permission check - same as AI metadata
-        if (!$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
-            $tenantRole = $user->getRoleForTenant($tenant);
-            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        // Check permission - same as AI metadata regeneration
+        if (!$user || !$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
+            // Also allow owners/admins
+            $tenantRole = $user?->getRoleForTenant($tenant);
+            $isOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
             
-            if (!$isTenantOwnerOrAdmin) {
+            if (!$isOwnerOrAdmin) {
                 return response()->json([
-                    'error' => 'You do not have permission to regenerate system metadata.',
+                    'success' => false,
+                    'error' => 'You do not have permission to regenerate system metadata',
                 ], 403);
             }
         }
 
-        // Clear completion flags to allow regeneration
-        $metadata = $asset->metadata ?? [];
-        unset($metadata['computed_metadata_completed'], $metadata['computed_metadata_completed_at']);
-        $asset->update(['metadata' => $metadata]);
-
-        // Dispatch both jobs that handle system metadata
-        \App\Jobs\ComputedMetadataJob::dispatch($asset->id);
-        \App\Jobs\PopulateAutomaticMetadataJob::dispatch($asset->id);
-
-        // Log activity
-        \App\Services\ActivityRecorder::logAsset($asset, \App\Enums\EventType::ASSET_SYSTEM_METADATA_REGENERATED, [
-            'triggered_by' => $user->id,
-            'triggered_at' => now()->toIso8601String(),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'System metadata regeneration queued',
-        ]);
-    }
-
-    /**
-     * Regenerate AI tagging for an asset.
-     *
-     * POST /assets/{asset}/ai-tagging/regenerate
-     *
-     * AI tagging = general/freeform tags (AITaggingJob)
-     *
-     * @param Asset $asset
-     * @return JsonResponse
-     */
-    public function regenerateAiTagging(Asset $asset): JsonResponse
-    {
-        $user = auth()->user();
-        $tenant = app('tenant');
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'error' => 'Asset not found',
-            ], 404);
-        }
-
-        // Permission check
-        if (!$user->hasPermissionForTenant($tenant, 'assets.ai_metadata.regenerate')) {
-            $tenantRole = $user->getRoleForTenant($tenant);
-            $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-            
-            if (!$isTenantOwnerOrAdmin) {
-                return response()->json([
-                    'error' => 'You do not have permission to regenerate AI tagging.',
-                ], 403);
-            }
-        }
-
-        // Check plan limits
-        $usageService = app(\App\Services\AiUsageService::class);
         try {
-            $usageService->checkUsage($tenant, 'tagging', 1);
-        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            // Use ComputedMetadataService to regenerate system metadata
+            $computedMetadataService = app(\App\Services\ComputedMetadataService::class);
+            $computedMetadataService->computeMetadata($asset);
+
+            // Also regenerate dominant colors via PopulateAutomaticMetadataJob
+            // This ensures dominant_colors and dominant_color_bucket are regenerated
+            \App\Jobs\PopulateAutomaticMetadataJob::dispatchSync($asset->id);
+
+            // Log activity event
+            ActivityEvent::create([
+                'tenant_id' => $tenant->id,
+                'event_type' => \App\Enums\EventType::ASSET_SYSTEM_METADATA_REGENERATED,
+                'subject_type' => Asset::class,
+                'subject_id' => $asset->id,
+                'actor_type' => User::class,
+                'actor_id' => $user?->id,
+                'metadata' => [
+                    'fields_regenerated' => ['orientation', 'color_space', 'resolution_class', 'dimensions', 'dominant_colors', 'dominant_color_bucket'],
+                ],
+            ]);
+
+            Log::info('[AssetController] System metadata regenerated', [
+                'asset_id' => $asset->id,
+                'user_id' => $user?->id,
+            ]);
+
             return response()->json([
-                'error' => 'Plan limit exceeded',
-                'message' => $e->getMessage(),
-            ], 403);
+                'success' => true,
+                'message' => 'System metadata regenerated successfully',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('[AssetController] Failed to regenerate system metadata', [
+                'asset_id' => $asset->id,
+                'user_id' => $user?->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to regenerate system metadata: ' . $e->getMessage(),
+            ], 500);
         }
-
-        // Clear completion flags and status to allow regeneration
-        $metadata = $asset->metadata ?? [];
-        unset($metadata['ai_tagging_completed'], $metadata['ai_tagging_completed_at']);
-        unset($metadata['_ai_tagging_status']);
-        unset($metadata['_ai_tagging_skipped'], $metadata['_ai_tagging_skip_reason'], $metadata['_ai_tagging_skipped_at']);
-        unset($metadata['_ai_tagging_failed'], $metadata['_ai_tagging_error'], $metadata['_ai_tagging_failed_at']);
-        $asset->update(['metadata' => $metadata]);
-
-        // Dispatch AI tagging job
-        \App\Jobs\AITaggingJob::dispatch($asset->id);
-
-        // Log activity
-        \App\Services\ActivityRecorder::logAsset($asset, \App\Enums\EventType::ASSET_AI_TAGGING_REGENERATED, [
-            'triggered_by' => $user->id,
-            'triggered_at' => now()->toIso8601String(),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'AI tagging regeneration queued',
-        ]);
     }
 
     /**
@@ -2149,304 +1419,6 @@ class AssetController extends Controller
      * @param Asset $asset
      * @return JsonResponse
      */
-    /**
-     * Publish an asset.
-     *
-     * Phase L.6.1 — Asset Approval Actions
-     * Publishes an asset using AssetPublicationService with proper authorization.
-     *
-     * @param Asset $asset The asset to publish
-     * @return JsonResponse
-     */
-    public function publish(Asset $asset): JsonResponse
-    {
-        $tenant = app('tenant');
-        $user = auth()->user();
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
-        }
-
-        // Verify user is authenticated
-        if (!$user) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 401);
-        }
-
-        try {
-            // Publish the asset (service handles authorization via policy)
-            $this->publicationService->publish($asset, $user);
-
-            // Refresh asset to get updated state
-            $asset->refresh();
-            
-            // Load relationships needed for formatting
-            $asset->load(['brand', 'tenant']);
-            $brand = $asset->brand;
-            $tenant = $asset->tenant;
-            $user = auth()->user();
-            
-            // Get published_by user info
-            $publishedBy = null;
-            if ($asset->published_by_id) {
-                $publishedByUser = \App\Models\User::find($asset->published_by_id);
-                if ($publishedByUser) {
-                    $publishedBy = [
-                        'id' => $publishedByUser->id,
-                        'name' => $publishedByUser->name,
-                        'first_name' => $publishedByUser->first_name,
-                        'last_name' => $publishedByUser->last_name,
-                        'email' => $publishedByUser->email,
-                        'avatar_url' => $publishedByUser->avatar_url,
-                    ];
-                }
-            }
-
-            // Return updated asset fields for frontend to merge
-            // This avoids full page reload while ensuring UI reflects backend state
-            return response()->json([
-                'message' => 'Asset published successfully',
-                'asset' => [
-                    'id' => $asset->id,
-                    'published_at' => $asset->published_at?->toIso8601String(),
-                    'is_published' => $asset->published_at !== null, // Canonical boolean for publication state
-                    'published_by' => $publishedBy,
-                    'published_by_id' => $asset->published_by_id,
-                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status,
-                    'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? 'not_required'),
-                ],
-            ], 200);
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
-            // Provide more helpful error message
-            $tenant = app('tenant');
-            $hasPermission = $user->hasPermissionForTenant($tenant, 'asset.publish');
-            $tenantRole = $user->getRoleForTenant($tenant);
-            $isTenantAdminOrOwner = in_array($tenantRole, ['admin', 'owner']);
-            // Phase MI-1: Check active brand membership
-            $isAssignedToBrand = $asset->brand_id ? ($user->activeBrandMembership($asset->brand) !== null) : true;
-            
-            $message = 'You do not have permission to publish this asset.';
-            if (!$hasPermission && !$isTenantAdminOrOwner) {
-                $message .= ' Your role does not have the "asset.publish" permission.';
-            } elseif (!$isAssignedToBrand && !$isTenantAdminOrOwner) {
-                $message .= ' You are not assigned to the brand that owns this asset.';
-            }
-            
-            return response()->json([
-                'message' => $message,
-            ], 403);
-        } catch (\RuntimeException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 400);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to publish asset', [
-                'asset_id' => $asset->id,
-                'user_id' => $user->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to publish asset: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Unpublish an asset.
-     *
-     * Phase L.6.1 — Asset Approval Actions
-     * Unpublishes an asset using AssetPublicationService with proper authorization.
-     *
-     * @param Asset $asset The asset to unpublish
-     * @return JsonResponse
-     */
-    public function unpublish(Asset $asset): JsonResponse
-    {
-        $tenant = app('tenant');
-        $user = auth()->user();
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
-        }
-
-        // Verify user is authenticated
-        if (!$user) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 401);
-        }
-
-        try {
-            // Unpublish the asset (service handles authorization via policy)
-            $this->publicationService->unpublish($asset, $user);
-
-            // Refresh asset to get updated state
-            $asset->refresh();
-
-            // Return updated asset fields for frontend to merge
-            // This avoids full page reload while ensuring UI reflects backend state
-            return response()->json([
-                'message' => 'Asset unpublished successfully',
-                'asset' => [
-                    'id' => $asset->id,
-                    'published_at' => null,
-                    'is_published' => false, // Canonical boolean for publication state
-                    'published_by' => null,
-                    'published_by_id' => null,
-                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status,
-                ],
-            ], 200);
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
-            return response()->json([
-                'message' => 'You do not have permission to unpublish this asset',
-            ], 403);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to unpublish asset', [
-                'asset_id' => $asset->id,
-                'user_id' => $user->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to unpublish asset: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Archive an asset.
-     *
-     * Phase L.3 — Asset Archive & Restore
-     * Archives an asset using AssetArchiveService with proper authorization.
-     *
-     * @param Asset $asset The asset to archive
-     * @return JsonResponse
-     */
-    public function archive(Asset $asset): JsonResponse
-    {
-        $tenant = app('tenant');
-        $user = auth()->user();
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
-        }
-
-        // Verify user is authenticated
-        if (!$user) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 401);
-        }
-
-        try {
-            // Archive the asset (service handles authorization via policy)
-            $this->archiveService->archive($asset, $user);
-
-            // Refresh asset to get updated state
-            $asset->refresh();
-
-            return response()->json([
-                'message' => 'Asset archived successfully',
-                'asset_id' => $asset->id,
-                'archived_at' => $asset->archived_at?->toIso8601String(),
-                'archived_by_id' => $asset->archived_by_id,
-                'status' => $asset->status->value,
-            ], 200);
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
-            return response()->json([
-                'message' => 'You do not have permission to archive this asset',
-            ], 403);
-        } catch (\RuntimeException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 400);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to archive asset', [
-                'asset_id' => $asset->id,
-                'user_id' => $user->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to archive asset: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Restore an archived asset.
-     *
-     * Phase L.3 — Asset Archive & Restore
-     * Restores an asset using AssetArchiveService with proper authorization.
-     *
-     * @param Asset $asset The asset to restore
-     * @return JsonResponse
-     */
-    public function restore(Asset $asset): JsonResponse
-    {
-        $tenant = app('tenant');
-        $user = auth()->user();
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
-        }
-
-        // Verify user is authenticated
-        if (!$user) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 401);
-        }
-
-        try {
-            // Restore the asset (service handles authorization via policy)
-            $this->archiveService->restore($asset, $user);
-
-            // Refresh asset to get updated state
-            $asset->refresh();
-
-            return response()->json([
-                'message' => 'Asset restored successfully',
-                'asset_id' => $asset->id,
-                'archived_at' => null,
-                'archived_by_id' => null,
-                'status' => $asset->status->value,
-            ], 200);
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
-            return response()->json([
-                'message' => 'You do not have permission to restore this asset',
-            ], 403);
-        } catch (\RuntimeException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 400);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to restore asset', [
-                'asset_id' => $asset->id,
-                'user_id' => $user->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to restore asset: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
     public function destroy(Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
@@ -2480,220 +1452,5 @@ class AssetController extends Controller
                 'message' => 'Failed to delete asset: ' . $e->getMessage(),
             ], 500);
         }
-    }
-
-    /**
-     * Initiate file replacement for a rejected asset.
-     * 
-     * Phase J.3.1: File-only replacement for rejected contributor assets
-     * 
-     * POST /assets/{asset}/replace-file
-     * 
-     * Creates an upload session in 'replace' mode for replacing the file
-     * of an existing rejected asset without modifying metadata.
-     * 
-     * @param Request $request
-     * @param Asset $asset
-     * @return JsonResponse
-     */
-    public function initiateReplaceFile(Request $request, Asset $asset): JsonResponse
-    {
-        $tenant = app('tenant');
-        $user = Auth::user();
-
-        // Verify user belongs to tenant
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
-            return response()->json([
-                'error' => 'Unauthorized. Please check your account permissions.',
-            ], 403);
-        }
-
-        // Verify asset belongs to tenant + brand
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'error' => 'Asset does not belong to this tenant.',
-            ], 403);
-        }
-
-        // Verify asset is rejected
-        if ($asset->approval_status !== \App\Enums\ApprovalStatus::REJECTED) {
-            return response()->json([
-                'error' => 'Asset is not rejected. Only rejected assets can have their files replaced.',
-                'current_status' => $asset->approval_status->value,
-            ], 422);
-        }
-
-        // Phase MI-1: Verify active brand membership
-        $brand = $asset->brand;
-        if (!$brand) {
-            return response()->json([
-                'error' => 'Asset does not have an associated brand.',
-            ], 422);
-        }
-
-        $membership = $user->activeBrandMembership($brand);
-        if (!$membership) {
-            return response()->json([
-                'error' => 'You do not have active membership for this brand.',
-            ], 403);
-        }
-
-        // Check permissions: User must be contributor AND uploader
-        $brandRole = $membership['role'];
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-        $isContributor = $brandRole === 'contributor' && !$isTenantOwnerOrAdmin;
-        $isUploader = $asset->user_id === $user->id;
-
-        if (!$isContributor || !$isUploader) {
-            return response()->json([
-                'error' => 'Only the contributor who uploaded this asset can replace its file.',
-                'required' => 'Must be contributor and original uploader',
-            ], 403);
-        }
-
-        // Verify brand requires contributor approval
-        if (!$brand->requiresContributorApproval()) {
-            return response()->json([
-                'error' => 'Brand does not require contributor approval. File replacement is only available for assets requiring approval.',
-            ], 422);
-        }
-
-        // Validate request
-        $validated = $request->validate([
-            'file_name' => 'required|string|max:255',
-            'file_size' => 'required|integer|min:1',
-            'mime_type' => 'nullable|string|max:255',
-            'client_reference' => 'nullable|uuid',
-        ]);
-
-        try {
-            // Use UploadInitiationService to create upload session in replace mode
-            $uploadService = app(\App\Services\UploadInitiationService::class);
-            $result = $uploadService->initiateReplace(
-                $tenant,
-                $brand,
-                $asset,
-                $validated['file_name'],
-                $validated['file_size'],
-                $validated['mime_type'] ?? null,
-                $validated['client_reference'] ?? null
-            );
-
-            Log::info('[AssetController] Replace file upload session initiated', [
-                'asset_id' => $asset->id,
-                'upload_session_id' => $result['upload_session_id'],
-                'user_id' => $user->id,
-            ]);
-
-            return response()->json([
-                'upload_session_id' => $result['upload_session_id'],
-                'client_reference' => $result['client_reference'],
-                'upload_session_status' => $result['upload_session_status'],
-                'upload_type' => $result['upload_type'],
-                'upload_url' => $result['upload_url'],
-                'multipart_upload_id' => $result['multipart_upload_id'],
-                'chunk_size' => $result['chunk_size'],
-                'expires_at' => $result['expires_at'],
-            ], 201);
-        } catch (\App\Exceptions\PlanLimitExceededException $e) {
-            return response()->json([
-                'error' => $e->getMessage(),
-            ], 403);
-        } catch (\Exception $e) {
-            Log::error('[AssetController] Failed to initiate replace file upload', [
-                'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'error' => 'Failed to initiate file replacement: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Get available file types from the loaded assets.
-     * 
-     * Extracts unique file extensions from assets and returns them as an array.
-     * Uses the same extension extraction logic as the asset mapping to ensure consistency.
-     * 
-     * @param \Illuminate\Support\Collection $assets
-     * @return array Array of file extension strings (e.g., ['jpg', 'png', 'pdf'])
-     */
-    protected function getAvailableFileTypes($assets): array
-    {
-        $fileTypes = [];
-        $mimeToExt = [
-            'image/jpeg' => 'jpg',
-            'image/jpg' => 'jpg',
-            'image/png' => 'png',
-            'image/gif' => 'gif',
-            'image/webp' => 'webp',
-            'image/svg+xml' => 'svg',
-            'image/tiff' => 'tif',
-            'image/tif' => 'tif',
-            'image/bmp' => 'bmp',
-            'application/pdf' => 'pdf',
-            'application/zip' => 'zip',
-            'application/x-zip-compressed' => 'zip',
-            'video/mpeg' => 'mpg',
-            'video/mp4' => 'mp4',
-            'video/quicktime' => 'mov',
-            'video/x-msvideo' => 'avi',
-            'video/webm' => 'webm',
-            'image/vnd.adobe.photoshop' => 'psd',
-            'application/vnd.adobe.illustrator' => 'ai',
-        ];
-
-        foreach ($assets as $asset) {
-            $fileExtension = null;
-            
-            // Handle both object and array access (assets may be mapped to arrays)
-            $originalFilename = is_array($asset) ? ($asset['original_filename'] ?? null) : ($asset->original_filename ?? null);
-            $mimeType = is_array($asset) ? ($asset['mime_type'] ?? null) : ($asset->mime_type ?? null);
-            
-            // Try to get extension from original_filename (same logic as asset mapping)
-            if ($originalFilename && $originalFilename !== 'unknown') {
-                $ext = pathinfo($originalFilename, PATHINFO_EXTENSION);
-                if ($ext && !empty(trim($ext))) {
-                    $fileExtension = strtolower(trim($ext, '.'));
-                }
-            }
-            
-            // Fallback to mime_type if extension not found (same logic as asset mapping)
-            if (empty($fileExtension) && $mimeType) {
-                $mimeTypeLower = strtolower(trim($mimeType));
-                $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
-                
-                // If not in map, try extracting from mime type subtype
-                if (empty($fileExtension) && strpos($mimeTypeLower, '/') !== false) {
-                    $mimeParts = explode('/', $mimeTypeLower);
-                    $subtype = $mimeParts[1] ?? null;
-                    if ($subtype) {
-                        // Remove "+xml" suffix if present (e.g., "svg+xml" -> "svg")
-                        $subtype = str_replace('+xml', '', $subtype);
-                        $subtype = str_replace('+zip', '', $subtype);
-                        // Normalize common subtypes (same as asset mapping)
-                        if ($subtype === 'jpeg') {
-                            $subtype = 'jpg';
-                        } elseif ($subtype === 'tiff') {
-                            $subtype = 'tif';
-                        }
-                        $fileExtension = $subtype;
-                    }
-                }
-            }
-            
-            // Add to list if we found a valid extension
-            if ($fileExtension && !in_array($fileExtension, $fileTypes, true)) {
-                $fileTypes[] = $fileExtension;
-            }
-        }
-        
-        // Sort for consistent output
-        sort($fileTypes);
-        
-        return $fileTypes;
     }
 }

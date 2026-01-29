@@ -31,6 +31,7 @@ import DevUploadDiagnostics from './DevUploadDiagnostics' // Phase 2.5 Step 3: D
 import MetadataGroups from './Upload/MetadataGroups' // Phase 2 – Step 2: Dynamic metadata schema
 import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // Phase 2 – Step 3: Required field validation
 import ApprovalNotice from './Upload/ApprovalNotice' // TASK 1: Approval notice for contributors
+import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh' // CSRF token refresh for 419 errors
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -533,7 +534,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 brand_id: auth.activeBrand?.id,
             }
             
-            const response = await fetch('/app/uploads/initiate-batch', {
+            let response = await fetch('/app/uploads/initiate-batch', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -542,6 +543,23 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 credentials: 'same-origin',
                 body: JSON.stringify(payload),
             })
+            
+            // Handle 419 CSRF token mismatch by refreshing token and retrying once
+            if (response.status === 419) {
+                const newToken = await refreshCsrfToken()
+                if (newToken) {
+                    // Retry the request with the new token
+                    response = await fetch('/app/uploads/initiate-batch', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': newToken,
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(payload),
+                    })
+                }
+            }
             
             if (!response.ok) {
                 // Phase 3.0C: Improved error handling for HTML error pages (419 CSRF, etc.)
@@ -1043,7 +1061,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         console.log('[INITIATE] sending request', { endpoint: '/app/uploads/initiate-batch', payload })
         
         // STEP 2.5: Use fetch() directly to bypass axios and verify network path
-        const response = await fetch('/app/uploads/initiate-batch', {
+        let response = await fetch('/app/uploads/initiate-batch', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1055,6 +1073,23 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         
         // DEV-only logging
         console.log('[INITIATE] fetch response status', { status: response.status, statusText: response.statusText })
+        
+        // Handle 419 CSRF token mismatch by refreshing token and retrying once
+        if (response.status === 419) {
+            const newToken = await refreshCsrfToken()
+            if (newToken) {
+                // Retry the request with the new token
+                response = await fetch('/app/uploads/initiate-batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': newToken,
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                })
+            }
+        }
         
         if (!response.ok) {
             // Phase 3.0C: Improved error handling for HTML error pages (419 CSRF, etc.)
@@ -2758,7 +2793,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
         try {
             // Call backend finalize endpoint using fetch
-            const response = await fetch('/app/assets/upload/finalize', {
+            let response = await fetch('/app/assets/upload/finalize', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2767,6 +2802,23 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 credentials: 'same-origin',
                 body: JSON.stringify({ manifest }),
             })
+
+            // Handle 419 CSRF token mismatch by refreshing token and retrying once
+            if (response.status === 419) {
+                const newToken = await refreshCsrfToken()
+                if (newToken) {
+                    // Retry the request with the new token
+                    response = await fetch('/app/assets/upload/finalize', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': newToken,
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ manifest }),
+                    })
+                }
+            }
 
             if (!response.ok) {
                 const errorText = await response.text().catch(() => 'Unknown error')
