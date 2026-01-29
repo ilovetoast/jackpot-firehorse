@@ -8,6 +8,7 @@ use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Services\ActivityRecorder;
 use App\Services\AssetProcessingFailureService;
+use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -48,9 +49,17 @@ class AITaggingJob implements ShouldQueue
     {
         $asset = Asset::findOrFail($this->assetId);
 
+        PipelineLogger::warning('AI TAGGING: HANDLE START', [
+            'asset_id' => $asset->id,
+        ]);
+
         // Idempotency: Check if AI tagging already completed
         $existingMetadata = $asset->metadata ?? [];
         if (isset($existingMetadata['ai_tagging_completed']) && $existingMetadata['ai_tagging_completed'] === true) {
+            PipelineLogger::warning('AI TAGGING: SKIPPED', [
+                'asset_id' => $asset->id,
+                'reason' => 'already_completed',
+            ]);
             Log::info('[AITaggingJob] AI tagging skipped - already completed', [
                 'asset_id' => $asset->id,
             ]);
@@ -73,6 +82,10 @@ class AITaggingJob implements ShouldQueue
         // for consistency across all image-derived jobs long-term.
         // See /docs/PIPELINE_SEQUENCING.md for architectural details.
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            PipelineLogger::warning('AI TAGGING: SKIPPED', [
+                'asset_id' => $asset->id,
+                'reason' => 'thumbnail_unavailable',
+            ]);
             Log::warning('[AITaggingJob] AI tagging skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
@@ -108,6 +121,10 @@ class AITaggingJob implements ShouldQueue
             'job' => 'AITaggingJob',
             'tag_count' => count($tags),
             'tags' => $tags,
+        ]);
+
+        PipelineLogger::warning('AI TAGGING: COMPLETE', [
+            'asset_id' => $asset->id,
         ]);
 
         Log::info('[AITaggingJob] AI tagging completed', [

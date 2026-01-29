@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataSuggestionService;
 use App\Services\AssetProcessingFailureService;
+use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -64,6 +65,10 @@ class AiMetadataSuggestionJob implements ShouldQueue
     {
         $asset = Asset::findOrFail($this->assetId);
 
+        PipelineLogger::warning('AI METADATA SUGGESTION: HANDLE START', [
+            'asset_id' => $asset->id,
+        ]);
+
         // Idempotency: Check if AI suggestions already generated
         // BUT: If it failed before, allow retry (check for failed flag)
         $existingMetadata = $asset->metadata ?? [];
@@ -99,6 +104,10 @@ class AiMetadataSuggestionJob implements ShouldQueue
         }
 
         if (!$category) {
+            PipelineLogger::warning('AI METADATA SUGGESTION: SKIPPED', [
+                'asset_id' => $asset->id,
+                'reason' => 'no_category',
+            ]);
             Log::info('[AiMetadataSuggestionJob] Skipping - no category', [
                 'asset_id' => $asset->id,
             ]);
@@ -180,6 +189,10 @@ class AiMetadataSuggestionJob implements ShouldQueue
             ActivityRecorder::logAsset($asset, EventType::ASSET_AI_SUGGESTIONS_GENERATED, [
                 'job' => 'AiMetadataSuggestionJob',
                 'suggestions_count' => count($suggestions),
+            ]);
+
+            PipelineLogger::warning('AI METADATA SUGGESTION: COMPLETE', [
+                'asset_id' => $asset->id,
             ]);
 
             Log::info('[AiMetadataSuggestionJob] Completed', [

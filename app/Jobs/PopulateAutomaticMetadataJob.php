@@ -12,6 +12,7 @@ use App\Services\AutomaticMetadataWriter;
 use App\Services\Automation\ColorAnalysisService;
 use App\Services\Automation\DominantColorsExtractor;
 use App\Services\MetadataSchemaResolver;
+use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -99,6 +100,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         // for consistency across all image-derived jobs.
         // See /docs/PIPELINE_SEQUENCING.md for architectural details.
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            PipelineLogger::warning('DOMINANT COLOR: SKIPPED', [
+                'asset_id' => $asset->id,
+                'reason' => 'thumbnails_not_ready',
+            ]);
             Log::warning('[PopulateAutomaticMetadataJob] Thumbnails not ready - releasing job for retry', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
@@ -168,6 +173,9 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         $colorAnalysisResult = null;
         $assetType = $this->determineAssetType($asset);
         if ($assetType === 'image') {
+            PipelineLogger::warning('DOMINANT COLOR: START', [
+                'asset_id' => $asset->id,
+            ]);
             Log::info('[PopulateAutomaticMetadataJob] Running color analysis for image asset', [
                 'asset_id' => $asset->id,
                 'mime_type' => $asset->mime_type,
@@ -178,6 +186,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 $colorAnalysisResult = $colorService->analyze($asset);
                 
                 if ($colorAnalysisResult === null) {
+                    PipelineLogger::warning('DOMINANT COLOR: SKIPPED', [
+                        'asset_id' => $asset->id,
+                        'reason' => 'no_image',
+                    ]);
                     Log::warning('[PopulateAutomaticMetadataJob] Color analysis returned null', [
                         'asset_id' => $asset->id,
                         'mime_type' => $asset->mime_type,
@@ -220,6 +232,16 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             
             try {
                 $dominantColorsExtractor->extractAndPersist($asset);
+                $colors = DB::table('asset_metadata')
+                    ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                    ->where('asset_metadata.asset_id', $asset->id)
+                    ->where('metadata_fields.key', 'dominant_colors')
+                    ->value('asset_metadata.value_json');
+                $colorCount = $colors ? count(json_decode($colors, true) ?? []) : 0;
+                PipelineLogger::warning('DOMINANT COLOR: SAVED', [
+                    'asset_id' => $asset->id,
+                    'color_count' => $colorCount,
+                ]);
                 Log::info('[PopulateAutomaticMetadataJob] Dominant colors extraction completed', [
                     'asset_id' => $asset->id,
                 ]);
@@ -239,6 +261,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 'clusters_count' => count($colorAnalysisResult['internal']['clusters'] ?? []),
             ]);
         } else {
+            PipelineLogger::warning('DOMINANT COLOR: SKIPPED', [
+                'asset_id' => $asset->id,
+                'reason' => 'no_image',
+            ]);
             Log::info('[PopulateAutomaticMetadataJob] Skipping dominant colors extraction - no color analysis result', [
                 'asset_id' => $asset->id,
                 'asset_type' => $this->determineAssetType($asset),

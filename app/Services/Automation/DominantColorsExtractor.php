@@ -549,14 +549,14 @@ class DominantColorsExtractor
      */
     protected function quantizeLabToBucket(float $l, float $a, float $b): string
     {
-        const L_STEP = 10;
-        const A_STEP = 10;
-        const B_STEP = 10;
+        $L_STEP = 10;
+        $A_STEP = 10;
+        $B_STEP = 10;
 
         // Quantize by rounding to nearest step
-        $quantizedL = (int) round($l / L_STEP) * L_STEP;
-        $quantizedA = (int) round($a / A_STEP) * A_STEP;
-        $quantizedB = (int) round($b / B_STEP) * B_STEP;
+        $quantizedL = (int) round($l / $L_STEP) * $L_STEP;
+        $quantizedA = (int) round($a / $A_STEP) * $A_STEP;
+        $quantizedB = (int) round($b / $B_STEP) * $B_STEP;
 
         // Clamp L to 0-100 range
         $quantizedL = max(0, min(100, $quantizedL));
