@@ -92,15 +92,22 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [showBulkEditModal, setShowBulkEditModal] = useState(false)
     
     // Derive active asset from local assets array to prevent stale references
-    // If asset no longer exists after reload, activeAsset will be null and drawer will close
+    // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
+    // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
     const activeAsset = activeAssetId ? localAssets.find(asset => asset.id === activeAssetId) : null
     
-    // Close drawer if active asset no longer exists in current assets array
+    // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
+    // This check is robust against temporary nulls during async updates
+    // We check for ID existence, not object reference equality
     useEffect(() => {
-        if (activeAssetId && !activeAsset) {
-            setActiveAssetId(null)
+        if (activeAssetId) {
+            const assetExists = localAssets.some(asset => asset.id === activeAssetId)
+            if (!assetExists) {
+                // Asset ID no longer exists in array - close drawer
+                setActiveAssetId(null)
+            }
         }
-    }, [activeAssetId, activeAsset, localAssets])
+    }, [activeAssetId, localAssets])
 
     // Category switches should reset the drawer selection,
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -283,6 +290,20 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             return prevAssets.map(asset => {
                 if (asset.id === updatedAsset.id) {
                     // Merge updated asset data (async, no refresh)
+                    return mergeAsset(asset, updatedAsset)
+                }
+                return asset
+            })
+        })
+    }, [])
+    
+    // Handle lifecycle updates (publish/unpublish) - updates local state without full reload
+    // This preserves drawer state and grid scroll position
+    const handleLifecycleUpdate = useCallback((updatedAsset) => {
+        setLocalAssets(prevAssets => {
+            return prevAssets.map(asset => {
+                if (asset.id === updatedAsset.id) {
+                    // Merge updated asset data (preserves thumbnail state, updates lifecycle fields)
                     return mergeAsset(asset, updatedAsset)
                 }
                 return asset
@@ -862,27 +883,37 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     </div>
 
                     {/* Asset Drawer - Desktop (pushes grid) */}
-                    {activeAsset && (
+                    {/* CRITICAL: Drawer identity is based ONLY on activeAssetId */}
+                    {/* Drawer must tolerate temporary undefined asset object during async updates */}
+                    {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
+                    {activeAssetId && (
                         <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
                             <AssetDrawer
-                                asset={activeAsset}
+                                key={activeAssetId} // Key by ID only - prevents remount on asset object changes
+                                asset={activeAsset} // May be undefined temporarily during async updates
                                 onClose={() => setActiveAssetId(null)}
                                 assets={localAssets}
-                                currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
+                                currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
+                                onAssetUpdate={handleLifecycleUpdate}
                             />
                         </div>
                     )}
                 </div>
 
                 {/* Asset Drawer - Mobile (full-width overlay) */}
-                {activeAsset && (
+                {/* CRITICAL: Drawer identity is based ONLY on activeAssetId */}
+                {/* Drawer must tolerate temporary undefined asset object during async updates */}
+                {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
+                {activeAssetId && (
                     <div className="md:hidden fixed inset-0 z-50">
                         <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
                         <AssetDrawer
-                            asset={activeAsset}
+                            key={activeAssetId} // Key by ID only - prevents remount on asset object changes
+                            asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => setActiveAssetId(null)}
                             assets={localAssets}
-                            currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
+                            currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
+                            onAssetUpdate={handleLifecycleUpdate}
                         />
                     </div>
                 )}

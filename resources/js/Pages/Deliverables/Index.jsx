@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
+import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { usePermission } from '../../hooks/usePermission'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
@@ -38,16 +39,34 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     // Local asset state (same pattern as Assets/Index)
     const [localAssets, setLocalAssets] = useState(assets)
     
+    // Track previous category ID to detect category changes
+    // When category changes, we should replace assets entirely (not merge incompatible sets)
+    const prevCategoryIdForAssetsRef = useRef(selectedCategoryId)
+    
     // Update local assets when props change (e.g., after Inertia reload)
     // Guard: Protect completed thumbnails from being overwritten on refresh
     useEffect(() => {
+        const prevCategoryId = prevCategoryIdForAssetsRef.current
+        const currentCategoryId = selectedCategoryId
+        const categoryChanged = prevCategoryId !== currentCategoryId
+        
+        // Update ref for next comparison
+        prevCategoryIdForAssetsRef.current = currentCategoryId
+        
         setLocalAssets(prevAssets => {
             // If no previous assets, use new assets as-is
             if (!prevAssets || prevAssets.length === 0) {
                 return assets
             }
             
-            // Merge new assets with field-level protection
+            // CRITICAL: If category changed, replace assets entirely (don't merge)
+            // This prevents merging incompatible asset sets from different categories
+            // which would cause a double flash (old assets briefly visible before new ones)
+            if (categoryChanged) {
+                return assets
+            }
+            
+            // Category didn't change - merge new assets with field-level protection
             return assets.map(newAsset => {
                 const prevAsset = prevAssets.find(a => a.id === newAsset.id)
                 if (!prevAsset) {
@@ -69,34 +88,117 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                 detail: { hasStaleAssetGrid: false }
             }))
         }
-    }, [assets])
+    }, [assets, selectedCategoryId])
     
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
     
     // Derive active asset from local assets array to prevent stale references
-    // If asset no longer exists after reload, activeAsset will be null and drawer will close
+    // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
+    // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
     const activeAsset = activeAssetId ? localAssets.find(asset => asset.id === activeAssetId) : null
     
-    // Close drawer if active asset no longer exists in current assets array
+    // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
+    // This check is robust against temporary nulls during async updates
+    // We check for ID existence, not object reference equality
     useEffect(() => {
-        if (activeAssetId && !activeAsset) {
-            setActiveAssetId(null)
+        if (activeAssetId) {
+            const assetExists = localAssets.some(asset => asset.id === activeAssetId)
+            if (!assetExists) {
+                // Asset ID no longer exists in array - close drawer
+                setActiveAssetId(null)
+            }
         }
-    }, [activeAssetId, activeAsset, assets])
+    }, [activeAssetId, localAssets])
+
+    // Category switches should reset the drawer selection
+    // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
+    // Match Assets/Index behavior: don't clear localAssets immediately - let the assets
+    // useEffect handle category changes by replacing (not merging) when category changed.
+    useEffect(() => {
+        setActiveAssetId(null)
+        
+        // Clear staleness flag when category changes (view is synced with new category)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
+    }, [selectedCategoryId])
+    
+    // Open drawer from URL query parameter (e.g., ?asset={id}&edit_metadata={field_id})
+    // Also clear staleness flag on mount (navigation to /app/deliverables completes)
+    useEffect(() => {
+        // Clear staleness flag when navigating to deliverables page (view is synced)
+        if (typeof window !== 'undefined' && window.__assetGridStaleness) {
+            window.__assetGridStaleness.hasStaleAssetGrid = false
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
+                detail: { hasStaleAssetGrid: false }
+            }))
+        }
+        
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search)
+            const assetId = urlParams.get('asset')
+            const editMetadataFieldId = urlParams.get('edit_metadata')
+            
+            if (assetId && localAssets.length > 0) {
+                const asset = localAssets.find(a => a.id === assetId)
+                if (asset) {
+                    setActiveAssetId(assetId)
+                    // If edit_metadata param is present, the drawer will handle it
+                    // (AssetDrawer or AssetMetadataDisplay should read this)
+                }
+            }
+        }
+    }, [localAssets]) // Re-check when assets load
     
     // Phase 3.1: Background Asset Reconciliation
-    // Bounded, non-invasive background reconciliation loop for asset thumbnails and processing state.
-    // Only polls when at least one visible asset is processing.
-    // Auto-stops when no assets are processing, max attempts reached, or category changes.
-    // This is NOT a live subscription - it's a quiet, page-level refresh loop.
-    // Phase 3.1 invariant: Background reconciliation MUST pause while upload dialog is open.
-    // Inertia reloads reset page-owned state (dialogs, modals).
-    useAssetReconciliation({
-        assets,
+    // DISABLED: useThumbnailSmartPoll handles async updates without reloads
+    // useAssetReconciliation uses router.reload() which causes grid remounts
+    // Async processing (thumbnails, AI, video posters) must NEVER call router.reload
+    // useThumbnailSmartPoll updates localAssets in-place via handleThumbnailUpdate callback
+    // This matches Assets/Index behavior - reconciliation is disabled there too
+    // useAssetReconciliation({
+    //     assets,
+    //     selectedCategoryId,
+    //     isPaused: isUploadDialogOpen,
+    // })
+    
+    // Grid thumbnail polling: Async updates for fade-in (same as drawer)
+    // No view refreshes - only local state updates
+    const handleThumbnailUpdate = useCallback((updatedAsset) => {
+        setLocalAssets(prevAssets => {
+            return prevAssets.map(asset => {
+                if (asset.id === updatedAsset.id) {
+                    // Merge updated asset data (async, no refresh)
+                    return mergeAsset(asset, updatedAsset)
+                }
+                return asset
+            })
+        })
+    }, [])
+    
+    // Handle lifecycle updates (publish/unpublish) - updates local state without full reload
+    // This preserves drawer state and grid scroll position (matches Assets/Index behavior)
+    const handleLifecycleUpdate = useCallback((updatedAsset) => {
+        setLocalAssets(prevAssets => {
+            return prevAssets.map(asset => {
+                if (asset.id === updatedAsset.id) {
+                    // Merge updated asset data (preserves thumbnail state, updates lifecycle fields)
+                    return mergeAsset(asset, updatedAsset)
+                }
+                return asset
+            })
+        })
+    }, [])
+    
+    useThumbnailSmartPoll({
+        assets: localAssets,
+        onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
-        isPaused: isUploadDialogOpen,
     })
     
     // Track drawer animation state to freeze grid layout during animation
@@ -216,12 +318,11 @@ export default function DeliverablesIndex({ categories, selected_category, show_
         setRemountKey(prev => prev + 1)
         
         // Reload assets to show newly uploaded assets
-        // Use preserveState: true to preserve activeAssetId (keeps drawer open if it was open)
-        // This matches Assets/Index behavior - drawer state is preserved via activeAssetId in state
+        // Match Assets/Index: preserveState: false prevents dialog reopening, but drawer state (activeAssetId) is preserved in component state
         router.reload({ 
             only: ['assets'], 
             preserveScroll: true,
-            preserveState: true, // Preserve drawer state (activeAssetId) - keeps drawer open
+            preserveState: false, // Prevent state preservation to avoid dialog reopening
             onSuccess: () => {
                 setIsUploadDialogOpen(false)
                 // Reset auto-closing flag after reload completes
@@ -491,57 +592,56 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             )
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
-                        {/* Asset Grid Toolbar */}
-                        {localAssets && localAssets.length > 0 && (
-                            <div className="mb-6">
-                                <AssetGridToolbar
-                                    showInfo={showInfo}
-                                    onToggleInfo={() => setShowInfo(v => !v)}
-                                    cardSize={cardSize}
-                                    onCardSizeChange={setCardSize}
-                                    primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
-                                    showMoreFilters={true}
-                                    moreFiltersContent={
-                                        /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
-                                        /* 
-                                            Secondary metadata filters are metadata fields NOT marked as primary.
-                                            These filters render in the "More filters" expandable section.
-                                            
-                                            Visibility rules (enforced by Phase H helpers):
-                                            - Field does NOT have is_primary === true (excluded from primary)
-                                            - Field is ENABLED for the current category (filterScopeRules.isFilterCompatible)
-                                            - Field has Filter = true (is_filterable) - enforced by backend filterable_schema
-                                            - Field has ≥1 value in current asset grid (filterVisibilityRules.hasAvailableValues)
-                                            
-                                            Phase H helpers used:
-                                            - normalizeFilterConfig: Normalizes Inertia props
-                                            - filterTierResolver.getSecondaryFilters: Gets metadata fields from schema (excludes is_primary === true)
-                                            - filterVisibilityRules.getVisibleFilters: Filters to visible only
-                                            
-                                            UI behavior:
-                                            - Bar always persists (content changes based on category)
-                                            - Shows "More filters" button always (disabled if no filters)
-                                            - Updates URL query params immediately on change
-                                            - Triggers grid refresh (only: ['assets'])
-                                            - Shows empty state if no filters available for current category
-                                            
-                                            Explicitly does NOT render:
-                                            - Category selectors (sidebar handles this)
-                                            - Asset type selectors (route/nav handles this)
-                                            - Brand selectors (never selectable)
-                                            - Primary metadata filters (is_primary === true) - handled by AssetGridMetadataPrimaryFilters
-                                        */
-                                        <AssetGridSecondaryFilters
-                                            filterable_schema={filterable_schema}
-                                            selectedCategoryId={selectedCategoryId}
-                                            available_values={available_values}
-                                            canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
-                                            assetType="image"
-                                        />
-                                    }
-                                />
-                            </div>
-                        )}
+                        {/* Asset Grid Toolbar - Always visible (persists across categories) */}
+                        {/* Matches Assets/Index behavior - toolbar always visible, even when no assets */}
+                        <div className="mb-8">
+                            <AssetGridToolbar
+                                showInfo={showInfo}
+                                onToggleInfo={() => setShowInfo(v => !v)}
+                                cardSize={cardSize}
+                                onCardSizeChange={setCardSize}
+                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                showMoreFilters={true}
+                                moreFiltersContent={
+                                    /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
+                                    /* 
+                                        Secondary metadata filters are metadata fields NOT marked as primary.
+                                        These filters render in the "More filters" expandable section.
+                                        
+                                        Visibility rules (enforced by Phase H helpers):
+                                        - Field does NOT have is_primary === true (excluded from primary)
+                                        - Field is ENABLED for the current category (filterScopeRules.isFilterCompatible)
+                                        - Field has Filter = true (is_filterable) - enforced by backend filterable_schema
+                                        - Field has ≥1 value in current asset grid (filterVisibilityRules.hasAvailableValues)
+                                        
+                                        Phase H helpers used:
+                                        - normalizeFilterConfig: Normalizes Inertia props
+                                        - filterTierResolver.getSecondaryFilters: Gets metadata fields from schema (excludes is_primary === true)
+                                        - filterVisibilityRules.getVisibleFilters: Filters to visible only
+                                        
+                                        UI behavior:
+                                        - Bar always persists (content changes based on category)
+                                        - Shows "More filters" button always (disabled if no filters)
+                                        - Updates URL query params immediately on change
+                                        - Triggers grid refresh (only: ['assets'])
+                                        - Shows empty state if no filters available for current category
+                                        
+                                        Explicitly does NOT render:
+                                        - Category selectors (sidebar handles this)
+                                        - Asset type selectors (route/nav handles this)
+                                        - Brand selectors (never selectable)
+                                        - Primary metadata filters (is_primary === true) - handled by AssetGridMetadataPrimaryFilters
+                                    */
+                                    <AssetGridSecondaryFilters
+                                        filterable_schema={filterable_schema}
+                                        selectedCategoryId={selectedCategoryId}
+                                        available_values={available_values}
+                                        canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
+                                        assetType="image"
+                                    />
+                                }
+                            />
+                        </div>
                         
                         {/* Deliverables Grid or Empty State */}
                         {localAssets && localAssets.length > 0 ? (
@@ -585,20 +685,26 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                 onClose={() => setActiveAssetId(null)}
                                 assets={localAssets}
                                 currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
+                                onAssetUpdate={handleLifecycleUpdate}
                             />
                         </div>
                     )}
                 </div>
 
                 {/* Asset Drawer - Mobile (full-width overlay) */}
-                {activeAsset && (
+                {/* CRITICAL: Drawer identity is based ONLY on activeAssetId */}
+                {/* Drawer must tolerate temporary undefined asset object during async updates */}
+                {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
+                {activeAssetId && (
                     <div className="md:hidden fixed inset-0 z-50">
                         <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
                         <AssetDrawer
-                            asset={activeAsset}
+                            key={activeAssetId} // Key by ID only - prevents remount on asset object changes
+                            asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => setActiveAssetId(null)}
                             assets={localAssets}
-                            currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
+                            currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
+                            onAssetUpdate={handleLifecycleUpdate}
                         />
                     </div>
                 )}

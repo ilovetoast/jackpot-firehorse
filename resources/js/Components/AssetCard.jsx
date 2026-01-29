@@ -285,7 +285,9 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                                 {fileExtension}
                             </span>
                             {/* Subtle unpublished icon */}
-                            {!asset.archived_at && !asset.published_at && (
+                            {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
+                            {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
+                            {!asset.archived_at && asset.is_published === false && (
                                 <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
                             )}
                         </div>

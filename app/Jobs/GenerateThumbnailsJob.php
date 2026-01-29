@@ -17,6 +17,8 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
+use App\Support\Logging\PipelineLogger;
 
 /**
  * Generate Asset Thumbnails Job
@@ -90,14 +92,34 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     public function handle(ThumbnailGenerationService $thumbnailService): void
     {
+        // TASK 1: Prove whether GenerateThumbnailsJob runs at all
+        // This log MUST appear if the job is dispatched
+        PipelineLogger::warning('THUMBNAILS: HANDLE START', [
+            'asset_id' => $this->assetId,
+            'job_id' => $this->job->getJobId() ?? 'unknown',
+            'attempt' => $this->attempts(),
+        ]);
+
         Log::info('[GenerateThumbnailsJob] Job started', [
             'asset_id' => $this->assetId,
             'job_id' => $this->job->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
         ]);
 
+        // TASK 2: Guarantee thumbnail job NEVER leaves PROCESSING
+        // Wrap all thumbnail logic in try/catch and enforce a terminal state
+        // After this change, no asset may remain in PROCESSING forever
         try {
             $asset = Asset::findOrFail($this->assetId);
+            
+            // Log asset state at start (after asset lookup)
+            PipelineLogger::warning('THUMBNAILS: ASSET LOADED', [
+                'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                'thumbnail_started_at' => $asset->thumbnail_started_at?->toIso8601String() ?? 'null',
+                'storage_bucket_id' => $asset->storage_bucket_id,
+                'storage_root_path' => $asset->storage_root_path,
+            ]);
 
             // Idempotency: Check if thumbnails already completed
             // NULL or PENDING means thumbnails haven't been attempted or are pending
@@ -108,6 +130,67 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // Job chaining is handled by Bus::chain() in ProcessAssetJob
                 // Chain will continue to next job automatically
                 return;
+            }
+            
+            // TASK 2: Safety guard - if asset is in PROCESSING from a previous failed attempt,
+            // we should set it to a terminal state (FAILED) before proceeding to prevent stuck state
+            // This handles the case where a job was interrupted and left PROCESSING
+            if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
+                PipelineLogger::warning('THUMBNAILS: DETECTED STUCK PROCESSING', [
+                    'asset_id' => $asset->id,
+                    'thumbnail_started_at' => $asset->thumbnail_started_at?->toIso8601String() ?? 'null',
+                ]);
+                
+                // Check if processing started too long ago (5 minutes = timeout)
+                $startedAt = $asset->thumbnail_started_at;
+                // Use Carbon's diffInMinutes - if startedAt is in the past, this returns positive number
+                // The second parameter (false) means absolute difference (always positive)
+                $minutesElapsed = $startedAt ? now()->diffInMinutes($startedAt, false) : 0;
+                PipelineLogger::warning('THUMBNAILS: CHECKING TIMEOUT', [
+                    'asset_id' => $asset->id,
+                    'started_at' => $startedAt?->toIso8601String() ?? 'null',
+                    'minutes_elapsed' => $minutesElapsed,
+                    'threshold' => 5,
+                    'is_past' => $startedAt ? $startedAt->isPast() : 'null',
+                    'now' => now()->toIso8601String(),
+                ]);
+                if ($startedAt && $startedAt->isPast() && $minutesElapsed > 5) {
+                    // Processing started more than 5 minutes ago - likely stuck
+                    // TASK 2: Set to FAILED (terminal state) instead of PENDING
+                    // This ensures we never leave PROCESSING forever
+                    PipelineLogger::warning('THUMBNAILS: TIMEOUT DETECTED - SETTING FAILED', [
+                        'asset_id' => $asset->id,
+                        'started_at' => $startedAt->toIso8601String(),
+                        'minutes_elapsed' => now()->diffInMinutes($startedAt),
+                    ]);
+                    Log::warning('[GenerateThumbnailsJob] Asset stuck in PROCESSING - setting to FAILED', [
+                        'asset_id' => $asset->id,
+                        'started_at' => $startedAt,
+                        'minutes_elapsed' => now()->diffInMinutes($startedAt),
+                    ]);
+                    $asset->update([
+                        'thumbnail_status' => ThumbnailStatus::FAILED,
+                        'thumbnail_error' => 'Thumbnail generation timed out (processing started more than 5 minutes ago)',
+                        'thumbnail_started_at' => null,
+                    ]);
+                    // Return early - asset is now in terminal state (FAILED)
+                    return;
+                } elseif (!$startedAt) {
+                    // PROCESSING but no started_at - this is invalid state, set to FAILED
+                    PipelineLogger::warning('THUMBNAILS: INVALID STATE - PROCESSING WITHOUT started_at - SETTING FAILED', [
+                        'asset_id' => $asset->id,
+                    ]);
+                    Log::warning('[GenerateThumbnailsJob] Asset in PROCESSING without started_at - setting to FAILED', [
+                        'asset_id' => $asset->id,
+                    ]);
+                    $asset->update([
+                        'thumbnail_status' => ThumbnailStatus::FAILED,
+                        'thumbnail_error' => 'Thumbnail generation in invalid state (PROCESSING without started_at)',
+                        'thumbnail_started_at' => null,
+                    ]);
+                    // Return early - asset is now in terminal state (FAILED)
+                    return;
+                }
             }
 
         // Step 5: Defensive check - Skip if file type doesn't support thumbnails
@@ -207,11 +290,17 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
         }
 
-        // Update status to processing and record start time for timeout detection
+        // TASK 2: Update status to processing and record start time for timeout detection
+        // CRITICAL: This sets PROCESSING - the catch block MUST set a terminal state if exception occurs
         $asset->update([
             'thumbnail_status' => ThumbnailStatus::PROCESSING,
             'thumbnail_error' => null,
             'thumbnail_started_at' => now(),
+        ]);
+        
+        PipelineLogger::warning('THUMBNAILS: SET PROCESSING', [
+            'asset_id' => $asset->id,
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
         ]);
 
         // Log thumbnail generation started (non-blocking)
@@ -233,6 +322,10 @@ class GenerateThumbnailsJob implements ShouldQueue
 
         // Step 6: Generate all thumbnail styles atomically (includes preview + final)
         // Note: Thumbnail generation errors are caught by outer catch block
+        // TASK 2: If this throws, catch block MUST set terminal state (FAILED)
+        PipelineLogger::warning('THUMBNAILS: CALLING generateThumbnails', [
+            'asset_id' => $asset->id,
+        ]);
         $thumbnails = $thumbnailService->generateThumbnails($asset);
 
             // Step 6: Separate preview thumbnails from final thumbnails
@@ -566,7 +659,24 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'job_id' => $this->job->getJobId() ?? 'unknown',
                 'attempt' => $this->attempts(),
             ]);
+            
+            // TASK 2: Terminal state guarantee - COMPLETED
+            // Asset is already updated to COMPLETED above (line 466)
+            PipelineLogger::warning('THUMBNAILS: COMPLETED', [
+                'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+            ]);
+            
         } catch (\Throwable $e) {
+            // TASK 2: Terminal state guarantee - FAILED
+            // This catch block MUST set a terminal state (FAILED) to prevent PROCESSING forever
+            // The catch block below will update thumbnail_status to FAILED
+            PipelineLogger::error('THUMBNAILS: FAILED', [
+                'asset_id' => $this->assetId,
+                'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+                'attempt' => $this->attempts(),
+            ]);
             Log::error('[GenerateThumbnailsJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
                 'job_id' => $this->job->getJobId() ?? 'unknown',
@@ -592,9 +702,13 @@ class GenerateThumbnailsJob implements ShouldQueue
             // Include exception class name for better debugging (for logs only)
             $fullErrorMessage = get_class($e) . ': ' . $errorMessage;
             
+            // TASK 2: Terminal state guarantee - ensure asset is loaded
             // $asset may not be defined if exception occurred before findOrFail
-            $asset = $asset ?? Asset::find($this->assetId);
-            
+            // We MUST load it to set terminal state
+            if (!isset($asset)) {
+                $asset = Asset::find($this->assetId);
+            }
+
             if ($asset) {
                 Log::error('[GenerateThumbnailsJob] Thumbnail generation failed', [
                     'asset_id' => $asset->id,
@@ -607,13 +721,32 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // Sanitize error message for user display (remove technical details)
                 $userFriendlyError = $this->sanitizeErrorMessage($errorMessage);
                 
-                // Mark as FAILED with user-friendly error message
-                // Clear thumbnail_started_at when failed (no longer needed)
-                $asset->update([
-                    'thumbnail_status' => ThumbnailStatus::FAILED,
-                    'thumbnail_error' => $userFriendlyError,
-                    'thumbnail_started_at' => null, // Clear start time on failure
-                ]);
+                // TASK 2: Terminal state guarantee - ALWAYS set FAILED in catch block
+                // This prevents assets from remaining in PROCESSING forever
+                // CRITICAL: Use direct property assignment + save() to ensure commit
+                // Even if we re-throw for retry, we set FAILED now as a safety guard
+                // If the job retries and succeeds, it will set COMPLETED (overriding FAILED)
+                // If it retries and fails again, at least we have a terminal state
+                $asset->thumbnail_status = ThumbnailStatus::FAILED;
+                $asset->thumbnail_error = $userFriendlyError;
+                $asset->thumbnail_started_at = null;
+                $asset->save(); // Explicit save to ensure commit before re-throw
+                
+                // TASK 2: Verify terminal state was set (defensive check)
+                $asset->refresh();
+                if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
+                    // This should never happen, but if it does, force terminal state with direct DB update
+                    Log::error('[GenerateThumbnailsJob] CRITICAL: Asset still in PROCESSING after save - forcing FAILED via direct DB', [
+                        'asset_id' => $asset->id,
+                    ]);
+                    DB::table('assets')
+                        ->where('id', $asset->id)
+                        ->update([
+                            'thumbnail_status' => ThumbnailStatus::FAILED->value,
+                            'thumbnail_error' => 'Thumbnail generation failed (forced terminal state)',
+                            'thumbnail_started_at' => null,
+                        ]);
+                }
                 
                 Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (exception)', [
                     'asset_id' => $asset->id,
@@ -649,6 +782,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $asset->update(['metadata' => $currentMetadata]);
             } else {
                 // Asset not found - log error but can't update
+                // TASK 2: Even if asset not found, we've logged the failure
+                // The failed() method will be called after retries exhausted
                 Log::error('[GenerateThumbnailsJob] Thumbnail generation failed - asset not found', [
                     'asset_id' => $this->assetId,
                     'error' => $errorMessage,
@@ -657,6 +792,27 @@ class GenerateThumbnailsJob implements ShouldQueue
                 ]);
             }
 
+            // TASK 2: Terminal state guarantee
+            // If asset exists and is in PROCESSING, we MUST set a terminal state
+            // Even if we re-throw for retry, the catch block above should have set FAILED
+            // The failed() method (called after retries) will also set FAILED as final safety
+            
+            // TASK 2: Final safety check - ensure terminal state is set before re-throwing
+            // Even if we're going to retry, we MUST have a terminal state now
+            if (isset($asset) && $asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
+                // This should never happen, but if it does, force terminal state with direct DB update
+                PipelineLogger::error('THUMBNAILS: CRITICAL - Still PROCESSING after catch block - forcing FAILED via DB', [
+                    'asset_id' => $asset->id,
+                ]);
+                DB::table('assets')
+                    ->where('id', $asset->id)
+                    ->update([
+                        'thumbnail_status' => ThumbnailStatus::FAILED->value,
+                        'thumbnail_error' => 'Thumbnail generation failed (forced terminal state in catch block)',
+                        'thumbnail_started_at' => null,
+                    ]);
+            }
+            
             // Re-throw to trigger job retry mechanism
             // After all retries exhausted, failed() method will be called
             throw $e;
@@ -673,18 +829,28 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
+        // TASK 2: Final safety net - ensure terminal state is set after all retries exhausted
+        // This method is called by Laravel when job fails after all retries
+        // It MUST set a terminal state (FAILED) to prevent PROCESSING forever
         $asset = Asset::find($this->assetId);
 
         if ($asset) {
             // Sanitize error message for user display
             $userFriendlyError = $this->sanitizeErrorMessage($exception->getMessage());
             
-            // Update thumbnail status to failed
+            // TASK 2: Terminal state guarantee - FAILED
+            // Update thumbnail status to failed (terminal state)
             // Clear thumbnail_started_at when failed (no longer needed)
             $asset->update([
                 'thumbnail_status' => ThumbnailStatus::FAILED,
                 'thumbnail_error' => $userFriendlyError,
                 'thumbnail_started_at' => null, // Clear start time on failure
+            ]);
+            
+            PipelineLogger::error('THUMBNAILS: FAILED (after all retries)', [
+                'asset_id' => $asset->id,
+                'error' => $exception->getMessage(),
+                'attempts' => $this->attempts(),
             ]);
             
             Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (failed() method)', [

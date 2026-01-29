@@ -66,6 +66,12 @@ class AITaggingJob implements ShouldQueue
 
         // Ensure thumbnails have been generated (check thumbnail_status, not asset status)
         // Asset.status remains UPLOADED throughout processing for visibility
+        //
+        // ARCHITECTURAL NOTE: This job uses "skip" model (marks as skipped, doesn't retry).
+        // PopulateAutomaticMetadataJob uses "retry until ready" model (release() + reschedule).
+        // Both models are valid, but consider standardizing on Option A (retry until ready)
+        // for consistency across all image-derived jobs long-term.
+        // See /docs/PIPELINE_SEQUENCING.md for architectural details.
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
             Log::warning('[AITaggingJob] AI tagging skipped - thumbnails have not completed', [
                 'asset_id' => $asset->id,

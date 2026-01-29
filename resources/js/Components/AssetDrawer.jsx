@@ -64,7 +64,7 @@ import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 import { useAssetMetrics } from '../hooks/useAssetMetrics'
 import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/solid'
 
-export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null }) {
+export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null }) {
     const { auth } = usePage().props
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
@@ -354,19 +354,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     }
 
     // LIVE THUMBNAIL BEHAVIOR: Poll thumbnail status for drawer asset only
-    // This is completely isolated from grid state - drawer updates never affect grid
+    // CRITICAL: Grid owns asset state - drawer is a consumer
+    // Polling updates drawerAsset for display, but grid state (asset prop) is source of truth
+    // When grid updates asset (via handleThumbnailUpdate/handleLifecycleUpdate), prop changes and drawerAsset syncs
     const { drawerAsset } = useDrawerThumbnailPoll({
         asset,
         onAssetUpdate: (updatedAsset) => {
-            // Update local state for drawer display only
-            // This does NOT mutate grid assets
-            // The drawer will re-render with updated thumbnail URLs
+            // Polling callback - drawerAsset is updated internally by hook
+            // Grid state updates come via asset prop changes, not through this callback
+            // This callback is for future use if we need to notify parent of polling updates
         },
     })
 
     // Use drawerAsset (with live updates) for thumbnail display
     // Fallback to prop asset if drawerAsset not yet initialized
-    const displayAsset = drawerAsset || asset
+    // CRITICAL: Drawer must tolerate undefined asset during async updates
+    // Asset may be temporarily undefined while localAssets array is being updated
+    const displayAsset = drawerAsset || asset || null
 
     // Phase V-1: Detect if asset is a video
     const isVideo = useMemo(() => {
@@ -1147,7 +1151,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     {/* Lifecycle badges - Unpublished, Archived, and Expired */}
                     <div className="flex flex-wrap gap-2">
                         {/* Unpublished badge */}
-                        {!displayAsset.archived_at && !displayAsset.published_at && (
+                        {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
+                        {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
+                        {!displayAsset.archived_at && displayAsset.is_published === false && (
                             <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
                                 Unpublished
                             </span>
@@ -1165,6 +1171,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </span>
                         )}
                         {/* Phase AF-1: Approval badges */}
+                        {/* CRITICAL: Approval badges are SEPARATE from publication badges */}
+                        {/* Publication = visibility (published_at) */}
+                        {/* Approval = governance (approval_status, approved_at) */}
+                        {/* These are independent states - do NOT conflate them */}
                         {/* Phase AF-5: Only show if approvals are enabled */}
                         {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'pending' && (
                             <>
@@ -1308,7 +1318,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 // 4. Contributors are blocked when approval is enabled
                                 // 5. If asset is pending approval or rejected, only approvers can publish
                                 const canShowPublishButton = canPublish && 
-                                                             !displayAsset.published_at && 
+                                                             displayAsset.is_published === false && 
                                                              !displayAsset.archived_at &&
                                                              !contributorBlocked &&
                                                              (!isPendingApproval || isApprover) &&
@@ -1346,10 +1356,18 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                     setToastMessage(null)
                                                 }, 8000)
                                                 
-                                                // Delay reload slightly to ensure toast is visible
-                                                setTimeout(() => {
-                                                    router.reload({ preserveState: true, preserveScroll: true })
-                                                }, 500)
+                                                // Update local asset state instead of full reload
+                                                // This preserves drawer state and grid scroll position
+                                                if (onAssetUpdate && response.data.asset) {
+                                                    onAssetUpdate(response.data.asset)
+                                                } else {
+                                                    // Fallback: reload only assets if callback not provided
+                                                    router.reload({ 
+                                                        only: ['assets'], 
+                                                        preserveState: true, 
+                                                        preserveScroll: true 
+                                                    })
+                                                }
                                             }
                                         } catch (err) {
                                             console.error('Failed to approve asset:', err)
@@ -2219,10 +2237,23 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             // Close modal
                                             setShowPublishModal(false)
                                             
-                                            // Delay reload slightly to ensure toast is visible
-                                            setTimeout(() => {
-                                                router.reload({ preserveState: true, preserveScroll: true })
-                                            }, 500)
+                                            // Update local asset state instead of full reload
+                                            // This preserves drawer state and grid scroll position
+                                            if (onAssetUpdate && response.data.asset) {
+                                                // Merge updated fields into existing asset
+                                                const updatedAsset = {
+                                                    ...displayAsset,
+                                                    ...response.data.asset,
+                                                }
+                                                onAssetUpdate(updatedAsset)
+                                            } else {
+                                                // Fallback: reload only assets if callback not provided
+                                                router.reload({ 
+                                                    only: ['assets'], 
+                                                    preserveState: true, 
+                                                    preserveScroll: true 
+                                                })
+                                            }
                                         }
                                     } catch (err) {
                                         console.error('Failed to publish asset:', err)
@@ -2463,9 +2494,16 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                     resubmitFileInputRef.current.value = ''
                                                 }
                                                 
-                                                setTimeout(() => {
-                                                    router.reload({ preserveState: true, preserveScroll: true })
-                                                }, 500)
+                                                // Update local asset state if callback provided, otherwise reload
+                                                if (onAssetUpdate && finalizeResponse.data?.results?.[0]?.asset) {
+                                                    onAssetUpdate(finalizeResponse.data.results[0].asset)
+                                                } else {
+                                                    router.reload({ 
+                                                        only: ['assets'], 
+                                                        preserveState: true, 
+                                                        preserveScroll: true 
+                                                    })
+                                                }
                                             } else {
                                                 // Extract error message from error object (may be string or object with message property)
                                                 const errorData = finalizeResponse.data?.results?.[0]?.error

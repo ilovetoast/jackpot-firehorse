@@ -755,7 +755,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                 {(canPublishWithFallback || canUnpublishWithFallback || canArchiveWithFallback || canRestoreWithFallback) && (
                                                     <>
                                                         {/* Publish */}
-                                                        {canPublishWithFallback && !asset?.published_at && !asset?.archived_at && (
+                                                        {canPublishWithFallback && asset?.is_published === false && !asset?.archived_at && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -771,7 +771,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                         )}
                                                         
                                                         {/* Unpublish */}
-                                                        {canUnpublishWithFallback && asset?.published_at && !asset?.archived_at && (
+                                                        {canUnpublishWithFallback && asset?.is_published === true && !asset?.archived_at && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -1196,13 +1196,15 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                 </span>
                                             )}
                                             {/* Published badge - show if published (regardless of archived status) */}
-                                            {asset?.published_at && (
+                                            {asset?.is_published === true && (
                                                 <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-green-100 text-green-700 border border-green-300">
                                                     Published
                                                 </span>
                                             )}
                                             {/* Unpublished badge - show if not published (regardless of archived status) */}
-                                            {!asset?.published_at && (
+                                            {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
+                                            {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
+                                            {asset?.is_published === false && (
                                                 <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
                                                     Unpublished
                                                 </span>
@@ -1211,7 +1213,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                         
                                         {/* Lifecycle Details */}
                                         {/* Show all lifecycle details independently */}
-                                        {asset?.published_at && (
+                                        {asset?.is_published === true && (
                                             <div className="text-sm text-gray-600">
                                                 <span className="font-medium text-gray-900">Published:</span>{' '}
                                                 {new Date(asset.published_at).toLocaleDateString('en-US', {
@@ -1226,7 +1228,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                 )}
                                             </div>
                                         )}
-                                        {!asset?.published_at && (
+                                        {asset?.is_published === false && (
                                             <div className="text-sm text-gray-600">
                                                 <span className="font-medium text-gray-900">Unpublished</span>
                                                 {asset?.category?.name && (

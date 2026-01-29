@@ -414,6 +414,19 @@ class User extends Authenticatable
      */
     public function hasPermissionForTenant(Tenant $tenant, string $permission): bool
     {
+        // CRITICAL: Check PermissionMap FIRST (owner/admin have all permissions)
+        // This prevents the bug where owner/admin permissions were missed
+        $tenantRole = $this->getRoleForTenant($tenant);
+        if ($tenantRole) {
+            $permissionMap = \App\Support\Roles\PermissionMap::tenantPermissions();
+            $rolePermissions = $permissionMap[strtolower($tenantRole)] ?? [];
+            
+            // Owner/Admin have all permissions via PermissionMap
+            if (in_array($permission, $rolePermissions)) {
+                return true;
+            }
+        }
+
         // Define site-specific permissions that should check Spatie permissions
         $siteSpecificPermissions = ['company.manage', 'permissions.manage'];
         $isSitePermission = in_array($permission, $siteSpecificPermissions) || str_starts_with($permission, 'site.');
@@ -425,7 +438,6 @@ class User extends Authenticatable
 
         // For ALL permissions (both company and site), check tenant role permissions
         // This ensures company permissions are ONLY checked via tenant role
-        $tenantRole = $this->getRoleForTenant($tenant);
         if (!$tenantRole) {
             return false;
         }

@@ -15,6 +15,7 @@ use App\Services\ApprovalAgingService;
 use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
+use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
@@ -40,7 +41,8 @@ class AssetController extends Controller
         protected AssetArchiveService $archiveService,
         protected MetadataFilterService $metadataFilterService,
         protected MetadataSchemaResolver $metadataSchemaResolver,
-        protected AiMetadataConfidenceService $confidenceService
+        protected AiMetadataConfidenceService $confidenceService,
+        protected LifecycleResolver $lifecycleResolver
     ) {
     }
 
@@ -323,196 +325,6 @@ class AssetController extends Controller
         ->where('brand_id', $brand->id)
         ->where('type', AssetType::ASSET);
 
-        // Phase L.5.1: Lifecycle filter - Check early to determine visibility rules
-        // SECURITY: Apply lifecycle filters based on specific permissions
-        // - pending_approval: Requires asset.publish (approvers)
-        // - pending_publication: Phase J - Contributors can see their own, approvers see all
-        // - unpublished: Requires metadata.bypass_approval (full viewing privileges)
-        // - archived: Requires asset.archive (users who can archive assets)
-        // - expired: Requires asset.archive (users who can archive assets, similar lifecycle management)
-        // This prevents unauthorized access to filtered assets via URL manipulation
-        $lifecycleFilter = $request->get('lifecycle');
-        if ($lifecycleFilter === 'pending_approval' && !$canPublish) {
-            // User doesn't have asset.publish permission - ignore filter and log security event
-            \Log::warning('[AssetController] Unauthorized pending_approval filter access attempt', [
-                'user_id' => $user?->id,
-                'lifecycle_filter' => $lifecycleFilter,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-            ]);
-            $lifecycleFilter = null; // Reset to prevent filter application
-        } elseif ($lifecycleFilter === 'pending_publication') {
-            // Phase J: Pending Publication filter - Contributors and approvers can access
-            // No additional permission check needed - visibility rules handle access control
-            // (Contributors see only their own, approvers see all)
-        } elseif ($lifecycleFilter === 'unpublished' && !$canBypassApproval) {
-            // User doesn't have metadata.bypass_approval permission - ignore filter and log security event
-            \Log::warning('[AssetController] Unauthorized unpublished filter access attempt', [
-                'user_id' => $user?->id,
-                'lifecycle_filter' => $lifecycleFilter,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-            ]);
-            $lifecycleFilter = null; // Reset to prevent filter application
-        } elseif ($lifecycleFilter === 'archived' && !$canArchive) {
-            // User doesn't have asset.archive permission - ignore filter and log security event
-            \Log::warning('[AssetController] Unauthorized archived filter access attempt', [
-                'user_id' => $user?->id,
-                'lifecycle_filter' => $lifecycleFilter,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-            ]);
-            $lifecycleFilter = null; // Reset to prevent filter application
-        } elseif ($lifecycleFilter === 'expired' && !$canArchive) {
-            // Phase M: User doesn't have asset.archive permission - ignore filter and log security event
-            // Use same permission as archived since it's similar lifecycle management
-            \Log::warning('[AssetController] Unauthorized expired filter access attempt', [
-                'user_id' => $user?->id,
-                'lifecycle_filter' => $lifecycleFilter,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-            ]);
-            $lifecycleFilter = null; // Reset to prevent filter application
-        }
-
-        // Phase L.5.1: Visibility filter
-        // Users with asset.publish can see HIDDEN assets (pending approval)
-        // Other users only see VISIBLE assets
-        // When lifecycle filter is active, adjust status filter accordingly
-        if ($lifecycleFilter === 'pending_approval' && $canPublish) {
-            // Pending approval: Only HIDDEN status, unpublished
-            // Requires asset.publish permission (approvers)
-            $assetsQuery->where('status', AssetStatus::HIDDEN)
-                ->whereNull('published_at');
-            
-            \Log::info('[AssetController] Applied pending_approval lifecycle filter', [
-                'user_id' => $user?->id,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-            ]);
-        } elseif ($lifecycleFilter === 'pending_publication') {
-            // Phase J: Pending Publication - Show assets with approval_status = pending or rejected
-            // Visibility rules:
-            // - Contributors: Only their own pending/rejected assets
-            // - Admin/Owner/Brand Manager: All pending/rejected assets
-            $userRole = $user ? $user->getRoleForTenant($tenant) : null;
-            $isTenantOwnerOrAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
-            
-            // Check if user is a brand manager
-            $isBrandManager = false;
-            if ($user && $brand) {
-                $membership = $user->activeBrandMembership($brand);
-                $isBrandManager = $membership && ($membership['role'] ?? null) === 'brand_manager';
-            }
-            
-            // Check if user is a contributor
-            $isContributor = false;
-            if ($user && $brand) {
-                $membership = $user->activeBrandMembership($brand);
-                $isContributor = $membership && ($membership['role'] ?? null) === 'contributor';
-            }
-            
-            // Approvers (Admin/Owner/Brand Manager) see all pending/rejected assets
-            // Contributors see only their own pending/rejected assets
-            if ($isContributor && !$isTenantOwnerOrAdmin && !$isBrandManager) {
-                // Contributor: Only their own assets
-                $assetsQuery->where('user_id', $user->id);
-            }
-            // Admin/Owner/Brand Manager: No user_id filter (see all)
-            
-            // Filter by approval_status = pending or rejected
-            $assetsQuery->where(function ($query) {
-                $query->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
-                      ->orWhere('approval_status', \App\Enums\ApprovalStatus::REJECTED);
-            });
-            
-            \Log::info('[AssetController] Applied pending_publication lifecycle filter', [
-                'user_id' => $user?->id,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'is_contributor' => $isContributor,
-                'is_approver' => $isTenantOwnerOrAdmin || $isBrandManager,
-            ]);
-        } elseif ($lifecycleFilter === 'unpublished' && $canBypassApproval) {
-            // Unpublished filter: Show all unpublished assets (both VISIBLE and HIDDEN status)
-            // Requires metadata.bypass_approval permission (full viewing privileges)
-            $assetsQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
-                ->whereNull('published_at');
-            
-            \Log::info('[AssetController] Applied unpublished lifecycle filter', [
-                'user_id' => $user?->id,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'can_bypass_approval' => $canBypassApproval,
-            ]);
-        } elseif ($lifecycleFilter === 'archived' && $canArchive) {
-            // Archived filter: Show only archived assets
-            // Requires asset.archive permission (users who can archive assets)
-            $assetsQuery->whereNotNull('archived_at');
-            
-            \Log::info('[AssetController] Applied archived lifecycle filter', [
-                'user_id' => $user?->id,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'can_archive' => $canArchive,
-            ]);
-        } elseif ($lifecycleFilter === 'expired' && $canArchive) {
-            // Phase M: Expired filter: Show only expired assets
-            // Requires asset.archive permission (users who can archive assets, similar lifecycle management)
-            $assetsQuery->whereNotNull('expires_at')
-                        ->where('expires_at', '<=', now());
-            
-            \Log::info('[AssetController] Applied expired lifecycle filter', [
-                'user_id' => $user?->id,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'can_archive' => $canArchive,
-            ]);
-        } else {
-            // Default visibility rules (no lifecycle filter active)
-            // CRITICAL: Unpublished assets should NEVER show unless filter is explicitly active
-            // Even users with permissions should not see unpublished assets by default
-            if ($canSeeUnpublished) {
-                // Users with permissions can see HIDDEN assets (pending approval) that are published
-                // But still exclude unpublished assets unless filter is active
-                $assetsQuery->whereIn('status', [AssetStatus::VISIBLE, AssetStatus::HIDDEN])
-                    ->whereNotNull('published_at'); // Always exclude unpublished in default view
-            } else {
-                // Regular users only see VISIBLE, published assets
-                $assetsQuery->where('status', AssetStatus::VISIBLE)
-                    ->whereNotNull('published_at'); // Phase L.2: Exclude unpublished assets
-            }
-        }
-
-        // Phase L.3: Exclude archived assets by default (unless archived filter is active)
-        // Archived assets are hidden from the grid unless explicitly filtered
-        if ($lifecycleFilter !== 'archived') {
-            $assetsQuery->whereNull('archived_at');
-        }
-
-        // Phase M: Exclude expired assets by default
-        // Expired assets are hidden from the grid unless explicitly filtered
-        // Archived assets are excluded first, then expired assets
-        // Expiration is derived state: expired = expires_at != null && expires_at < now()
-        // Note: Expired filter is handled above in lifecycle filter section
-        if ($lifecycleFilter !== 'expired') {
-            $assetsQuery->where(function ($query) {
-                $query->whereNull('expires_at')
-                      ->orWhere('expires_at', '>', now());
-            });
-        }
-
-        // Phase AF-1: Exclude pending and rejected assets from main grid
-        // Phase J: Pending/rejected assets are visible only in "Pending Publication" lifecycle filter
-        // Note: This applies to default view only - lifecycle filter handles pending/rejected separately
-        if ($lifecycleFilter !== 'pending_publication') {
-            $assetsQuery->where(function ($query) {
-                $query->where('approval_status', 'not_required')
-                      ->orWhere('approval_status', 'approved')
-                      ->orWhereNull('approval_status'); // Handle legacy assets without approval_status
-            });
-        }
-
         // Exclude soft-deleted assets only
         $assetsQuery->whereNull('deleted_at');
 
@@ -624,6 +436,19 @@ class AssetController extends Controller
             // Apply filters
             $this->metadataFilterService->applyFilters($assetsQuery, $filters, $schema);
         }
+
+        // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
+        // This is the SINGLE SOURCE OF TRUTH for lifecycle logic
+        // CRITICAL: Lifecycle resolver MUST run LAST to override any other filters
+        // Used by both AssetController and DeliverableController for consistency
+        $lifecycleFilter = $request->get('lifecycle');
+        $this->lifecycleResolver->apply(
+            $assetsQuery,
+            $lifecycleFilter,
+            $user,
+            $tenant,
+            $brand
+        );
 
         $assets = $assetsQuery->get();
         
@@ -1095,6 +920,7 @@ class AssetController extends Controller
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
                     // Phase L.4: Lifecycle fields (read-only display)
                     'published_at' => $asset->published_at?->toIso8601String(),
+                    'is_published' => $asset->published_at !== null, // Canonical boolean for publication state
                     'published_by' => $publishedBy, // User who published the asset
                     'archived_at' => $asset->archived_at?->toIso8601String(),
                     'archived_by' => $archivedBy, // User who archived the asset
@@ -2357,13 +2183,42 @@ class AssetController extends Controller
 
             // Refresh asset to get updated state
             $asset->refresh();
+            
+            // Load relationships needed for formatting
+            $asset->load(['brand', 'tenant']);
+            $brand = $asset->brand;
+            $tenant = $asset->tenant;
+            $user = auth()->user();
+            
+            // Get published_by user info
+            $publishedBy = null;
+            if ($asset->published_by_id) {
+                $publishedByUser = \App\Models\User::find($asset->published_by_id);
+                if ($publishedByUser) {
+                    $publishedBy = [
+                        'id' => $publishedByUser->id,
+                        'name' => $publishedByUser->name,
+                        'first_name' => $publishedByUser->first_name,
+                        'last_name' => $publishedByUser->last_name,
+                        'email' => $publishedByUser->email,
+                        'avatar_url' => $publishedByUser->avatar_url,
+                    ];
+                }
+            }
 
+            // Return updated asset fields for frontend to merge
+            // This avoids full page reload while ensuring UI reflects backend state
             return response()->json([
                 'message' => 'Asset published successfully',
-                'asset_id' => $asset->id,
-                'published_at' => $asset->published_at?->toIso8601String(),
-                'published_by_id' => $asset->published_by_id,
-                'status' => $asset->status->value,
+                'asset' => [
+                    'id' => $asset->id,
+                    'published_at' => $asset->published_at?->toIso8601String(),
+                    'is_published' => $asset->published_at !== null, // Canonical boolean for publication state
+                    'published_by' => $publishedBy,
+                    'published_by_id' => $asset->published_by_id,
+                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status,
+                    'approval_status' => $asset->approval_status instanceof \App\Enums\ApprovalStatus ? $asset->approval_status->value : ($asset->approval_status ?? 'not_required'),
+                ],
             ], 200);
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             // Provide more helpful error message
@@ -2436,12 +2291,18 @@ class AssetController extends Controller
             // Refresh asset to get updated state
             $asset->refresh();
 
+            // Return updated asset fields for frontend to merge
+            // This avoids full page reload while ensuring UI reflects backend state
             return response()->json([
                 'message' => 'Asset unpublished successfully',
-                'asset_id' => $asset->id,
-                'published_at' => null,
-                'published_by_id' => null,
-                'status' => $asset->status->value,
+                'asset' => [
+                    'id' => $asset->id,
+                    'published_at' => null,
+                    'is_published' => false, // Canonical boolean for publication state
+                    'published_by' => null,
+                    'published_by_id' => null,
+                    'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string)$asset->status,
+                ],
             ], 200);
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             return response()->json([

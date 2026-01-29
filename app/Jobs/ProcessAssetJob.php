@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
+use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -75,10 +76,10 @@ class ProcessAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
-        Log::info('[ProcessAssetJob] Job started', [
+        $assetAtStart = Asset::find($this->assetId);
+        PipelineLogger::error('PROCESS ASSET: HANDLE START', [
             'asset_id' => $this->assetId,
-            'job_id' => $this->job->getJobId() ?? 'unknown',
-            'attempt' => $this->attempts(),
+            'thumbnail_status' => $assetAtStart?->thumbnail_status?->value ?? null,
         ]);
 
         try {
@@ -119,7 +120,7 @@ class ProcessAssetJob implements ShouldQueue
         // Only skip if processing_started flag exists (prevents duplicate chains)
         $existingMetadata = $asset->metadata ?? [];
         if (isset($existingMetadata['processing_started']) && $existingMetadata['processing_started'] === true) {
-            Log::info('[ProcessAssetJob] Processing already started - skipping to prevent duplicate chain', [
+            PipelineLogger::info('[ProcessAssetJob] Processing already started - skipping to prevent duplicate chain', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
@@ -178,6 +179,16 @@ class ProcessAssetJob implements ShouldQueue
         $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
         $isVideo = $fileType === 'video';
         
+        // TASK 4: Prove job dispatch chain is intact
+        // GenerateThumbnailsJob is part of the processing chain
+        PipelineLogger::warning('PIPELINE: Dispatching GenerateThumbnailsJob in chain', [
+            'asset_id' => $asset->id,
+        ]);
+
+        PipelineLogger::error('PROCESS ASSET: ABOUT TO DISPATCH CHILD JOBS', [
+            'asset_id' => $asset->id,
+        ]);
+
         $chainJobs = [
             new ExtractMetadataJob($asset->id),
             new GenerateThumbnailsJob($asset->id),
@@ -202,12 +213,25 @@ class ProcessAssetJob implements ShouldQueue
         
         Bus::chain($chainJobs)->dispatch();
 
-        Log::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
+        PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
             'asset_id' => $asset->id,
             'job_id' => $this->job->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
+            'chain_job_count' => count($chainJobs),
+            'chain_jobs' => array_map(fn($job) => get_class($job), $chainJobs),
+        ]);
+
+        PipelineLogger::error('PROCESS ASSET: HANDLE END', [
+            'asset_id' => $asset->id,
         ]);
         } catch (\Throwable $e) {
+            PipelineLogger::error('PROCESS ASSET: EXCEPTION', [
+                'asset_id' => $this->assetId,
+                'message' => $e->getMessage(),
+                'class' => get_class($e),
+                'trace' => collect($e->getTrace())->take(5),
+            ]);
+
             Log::error('[ProcessAssetJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
                 'job_id' => $this->job->getJobId() ?? 'unknown',

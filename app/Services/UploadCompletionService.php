@@ -856,6 +856,14 @@ class UploadCompletionService
 
             // Emit AssetUploaded event (only emit once, even if called multiple times)
             // The event system should handle duplicate events gracefully
+            // Pipeline health logging: Confirm event is dispatched
+            // Gated by PIPELINE_DEBUG env var to reduce production noise
+            \App\Support\Logging\PipelineLogger::info('[UploadCompletionService] Dispatching AssetUploaded event', [
+                'asset_id' => $asset->id,
+                'asset_type' => $asset->type?->value ?? 'unknown',
+                'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
+            ]);
             event(new AssetUploaded($asset));
 
             // NOTE: Processing jobs are now handled by ProcessAssetJob chain via AssetUploaded event

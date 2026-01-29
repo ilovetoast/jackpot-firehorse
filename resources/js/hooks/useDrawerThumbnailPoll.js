@@ -43,11 +43,35 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
         onAssetUpdateRef.current = onAssetUpdate
     }, [asset, onAssetUpdate])
 
-    // Update drawer asset when prop changes (but don't poll if drawer is closed)
+    // Update drawer asset when prop changes (sync grid updates to drawer)
+    // CRITICAL: Grid owns asset state - prop is source of truth
+    // Sync when asset prop changes (not just ID) to reflect grid state updates
+    // This ensures drawer displays latest asset data from grid (thumbnail updates, lifecycle changes, etc.)
     useEffect(() => {
-        setDrawerAsset(asset)
-        assetIdRef.current = asset?.id
-    }, [asset?.id])
+        if (asset) {
+            setDrawerAsset(prevDrawerAsset => {
+                // If asset ID changed, use new asset
+                if (!prevDrawerAsset || prevDrawerAsset.id !== asset.id) {
+                    return asset
+                }
+                // Same asset ID - grid state (prop) is source of truth
+                // Use prop values, but allow polling to add thumbnail URLs if missing
+                // Grid state updates (from handleThumbnailUpdate/handleLifecycleUpdate) take precedence
+                return {
+                    ...asset, // Grid state is source of truth
+                    // Only use polling updates if grid doesn't have them yet
+                    final_thumbnail_url: asset.final_thumbnail_url || prevDrawerAsset?.final_thumbnail_url,
+                    preview_thumbnail_url: asset.preview_thumbnail_url || prevDrawerAsset?.preview_thumbnail_url,
+                    thumbnail_version: asset.thumbnail_version || prevDrawerAsset?.thumbnail_version,
+                }
+            })
+            assetIdRef.current = asset.id
+        } else {
+            // Drawer closed - clear state
+            setDrawerAsset(null)
+            assetIdRef.current = null
+        }
+    }, [asset])
 
     // Clear polling when asset changes or drawer closes
     useEffect(() => {

@@ -43,6 +43,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Pipeline Debug Mode
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, detailed pipeline health logs are emitted for asset
+    | processing (UploadCompletionService, ProcessAssetJob, etc.).
+    | Set PIPELINE_DEBUG=true in .env to enable.
+    |
+    */
+
+    'pipeline_debug' => (bool) env('PIPELINE_DEBUG', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application URL
     |--------------------------------------------------------------------------
     |

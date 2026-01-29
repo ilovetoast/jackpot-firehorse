@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\AssetStatus;
 use App\Enums\EventType;
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Services\ActivityRecorder;
 use App\Services\AssetProcessingFailureService;
@@ -76,6 +77,36 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);
+            return;
+        }
+
+        // CANONICAL INVARIANT: Image-derived jobs (color analysis, dominant colors) require thumbnails
+        // Thumbnail readiness is the gate: thumbnail_status MUST be COMPLETED before image analysis
+        // This prevents jobs from running before thumbnails are generated, which breaks:
+        // - dominant color extraction (needs image access)
+        // - AI image analysis (needs image access)
+        // - metadata derivation from images (needs image access)
+        //
+        // ARCHITECTURAL DECISION: Option A - "Retry until ready"
+        // This job uses release() to reschedule itself when thumbnails are not ready.
+        // This model is appropriate when:
+        // - Thumbnails are guaranteed to complete eventually
+        // - We want work to resume automatically without manual intervention
+        // - The job chain is self-healing (retries until dependencies are met)
+        //
+        // NOTE: AITaggingJob uses a different model (skip + mark as skipped).
+        // Both models are valid, but consider standardizing on Option A long-term
+        // for consistency across all image-derived jobs.
+        // See /docs/PIPELINE_SEQUENCING.md for architectural details.
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            Log::warning('[PopulateAutomaticMetadataJob] Thumbnails not ready - releasing job for retry', [
+                'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+            ]);
+            // Reschedule job with delay to retry after thumbnails complete
+            // This is retry-safe: job will check again on next attempt
+            // Job will automatically resume when thumbnails are ready
+            $this->release(60); // Wait 60 seconds before retry
             return;
         }
 
