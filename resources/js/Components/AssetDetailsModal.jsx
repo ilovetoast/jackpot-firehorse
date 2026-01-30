@@ -16,7 +16,7 @@
  * @param {Function} props.onClose - Callback when modal should close
  */
 import { useEffect, useState, useRef, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, PlayIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronDownIcon, TrashIcon, LockClosedIcon, CheckCircleIcon, XCircleIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, PlayIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
@@ -28,6 +28,9 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [metadata, setMetadata] = useState(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
+    // C9.2: Collections for this asset (shown when collection field is in metadata for category)
+    const [assetCollections, setAssetCollections] = useState([])
+    const [assetCollectionsLoading, setAssetCollectionsLoading] = useState(false)
     
     // Permission checks
     const { auth } = usePage().props
@@ -159,6 +162,19 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
         if (isOpen && asset?.id) {
             fetchMetadata()
         }
+    }, [isOpen, asset?.id])
+
+    // C9.2: Fetch asset collections when modal opens (for Collection row)
+    useEffect(() => {
+        if (!isOpen || !asset?.id) {
+            setAssetCollections([])
+            return
+        }
+        setAssetCollectionsLoading(true)
+        window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+            .then((res) => setAssetCollections(res.data?.collections ?? []))
+            .catch(() => setAssetCollections([]))
+            .finally(() => setAssetCollectionsLoading(false))
     }, [isOpen, asset?.id])
 
     const fetchMetadata = async () => {
@@ -1309,8 +1325,9 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                     <h4 className="text-sm font-medium text-gray-900 mb-3">All Metadata Fields</h4>
                                     <div className="space-y-1">
                                         {metadata && metadata.fields && metadata.fields.length > 0 ? (
-                                            metadata.fields
-                                                .filter((field) => field.key !== 'tags') // Hide Tags field as we show it separately below
+                                            <>
+                                            {metadata.fields
+                                                .filter((field) => field.key !== 'tags' && field.key !== 'collection') // Tags and Collection shown separately
                                                 .map((field) => {
                                                 const typeLabel = field.type + 
                                                     (field.population_mode !== 'manual' ? ` (${field.population_mode})` : '') +
@@ -1420,7 +1437,36 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                                         </div>
                                                     </div>
                                                 );
-                                            })
+                                            })}
+                                            {/* C9.2: Collection row - show when collection field is in metadata (category visibility) */}
+                                            {metadata.fields.some((f) => (f.key || f.field_key) === 'collection') && (
+                                                <div className="flex items-start justify-between py-1.5 border-b border-gray-100 last:border-b-0">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-sm text-gray-900">
+                                                            <span className="text-gray-500">Collection</span>
+                                                            <span className="text-gray-400 text-xs ml-1">(multiselect)</span>
+                                                            <span className="text-gray-400 mx-2">:</span>
+                                                            <span className="font-semibold text-gray-900">
+                                                                {assetCollectionsLoading ? (
+                                                                    <span className="text-gray-400">Loading…</span>
+                                                                ) : assetCollections.length > 0 ? (
+                                                                    <span className="inline-flex flex-wrap gap-1">
+                                                                        {assetCollections.map((c) => (
+                                                                            <span key={c.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium">
+                                                                                <RectangleStackIcon className="h-3 w-3" />
+                                                                                {c.name}
+                                                                            </span>
+                                                                        ))}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-gray-400">No collections</span>
+                                                                )}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            </>
                                         ) : (
                                             <p className="text-sm text-gray-500">No metadata fields available</p>
                                         )}

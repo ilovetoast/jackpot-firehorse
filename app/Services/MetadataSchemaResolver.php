@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Metadata Schema Resolver
@@ -73,8 +74,20 @@ class MetadataSchemaResolver
             // Only include fields that are visible (not hidden)
             if ($resolved['is_visible']) {
                 $resolvedFields[] = $resolved;
+            } elseif (($resolved['key'] ?? null) === 'collection') {
+                \Illuminate\Support\Facades\Log::info('[MetadataSchemaResolver] resolve EXCLUDED collection (is_visible=false)', [
+                    'category_id' => $categoryId,
+                    'asset_type' => $assetType,
+                ]);
             }
         }
+
+        $resolvedKeys = array_column($resolvedFields, 'key');
+        \Illuminate\Support\Facades\Log::info('[MetadataSchemaResolver] resolve result', [
+            'category_id' => $categoryId,
+            'field_keys' => $resolvedKeys,
+            'has_collection' => in_array('collection', $resolvedKeys, true),
+        ]);
 
         return [
             'fields' => $resolvedFields,
@@ -170,16 +183,22 @@ class MetadataSchemaResolver
         }
 
         // Build OR conditions for all applicable scopes
+        // C9.2: Explicitly select columns, conditionally include is_edit_hidden if it exists
+        $selectColumns = [
+            'metadata_field_id',
+            'is_hidden',
+            'is_upload_hidden',
+            'is_filter_hidden',
+            'is_primary', // Category-scoped primary filter placement
+        ];
+        if (\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+            $selectColumns[] = 'is_edit_hidden'; // C9.2: Edit visibility (Quick View checkbox)
+        }
+        
         $query = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenantId)
             ->whereIn('metadata_field_id', $fieldIds)
-            ->select([
-                'metadata_field_id',
-                'is_hidden',
-                'is_upload_hidden',
-                'is_filter_hidden',
-                'is_primary', // Category-scoped primary filter placement
-            ])
+            ->select($selectColumns)
             ->where(function ($q) use ($brandId, $categoryId) {
                 // Tenant-level: brand_id IS NULL AND category_id IS NULL
                 $q->where(function ($subQ) {
@@ -218,6 +237,7 @@ class MetadataSchemaResolver
                 $results[$row->metadata_field_id] = [
                     'is_hidden' => (bool) $row->is_hidden,
                     'is_upload_hidden' => (bool) $row->is_upload_hidden,
+                    'is_edit_hidden' => (bool) ($row->is_edit_hidden ?? false), // C9.2: Edit visibility
                     'is_filter_hidden' => (bool) $row->is_filter_hidden,
                     'is_primary' => isset($row->is_primary) ? ($row->is_primary === 1 || $row->is_primary === true) : null,
                 ];
@@ -303,16 +323,20 @@ class MetadataSchemaResolver
         string $assetType
     ): array {
         // Start with system defaults
-        $isHidden = false;
+        $isHidden = false; // Category suppression only (big toggle)
         $isUploadHidden = !$field->is_upload_visible;
+        $isEditHidden = !($field->show_on_edit ?? true); // C9.2: Edit visibility (Quick View)
         $isFilterHidden = !$field->is_filterable;
 
         // Apply visibility overrides (last override wins)
         if (isset($visibilityOverrides['is_hidden'])) {
-            $isHidden = $visibilityOverrides['is_hidden'];
+            $isHidden = $visibilityOverrides['is_hidden']; // Category suppression only
         }
         if (isset($visibilityOverrides['is_upload_hidden'])) {
             $isUploadHidden = $visibilityOverrides['is_upload_hidden'];
+        }
+        if (isset($visibilityOverrides['is_edit_hidden'])) {
+            $isEditHidden = $visibilityOverrides['is_edit_hidden']; // C9.2: Edit visibility override
         }
         if (isset($visibilityOverrides['is_filter_hidden'])) {
             $isFilterHidden = $visibilityOverrides['is_filter_hidden'];
@@ -355,14 +379,16 @@ class MetadataSchemaResolver
             'type' => $field->type,
             'group_key' => $field->group_key,
             'applies_to' => $field->applies_to,
-            'is_visible' => !$isHidden,
+            'is_visible' => !$isHidden, // Category suppression only (big toggle)
             'is_upload_visible' => !$isUploadHidden,
             'is_filterable' => !$isFilterHidden,
             'is_internal_only' => (bool) $field->is_internal_only,
             // Phase B2: Add population and visibility attributes (safe defaults applied)
             'population_mode' => $field->population_mode ?? 'manual',
+            // C9.2: Apply category-level edit visibility override
+            // show_on_edit: base field setting OR category override (is_edit_hidden)
             'show_on_upload' => isset($field->show_on_upload) ? (bool) $field->show_on_upload : true,
-            'show_on_edit' => isset($field->show_on_edit) ? (bool) $field->show_on_edit : true,
+            'show_on_edit' => !$isEditHidden, // C9.2: Apply category-level edit visibility override
             'show_in_filters' => isset($field->show_in_filters) ? (bool) $field->show_in_filters : true,
             'readonly' => isset($field->readonly) ? (bool) $field->readonly : false,
             // Category-scoped primary filter placement

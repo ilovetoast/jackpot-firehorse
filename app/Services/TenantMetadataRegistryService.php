@@ -103,9 +103,11 @@ class TenantMetadataRegistryService
                 $field->show_on_upload ?? true,
                 $overrides?->is_upload_hidden ?? false
             );
+            // C9.2: Use is_edit_hidden for edit visibility, not is_hidden
+            // is_hidden is only for category suppression (big toggle)
             $effectiveEdit = $this->calculateEffectiveVisibility(
                 $field->show_on_edit ?? true,
-                $overrides?->is_hidden ?? false
+                $overrides?->is_edit_hidden ?? false
             );
             $effectiveFilter = $this->calculateEffectiveVisibility(
                 $field->show_in_filters ?? true,

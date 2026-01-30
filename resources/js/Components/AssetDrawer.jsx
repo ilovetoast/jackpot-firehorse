@@ -122,8 +122,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [addToCollectionLoading, setAddToCollectionLoading] = useState(false)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false) // C9.1: Modal state
     const [showCollectionsModal, setShowCollectionsModal] = useState(false) // C9.1: Modal for inline collections edit
-    /** C9.2: Collection field visibility (category-driven) */
-    const [collectionFieldVisible, setCollectionFieldVisible] = useState(true) // Default to visible
+    /** C9.2: Collection field visibility (category-driven, matches Tags behavior) */
+    // Collections follow the same visibility resolution as Tags - check if collection field appears in metadata schema
+    const [collectionFieldVisible, setCollectionFieldVisible] = useState(false)
     
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
@@ -341,26 +342,92 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             .finally(() => setDropdownCollectionsLoading(false))
     }, [asset?.id])
 
-    // C9.2: Check collection field visibility when asset changes (using asset's category)
+    // C9.2: Resolve category ID from asset (backend sends category: { id, name } and metadata.category_id, not top-level category_id)
+    const assetCategoryId = asset?.category?.id ?? asset?.metadata?.category_id ?? asset?.category_id ?? null
+
+    // C9.2: Check collection field visibility using upload metadata schema (same as Tags)
+    // Collections follow the same visibility resolution path as Tags
     useEffect(() => {
-        if (!asset?.category_id) {
-            // No category, default to visible
-            setCollectionFieldVisible(true)
+        // DEBUG: Always log when effect runs (before any early return) so we see it in console
+        const hasAsset = !!asset
+        console.log('[AssetDrawer] DEBUG collection visibility effect ran', {
+            hasAsset,
+            assetId: asset?.id ?? null,
+            assetCategoryId,
+            'asset.category': asset?.category ?? null,
+            'asset.metadata?.category_id': asset?.metadata?.category_id ?? null,
+            willBailOut: !assetCategoryId,
+        })
+
+        if (!assetCategoryId) {
+            setCollectionFieldVisible(false)
             return
         }
 
-        // Fetch collection field visibility for this category
-        window.axios.get(`/app/collections/field-visibility?category_id=${asset.category_id}`, {
-            headers: { Accept: 'application/json' },
+        // Determine asset type from mime_type
+        const mime = asset?.mime_type?.toLowerCase() || ''
+        let assetType = 'image'
+        if (mime.startsWith('video/')) assetType = 'video'
+        else if (mime.includes('pdf') || mime.includes('document') || mime.includes('text')) assetType = 'document'
+
+        // C9.2: Fetch edit/quick-view schema so Collection shows when Quick View is checked (not upload-only)
+        const params = new URLSearchParams({
+            category_id: String(assetCategoryId),
+            asset_type: assetType,
+            context: 'edit',
         })
-            .then((res) => {
-                setCollectionFieldVisible(res.data?.visible ?? true)
+        const schemaUrl = `/app/uploads/metadata-schema?${params.toString()}`
+
+        console.log('[AssetDrawer] DEBUG fetching edit schema for collection visibility', {
+            url: schemaUrl,
+            categoryId: assetCategoryId,
+            assetType,
+        })
+
+        fetch(schemaUrl, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        })
+            .then((response) => {
+                console.log('[AssetDrawer] DEBUG schema fetch response', { ok: response.ok, status: response.status, url: schemaUrl })
+                if (!response.ok) {
+                    console.error('[AssetDrawer] DEBUG schema fetch failed', { status: response.status, statusText: response.statusText, url: schemaUrl })
+                    throw new Error(`Failed to fetch metadata schema: ${response.status}`)
+                }
+                return response.json()
             })
-            .catch(() => {
-                // On error, default to visible
-                setCollectionFieldVisible(true)
+            .then((data) => {
+                if (data.error) {
+                    console.error('[AssetDrawer] DEBUG schema response error', { error: data.error, message: data.message })
+                    throw new Error(data.message || 'Failed to load metadata schema')
+                }
+                // Check if collection field appears in schema (support both field.key and field.field_key)
+                const hasCollectionField = data.groups?.some(group =>
+                    (group.fields || []).some(field => (field.key || field.field_key) === 'collection')
+                ) || false
+                const groupFieldKeys = data.groups?.map(g => ({
+                    key: g.key,
+                    fieldKeys: (g.fields || []).map(f => f.key || f.field_key),
+                })) ?? []
+                console.log('[AssetDrawer] DEBUG Collection field visibility check', {
+                    categoryId: assetCategoryId,
+                    assetType,
+                    hasCollectionField,
+                    groupFieldKeys,
+                    rawGroupsCount: data.groups?.length ?? 0,
+                    fullResponseKeys: data ? Object.keys(data) : [],
+                })
+                setCollectionFieldVisible(hasCollectionField)
             })
-    }, [asset?.category_id])
+            .catch((err) => {
+                console.error('[AssetDrawer] DEBUG schema fetch/render error', { error: err?.message ?? err, url: schemaUrl })
+                setCollectionFieldVisible(false)
+            })
+    }, [asset?.id, assetCategoryId, asset?.mime_type, asset?.category, asset?.metadata])
 
     // Phase J.3: Fetch approval comments for rejected assets (to get rejecting user role)
     useEffect(() => {

@@ -42,6 +42,18 @@ class ProcessAssetJob implements ShouldQueue
     ) {}
 
     /**
+     * C9.2: Check if AI tagging should be skipped based on upload-time flag.
+     *
+     * @param Asset $asset
+     * @return bool
+     */
+    protected function shouldSkipAiTagging(Asset $asset): bool
+    {
+        $metadata = $asset->metadata ?? [];
+        return (bool) ($metadata['_skip_ai_tagging'] ?? false);
+    }
+
+    /**
      * Get AI jobs conditionally based on tenant policy.
      * 
      * Phase J.2.2: Enforcement guard for AI tagging controls
@@ -51,6 +63,21 @@ class ProcessAssetJob implements ShouldQueue
      */
     protected function getConditionalAiJobs(Asset $asset): array
     {
+        // C9.2: Check upload-time AI skip flags (upload-level override)
+        $metadata = $asset->metadata ?? [];
+        $skipAiTagging = $metadata['_skip_ai_tagging'] ?? false;
+        $skipAiMetadata = $metadata['_skip_ai_metadata'] ?? false;
+        
+        if ($skipAiTagging && $skipAiMetadata) {
+            // Both skipped - return empty array (no AI jobs)
+            Log::info('[ProcessAssetJob] AI jobs skipped due to upload-time flags', [
+                'asset_id' => $asset->id,
+                'skip_ai_tagging' => true,
+                'skip_ai_metadata' => true,
+            ]);
+            return [];
+        }
+        
         $policyService = app(\App\Services\AiTagPolicyService::class);
         $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
         
@@ -63,12 +90,29 @@ class ProcessAssetJob implements ShouldQueue
             return []; // Skip AI jobs entirely
         }
 
-        // Policy allows AI tagging - proceed with normal AI pipeline
-        return [
-            new AiMetadataGenerationJob($asset->id), // Phase I: AI metadata generation (creates candidates)
-            new AiTagAutoApplyJob($asset->id), // Phase J.2.2: Auto-apply high-confidence tags (if enabled)
-            new AiMetadataSuggestionJob($asset->id), // Phase 2 – Step 5: AI metadata suggestions (creates suggestions from candidates)
-        ];
+        // Policy allows AI tagging - build job array based on skip flags
+        $jobs = [];
+        
+        // C9.2: Only add AI tagging jobs if not skipped
+        if (!$skipAiTagging) {
+            $jobs[] = new AiTagAutoApplyJob($asset->id); // Phase J.2.2: Auto-apply high-confidence tags (if enabled)
+        }
+        
+        // C9.2: Only add AI metadata jobs if not skipped
+        if (!$skipAiMetadata) {
+            $jobs[] = new AiMetadataGenerationJob($asset->id); // Phase I: AI metadata generation (creates candidates)
+            $jobs[] = new AiMetadataSuggestionJob($asset->id); // Phase 2 – Step 5: AI metadata suggestions (creates suggestions from candidates)
+        }
+        
+        if (empty($jobs)) {
+            Log::info('[ProcessAssetJob] AI jobs skipped due to upload-time flags', [
+                'asset_id' => $asset->id,
+                'skip_ai_tagging' => $skipAiTagging,
+                'skip_ai_metadata' => $skipAiMetadata,
+            ]);
+        }
+        
+        return $jobs;
     }
 
     /**
@@ -204,8 +248,9 @@ class ProcessAssetJob implements ShouldQueue
             new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
             new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
             new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
-            new AITaggingJob($asset->id),
-            // Phase J.2.2: Check AI tagging policy before proceeding
+            // C9.2: Conditionally add AITaggingJob based on upload-time skip flag
+            ...($this->shouldSkipAiTagging($asset) ? [] : [new AITaggingJob($asset->id)]),
+            // Phase J.2.2: Check AI tagging policy before proceeding (also respects upload-time skip flags)
             ...$this->getConditionalAiJobs($asset),
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),

@@ -37,8 +37,11 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
         }
     }, [autoExpand, hasErrors, isExpanded])
 
+    // C9.2: In upload form, collection is shown in dedicated Collections section only — exclude from metadata groups
+    const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'collection')
+
     // Handle empty groups
-    if (!group.fields || group.fields.length === 0) {
+    if (fieldsToRender.length === 0) {
         return null
     }
 
@@ -69,7 +72,7 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
                     className="px-4 py-4 border-t border-gray-200"
                 >
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {group.fields.map((field) => (
+                        {fieldsToRender.map((field) => (
                             <MetadataFieldInput
                                 key={field.key}
                                 field={field}

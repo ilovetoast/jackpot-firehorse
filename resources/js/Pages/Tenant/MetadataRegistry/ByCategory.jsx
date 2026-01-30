@@ -99,9 +99,9 @@ export default function ByCategoryView({
         return groups
     }, [categories])
 
-    // Load category data for a field
-    const loadFieldCategoryData = async (field) => {
-        if (fieldCategoryData[field.id]) {
+    // Load category data for a field (forceRefetch = true to skip cache after saving visibility)
+    const loadFieldCategoryData = async (field, forceRefetch = false) => {
+        if (!forceRefetch && fieldCategoryData[field.id]) {
             return fieldCategoryData[field.id]
         }
 
@@ -240,7 +240,32 @@ export default function ByCategoryView({
         // Store current selected category to restore after reload
         const currentCategoryId = selectedCategoryIdRef.current
 
+        // C9.2: Validate category_id is present for category-scoped settings
+        if (!currentCategoryId) {
+            console.warn('[ByCategory] No category selected, saving at tenant level', {
+                fieldId,
+                context,
+            })
+        }
+
         try {
+            // C9.2: Include category_id when saving category-specific visibility settings
+            const requestBody = {
+                [visibilityKey]: newValue,
+            }
+            if (currentCategoryId) {
+                requestBody.category_id = currentCategoryId
+            }
+
+            console.log('[ByCategory] Saving visibility', {
+                fieldId,
+                context,
+                visibilityKey,
+                newValue,
+                categoryId: currentCategoryId,
+                requestBody,
+            })
+
             const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
                 method: 'POST',
                 headers: {
@@ -249,38 +274,76 @@ export default function ByCategoryView({
                     'X-CSRF-TOKEN': getCsrfToken(),
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({
-                    [visibilityKey]: newValue,
-                }),
+                body: JSON.stringify(requestBody),
+            })
+            
+            const responseData = await response.json().catch(() => ({}))
+            console.log('[ByCategory] Visibility save response', {
+                ok: response.ok,
+                status: response.status,
+                data: responseData,
             })
             
             if (response.ok) {
                 // Show success message
                 setSuccessMessage(`${contextLabel} visibility ${newValue ? 'enabled' : 'disabled'}`)
                 setTimeout(() => setSuccessMessage(null), 3000)
-                
+
+                // C9.2: Invalidate and refetch category data for this field so checkboxes show saved state
+                setFieldCategoryData(prev => {
+                    const next = { ...prev }
+                    delete next[fieldId]
+                    return next
+                })
+                const fieldToRefetch = manageableFields.find(f => f.id === fieldId) || automatedFields.find(f => f.id === fieldId)
+                if (fieldToRefetch) {
+                    loadFieldCategoryData(fieldToRefetch, true).catch(() => {})
+                }
+
                 // Silently reload registry in background without page refresh
-                // Use preserveState to keep selected category and scroll position
-                router.reload({ 
+                router.reload({
                     only: ['registry'],
                     preserveState: true,
                     preserveScroll: true,
                     onSuccess: () => {
-                        // Restore selected category after reload
                         if (currentCategoryId) {
-                            setTimeout(() => {
-                                setSelectedCategoryId(currentCategoryId)
-                            }, 0)
+                            setTimeout(() => setSelectedCategoryId(currentCategoryId), 0)
                         }
                     }
                 })
             } else {
-                setSuccessMessage('Failed to update visibility')
-                setTimeout(() => setSuccessMessage(null), 3000)
+                // C9.2: Enhanced error handling for visibility save failures
+                const errorMsg = responseData?.error || responseData?.message || `Failed to update visibility (${response.status})`
+                console.error('[ByCategory] Visibility save failed', {
+                    status: response.status,
+                    error: errorMsg,
+                    responseData,
+                    fieldId,
+                    context,
+                    categoryId: currentCategoryId,
+                })
+                
+                // Show user-friendly error message
+                setSuccessMessage(`Error: ${errorMsg}. Please try again.`)
+                setTimeout(() => setSuccessMessage(null), 5000)
+                
+                // Revert checkbox state on error (optimistic update rollback)
+                // Note: The checkbox will revert when the page reloads, but we could add optimistic state here
             }
         } catch (error) {
-            console.error('Failed to update visibility:', error)
-            setSuccessMessage(null)
+            // C9.2: Handle network errors and other exceptions
+            console.error('[ByCategory] Network or other error during visibility save', {
+                error: error.message,
+                stack: error.stack,
+                fieldId,
+                context,
+                categoryId: currentCategoryId,
+            })
+            
+            // Show user-friendly error message
+            const errorMsg = error.message || 'Network error. Please check your connection and try again.'
+            setSuccessMessage(`Error: ${errorMsg}`)
+            setTimeout(() => setSuccessMessage(null), 5000)
         }
     }
 
@@ -911,10 +974,18 @@ function FieldRow({
     // Determine if field is system or custom
     // Custom fields have scope === 'tenant', system fields have scope === 'system' or are in systemFields array
     const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
-    const effectiveUpload = field.effective_show_on_upload ?? field.show_on_upload ?? true
-    const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? true
-    const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
-    
+    // C9.2: Use category-level overrides when a category is selected; otherwise tenant-level effective values
+    const categoryOverride = categoryId && fieldCategoryData?.overrides?.[categoryId]
+    const effectiveUpload = categoryOverride?.show_on_upload !== undefined
+        ? categoryOverride.show_on_upload
+        : (field.effective_show_on_upload ?? field.show_on_upload ?? true)
+    const effectiveEdit = categoryOverride?.show_on_edit !== undefined
+        ? categoryOverride.show_on_edit
+        : (field.effective_show_on_edit ?? field.show_on_edit ?? true)
+    const effectiveFilter = categoryOverride?.show_in_filters !== undefined
+        ? categoryOverride.show_in_filters
+        : (field.effective_show_in_filters ?? field.show_in_filters ?? true)
+
     // Resolve effective_is_primary for this category
     // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
     // A field may be primary in Photography but secondary in Logos.

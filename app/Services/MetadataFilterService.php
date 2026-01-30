@@ -91,9 +91,42 @@ class MetadataFilterService
                 continue; // Skip empty filters
             }
 
+            // C9.2: Collection filter uses asset_collections pivot, not asset_metadata
+            if ($fieldKey === 'collection') {
+                $this->applyCollectionFilter($query, $value);
+                continue;
+            }
+
             // Apply filter based on field type
             $this->applyFieldFilter($query, $fieldId, $field['type'], $operator, $value);
         }
+    }
+
+    /**
+     * Apply filter for collection field (C9.2).
+     * Collection membership is stored in asset_collections pivot, not asset_metadata.
+     * Value can be single id or array of ids (e.g. from single dropdown: [id]).
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param mixed $value Single collection id or array of collection ids
+     */
+    protected function applyCollectionFilter($query, $value): void
+    {
+        $ids = is_array($value) ? array_values($value) : [$value];
+        $ids = array_filter(array_map(function ($v) {
+            return is_numeric($v) ? (int) $v : null;
+        }, $ids));
+
+        if (empty($ids)) {
+            return;
+        }
+
+        $query->whereExists(function ($q) use ($ids) {
+            $q->select(DB::raw(1))
+                ->from('asset_collections')
+                ->whereColumn('asset_collections.asset_id', 'assets.id')
+                ->whereIn('asset_collections.collection_id', $ids);
+        });
     }
 
     /**

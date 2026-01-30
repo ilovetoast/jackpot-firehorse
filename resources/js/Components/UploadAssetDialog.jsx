@@ -150,13 +150,70 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      */
     const [selectedCategoryId, setSelectedCategoryId] = useState(initialCategoryId || null)
 
+    /**
+     * Phase 2 – Step 2: Upload Metadata Schema
+     * Declared before collectionFieldVisible useMemo (which depends on it).
+     */
+    const [uploadMetadataSchema, setUploadMetadataSchema] = useState(null)
+    const [isLoadingMetadataSchema, setIsLoadingMetadataSchema] = useState(false)
+
     /** C9: Collections to attach to uploaded assets (manifest.*.collection_ids) */
     const [selectedCollectionIds, setSelectedCollectionIds] = useState([])
     const [collectionsList, setCollectionsList] = useState([])
     const [collectionsListLoading, setCollectionsListLoading] = useState(false)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
-    /** C9.2: Collection field visibility (category-driven) */
-    const [collectionFieldVisible, setCollectionFieldVisible] = useState(true) // Default to visible
+    /** C9.2: Collection field visibility (category-driven, matches Tags behavior) */
+    // Collections follow the same visibility resolution as Tags - check if collection field appears in upload metadata schema
+    const collectionFieldVisible = useMemo(() => {
+        if (!uploadMetadataSchema || !uploadMetadataSchema.groups) return false
+        // Check if collection field exists in any group (same way Tags are checked)
+        return uploadMetadataSchema.groups.some(group => 
+            (group.fields || []).some(field => field.key === 'collection')
+        )
+    }, [uploadMetadataSchema])
+
+    /** C9.2: Upload-time AI skip controls (Admin/Brand Manager only) */
+    const brandRole = auth?.brand_role?.toLowerCase()
+    const tenantRole = auth?.tenant_role?.toLowerCase()
+    const isAdminOrBrandManager = brandRole === 'admin' || brandRole === 'brand_manager' || tenantRole === 'owner' || tenantRole === 'admin'
+    
+    // C9.2: Check if tenant/brand has AI disabled
+    // Note: AI settings are tenant-level (tenant_ai_tag_settings table)
+    // Brand-level AI settings may not exist - if they do, check auth?.activeBrand?.settings?.disable_ai_tagging
+    // For now, we'll fetch AI settings or use defaults (enabled by default)
+    // The checkboxes will be disabled if tenant has AI disabled (checked via API or auth object)
+    // Default to enabled (checkboxes auto-checked) - actual check happens on backend
+    const [aiSettings, setAiSettings] = useState({ aiTaggingEnabled: true, aiMetadataEnabled: true })
+    
+    // C9.2: Fetch AI settings to determine if checkboxes should be disabled
+    useEffect(() => {
+        if (!isAdminOrBrandManager || !open) return
+        
+        // Fetch tenant AI settings
+        fetch('/app/api/companies/ai-settings', {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                const settings = data?.settings || {}
+                setAiSettings({
+                    aiTaggingEnabled: !(settings.disable_ai_tagging ?? false),
+                    // AI metadata settings may not exist yet - default to enabled
+                    aiMetadataEnabled: !(settings.disable_ai_metadata ?? false),
+                })
+            })
+            .catch(() => {
+                // On error, default to enabled (checkboxes remain enabled)
+                setAiSettings({ aiTaggingEnabled: true, aiMetadataEnabled: true })
+            })
+    }, [isAdminOrBrandManager, open])
+    
+    const aiTaggingDisabled = !aiSettings.aiTaggingEnabled
+    const aiMetadataDisabled = !aiSettings.aiMetadataEnabled
+    
+    const [applyAiTagging, setApplyAiTagging] = useState(true) // Auto-checked by default
+    const [applyAiMetadata, setApplyAiMetadata] = useState(true) // Auto-checked by default
 
     /**
      * CLEAN UPLOADER V2 — Global Metadata Draft
@@ -166,15 +223,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Empty override on a file = inherits global value.
      */
     const [globalMetadataDraft, setGlobalMetadataDraft] = useState({})
-
-    /**
-     * Phase 2 – Step 2: Upload Metadata Schema
-     * 
-     * Schema fetched from UploadMetadataSchemaResolver.
-     * Fetched when category changes.
-     */
-    const [uploadMetadataSchema, setUploadMetadataSchema] = useState(null)
-    const [isLoadingMetadataSchema, setIsLoadingMetadataSchema] = useState(false)
 
     /**
      * Phase 2 – Step 3: Metadata Validation State
@@ -2814,6 +2862,16 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         )
 
         try {
+            // C9.2: Include AI skip flags in finalize request (upload-level, applies to all assets)
+            const finalizePayload = {
+                manifest,
+                // C9.2: Upload-time AI skip controls (only if user is Admin/Brand Manager)
+                ...(isAdminOrBrandManager && {
+                    skip_ai_tagging: !applyAiTagging,
+                    skip_ai_metadata: !applyAiMetadata,
+                }),
+            }
+
             // Call backend finalize endpoint using fetch
             let response = await fetch('/app/assets/upload/finalize', {
                 method: 'POST',
@@ -2822,7 +2880,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({ manifest }),
+                body: JSON.stringify(finalizePayload),
             })
 
             // Handle 419 CSRF token mismatch by refreshing token and retrying once
@@ -2837,7 +2895,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             'X-CSRF-TOKEN': newToken,
                         },
                         credentials: 'same-origin',
-                        body: JSON.stringify({ manifest }),
+                        body: JSON.stringify(finalizePayload),
                     })
                 }
             }
@@ -3499,28 +3557,16 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             .finally(() => setCollectionsListLoading(false))
     }, [open])
 
-    // C9.2: Check collection field visibility when category changes
+    // C9.2: Collection field visibility is determined by upload metadata schema (same as Tags)
+    // If collection field appears in schema, it's visible. If suppressed, it won't be in schema.
+    
+    // C9.2: Reset AI skip flags when dialog opens
     useEffect(() => {
-        if (!selectedCategoryId) {
-            // No category selected, default to visible
-            setCollectionFieldVisible(true)
-            return
+        if (open) {
+            setApplyAiTagging(true)
+            setApplyAiMetadata(true)
         }
-
-        // Fetch collection field visibility for this category
-        fetch(`/app/collections/field-visibility?category_id=${selectedCategoryId}`, {
-            headers: { Accept: 'application/json' },
-            credentials: 'same-origin',
-        })
-            .then((r) => r.json())
-            .then((data) => {
-                setCollectionFieldVisible(data?.visible ?? true)
-            })
-            .catch(() => {
-                // On error, default to visible
-                setCollectionFieldVisible(true)
-            })
-    }, [selectedCategoryId])
+    }, [open])
 
     /**
      * Handle category change callback (LEGACY - for Phase 3 manager)
@@ -4209,6 +4255,56 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     metadataApprovalRequired={approvalInfo.approvalRequired}
                                     pendingMetadataCount={approvalInfo.pendingMetadataCount}
                                 />
+                            )}
+
+                            {/* C9.2: Upload-time AI skip controls (Admin/Brand Manager only) */}
+                            {isAdminOrBrandManager && v2Files.length > 0 && (
+                                <div className="mb-4 rounded-md bg-gray-50 border border-gray-200 p-4">
+                                    <h4 className="text-sm font-medium text-gray-900 mb-3">AI Processing Options</h4>
+                                    <div className="space-y-3">
+                                        <label className="flex items-start">
+                                            <input
+                                                type="checkbox"
+                                                checked={applyAiTagging}
+                                                onChange={(e) => setApplyAiTagging(e.target.checked)}
+                                                disabled={aiTaggingDisabled || batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                            />
+                                            <div className="ml-3 flex-1">
+                                                <span className={`text-sm font-medium ${aiTaggingDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
+                                                    Apply AI Tagging
+                                                </span>
+                                                {aiTaggingDisabled && (
+                                                    <p className="mt-1 text-xs text-gray-500">
+                                                        AI tagging is disabled for this tenant or brand.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </label>
+                                        <label className="flex items-start">
+                                            <input
+                                                type="checkbox"
+                                                checked={applyAiMetadata}
+                                                onChange={(e) => setApplyAiMetadata(e.target.checked)}
+                                                disabled={aiMetadataDisabled || batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                            />
+                                            <div className="ml-3 flex-1">
+                                                <span className={`text-sm font-medium ${aiMetadataDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
+                                                    Apply AI Metadata
+                                                </span>
+                                                {aiMetadataDisabled && (
+                                                    <p className="mt-1 text-xs text-gray-500">
+                                                        AI metadata generation is disabled for this tenant or brand.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </label>
+                                    </div>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Unchecking these options will skip all AI-related jobs for this upload. This only affects the current upload and does not change tenant or brand settings.
+                                    </p>
+                                </div>
                             )}
 
                             {/* CLEAN UPLOADER V2 — Partial success banner */}

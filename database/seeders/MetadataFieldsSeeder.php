@@ -49,19 +49,21 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function handleFieldRenames(): void
     {
-        // C9.1: Deprecate old collection metadata field (now using Collection models)
+        // C9.2: Collection field is needed for Metadata Management governance (same as Tags)
+        // Even though Collections use Collection models for data storage, we need the metadata field
+        // to exist so it can be governed by category visibility rules in Metadata Management UI
+        // This is a governance-only field - actual collection data is in Collection models, not asset_metadata
+        // Do NOT deprecate - restore if previously deprecated
         $collectionField = DB::table('metadata_fields')
             ->where('key', 'collection')
-            ->whereNull('deprecated_at')
             ->first();
             
-        if ($collectionField) {
-            // Deprecate the old text-based collection metadata field
-            // The new Collection system uses Collection models, not metadata fields
+        if ($collectionField && $collectionField->deprecated_at) {
+            // C9.2: Restore collection field for Metadata Management governance
             DB::table('metadata_fields')
                 ->where('key', 'collection')
                 ->update([
-                    'deprecated_at' => now(),
+                    'deprecated_at' => null,
                     'updated_at' => now(),
                 ]);
         }
@@ -79,12 +81,13 @@ class MetadataFieldsSeeder extends Seeder
                 
             if (!$collectionField) {
                 // Rename campaign to collection (preserves all existing data)
+                // C9.2: Do NOT deprecate - needed for Metadata Management governance
                 DB::table('metadata_fields')
                     ->where('id', $campaignField->id)
                     ->update([
                         'key' => 'collection',
                         'system_label' => 'Collection',
-                        'deprecated_at' => now(), // C9.1: Deprecate immediately (using Collection models now)
+                        'deprecated_at' => null, // C9.2: Keep active for Metadata Management governance
                         'updated_at' => now(),
                     ]);
             }
@@ -297,17 +300,31 @@ class MetadataFieldsSeeder extends Seeder
             ->where('id', $tagsId)
             ->update(['ai_eligible' => true]);
 
-        // Collection (formerly Campaign) - DEPRECATED: Now using Collection models (C9.1)
-        // C9.1: Deprecate old text-based collection metadata field in favor of Collection model system
-        $collectionField = DB::table('metadata_fields')->where('key', 'collection')->first();
-        if ($collectionField && !$collectionField->deprecated_at) {
-            DB::table('metadata_fields')
-                ->where('key', 'collection')
-                ->update([
-                    'deprecated_at' => now(),
-                    'updated_at' => now(),
-                ]);
-        }
+        // Collection - C9.2: Governance-only metadata field for Metadata Management
+        // Actual collection data is stored in Collection models (not asset_metadata table)
+        // This field exists solely to allow category-driven visibility control (same as Tags)
+        $collectionId = $this->getOrCreateField([
+            'key' => 'collection',
+            'system_label' => 'Collection',
+            'type' => 'multiselect', // Similar to Tags
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'general',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => false, // Collections are not AI-generated
+        ]);
+        
+        // C9.2: Ensure collection field is not deprecated (needed for Metadata Management governance)
+        DB::table('metadata_fields')
+            ->where('id', $collectionId)
+            ->update([
+                'deprecated_at' => null,
+                'updated_at' => now(),
+            ]);
 
         // Quality Rating (user-editable rating field)
         $qualityRatingId = $this->getOrCreateField([

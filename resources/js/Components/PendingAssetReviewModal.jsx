@@ -240,7 +240,8 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
             .finally(() => setAssetCollectionsLoading(false))
     }, [currentAsset?.id])
 
-    // C9.2: Fetch collections list and check visibility
+    // C9.2: Check collection field visibility using upload metadata schema (same as Tags)
+    // Collections follow the same visibility resolution path as Tags
     useEffect(() => {
         if (!currentAsset?.category_id) {
             setCollectionFieldVisible(false)
@@ -248,14 +249,42 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
             return
         }
 
-        // Check visibility
-        fetch(`/app/collections/field-visibility?category_id=${currentAsset.category_id}`, {
-            headers: { Accept: 'application/json' },
+        // Determine asset type from mime_type
+        const mime = currentAsset?.mime_type?.toLowerCase() || ''
+        let assetType = 'image'
+        if (mime.startsWith('video/')) assetType = 'video'
+        else if (mime.includes('pdf') || mime.includes('document') || mime.includes('text')) assetType = 'document'
+
+        // C9.2: Fetch edit schema so Collection shows when Quick View is checked
+        const params = new URLSearchParams({
+            category_id: currentAsset.category_id.toString(),
+            asset_type: assetType,
+            context: 'edit',
+        })
+
+        fetch(`/app/uploads/metadata-schema?${params.toString()}`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
             credentials: 'same-origin',
         })
-            .then((r) => r.json())
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata schema: ${response.status}`)
+                }
+                return response.json()
+            })
             .then((data) => {
-                setCollectionFieldVisible(data?.visible ?? false)
+                if (data.error) {
+                    throw new Error(data.message || 'Failed to load metadata schema')
+                }
+                // Check if collection field appears in schema (same way Tags are checked)
+                const hasCollectionField = data.groups?.some(group => 
+                    (group.fields || []).some(field => field.key === 'collection')
+                ) || false
+                setCollectionFieldVisible(hasCollectionField)
             })
             .catch(() => {
                 setCollectionFieldVisible(false)
@@ -273,7 +302,7 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
             })
             .catch(() => setCollectionsList([]))
             .finally(() => setCollectionsListLoading(false))
-    }, [currentAsset?.category_id])
+    }, [currentAsset?.category_id, currentAsset?.mime_type])
     
     // Fetch current metadata values from editable endpoint
     // This is used to populate initial values, but the schema comes from AssetMetadataEditForm
@@ -377,7 +406,7 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
             else if (mime.includes('pdf') || mime.includes('document') || mime.includes('text')) assetType = 'document'
             
             // Fetch schema to get field_ids for all fields
-            const schemaResponse = await fetch(`/app/uploads/metadata-schema?category_id=${categoryId}&asset_type=${assetType}`, {
+            const schemaResponse = await fetch(`/app/uploads/metadata-schema?category_id=${categoryId}&asset_type=${assetType}&context=edit`, {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',

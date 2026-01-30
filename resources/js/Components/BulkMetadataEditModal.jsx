@@ -61,21 +61,44 @@ export default function BulkMetadataEditModal({
         }
     }, [assetIds])
 
-    // C9.2: Check collection field visibility and fetch collections list
+    // C9.2: Check collection field visibility using upload metadata schema (same as Tags)
+    // Collections follow the same visibility resolution path as Tags
     useEffect(() => {
         if (!firstAssetCategoryId) {
             setCollectionFieldVisible(false)
             return
         }
 
-        // Check visibility
-        fetch(`/app/collections/field-visibility?category_id=${firstAssetCategoryId}`, {
-            headers: { Accept: 'application/json' },
+        // C9.2: Fetch edit schema so Collection shows when Quick View is checked
+        const params = new URLSearchParams({
+            category_id: firstAssetCategoryId.toString(),
+            asset_type: 'image',
+            context: 'edit',
+        })
+
+        fetch(`/app/uploads/metadata-schema?${params.toString()}`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
             credentials: 'same-origin',
         })
-            .then((r) => r.json())
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata schema: ${response.status}`)
+                }
+                return response.json()
+            })
             .then((data) => {
-                setCollectionFieldVisible(data?.visible ?? false)
+                if (data.error) {
+                    throw new Error(data.message || 'Failed to load metadata schema')
+                }
+                // Check if collection field appears in schema (same way Tags are checked)
+                const hasCollectionField = data.groups?.some(group => 
+                    (group.fields || []).some(field => field.key === 'collection')
+                ) || false
+                setCollectionFieldVisible(hasCollectionField)
             })
             .catch(() => {
                 setCollectionFieldVisible(false)

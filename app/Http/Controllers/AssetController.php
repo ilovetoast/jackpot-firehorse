@@ -775,11 +775,30 @@ class AssetController extends Controller
                     }
                 }
                 
+                // C9.2: Source 3 - Collection filter values from asset_collections pivot (not asset_metadata)
+                // Primary filter for collection requires available_values; harvest from pivot for current asset set
+                if (isset($filterableFieldKeys['collection'])) {
+                    $collectionIds = \DB::table('asset_collections')
+                        ->whereIn('asset_id', $assetIds)
+                        ->distinct()
+                        ->pluck('collection_id')
+                        ->map(fn ($id) => (int) $id)
+                        ->unique()
+                        ->values()
+                        ->all();
+                    if (!empty($collectionIds)) {
+                        $availableValues['collection'] = array_values(array_unique(array_merge(
+                            $availableValues['collection'] ?? [],
+                            $collectionIds
+                        )));
+                    }
+                }
+
                 // Remove empty arrays (filters with no values should not appear)
                 $availableValues = array_filter($availableValues, function ($values) {
                     return !empty($values);
                 });
-                
+
                 // Sort values for consistent output
                 foreach ($availableValues as $fieldKey => $values) {
                     sort($availableValues[$fieldKey]);
@@ -822,7 +841,18 @@ class AssetController extends Controller
                         ),
                     ];
                 }, $bucketValues));
-                break;
+            }
+            // C9.2: Attach collection options (id => name) so primary filter is a dropdown with labels
+            if ($fieldKey === 'collection') {
+                $collectionIds = $availableValues['collection'] ?? [];
+                $collections = $collectionIds
+                    ? \App\Models\Collection::whereIn('id', $collectionIds)->pluck('name', 'id')->all()
+                    : [];
+                $field['options'] = array_values(array_map(fn ($id) => [
+                    'value' => (string) $id,
+                    'label' => $collections[$id] ?? (string) $id,
+                    'display_label' => $collections[$id] ?? (string) $id, // FilterFieldInput uses display_label
+                ], $collectionIds));
             }
         }
         unset($field);

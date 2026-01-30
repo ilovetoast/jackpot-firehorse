@@ -329,7 +329,9 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     // STEP 2 & 3: Color swatch filters (filter_type === 'color') - no operator dropdown, always equals, OR semantics
     const isColorFilter = field.filter_type === 'color'
-    
+    // C9.2: Collection = single select only, no operator dropdown (no "Contains any")
+    const isCollectionFilter = fieldKey === 'collection'
+
     // Phase J.2.8: Special rendering for tags field (no label)
     if (fieldKey === 'tags') {
         return (
@@ -396,16 +398,20 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                 const arrayValue = Array.isArray(newValue) ? newValue : (newValue != null ? [newValue] : null)
                 onChange('equals', arrayValue)
             }
+        } else if (isCollectionFilter) {
+            // Collection: single select, always use 'equals'
+            onChange('equals', newValue)
         } else {
             onChange(operator, newValue)
         }
     }
     
     // STEP 3: For color filters, hardcode operator to 'equals' and normalize value to array
-    const effectiveOperator = isColorFilter ? 'equals' : operator
-    const effectiveValue = isColorFilter 
+    // C9.2: Collection = single select, no operator dropdown, always 'equals'
+    const effectiveOperator = isColorFilter || isCollectionFilter ? 'equals' : operator
+    const effectiveValue = isColorFilter
         ? (Array.isArray(value) ? value : (value != null ? [value] : null))
-        : value
+        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : value)
     
     return (
         <div className="flex-shrink-0">
@@ -414,8 +420,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                 {field.display_label || field.label || fieldKey}
             </label>
             <div className="flex items-center gap-2">
-                {/* STEP 3: Hide operator dropdown for color filters */}
-                {!isColorFilter && field.operators && field.operators.length > 1 && (
+                {/* STEP 3: Hide operator dropdown for color filters; C9.2: hide for collection (single select only) */}
+                {!isColorFilter && !isCollectionFilter && field.operators && field.operators.length > 1 && (
                     <select
                         value={effectiveOperator}
                         onChange={handleOperatorChange}
@@ -458,7 +464,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         // Get tenant ID from page props for tag autocomplete
         const pageProps = usePage().props
         const tenantId = pageProps.tenant?.id || pageProps.auth?.user?.current_tenant_id
-        
+
         return (
             <TagPrimaryFilter
                 value={value}
@@ -469,7 +475,34 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
             />
         )
     }
-    
+
+    // C9.2: Collection primary filter = dropdown with collection name (label), not text/number
+    if (fieldKey === 'collection') {
+        const opts = (filteredOptions !== null && filteredOptions.length > 0)
+            ? filteredOptions
+            : (field.options || [])
+        const label = (opt) => opt.display_label ?? opt.label ?? opt.value
+        return (
+            <select
+                value={Array.isArray(value) ? value[0] ?? '' : (value ?? '')}
+                onChange={(e) => {
+                    const v = e.target.value
+                    onChange(v ? [v] : null)
+                }}
+                className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                    compact ? 'min-w-[100px]' : 'min-w-[140px]'
+                }`}
+            >
+                <option value="">Any</option>
+                {opts.map((option) => (
+                    <option key={option.value} value={option.value}>
+                        {label(option)}
+                    </option>
+                ))}
+            </select>
+        )
+    }
+
     // Special handling for dominant_colors field - render color tiles
     if (fieldKey === 'dominant_colors') {
         // Extract color arrays from availableValues
@@ -588,12 +621,12 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     <option value="">Any</option>
                     {options.map((option) => (
                         <option key={option.value} value={option.value}>
-                            {option.display_label || option.value}
+                            {option.display_label ?? option.label ?? option.value}
                         </option>
                     ))}
                 </select>
             )
-        
+
         case 'multiselect':
             return (
                 <select
@@ -610,7 +643,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                 >
                     {options.map((option) => (
                         <option key={option.value} value={option.value}>
-                            {option.display_label || option.value}
+                            {option.display_label ?? option.label ?? option.value}
                         </option>
                     ))}
                 </select>

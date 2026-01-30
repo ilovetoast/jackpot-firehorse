@@ -92,6 +92,100 @@ class UploadMetadataSchemaResolver
     }
 
     /**
+     * Resolve metadata schema for edit/quick-view context (drawer, bulk edit, approval review).
+     * C9.2: Returns fields visible in quick view (show_on_edit) for the category, not upload-only.
+     *
+     * @param int $tenantId
+     * @param int|null $brandId
+     * @param int $categoryId
+     * @param string $assetType
+     * @param string|null $userRole
+     * @return array Same structure as resolve() but filtered by show_on_edit
+     */
+    public function resolveForEdit(
+        int $tenantId,
+        ?int $brandId,
+        int $categoryId,
+        string $assetType,
+        ?string $userRole = null
+    ): array {
+        $resolvedSchema = $this->metadataSchemaResolver->resolve(
+            $tenantId,
+            $brandId,
+            $categoryId,
+            $assetType
+        );
+
+        $category = \App\Models\Category::find($categoryId);
+        $tenant = \App\Models\Tenant::find($tenantId);
+
+        $editFields = $this->filterForEdit($resolvedSchema['fields'], $category, $tenant);
+
+        // DEBUG: Log edit field keys to trace collection visibility in drawer
+        $editKeys = array_column($editFields, 'key');
+        \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] resolveForEdit after filterForEdit', [
+            'category_id' => $categoryId,
+            'field_keys' => $editKeys,
+            'has_collection' => in_array('collection', $editKeys, true),
+        ]);
+
+        $editFields = $this->visibilityResolver->filterVisibleFields($editFields, $category, $tenant);
+
+        $visibleKeys = array_column($editFields, 'key');
+        \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] resolveForEdit after filterVisibleFields', [
+            'field_keys' => $visibleKeys,
+            'has_collection' => in_array('collection', $visibleKeys, true),
+        ]);
+
+        if ($userRole !== null) {
+            $editFields = $this->addPermissionFlags(
+                $editFields,
+                $userRole,
+                $tenantId,
+                $brandId,
+                $categoryId
+            );
+        }
+
+        $grouped = $this->groupFields($editFields);
+        return $this->buildOutput($grouped);
+    }
+
+    /**
+     * Filter fields for edit/quick-view visibility (C9.2).
+     * Keeps fields where is_visible and show_on_edit (category-scoped).
+     */
+    protected function filterForEdit(array $fields, ?\App\Models\Category $category = null, ?\App\Models\Tenant $tenant = null): array
+    {
+        $editFields = [];
+        foreach ($fields as $field) {
+            $key = $field['key'] ?? $field['field_key'] ?? null;
+            if (!$field['is_visible']) {
+                if ($key === 'collection') {
+                    \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] filterForEdit SKIP collection', ['reason' => 'is_visible=false']);
+                }
+                continue;
+            }
+            // C9.2: Respect Quick View (show_on_edit) from Metadata Management – no special case for collection
+            $showOnEdit = $field['show_on_edit'] ?? true;
+            if (!$showOnEdit) {
+                continue;
+            }
+            if ($field['type'] === 'rating') {
+                continue;
+            }
+            if ($field['is_internal_only'] ?? false) {
+                if ($key === 'collection') {
+                    \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] filterForEdit SKIP collection', ['reason' => 'is_internal_only=true']);
+                }
+                continue;
+            }
+            $editFields[] = $field;
+        }
+        return $this->visibilityResolver->filterVisibleFields($editFields, $category, $tenant);
+    }
+
+    /**
      * Filter resolved fields for upload-specific rules.
      *
      * Excludes fields that are:

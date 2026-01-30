@@ -1619,9 +1619,15 @@ class UploadController extends Controller
             'manifest.*.comment' => 'nullable|string|max:1000', // Phase J.3.1: Optional comment for replace mode
             'manifest.*.collection_ids' => 'nullable|array', // C7: Attach asset to collections post-upload
             'manifest.*.collection_ids.*' => 'integer|exists:collections,id',
+            // C9.2: Upload-time AI skip controls (Admin/Brand Manager only)
+            'skip_ai_tagging' => 'nullable|boolean',
+            'skip_ai_metadata' => 'nullable|boolean',
         ]);
 
         $manifest = $validated['manifest'];
+        // C9.2: Extract upload-time AI skip flags (upload-level, applies to all assets in this batch)
+        $skipAiTagging = $validated['skip_ai_tagging'] ?? false;
+        $skipAiMetadata = $validated['skip_ai_metadata'] ?? false;
         $results = [];
 
         // Process each manifest item independently
@@ -2052,6 +2058,24 @@ class UploadController extends Controller
                         null, // Do NOT pass metadata here - persist separately below with approval check
                         $user->id
                     );
+
+                    // C9.2: Store upload-time AI skip flags in asset metadata (if provided)
+                    if ($skipAiTagging || $skipAiMetadata) {
+                        $currentMetadata = $asset->metadata ?? [];
+                        if ($skipAiTagging) {
+                            $currentMetadata['_skip_ai_tagging'] = true;
+                        }
+                        if ($skipAiMetadata) {
+                            $currentMetadata['_skip_ai_metadata'] = true;
+                        }
+                        $asset->update(['metadata' => $currentMetadata]);
+                        
+                        Log::info('[UploadController::finalize] AI skip flags stored in asset metadata', [
+                            'asset_id' => $asset->id,
+                            'skip_ai_tagging' => $skipAiTagging,
+                            'skip_ai_metadata' => $skipAiMetadata,
+                        ]);
+                    }
 
                     // IMPORTANT:
                     // Metadata MUST be persisted exactly once during upload.
@@ -2681,8 +2705,12 @@ class UploadController extends Controller
     public function getMetadataSchema(Request $request): JsonResponse
     {
         $tenant = app('tenant');
-        $brand = app('brand');
+        $brand = app()->bound('brand') ? app('brand') : null;
         $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found', 'message' => 'Tenant context is required.'], 404);
+        }
 
         // Verify user belongs to tenant
         if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
@@ -2692,23 +2720,39 @@ class UploadController extends Controller
             ], 403);
         }
 
-        // Validate request
         $validated = $request->validate([
             'category_id' => 'required|integer|exists:categories,id',
             'asset_type' => 'nullable|string|in:image,video,document',
+            'context' => 'nullable|string|in:upload,edit', // C9.2: edit = quick view / drawer visibility
         ]);
 
-        // Verify category belongs to tenant and brand
+        // C9.2: Resolve category first; if brand is missing (e.g. fetch from drawer), resolve brand from category
         $category = Category::where('id', $validated['category_id'])
             ->where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
             ->first();
 
         if (!$category) {
             return response()->json([
                 'error' => 'Invalid category',
-                'message' => 'Category must belong to this brand.',
+                'message' => 'Category not found or does not belong to this tenant.',
             ], 422);
+        }
+
+        if (!$brand) {
+            $brand = $category->brand;
+            if (!$brand) {
+                return response()->json([
+                    'error' => 'Brand not found',
+                    'message' => 'Could not resolve brand for this category.',
+                ], 422);
+            }
+        } else {
+            if ($category->brand_id !== $brand->id) {
+                return response()->json([
+                    'error' => 'Invalid category',
+                    'message' => 'Category must belong to this brand.',
+                ], 422);
+            }
         }
 
         // Determine asset type (file type, not category asset_type)
@@ -2716,17 +2760,37 @@ class UploadController extends Controller
         $assetType = $validated['asset_type'] ?? 'image';
 
         try {
-            // Phase 4: Get user role for permission checks
             $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
+            $context = $validated['context'] ?? 'upload';
 
-            // Resolve upload metadata schema
-            $schema = $this->uploadMetadataSchemaResolver->resolve(
-                $tenant->id,
-                $brand->id,
-                $category->id,
-                $assetType,
-                $userRole
-            );
+            // C9.2: When context=edit, return fields visible in quick view (drawer) so Collection shows when Quick View is checked
+            if ($context === 'edit') {
+                $schema = $this->uploadMetadataSchemaResolver->resolveForEdit(
+                    $tenant->id,
+                    $brand->id,
+                    $category->id,
+                    $assetType,
+                    $userRole
+                );
+                // DEBUG: Log schema field keys for drawer collection visibility
+                $groupFieldKeys = [];
+                foreach ($schema['groups'] ?? [] as $g) {
+                    $groupFieldKeys[$g['key'] ?? '?'] = array_map(fn ($f) => $f['key'] ?? $f['field_key'] ?? '?', $g['fields'] ?? []);
+                }
+                Log::info('[UploadController] getMetadataSchema context=edit response', [
+                    'category_id' => $category->id,
+                    'group_field_keys' => $groupFieldKeys,
+                    'has_collection' => collect($schema['groups'] ?? [])->contains(fn ($g) => collect($g['fields'] ?? [])->contains(fn ($f) => ($f['key'] ?? $f['field_key'] ?? null) === 'collection')),
+                ]);
+            } else {
+                $schema = $this->uploadMetadataSchemaResolver->resolve(
+                    $tenant->id,
+                    $brand->id,
+                    $category->id,
+                    $assetType,
+                    $userRole
+                );
+            }
 
             return response()->json($schema);
         } catch (\Exception $e) {

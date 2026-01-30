@@ -789,7 +789,9 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     // STEP 2 & 3: Color swatch filters (filter_type === 'color') - no operator dropdown, always equals, OR semantics
     const isColorFilter = field.filter_type === 'color'
-    
+    // C9.2: Collection = single select only, no operator dropdown (no "Contains any")
+    const isCollectionFilter = fieldKey === 'collection'
+
     // Filter options to only show values that exist in available_values
     // This ensures users only see options that actually have matching assets
     const filteredOptions = useMemo(() => {
@@ -841,18 +843,22 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                 const arrayValue = Array.isArray(newValue) ? newValue : (newValue != null ? [newValue] : null)
                 onChange('equals', arrayValue)
             }
+        } else if (isCollectionFilter) {
+            // Collection: single select, always use 'equals'
+            onChange('equals', newValue)
         } else {
             onChange(operator, newValue)
         }
     }
     
     // STEP 3: For color filters, hardcode operator to 'equals' and normalize value to array
-    const effectiveOperator = isColorFilter ? 'equals' : operator
-    const effectiveValue = isColorFilter 
+    // C9.2: Collection = single select, no operator dropdown, always 'equals'
+    const effectiveOperator = isColorFilter || isCollectionFilter ? 'equals' : operator
+    const effectiveValue = isColorFilter
         ? (Array.isArray(value) ? value : (value != null ? [value] : null))
-        : value
+        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : value)
     
-    // Special handling for dominant_colors - hide operator dropdown, show only color swatches
+    // Special handling for dominant_colors / color / collection - hide operator dropdown, show only value control
     const isDominantColors = (fieldKey === 'dominant_colors')
     
     return (
@@ -860,8 +866,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
             <label className="block text-xs font-medium text-gray-700">
                 {field.display_label || field.label}
             </label>
-            {/* For dominant_colors or color filters, render swatches directly without operator dropdown */}
-            {(isDominantColors || isColorFilter) ? (
+            {/* For dominant_colors, color, or collection: render value control only (no operator dropdown) */}
+            {(isDominantColors || isColorFilter || isCollectionFilter) ? (
                 <FilterValueInput
                     field={field}
                     operator={effectiveOperator}
@@ -872,8 +878,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                 />
             ) : (
                 <div className="flex items-center gap-2">
-                    {/* STEP 3: Hide operator dropdown for color filters */}
-                    {!isColorFilter && field.operators && field.operators.length > 1 && (
+                    {/* STEP 3: Hide operator dropdown for color/collection filters */}
+                    {!isColorFilter && !isCollectionFilter && field.operators && field.operators.length > 1 && (
                         <select
                             value={effectiveOperator}
                             onChange={handleOperatorChange}
@@ -909,6 +915,31 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
 function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, availableValues = [] }) {
     const fieldType = field.type || 'text'
     const fieldKey = field.field_key || field.key
+    
+    // C9.2: Collection = single dropdown (not "Contains any" multiselect) in secondary filters too
+    if (fieldKey === 'collection') {
+        const opts = (filteredOptions !== null && filteredOptions.length > 0)
+            ? filteredOptions
+            : (field.options || [])
+        const label = (opt) => opt.display_label ?? opt.label ?? opt.value
+        return (
+            <select
+                value={Array.isArray(value) ? value[0] ?? '' : (value ?? '')}
+                onChange={(e) => {
+                    const v = e.target.value
+                    onChange(v ? [v] : null)
+                }}
+                className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+            >
+                <option value="">Any</option>
+                {opts.map((option) => (
+                    <option key={option.value} value={option.value}>
+                        {label(option)}
+                    </option>
+                ))}
+            </select>
+        )
+    }
     
     // Special handling for dominant_colors field - render color tiles
     if (fieldKey === 'dominant_colors') {

@@ -11,6 +11,8 @@ use App\Services\TenantMetadataVisibilityService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -186,25 +188,58 @@ class TenantMetadataRegistryController extends Controller
             return response()->json(['error' => 'Field does not belong to this tenant'], 403);
         }
 
-        // Set visibility override
-        $this->visibilityService->setFieldVisibility($tenant, $field, $validated);
+        // C9.2: Handle category-scoped visibility settings (Upload/Edit/Filter) and is_primary
+        // If category_id is provided, save category-level overrides instead of tenant-level
+        if (isset($validated['category_id'])) {
+            $categoryId = (int) $validated['category_id'];
+            $brand = app()->bound('brand') ? app('brand') : null;
 
-        // Handle is_primary as category-scoped override (stored in metadata_field_visibility table)
-        // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
-        // A field may be primary in Photography but secondary in Logos.
-        if (isset($validated['is_primary']) && isset($validated['category_id'])) {
-            $categoryId = $validated['category_id'];
-            $brand = app('brand');
-            
-            // Verify category belongs to tenant and brand
+            // Resolve category (must belong to tenant)
             $category = \App\Models\Category::where('id', $categoryId)
                 ->where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
                 ->first();
-            
+
             if (!$category) {
-                return response()->json(['error' => 'Category not found or does not belong to tenant/brand'], 404);
+                \Log::error('[TenantMetadataRegistryController] Category not found', [
+                    'category_id' => $categoryId,
+                    'tenant_id' => $tenant->id,
+                ]);
+                return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
             }
+
+            // Use brand from context, or resolve from category so save works when context is missing (e.g. fetch from Metadata Registry)
+            if (!$brand) {
+                $brand = $category->brand;
+                if (!$brand) {
+                    \Log::error('[TenantMetadataRegistryController] Brand not found for category', [
+                        'category_id' => $categoryId,
+                        'brand_id' => $category->brand_id,
+                    ]);
+                    return response()->json(['error' => 'Brand not found for category'], 500);
+                }
+                \Log::info('[TenantMetadataRegistryController] Resolved brand from category', [
+                    'category_id' => $categoryId,
+                    'brand_id' => $brand->id,
+                ]);
+            } else {
+                // Ensure category belongs to the context brand
+                if ($category->brand_id !== $brand->id) {
+                    \Log::error('[TenantMetadataRegistryController] Category does not belong to context brand', [
+                        'category_id' => $categoryId,
+                        'category_brand_id' => $category->brand_id,
+                        'context_brand_id' => $brand->id,
+                    ]);
+                    return response()->json(['error' => 'Category does not belong to current brand'], 404);
+                }
+            }
+
+            \Log::info('[TenantMetadataRegistryController] Saving category-scoped visibility', [
+                'field_id' => $field,
+                'category_id' => $categoryId,
+                'validated' => $validated,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
             
             // Get or create category-level visibility override
             $existing = \DB::table('metadata_field_visibility')
@@ -214,38 +249,103 @@ class TenantMetadataRegistryController extends Controller
                 ->where('category_id', $categoryId)
                 ->first();
             
+            // Convert show_* flags to is_*_hidden flags
+            // Handle string "true"/"false" from JSON (ensure boolean conversion)
+            // C9.2: is_hidden is ONLY for category suppression (big toggle), NOT for edit visibility
+            // Use is_edit_hidden for Quick View checkbox (show_on_edit)
+            $isUploadHidden = isset($validated['show_on_upload']) ? !filter_var($validated['show_on_upload'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isEditHidden = isset($validated['show_on_edit']) ? !filter_var($validated['show_on_edit'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isFilterHidden = isset($validated['show_in_filters']) ? !filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isPrimary = isset($validated['is_primary']) ? filter_var($validated['is_primary'], FILTER_VALIDATE_BOOLEAN) : null;
+            // NOTE: is_hidden is NOT set here - it's only set by category suppression toggle (toggleCategoryField)
+            
+            \Log::info('[TenantMetadataRegistryController] Converted visibility flags', [
+                'show_on_upload' => $validated['show_on_upload'] ?? 'not set',
+                'is_upload_hidden' => $isUploadHidden,
+                'existing_record' => $existing ? 'yes' : 'no',
+            ]);
+            
             if ($existing) {
-                // Update existing category override
+                // Update existing category override - only update provided fields
+                // C9.2: is_hidden is ONLY for category suppression, NOT for edit visibility
+                // Use is_edit_hidden for Quick View checkbox
+                $updateData = ['updated_at' => now()];
+                if ($isUploadHidden !== null) $updateData['is_upload_hidden'] = $isUploadHidden;
+                // C9.2: Only update is_edit_hidden if column exists (defensive check for migration)
+                if ($isEditHidden !== null && \Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+                    $updateData['is_edit_hidden'] = $isEditHidden;
+                } elseif ($isEditHidden !== null) {
+                    // Fallback: If column doesn't exist yet, log warning but don't fail
+                    \Log::warning('[TenantMetadataRegistryController] is_edit_hidden column does not exist yet. Migration may not have run.', [
+                        'field_id' => $field,
+                        'category_id' => $categoryId,
+                    ]);
+                }
+                if ($isFilterHidden !== null) $updateData['is_filter_hidden'] = $isFilterHidden;
+                if ($isPrimary !== null) $updateData['is_primary'] = $isPrimary;
+                
+                \Log::info('[TenantMetadataRegistryController] Updating existing category override', [
+                    'record_id' => $existing->id,
+                    'update_data' => $updateData,
+                ]);
+                
                 \DB::table('metadata_field_visibility')
                     ->where('id', $existing->id)
-                    ->update([
-                        'is_primary' => $validated['is_primary'],
-                        'updated_at' => now(),
-                    ]);
+                    ->update($updateData);
             } else {
-                // Create new category override for is_primary
+                // Create new category override
                 // Inherit other visibility flags from tenant-level override if exists
+                // C9.2: Select columns explicitly to handle case where is_edit_hidden might not exist yet
+                $selectColumns = ['id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary'];
+                if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+                    $selectColumns[] = 'is_edit_hidden';
+                }
+                
                 $tenantOverride = \DB::table('metadata_field_visibility')
                     ->where('metadata_field_id', $field)
                     ->where('tenant_id', $tenant->id)
                     ->whereNull('brand_id')
                     ->whereNull('category_id')
+                    ->select($selectColumns)
                     ->first();
                 
-                \DB::table('metadata_field_visibility')->insert([
+                $insertData = [
                     'metadata_field_id' => $field,
                     'tenant_id' => $tenant->id,
                     'brand_id' => $brand->id,
                     'category_id' => $categoryId,
+                    // C9.2: is_hidden is ONLY for category suppression (big toggle), NOT for edit visibility
+                    // Keep is_hidden from tenant override (for category suppression) or default to false
                     'is_hidden' => $tenantOverride ? (bool) $tenantOverride->is_hidden : false,
-                    'is_upload_hidden' => $tenantOverride ? (bool) $tenantOverride->is_upload_hidden : false,
-                    'is_filter_hidden' => $tenantOverride ? (bool) $tenantOverride->is_filter_hidden : false,
-                    'is_primary' => $validated['is_primary'],
+                    'is_upload_hidden' => $isUploadHidden !== null ? $isUploadHidden : ($tenantOverride ? (bool) $tenantOverride->is_upload_hidden : false),
+                    'is_filter_hidden' => $isFilterHidden !== null ? $isFilterHidden : ($tenantOverride ? (bool) $tenantOverride->is_filter_hidden : false),
+                    'is_primary' => $isPrimary !== null ? $isPrimary : ($tenantOverride ? (bool) ($tenantOverride->is_primary ?? false) : false),
                     'created_at' => now(),
                     'updated_at' => now(),
+                ];
+                
+                // C9.2: Only include is_edit_hidden if column exists (defensive check for migration)
+                if (\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+                    $insertData['is_edit_hidden'] = $isEditHidden !== null ? $isEditHidden : ($tenantOverride ? (bool) ($tenantOverride->is_edit_hidden ?? false) : false);
+                } elseif ($isEditHidden !== null) {
+                    // Fallback: If column doesn't exist yet, log warning but don't fail
+                    \Log::warning('[TenantMetadataRegistryController] is_edit_hidden column does not exist yet. Migration may not have run.', [
+                        'field_id' => $field,
+                        'category_id' => $categoryId,
+                    ]);
+                }
+                
+                \Log::info('[TenantMetadataRegistryController] Creating new category override', [
+                    'insert_data' => $insertData,
                 ]);
+                
+                \DB::table('metadata_field_visibility')->insert($insertData);
             }
+        } else {
+            // No category_id - save at tenant level (existing behavior)
+            $this->visibilityService->setFieldVisibility($tenant, $field, $validated);
         }
+
 
         return response()->json([
             'success' => true,

@@ -175,3 +175,49 @@ Phase C is complete when:
 - When modifying drawer metadata queries, ensure approved metadata is visible regardless of edit permissions
 - Do not add source-based filtering for contributors/viewers - only check `approved_at`
 - Always verify brand-level permissions are used, not tenant-level
+
+---
+
+## Adding a new metadata field (drawer + primary filter) — Checklist
+
+When adding a new metadata field that must appear in the **Asset Drawer (Quick View)** and/or **Primary Filter**, use this checklist so brand/permission and UI issues don’t recur.
+
+### Drawer (Quick View)
+
+1. **Metadata schema (edit context)**  
+   Drawer uses `GET /app/uploads/metadata-schema?category_id=&asset_type=&context=edit`.  
+   - `UploadController::getMetadataSchema`: support `context=edit` and call `resolveForEdit()` (C9.2).  
+   - If `app('brand')` can be null (e.g. fetch from drawer), **resolve brand from category** so the request doesn’t return 422.  
+   - Touchpoint: `app/Http/Controllers/UploadController.php` — `getMetadataSchema()`.
+
+2. **Edit schema resolver**  
+   - `UploadMetadataSchemaResolver::resolveForEdit()` and `filterForEdit()` must include the new field when `show_on_edit` is true for the category.  
+   - Touchpoint: `app/Services/UploadMetadataSchemaResolver.php`.
+
+3. **Frontend: context=edit**  
+   - AssetDrawer, BulkMetadataEditModal, PendingAssetReviewModal must request metadata-schema with **`context=edit`** when deciding whether to show the field.  
+   - Touchpoints: `AssetDrawer.jsx`, `BulkMetadataEditModal.jsx`, `PendingAssetReviewModal.jsx`.
+
+### Primary filter
+
+4. **Filterable schema**  
+   - Field must be in `filterable_schema` with correct `is_primary` (category override from `metadata_field_visibility`).  
+   - Handled by `MetadataSchemaResolver` + `MetadataFilterService` when the field is filterable and visible.
+
+5. **available_values**  
+   - Primary filters only show when `available_values[field_key]` is non-empty.  
+   - If the field’s values come from a **pivot or other table** (not `asset_metadata`), **harvest them in AssetController** and set `available_values['field_key']`.  
+   - Touchpoint: `app/Http/Controllers/AssetController.php` (index) — e.g. “Source 3” for collection.
+
+6. **Options with labels**  
+   - For a dropdown, attach `field['options']` with `value` and `display_label` (or `label`) so the primary filter shows labels, not raw values.  
+   - Touchpoint: same AssetController loop that builds `filterable_schema` (e.g. collection options from `Collection::whereIn(...)`).
+
+7. **Filter UI (dropdown with label)**  
+   - If the field should always be a **dropdown with label** (e.g. collection), add explicit handling in `FilterValueInput` (e.g. `if (fieldKey === 'collection')`) so it doesn’t fall back to text/number.  
+   - Touchpoint: `resources/js/Components/AssetGridMetadataPrimaryFilters.jsx` — `FilterValueInput`, and option label: `option.display_label ?? option.label ?? option.value`.
+
+### Brand / permission gotchas
+
+- **Brand context:** Endpoints that require `app('brand')` (e.g. metadata-schema, setVisibility) should resolve brand from the **category** when brand is not bound, so fetch from the drawer still works.  
+- **Permission:** Drawer editable fields are filtered in `AssetMetadataController::getEditableMetadata()`; approved metadata must remain visible read-only (see “Known Issues” above).
