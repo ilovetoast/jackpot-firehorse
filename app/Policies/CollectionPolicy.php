@@ -62,7 +62,7 @@ class CollectionPolicy
 
     /**
      * Determine if the user can create collections for the brand.
-     * Only brand admins and brand managers may create.
+     * C9: Brand admin, brand manager, and contributor may create; viewer may not.
      */
     public function create(User $user, Brand $brand): bool
     {
@@ -71,7 +71,10 @@ class CollectionPolicy
             return false;
         }
         $role = $membership['role'] ?? null;
-        return $role !== null && RoleRegistry::isBrandApproverRole($role);
+        if ($role === null) {
+            return false;
+        }
+        return in_array($role, ['admin', 'brand_manager', 'contributor'], true);
     }
 
     /**

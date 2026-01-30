@@ -122,11 +122,11 @@ class CollectionPolicyTest extends TestCase
         $this->assertTrue($this->policy->manageAssets($user, $this->collection));
     }
 
-    public function test_contributor_can_view_but_cannot_modify(): void
+    public function test_contributor_can_view_and_create_but_cannot_update_delete_manage_assets(): void
     {
         $user = $this->contributorUser;
         $this->assertTrue($this->policy->view($user, $this->collection));
-        $this->assertFalse($this->policy->create($user, $this->brand));
+        $this->assertTrue($this->policy->create($user, $this->brand)); // C9: contributor may create collections
         $this->assertFalse($this->policy->update($user, $this->collection));
         $this->assertFalse($this->policy->delete($user, $this->collection));
         $this->assertFalse($this->policy->manageAssets($user, $this->collection));

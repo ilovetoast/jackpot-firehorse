@@ -1629,6 +1629,14 @@ class UploadController extends Controller
             $uploadKey = $item['upload_key'];
             $expectedSize = $item['expected_size'];
             $categoryId = $item['category_id'] ?? null; // Phase J.3.1: Optional for replace mode
+            
+            // C9.1: DEBUG - Log category_id extraction
+            Log::info('[UploadController::finalize] Extracted category_id from manifest', [
+                'upload_key' => $uploadKey,
+                'category_id' => $categoryId,
+                'has_category_id_key' => array_key_exists('category_id', $item),
+                'item_keys' => array_keys($item),
+            ]);
             // CRITICAL: Extract metadata - handle both array and object formats from JSON
             $metadata = $item['metadata'] ?? [];
             // If metadata is an object (stdClass from JSON), convert to array
@@ -1659,17 +1667,36 @@ class UploadController extends Controller
                     throw new \RuntimeException("Upload session not found: {$uploadSessionId}");
                 }
 
+                // IDEMPOTENCY CHECK: Check if asset already exists for this upload_session_id
+                // Uses upload_session_id only (unique constraint) - brand_id is determined by active brand context
+                // This makes finalize safe under retries, refreshes, and race conditions
+                // C9.1: Check idempotency FIRST to avoid unnecessary category validation for existing assets
+                $existingAsset = Asset::where('upload_session_id', $uploadSessionId)
+                    ->where('tenant_id', $tenant->id)
+                    ->first();
+
                 // Phase J.3.1: For replace mode, skip category validation and metadata persistence
                 $isReplaceMode = $uploadSession->mode === 'replace' && $uploadSession->asset_id;
 
                 // CRITICAL: Verify category belongs to tenant and ACTIVE BRAND (not upload_session->brand_id)
                 // The user is selecting a category in the UI, which is scoped to the active brand
                 // Assets are created with the active brand_id to match UI queries
-                // Phase J.3.1: Skip category validation for replace mode
+                // Phase J.3.1: Skip category validation for replace mode or existing assets
                 $category = null;
-                if (!$isReplaceMode) {
+                if (!$isReplaceMode && !$existingAsset) {
+                    // C9.1: DEBUG - Log category_id check
+                    Log::info('[UploadController::finalize] Category validation check', [
+                        'upload_key' => $uploadKey,
+                        'category_id_provided' => $categoryId,
+                        'has_category_id_key' => array_key_exists('category_id', $item),
+                        'is_replace_mode' => $isReplaceMode,
+                        'existing_asset' => $existingAsset ? $existingAsset->id : null,
+                        'brand_id' => $brand->id ?? null,
+                        'tenant_id' => $tenant->id ?? null,
+                    ]);
+                    
                     if (!$categoryId) {
-                        throw new \RuntimeException("Category ID is required for new asset uploads");
+                        throw new \RuntimeException("Category ID is required for new asset uploads. Please select a category before finalizing.");
                     }
                     
                     $category = Category::where('id', $categoryId)
@@ -1682,15 +1709,148 @@ class UploadController extends Controller
                     }
                 }
 
-                // IDEMPOTENCY CHECK: Check if asset already exists for this upload_session_id
-                // Uses upload_session_id only (unique constraint) - brand_id is determined by active brand context
-                // This makes finalize safe under retries, refreshes, and race conditions
-                $existingAsset = Asset::where('upload_session_id', $uploadSessionId)
-                    ->where('tenant_id', $tenant->id)
-                    ->first();
-
                 if ($existingAsset) {
                     // Asset already exists - return existing asset (idempotent)
+                    // C9.1: Still process collection assignment even for existing assets
+                    $asset = $existingAsset;
+                    
+                    // C9.1: Sync asset to collections post-upload (collection_ids from manifest)
+                    // Handles empty arrays (deselection) and returns clear errors on failure
+                    $collectionIds = $item['collection_ids'] ?? [];
+                    $collectionErrors = [];
+                    
+                    // C9.1: DEBUG - Log collection assignment attempt (existing asset path)
+                    Log::info('[UploadController::finalize] Collection assignment check (EXISTING ASSET PATH)', [
+                        'upload_key' => $uploadKey,
+                        'asset_id' => $asset->id ?? null,
+                        'collection_ids_provided' => $collectionIds,
+                        'has_collection_ids_key' => isset($item['collection_ids']),
+                        'brand_id' => $brand->id ?? null,
+                        'tenant_id' => $tenant->id ?? null,
+                        'user_id' => $user->id ?? null,
+                    ]);
+                    
+                    // C9.1: Process collections if provided (empty array = deselect all, non-empty = sync)
+                    // C9.1: Always process if collection_ids key exists (even if empty array)
+                    if ($asset && $asset->id && array_key_exists('collection_ids', $item)) {
+                        // Get current collections for this asset (brand-scoped)
+                        $currentCollectionIds = $asset->collections()
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->pluck('collections.id')
+                            ->toArray();
+
+                        // Determine what to add and remove
+                        $toAdd = array_diff($collectionIds, $currentCollectionIds);
+                        $toRemove = array_diff($currentCollectionIds, $collectionIds);
+
+                        // Process removals first
+                        foreach ($toRemove as $collectionId) {
+                            $targetCollection = Collection::query()
+                                ->where('id', $collectionId)
+                                ->where('tenant_id', $tenant->id)
+                                ->where('brand_id', $brand->id)
+                                ->first();
+
+                            if (! $targetCollection) {
+                                $collectionErrors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+                                continue;
+                            }
+
+                            if (! Gate::forUser($user)->allows('removeAsset', $targetCollection)) {
+                                $collectionErrors[] = "You do not have permission to remove assets from collection: {$targetCollection->name}.";
+                                continue;
+                            }
+
+                            try {
+                                $this->collectionAssetService->detach($targetCollection, $asset);
+                            } catch (\Throwable $e) {
+                                $collectionErrors[] = "Failed to remove from collection {$targetCollection->name}: {$e->getMessage()}";
+                                Log::warning('[UploadController::finalize] Failed to detach asset from collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+
+                        // Process additions
+                        foreach ($toAdd as $collectionId) {
+                            // C9.1: DEBUG - Log each collection addition attempt
+                            Log::info('[UploadController::finalize] Attempting to add collection', [
+                                'asset_id' => $asset->id,
+                                'collection_id' => $collectionId,
+                                'brand_id' => $brand->id,
+                                'tenant_id' => $tenant->id,
+                                'user_id' => $user->id,
+                            ]);
+                            
+                            $targetCollection = Collection::query()
+                                ->where('id', $collectionId)
+                                ->where('tenant_id', $tenant->id)
+                                ->where('brand_id', $brand->id)
+                                ->first();
+
+                            if (! $targetCollection) {
+                                $errorMsg = "Collection {$collectionId} not found or does not belong to this brand.";
+                                $collectionErrors[] = $errorMsg;
+                                Log::warning('[UploadController::finalize] Collection not found', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'brand_id' => $brand->id,
+                                    'tenant_id' => $tenant->id,
+                                ]);
+                                continue;
+                            }
+
+                            $canAdd = Gate::forUser($user)->allows('addAsset', $targetCollection);
+                            Log::info('[UploadController::finalize] Permission check result', [
+                                'asset_id' => $asset->id,
+                                'collection_id' => $collectionId,
+                                'collection_name' => $targetCollection->name,
+                                'user_id' => $user->id,
+                                'can_add' => $canAdd,
+                            ]);
+                            
+                            if (! $canAdd) {
+                                $errorMsg = "You do not have permission to add assets to collection: {$targetCollection->name}.";
+                                $collectionErrors[] = $errorMsg;
+                                Log::warning('[UploadController::finalize] Permission denied for collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'collection_name' => $targetCollection->name,
+                                    'user_id' => $user->id,
+                                ]);
+                                continue;
+                            }
+
+                            try {
+                                $this->collectionAssetService->attach($targetCollection, $asset);
+                                Log::info('[UploadController::finalize] Successfully attached collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'collection_name' => $targetCollection->name,
+                                ]);
+                            } catch (\Throwable $e) {
+                                $collectionErrors[] = "Failed to add to collection {$targetCollection->name}: {$e->getMessage()}";
+                                Log::warning('[UploadController::finalize] Failed to attach asset to collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'error' => $e->getMessage(),
+                                    'trace' => $e->getTraceAsString(),
+                                ]);
+                            }
+                        }
+
+                        // Log collection errors but don't fail entire finalize (asset is already created)
+                        if (! empty($collectionErrors)) {
+                            Log::warning('[UploadController::finalize] Collection assignment errors (existing asset)', [
+                                'asset_id' => $asset->id,
+                                'errors' => $collectionErrors,
+                            ]);
+                        }
+                    }
+                    
                     // TASK 1: Check approval info for existing asset (UI-only, read-only)
                     $approvalRequired = false;
                     $pendingMetadataCount = 0;
@@ -1943,26 +2103,149 @@ class UploadController extends Controller
                         }
                     }
 
-                    // C7: Attach asset to collections post-upload (collection_ids from manifest)
+                    // C9.1: Sync asset to collections post-upload (collection_ids from manifest)
+                    // Handles empty arrays (deselection) and returns clear errors on failure
                     $collectionIds = $item['collection_ids'] ?? [];
-                    if (!empty($collectionIds) && $asset && $asset->id) {
-                        foreach ($collectionIds as $collectionId) {
+                    $collectionErrors = [];
+                    
+                    // C9.1: DEBUG - Log collection assignment attempt (NEW ASSET PATH)
+                    Log::info('[UploadController::finalize] Collection assignment check (NEW ASSET PATH)', [
+                        'upload_key' => $uploadKey,
+                        'asset_id' => $asset->id ?? null,
+                        'collection_ids_provided' => $collectionIds,
+                        'has_collection_ids_key' => isset($item['collection_ids']),
+                        'brand_id' => $brand->id ?? null,
+                        'tenant_id' => $tenant->id ?? null,
+                        'user_id' => $user->id ?? null,
+                    ]);
+                    
+                    // C9.1: Process collections if provided (empty array = deselect all, non-empty = sync)
+                    // C9.1: Always process if collection_ids key exists (even if empty array)
+                    if ($asset && $asset->id && array_key_exists('collection_ids', $item)) {
+                        // Get current collections for this asset (brand-scoped)
+                        $currentCollectionIds = $asset->collections()
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->pluck('collections.id')
+                            ->toArray();
+
+                        // Determine what to add and remove
+                        $toAdd = array_diff($collectionIds, $currentCollectionIds);
+                        $toRemove = array_diff($currentCollectionIds, $collectionIds);
+                        
+                        // C9.1: DEBUG - Log what will be added/removed (new asset)
+                        Log::info('[UploadController::finalize] Collection sync calculation (NEW ASSET)', [
+                            'asset_id' => $asset->id,
+                            'requested_collection_ids' => $collectionIds,
+                            'current_collection_ids' => $currentCollectionIds,
+                            'to_add' => $toAdd,
+                            'to_remove' => $toRemove,
+                        ]);
+
+                        // Process removals first
+                        foreach ($toRemove as $collectionId) {
                             $targetCollection = Collection::query()
                                 ->where('id', $collectionId)
                                 ->where('tenant_id', $tenant->id)
                                 ->where('brand_id', $brand->id)
                                 ->first();
-                            if ($targetCollection && Gate::forUser($user)->allows('addAsset', $targetCollection)) {
-                                try {
-                                    $this->collectionAssetService->attach($targetCollection, $asset);
-                                } catch (\Throwable $e) {
-                                    Log::warning('[UploadController::finalize] Failed to attach asset to collection', [
-                                        'asset_id' => $asset->id,
-                                        'collection_id' => $collectionId,
-                                        'error' => $e->getMessage(),
-                                    ]);
-                                }
+
+                            if (! $targetCollection) {
+                                $collectionErrors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+                                continue;
                             }
+
+                            if (! Gate::forUser($user)->allows('removeAsset', $targetCollection)) {
+                                $collectionErrors[] = "You do not have permission to remove assets from collection: {$targetCollection->name}.";
+                                continue;
+                            }
+
+                            try {
+                                $this->collectionAssetService->detach($targetCollection, $asset);
+                            } catch (\Throwable $e) {
+                                $collectionErrors[] = "Failed to remove from collection {$targetCollection->name}: {$e->getMessage()}";
+                                Log::warning('[UploadController::finalize] Failed to detach asset from collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+
+                        // Process additions
+                        foreach ($toAdd as $collectionId) {
+                            // C9.1: DEBUG - Log each collection addition attempt
+                            Log::info('[UploadController::finalize] Attempting to add collection', [
+                                'asset_id' => $asset->id,
+                                'collection_id' => $collectionId,
+                                'brand_id' => $brand->id,
+                                'tenant_id' => $tenant->id,
+                                'user_id' => $user->id,
+                            ]);
+                            
+                            $targetCollection = Collection::query()
+                                ->where('id', $collectionId)
+                                ->where('tenant_id', $tenant->id)
+                                ->where('brand_id', $brand->id)
+                                ->first();
+
+                            if (! $targetCollection) {
+                                $errorMsg = "Collection {$collectionId} not found or does not belong to this brand.";
+                                $collectionErrors[] = $errorMsg;
+                                Log::warning('[UploadController::finalize] Collection not found', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'brand_id' => $brand->id,
+                                    'tenant_id' => $tenant->id,
+                                ]);
+                                continue;
+                            }
+
+                            $canAdd = Gate::forUser($user)->allows('addAsset', $targetCollection);
+                            Log::info('[UploadController::finalize] Permission check result', [
+                                'asset_id' => $asset->id,
+                                'collection_id' => $collectionId,
+                                'collection_name' => $targetCollection->name,
+                                'user_id' => $user->id,
+                                'can_add' => $canAdd,
+                            ]);
+                            
+                            if (! $canAdd) {
+                                $errorMsg = "You do not have permission to add assets to collection: {$targetCollection->name}.";
+                                $collectionErrors[] = $errorMsg;
+                                Log::warning('[UploadController::finalize] Permission denied for collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'collection_name' => $targetCollection->name,
+                                    'user_id' => $user->id,
+                                ]);
+                                continue;
+                            }
+
+                            try {
+                                $this->collectionAssetService->attach($targetCollection, $asset);
+                                Log::info('[UploadController::finalize] Successfully attached collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'collection_name' => $targetCollection->name,
+                                ]);
+                            } catch (\Throwable $e) {
+                                $collectionErrors[] = "Failed to add to collection {$targetCollection->name}: {$e->getMessage()}";
+                                Log::warning('[UploadController::finalize] Failed to attach asset to collection', [
+                                    'asset_id' => $asset->id,
+                                    'collection_id' => $collectionId,
+                                    'error' => $e->getMessage(),
+                                    'trace' => $e->getTraceAsString(),
+                                ]);
+                            }
+                        }
+
+                        // Log collection errors but don't fail entire finalize (asset is already created)
+                        if (! empty($collectionErrors)) {
+                            Log::warning('[UploadController::finalize] Collection assignment errors', [
+                                'asset_id' => $asset->id,
+                                'errors' => $collectionErrors,
+                            ]);
                         }
                     }
                 } // Phase J.3.1: Close else block for create mode

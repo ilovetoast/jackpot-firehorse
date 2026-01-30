@@ -64,19 +64,20 @@ class CollectionCreateTest extends TestCase
         ]);
     }
 
-    public function test_contributor_cannot_create_collection(): void
+    public function test_contributor_can_create_collection(): void
     {
         $response = $this->actingAs($this->contributorUser)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
             ->postJson('/app/collections', [
-                'name' => 'Forbidden',
+                'name' => 'Contributor Collection',
                 'description' => null,
             ]);
 
-        $response->assertStatus(403);
-        $this->assertDatabaseMissing('collections', [
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('collections', [
             'brand_id' => $this->brand->id,
-            'name' => 'Forbidden',
+            'name' => 'Contributor Collection',
+            'created_by' => $this->contributorUser->id,
         ]);
     }
 

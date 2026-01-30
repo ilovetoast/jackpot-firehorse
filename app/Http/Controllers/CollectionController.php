@@ -145,11 +145,27 @@ class CollectionController extends Controller
     {
         $tenant = app('tenant');
         $brand = app('brand');
+
+        // C9: Resolve brand explicitly when missing (e.g. uploader context) so authorization has correct context
+        if (! $brand && $tenant && $request->user()) {
+            $brandId = $request->input('brand_id') ?? session('brand_id');
+            if ($brandId) {
+                $brand = Brand::query()
+                    ->where('tenant_id', $tenant->id)
+                    ->find($brandId);
+                if ($brand) {
+                    app()->instance('brand', $brand);
+                }
+            }
+        }
+
         $user = $request->user();
         if (! $tenant || ! $brand) {
             abort(403, 'Tenant or brand not resolved.');
         }
-        Gate::forUser($user)->authorize('create', $brand);
+
+        // C9: Use Collection policy with brand explicitly so uploader and collections page behave the same
+        Gate::forUser($user)->authorize('create', [Collection::class, $brand]);
 
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -248,7 +264,120 @@ class CollectionController extends Controller
             ->map(fn (Collection $c) => ['id' => $c->id, 'name' => $c->name])
             ->all();
 
+        // C9.1: DEBUG - Log collections returned
+        \Log::info('[CollectionController::assetCollections] Returning collections', [
+            'asset_id' => $asset->id,
+            'collections_count' => count($collections),
+            'collection_ids' => array_column($collections, 'id'),
+        ]);
+
         return response()->json(['collections' => $collections]);
+    }
+
+    /**
+     * C9.1: Sync asset collections (add/remove in one operation). JSON response.
+     * Handles full state sync: empty array = remove from all, partial = add/remove as needed.
+     */
+    public function syncAssetCollections(Request $request, Asset $asset): JsonResponse
+    {
+        $user = $request->user();
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        Gate::forUser($user)->authorize('view', $asset);
+
+        if (! $tenant || ! $brand) {
+            abort(403, 'Tenant or brand not resolved.');
+        }
+
+        $validated = $request->validate([
+            'collection_ids' => 'present|array', // C9.1: Empty array allowed (deselects all)
+            'collection_ids.*' => 'integer|exists:collections,id',
+        ]);
+
+        $requestedCollectionIds = $validated['collection_ids'];
+        $errors = [];
+        $attached = [];
+        $detached = [];
+
+        // Get current collections for this asset (brand-scoped)
+        $currentCollections = $asset->collections()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->pluck('collections.id')
+            ->toArray();
+
+        // Determine what to add and remove
+        $toAdd = array_diff($requestedCollectionIds, $currentCollections);
+        $toRemove = array_diff($currentCollections, $requestedCollectionIds);
+
+        // Process removals first
+        foreach ($toRemove as $collectionId) {
+            $collection = Collection::query()
+                ->where('id', $collectionId)
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+
+            if (! $collection) {
+                $errors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+                continue;
+            }
+
+            if (! Gate::forUser($user)->allows('removeAsset', $collection)) {
+                $errors[] = "You do not have permission to remove assets from collection: {$collection->name}.";
+                continue;
+            }
+
+            try {
+                $this->collectionAssetService->detach($collection, $asset);
+                $detached[] = $collectionId;
+            } catch (\Throwable $e) {
+                $errors[] = "Failed to remove from collection {$collection->name}: {$e->getMessage()}";
+            }
+        }
+
+        // Process additions
+        foreach ($toAdd as $collectionId) {
+            $collection = Collection::query()
+                ->where('id', $collectionId)
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+
+            if (! $collection) {
+                $errors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+                continue;
+            }
+
+            if (! Gate::forUser($user)->allows('addAsset', $collection)) {
+                $errors[] = "You do not have permission to add assets to collection: {$collection->name}.";
+                continue;
+            }
+
+            try {
+                $this->collectionAssetService->attach($collection, $asset);
+                $attached[] = $collectionId;
+            } catch (\Throwable $e) {
+                $errors[] = "Failed to add to collection {$collection->name}: {$e->getMessage()}";
+            }
+        }
+
+        // Return result with any errors
+        if (! empty($errors)) {
+            return response()->json([
+                'message' => 'Some collection assignments failed.',
+                'errors' => $errors,
+                'attached' => $attached,
+                'detached' => $detached,
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Collections synced successfully.',
+            'attached' => $attached,
+            'detached' => $detached,
+        ]);
     }
 
     /**

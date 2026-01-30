@@ -33,6 +33,7 @@ import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // P
 import ApprovalNotice from './Upload/ApprovalNotice' // TASK 1: Approval notice for contributors
 import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh' // CSRF token refresh for 419 errors
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
+import CollectionSelector from './Collections/CollectionSelector' // C9.1
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -2756,11 +2757,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             const manifestItem = {
                 upload_key: uploadKey,
                 expected_size: fileEntry.file.size,
-                category_id: selectedCategoryId,
+                // C9.1: Only include category_id if it's set (null/undefined means not selected)
+                // Backend requires category_id for new assets, so this should always be set if validation passed
+                ...(selectedCategoryId !== null && selectedCategoryId !== undefined && { category_id: selectedCategoryId }),
                 metadata: metadataPayload, // Phase 2 – Step 4: Only valid fields, no empty values
                 title: normalizedTitle, // This now includes user-edited title if available
                 resolved_filename: resolvedFilename,
-                ...(selectedCollectionIds?.length > 0 && { collection_ids: selectedCollectionIds }),
+                // C9.1: Always include collection_ids (even if empty array) so backend can process
+                collection_ids: selectedCollectionIds || [],
             }
             
             // CRITICAL: Log the actual manifest item being sent
@@ -2771,7 +2775,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 metadataType: typeof manifestItem.metadata,
                 metadataIsArray: Array.isArray(manifestItem.metadata),
                 metadataKeys: Object.keys(manifestItem.metadata),
-                metadataValues: manifestItem.metadata
+                metadataValues: manifestItem.metadata,
+                category_id: manifestItem.category_id ?? 'NOT INCLUDED', // C9.1: DEBUG - Log category_id
+                selectedCategoryId: selectedCategoryId, // C9.1: DEBUG - Log selected category
+                collection_ids: manifestItem.collection_ids, // C9.1: DEBUG - Log collection_ids (can be empty array)
+                collection_ids_type: Array.isArray(manifestItem.collection_ids) ? 'array' : typeof manifestItem.collection_ids, // C9.1: DEBUG
+                collection_ids_length: Array.isArray(manifestItem.collection_ids) ? manifestItem.collection_ids.length : 'N/A', // C9.1: DEBUG
+                selectedCollectionIds: selectedCollectionIds, // C9.1: DEBUG - Log selected IDs from state
+                selectedCollectionIds_length: selectedCollectionIds?.length ?? 0, // C9.1: DEBUG
             })
             
             return manifestItem
@@ -2782,6 +2793,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             manifest: manifest.map(m => ({
                 upload_key: m.upload_key,
                 category_id: m.category_id,
+                collection_ids: m.collection_ids, // C9.1: Include collection_ids in summary
                 metadata: m.metadata,
                 metadataKeys: m.metadata ? Object.keys(m.metadata) : [],
                 title: m.title
@@ -3066,7 +3078,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             )
             // Note: batchStatus is now computed from v2Files, no manual update needed
         }
-    }, [canFinalizeV2, v2Files, selectedCategoryId, getEffectiveMetadataV2, globalMetadataDraft, uploadMetadataSchema])
+    }, [canFinalizeV2, v2Files, selectedCategoryId, selectedCollectionIds, getEffectiveMetadataV2, globalMetadataDraft, uploadMetadataSchema])
 
     /**
      * LEGACY — DO NOT USE: Finalize Assets
@@ -4049,7 +4061,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
 
-                                {/* C9: Collections — multi-select, attach to all files on finalize */}
+                                {/* C9.1: Collections — custom selector, attach to all files on finalize */}
                                 <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
                                     <div className="px-4 py-3 border-b border-gray-200">
                                         <h3 className="text-sm font-medium text-gray-900">Collections</h3>
@@ -4059,31 +4071,15 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         {collectionsListLoading ? (
                                             <p className="text-sm text-gray-500">Loading…</p>
                                         ) : (
-                                            <>
-                                                <select
-                                                    multiple
-                                                    value={selectedCollectionIds.map(String)}
-                                                    onChange={(e) => {
-                                                        const selected = Array.from(e.target.selectedOptions, (o) => parseInt(o.value, 10))
-                                                        setSelectedCollectionIds(selected)
-                                                    }}
-                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                                                >
-                                                    {collectionsList.map((c) => (
-                                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                                    ))}
-                                                </select>
-                                                <p className="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple</p>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setShowCreateCollectionModal(true)}
-                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                    className="mt-2 text-sm text-indigo-600 hover:text-indigo-500"
-                                                >
-                                                    + Create new collection
-                                                </button>
-                                            </>
+                                            <CollectionSelector
+                                                collections={collectionsList}
+                                                selectedIds={selectedCollectionIds}
+                                                onChange={setSelectedCollectionIds}
+                                                disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                placeholder="Select collections…"
+                                                showCreateButton={true}
+                                                onCreateClick={() => setShowCreateCollectionModal(true)}
+                                            />
                                         )}
                                     </div>
                                 </div>
