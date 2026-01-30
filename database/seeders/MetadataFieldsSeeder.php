@@ -49,13 +49,30 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function handleFieldRenames(): void
     {
-        // Rename campaign to collection
+        // C9.1: Deprecate old collection metadata field (now using Collection models)
+        $collectionField = DB::table('metadata_fields')
+            ->where('key', 'collection')
+            ->whereNull('deprecated_at')
+            ->first();
+            
+        if ($collectionField) {
+            // Deprecate the old text-based collection metadata field
+            // The new Collection system uses Collection models, not metadata fields
+            DB::table('metadata_fields')
+                ->where('key', 'collection')
+                ->update([
+                    'deprecated_at' => now(),
+                    'updated_at' => now(),
+                ]);
+        }
+        
+        // Rename campaign to collection (if collection doesn't exist)
         $campaignField = DB::table('metadata_fields')
             ->where('key', 'campaign')
             ->first();
             
         if ($campaignField) {
-            // Check if collection already exists
+            // Check if collection already exists (including deprecated)
             $collectionField = DB::table('metadata_fields')
                 ->where('key', 'collection')
                 ->first();
@@ -67,6 +84,7 @@ class MetadataFieldsSeeder extends Seeder
                     ->update([
                         'key' => 'collection',
                         'system_label' => 'Collection',
+                        'deprecated_at' => now(), // C9.1: Deprecate immediately (using Collection models now)
                         'updated_at' => now(),
                     ]);
             }
@@ -279,20 +297,17 @@ class MetadataFieldsSeeder extends Seeder
             ->where('id', $tagsId)
             ->update(['ai_eligible' => true]);
 
-        // Collection (formerly Campaign)
-        $this->getOrCreateField([
-            'key' => 'collection',
-            'system_label' => 'Collection',
-            'type' => 'text',
-            'applies_to' => 'all',
-            'scope' => 'system',
-            'group_key' => 'general',
-            'is_filterable' => true,
-            'is_user_editable' => true,
-            'is_ai_trainable' => false,
-            'is_upload_visible' => true,
-            'is_internal_only' => false,
-        ]);
+        // Collection (formerly Campaign) - DEPRECATED: Now using Collection models (C9.1)
+        // C9.1: Deprecate old text-based collection metadata field in favor of Collection model system
+        $collectionField = DB::table('metadata_fields')->where('key', 'collection')->first();
+        if ($collectionField && !$collectionField->deprecated_at) {
+            DB::table('metadata_fields')
+                ->where('key', 'collection')
+                ->update([
+                    'deprecated_at' => now(),
+                    'updated_at' => now(),
+                ]);
+        }
 
         // Quality Rating (user-editable rating field)
         $qualityRatingId = $this->getOrCreateField([

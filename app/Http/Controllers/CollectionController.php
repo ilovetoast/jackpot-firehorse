@@ -9,8 +9,10 @@ use App\Models\Collection;
 use App\Models\Tenant;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
+use App\Services\MetadataVisibilityResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -477,5 +479,62 @@ class CollectionController extends Controller
             'preview_url' => null,
             'url' => null,
         ];
+    }
+
+    /**
+     * C9.2: Check if collection field is visible for a category.
+     * 
+     * GET /app/collections/field-visibility?category_id={id}
+     * 
+     * Returns whether the collection metadata field is visible for the given category.
+     * Uses the same visibility rules as other system metadata fields.
+     * 
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function checkFieldVisibility(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $categoryId = $request->query('category_id');
+        
+        if (!$tenant || !$categoryId) {
+            // If no category, assume visible (no suppression)
+            return response()->json(['visible' => true]);
+        }
+        
+        $category = Category::where('id', $categoryId)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+        
+        if (!$category) {
+            // Category not found, assume visible
+            return response()->json(['visible' => true]);
+        }
+        
+        // Get collection metadata field (if it exists and is not deprecated)
+        $collectionField = DB::table('metadata_fields')
+            ->where('key', 'collection')
+            ->where('scope', 'system')
+            ->whereNull('deprecated_at')
+            ->first();
+        
+        if (!$collectionField) {
+            // Collection field doesn't exist or is deprecated
+            // C9.2: Default to visible if field doesn't exist (Collections are a feature, not deprecated)
+            return response()->json(['visible' => true]);
+        }
+        
+        // Use MetadataVisibilityResolver to check visibility
+        $visibilityResolver = app(MetadataVisibilityResolver::class);
+        
+        // Create a field array with field_id for the resolver
+        $field = [
+            'field_id' => $collectionField->id,
+            'key' => 'collection',
+        ];
+        
+        $isVisible = $visibilityResolver->isFieldVisible($field, $category, $tenant);
+        
+        return response()->json(['visible' => $isVisible]);
     }
 }

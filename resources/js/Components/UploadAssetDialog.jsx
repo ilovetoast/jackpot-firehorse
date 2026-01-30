@@ -155,6 +155,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const [collectionsList, setCollectionsList] = useState([])
     const [collectionsListLoading, setCollectionsListLoading] = useState(false)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
+    /** C9.2: Collection field visibility (category-driven) */
+    const [collectionFieldVisible, setCollectionFieldVisible] = useState(true) // Default to visible
 
     /**
      * CLEAN UPLOADER V2 — Global Metadata Draft
@@ -3497,6 +3499,29 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             .finally(() => setCollectionsListLoading(false))
     }, [open])
 
+    // C9.2: Check collection field visibility when category changes
+    useEffect(() => {
+        if (!selectedCategoryId) {
+            // No category selected, default to visible
+            setCollectionFieldVisible(true)
+            return
+        }
+
+        // Fetch collection field visibility for this category
+        fetch(`/app/collections/field-visibility?category_id=${selectedCategoryId}`, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionFieldVisible(data?.visible ?? true)
+            })
+            .catch(() => {
+                // On error, default to visible
+                setCollectionFieldVisible(true)
+            })
+    }, [selectedCategoryId])
+
     /**
      * Handle category change callback (LEGACY - for Phase 3 manager)
      * Fetches metadata fields for the category (placeholder - should be implemented by parent)
@@ -4061,28 +4086,30 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
 
-                                {/* C9.1: Collections — custom selector, attach to all files on finalize */}
-                                <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-                                    <div className="px-4 py-3 border-b border-gray-200">
-                                        <h3 className="text-sm font-medium text-gray-900">Collections</h3>
-                                        <p className="text-xs text-gray-500 mt-1">Add uploaded files to collections (optional)</p>
+                                {/* C9.2: Collections — custom selector, attach to all files on finalize (category-driven visibility) */}
+                                {collectionFieldVisible && (
+                                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+                                        <div className="px-4 py-3 border-b border-gray-200">
+                                            <h3 className="text-sm font-medium text-gray-900">Collections</h3>
+                                            <p className="text-xs text-gray-500 mt-1">Add uploaded files to collections (optional)</p>
+                                        </div>
+                                        <div className="px-4 py-3">
+                                            {collectionsListLoading ? (
+                                                <p className="text-sm text-gray-500">Loading…</p>
+                                            ) : (
+                                                <CollectionSelector
+                                                    collections={collectionsList}
+                                                    selectedIds={selectedCollectionIds}
+                                                    onChange={setSelectedCollectionIds}
+                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                    placeholder="Select collections…"
+                                                    showCreateButton={true}
+                                                    onCreateClick={() => setShowCreateCollectionModal(true)}
+                                                />
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="px-4 py-3">
-                                        {collectionsListLoading ? (
-                                            <p className="text-sm text-gray-500">Loading…</p>
-                                        ) : (
-                                            <CollectionSelector
-                                                collections={collectionsList}
-                                                selectedIds={selectedCollectionIds}
-                                                onChange={setSelectedCollectionIds}
-                                                disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                placeholder="Select collections…"
-                                                showCreateButton={true}
-                                                onCreateClick={() => setShowCreateCollectionModal(true)}
-                                            />
-                                        )}
-                                    </div>
-                                </div>
+                                )}
 
                                 <CreateCollectionModal
                                     open={showCreateCollectionModal}

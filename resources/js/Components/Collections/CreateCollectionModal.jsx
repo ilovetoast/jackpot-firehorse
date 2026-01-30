@@ -60,10 +60,10 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
     if (!open) return null
 
     return (
-        <div className="fixed inset-0 z-[100] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[80] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="fixed inset-0 bg-gray-500/75 transition-opacity" aria-hidden="true" onClick={handleClose} />
-                <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg">
+                <div className="fixed inset-0 bg-gray-500/75 transition-opacity z-[80]" aria-hidden="true" onClick={handleClose} />
+                <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg z-[81]">
                     <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-semibold text-gray-900" id="modal-title">Create collection</h3>

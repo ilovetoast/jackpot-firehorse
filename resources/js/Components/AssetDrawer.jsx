@@ -121,6 +121,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [dropdownCollectionsLoading, setDropdownCollectionsLoading] = useState(false)
     const [addToCollectionLoading, setAddToCollectionLoading] = useState(false)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false) // C9.1: Modal state
+    const [showCollectionsModal, setShowCollectionsModal] = useState(false) // C9.1: Modal for inline collections edit
+    /** C9.2: Collection field visibility (category-driven) */
+    const [collectionFieldVisible, setCollectionFieldVisible] = useState(true) // Default to visible
     
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
@@ -323,8 +326,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     }, [asset?.id])
 
     // C5: Fetch collections list for "Add to Collection" dropdown
+    // C9.1: Always fetch collections list (not dependent on collectionContext) for inline modal
     useEffect(() => {
-        if (!collectionContext?.show || !collectionContext?.canAddToCollection) {
+        if (!asset?.id) {
             setDropdownCollections([])
             return
         }
@@ -335,7 +339,28 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             })
             .catch(() => setDropdownCollections([]))
             .finally(() => setDropdownCollectionsLoading(false))
-    }, [collectionContext?.show, collectionContext?.canAddToCollection])
+    }, [asset?.id])
+
+    // C9.2: Check collection field visibility when asset changes (using asset's category)
+    useEffect(() => {
+        if (!asset?.category_id) {
+            // No category, default to visible
+            setCollectionFieldVisible(true)
+            return
+        }
+
+        // Fetch collection field visibility for this category
+        window.axios.get(`/app/collections/field-visibility?category_id=${asset.category_id}`, {
+            headers: { Accept: 'application/json' },
+        })
+            .then((res) => {
+                setCollectionFieldVisible(res.data?.visible ?? true)
+            })
+            .catch(() => {
+                // On error, default to visible
+                setCollectionFieldVisible(true)
+            })
+    }, [asset?.category_id])
 
     // Phase J.3: Fetch approval comments for rejected assets (to get rejecting user role)
     useEffect(() => {
@@ -1576,7 +1601,15 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             <AssetMetadataDisplay 
                                 assetId={displayAsset.id} 
                                 onPendingCountChange={setPendingMetadataCount}
+                                collectionDisplay={collectionFieldVisible ? {
+                                    collections: assetCollections,
+                                    loading: assetCollectionsLoading,
+                                    onEdit: () => setShowCollectionsModal(true),
+                                } : null}
                             />
+                            
+                            {/* C9.1: Old inline Collections section removed - now integrated into AssetMetadataDisplay after Scene Classification */}
+                            
                             {/* Tags at bottom of metadata */}
                             <div className="mt-4 pt-4 border-t border-gray-100">
                                 <AssetTagManager 
@@ -1592,162 +1625,134 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </div>
                 )}
 
-                {/* C5: Collections — "In X collections" (read-only) + Add to Collection */}
-                {/* C9.1: Always show collections section if asset exists (not dependent on collectionContext) */}
-                {displayAsset?.id && (
-                    <div className="border-t border-gray-200">
-                        <CollapsibleSection title="Collections" defaultExpanded={true}>
-                            {assetCollectionsLoading ? (
-                                <p className="text-sm text-gray-500">Loading…</p>
-                            ) : (
-                                <>
-                                    <div className="mb-3">
-                                        <p className="text-sm text-gray-600">
-                                            In {assetCollections.length} {assetCollections.length === 1 ? 'collection' : 'collections'}
-                                        </p>
-                                        {assetCollections.length > 0 && (
-                                            <ul className="mt-1.5 space-y-1 text-sm text-gray-800">
-                                                {assetCollections.map((c) => (
-                                                    <li key={c.id} className="flex items-center justify-between gap-2 group">
-                                                        <a
-                                                            href={collectionContext?.collectionsBaseUrl ? `${collectionContext.collectionsBaseUrl}?collection=${c.id}` : `/app/collections?collection=${c.id}`}
-                                                            className="flex items-center gap-2 min-w-0 text-indigo-600 hover:text-indigo-800 truncate"
-                                                        >
-                                                            <RectangleStackIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                                                            <span className="truncate">{c.name}</span>
-                                                        </a>
-                                                        {collectionContext?.canRemoveFromCollection && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={async () => {
-                                                                    if (!asset?.id || addToCollectionLoading) return
-                                                                    setAddToCollectionLoading(true)
-                                                                    try {
-                                                                        await window.axios.delete(`/app/collections/${c.id}/assets/${asset.id}`, { headers: { Accept: 'application/json' } })
-                                                                        const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                        setAssetCollections(res.data?.collections ?? [])
-                                                                        collectionContext?.onAssetRemovedFromCollection?.(asset.id, c.id)
-                                                                    } catch (err) {
-                                                                        setToastMessage(err.response?.data?.message || 'Failed to remove from collection')
-                                                                        setToastType('error')
-                                                                    } finally {
-                                                                        setAddToCollectionLoading(false)
-                                                                    }
-                                                                }}
-                                                                disabled={addToCollectionLoading}
-                                                                className="flex-shrink-0 text-xs text-gray-500 hover:text-red-600 focus:outline-none disabled:opacity-50"
-                                                            >
-                                                                Remove
-                                                            </button>
-                                                        )}
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </div>
-                                    {/* C9.1: Use CollectionSelector for bulk add/remove with sync endpoint */}
-                                    {collectionContext?.canAddToCollection && (
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Collections
-                                            </label>
-                                            <CollectionSelector
-                                                collections={dropdownCollections}
-                                                selectedIds={assetCollections.map((c) => c.id)}
-                                                onChange={async (newCollectionIds) => {
-                                                    if (!asset?.id || addToCollectionLoading) return
-                                                    setAddToCollectionLoading(true)
-                                                    try {
-                                                        // C9.1: Use sync endpoint for full state update
-                                                        await window.axios.put(
-                                                            `/app/assets/${asset.id}/collections`,
-                                                            { collection_ids: newCollectionIds },
-                                                            { headers: { Accept: 'application/json' } }
-                                                        )
-                                                        // Refresh collections from backend to reflect truth
-                                                        const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                        setAssetCollections(res.data?.collections ?? [])
-                                                        // Notify parent if callback provided
-                                                        const added = newCollectionIds.filter((id) => !assetCollections.some((c) => c.id === id))
-                                                        const removed = assetCollections.filter((c) => !newCollectionIds.includes(c.id)).map((c) => c.id)
-                                                        if (collectionContext) {
-                                                            added.forEach((id) => collectionContext.onAssetAddedToCollection?.(asset.id, id))
-                                                            removed.forEach((id) => collectionContext.onAssetRemovedFromCollection?.(asset.id, id))
-                                                        }
-                                                    } catch (err) {
-                                                        const errorMsg = err.response?.data?.message || err.response?.data?.errors?.collection_ids?.[0] || 'Failed to update collections'
-                                                        setToastMessage(errorMsg)
-                                                        setToastType('error')
-                                                        // Refresh to restore backend truth on error
-                                                        const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                        setAssetCollections(res.data?.collections ?? [])
-                                                    } finally {
-                                                        setAddToCollectionLoading(false)
-                                                    }
-                                                }}
-                                                disabled={addToCollectionLoading || dropdownCollectionsLoading}
-                                                placeholder="Select collections…"
-                                                showCreateButton={collectionContext?.canCreateCollection}
-                                                onCreateClick={() => {
-                                                    // C9.1: Always use local modal for asset drawer (ensures proper collection selection)
-                                                    setShowCreateCollectionModal(true)
-                                                }}
-                                            />
+                {/* C9.1: Old Collections section removed - now inline in Metadata section above */}
+
+                {/* C9.2: Collections Edit Modal (inline in Metadata section, only if field is visible) */}
+                {showCollectionsModal && collectionFieldVisible && (
+                    <div className="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                        <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity z-[60]" onClick={() => setShowCollectionsModal(false)}></div>
+                            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                            <div className="relative inline-block align-bottom bg-white rounded-lg text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full z-[61]">
+                                <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
+                                    <div className="sm:flex sm:items-start">
+                                        <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
+                                            <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4" id="modal-title">
+                                                Edit Collections
+                                            </h3>
+                                            {dropdownCollectionsLoading ? (
+                                                <p className="text-sm text-gray-500">Loading collections…</p>
+                                            ) : (
+                                                <div className="relative">
+                                                    <CollectionSelector
+                                                        collections={dropdownCollections}
+                                                        selectedIds={assetCollections.map((c) => c.id)}
+                                                        maxHeight="320px"
+                                                        onChange={async (newCollectionIds) => {
+                                                            if (!asset?.id || addToCollectionLoading) return
+                                                            setAddToCollectionLoading(true)
+                                                            try {
+                                                                // C9.1: Use sync endpoint for full state update
+                                                                await window.axios.put(
+                                                                    `/app/assets/${asset.id}/collections`,
+                                                                    { collection_ids: newCollectionIds },
+                                                                    { headers: { Accept: 'application/json' } }
+                                                                )
+                                                                // Refresh collections from backend to reflect truth
+                                                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                // Notify parent if callback provided
+                                                                const added = newCollectionIds.filter((id) => !assetCollections.some((c) => c.id === id))
+                                                                const removed = assetCollections.filter((c) => !newCollectionIds.includes(c.id)).map((c) => c.id)
+                                                                if (collectionContext) {
+                                                                    added.forEach((id) => collectionContext.onAssetAddedToCollection?.(asset.id, id))
+                                                                    removed.forEach((id) => collectionContext.onAssetRemovedFromCollection?.(asset.id, id))
+                                                                }
+                                                                setToastMessage('Collections updated')
+                                                                setToastType('success')
+                                                                setTimeout(() => setToastMessage(null), 3000)
+                                                            } catch (err) {
+                                                                const errorMsg = err.response?.data?.message || err.response?.data?.errors?.collection_ids?.[0] || 'Failed to update collections'
+                                                                setToastMessage(errorMsg)
+                                                                setToastType('error')
+                                                                // Refresh to restore backend truth on error
+                                                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                                                setAssetCollections(res.data?.collections ?? [])
+                                                            } finally {
+                                                                setAddToCollectionLoading(false)
+                                                            }
+                                                        }}
+                                                        disabled={addToCollectionLoading || dropdownCollectionsLoading}
+                                                        placeholder="Select collections…"
+                                                        showCreateButton={true} // C9.1: Always show create button in modal
+                                                        onCreateClick={() => {
+                                                            setShowCreateCollectionModal(true)
+                                                        }}
+                                                    />
+                                                </div>
+                                            )}
                                         </div>
-                                    )}
-                                </>
-                            )}
-                        </CollapsibleSection>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCollectionsModal(false)}
+                                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm"
+                                    >
+                                        Done
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
 
-                {/* C9.1: Create Collection Modal (always available for asset drawer) */}
-                {collectionContext?.show && (
-                    <CreateCollectionModal
-                        open={showCreateCollectionModal}
-                        onClose={() => setShowCreateCollectionModal(false)}
-                        onCreated={async (newCollection) => {
-                            // C9.1: Add new collection to dropdown list
-                            setDropdownCollections((prev) => {
-                                // Avoid duplicates
-                                if (prev.some((c) => c.id === newCollection.id)) {
-                                    return prev
-                                }
-                                return [...prev, { id: newCollection.id, name: newCollection.name }]
-                            })
-                            
-                            // C9.1: Auto-select the new collection and sync to asset
-                            if (asset?.id) {
-                                const newCollectionIds = [...assetCollections.map((c) => c.id), newCollection.id]
-                                setAddToCollectionLoading(true)
-                                try {
-                                    await window.axios.put(
-                                        `/app/assets/${asset.id}/collections`,
-                                        { collection_ids: newCollectionIds },
-                                        { headers: { Accept: 'application/json' } }
-                                    )
-                                    // Refresh collections from backend
-                                    const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                    setAssetCollections(res.data?.collections ?? [])
-                                    setToastMessage('Collection created and added to asset')
-                                    setToastType('success')
-                                    setTimeout(() => setToastMessage(null), 3000)
-                                } catch (err) {
-                                    const errorMsg = err.response?.data?.message || err.response?.data?.errors?.collection_ids?.[0] || 'Failed to add to collection'
-                                    setToastMessage(errorMsg)
-                                    setToastType('error')
-                                    // Refresh to restore backend truth
-                                    const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                    setAssetCollections(res.data?.collections ?? [])
-                                } finally {
-                                    setAddToCollectionLoading(false)
-                                }
+                {/* C9.1: Create Collection Modal (always available for asset drawer, higher z-index than Edit Collections modal) */}
+                <CreateCollectionModal
+                    open={showCreateCollectionModal}
+                    onClose={() => setShowCreateCollectionModal(false)}
+                    onCreated={async (newCollection) => {
+                        // C9.1: Add new collection to dropdown list
+                        setDropdownCollections((prev) => {
+                            // Avoid duplicates
+                            if (prev.some((c) => c.id === newCollection.id)) {
+                                return prev
                             }
-                            
-                            setShowCreateCollectionModal(false)
-                        }}
-                    />
-                )}
+                            return [...prev, { id: newCollection.id, name: newCollection.name }]
+                        })
+                        
+                        // C9.1: Auto-select the new collection and sync to asset
+                        if (asset?.id) {
+                            const newCollectionIds = [...assetCollections.map((c) => c.id), newCollection.id]
+                            setAddToCollectionLoading(true)
+                            try {
+                                await window.axios.put(
+                                    `/app/assets/${asset.id}/collections`,
+                                    { collection_ids: newCollectionIds },
+                                    { headers: { Accept: 'application/json' } }
+                                )
+                                // Refresh collections from backend
+                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                setAssetCollections(res.data?.collections ?? [])
+                                setToastMessage('Collection created and added to asset')
+                                setToastType('success')
+                                setTimeout(() => setToastMessage(null), 3000)
+                            } catch (err) {
+                                const errorMsg = err.response?.data?.message || err.response?.data?.errors?.collection_ids?.[0] || 'Failed to add to collection'
+                                setToastMessage(errorMsg)
+                                setToastType('error')
+                                // Refresh to restore backend truth
+                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                setAssetCollections(res.data?.collections ?? [])
+                            } finally {
+                                setAddToCollectionLoading(false)
+                            }
+                        }
+                        
+                        setShowCreateCollectionModal(false)
+                    }}
+                />
 
                 {/* Phase AF-2: Approval History */}
                 {/* Phase AF-5: Only show approval history if approvals are enabled */}

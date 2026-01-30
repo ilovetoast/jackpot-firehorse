@@ -5,14 +5,14 @@
  */
 
 import { useState, useEffect } from 'react'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { usePermission } from '../hooks/usePermission'
 
-export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) {
+export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null }) {
     const { auth } = usePage().props
     const [fields, setFields] = useState([])
     const [loading, setLoading] = useState(true)
@@ -182,6 +182,10 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) 
                             if (field.key === 'dimensions' || field.field_key === 'dimensions') {
                                 return false;
                             }
+                            // C9.1: Exclude collection field (handled separately in inline collections display)
+                            if (field.key === 'collection' || field.field_key === 'collection') {
+                                return false;
+                            }
                             return true;
                         }).sort((a, b) => {
                             // Sort: non-auto fields first, auto fields last
@@ -191,10 +195,11 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) 
                             if (aIsAuto && !bIsAuto) return 1  // a is auto, b is not - a goes after b
                             if (!aIsAuto && bIsAuto) return -1 // a is not auto, b is - a goes before b
                             return 0 // Both same type, maintain original order
-                        }).map((field) => {
+                        }).flatMap((field) => {
                             const fieldHasValue = hasValue(field.current_value)
                             const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
                             const isRating = field.type === 'rating' || field.key === 'quality_rating' || field.field_key === 'quality_rating'
+                            const isSceneClassification = (field.key === 'scene_classification' || field.field_key === 'scene_classification')
                             
                             // For dominant_colors, check if we have a valid array
                             let dominantColorsArray = null
@@ -241,10 +246,10 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) 
                             const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly)
                             
                             if (!shouldShow) {
-                                return null;
+                                return [];
                             }
                             
-                            return (
+                            const fieldElement = (
                                 <div 
                                     key={field.metadata_field_id} 
                                     className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
@@ -335,6 +340,56 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange }) 
                                     ) : null}
                                 </div>
                             )
+                            
+                            // C9.1: Insert Collection field right after Scene Classification (before auto fields)
+                            if (isSceneClassification && collectionDisplay) {
+                                return [
+                                    fieldElement,
+                                    // C9.1: Collection field (inline, matches metadata field layout)
+                                    <div 
+                                        key="collection-field"
+                                        className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
+                                    >
+                                        <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
+                                            <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                                <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
+                                                    Collection
+                                                </span>
+                                            </dt>
+                                            <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
+                                                {collectionDisplay.loading ? (
+                                                    <span className="text-gray-400">Loading…</span>
+                                                ) : collectionDisplay.collections.length > 0 ? (
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        {collectionDisplay.collections.map((c) => (
+                                                            <span
+                                                                key={c.id}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium"
+                                                            >
+                                                                <RectangleStackIcon className="h-3 w-3" />
+                                                                {c.name}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+                                            </dd>
+                                        </div>
+                                        {/* C9.1: Edit button aligned right like other metadata fields */}
+                                        <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={collectionDisplay.onEdit}
+                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                            >
+                                                <PencilIcon className="h-3 w-3" />
+                                                {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ]
+                            }
+                            
+                            return [fieldElement]
                         })}
                     </dl>
                 )}

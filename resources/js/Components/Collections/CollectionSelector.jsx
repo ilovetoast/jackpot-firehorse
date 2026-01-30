@@ -114,9 +114,9 @@ export default function CollectionSelector({
 
             {/* Dropdown Panel */}
             {isOpen && (
-                <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5">
+                <div className="absolute z-[9999] mt-1 w-full rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5" style={{ maxHeight: maxHeight || '300px', display: 'flex', flexDirection: 'column' }}>
                     {/* Search Input */}
-                    <div className="p-2 border-b border-gray-200">
+                    <div className="p-2 border-b border-gray-200 flex-shrink-0">
                         <input
                             ref={searchInputRef}
                             type="text"
@@ -127,12 +127,12 @@ export default function CollectionSelector({
                         />
                     </div>
 
-                    {/* Collections List */}
+                    {/* Collections List - Scrollable */}
                     <div
-                        className="overflow-auto"
-                        style={{ maxHeight }}
+                        className="overflow-y-auto flex-1"
                         role="listbox"
                         aria-label="Collections"
+                        style={{ maxHeight: showCreateButton && onCreateClick ? `calc(${maxHeight || '300px'} - 120px)` : `calc(${maxHeight || '300px'} - 60px)` }}
                     >
                         {filteredCollections.length === 0 ? (
                             <div className="px-4 py-3 text-sm text-gray-500 text-center">
@@ -198,9 +198,9 @@ export default function CollectionSelector({
                         )}
                     </div>
 
-                    {/* Create Collection Button */}
+                    {/* Create Collection Button - Always visible at bottom */}
                     {showCreateButton && onCreateClick && (
-                        <div className="border-t border-gray-200 p-2">
+                        <div className="border-t border-gray-200 p-2 flex-shrink-0 bg-white">
                             <button
                                 type="button"
                                 onClick={() => {

@@ -10,6 +10,8 @@ import { XMarkIcon, CheckIcon, XCircleIcon, ChevronLeftIcon, ChevronRightIcon, A
 import { usePage, router } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import AssetMetadataEditForm from './AssetMetadataEditForm'
+import CollectionSelector from './Collections/CollectionSelector' // C9.2
+import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.2
 
 export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetId = null, initialAsset = null }) {
     const { auth } = usePage().props
@@ -26,6 +28,13 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
     const [showZoomModal, setShowZoomModal] = useState(false)
     const currentIndexRef = useRef(0)
     const initialAssetProcessedRef = useRef(false)
+    /** C9.2: Collections support */
+    const [assetCollections, setAssetCollections] = useState([])
+    const [assetCollectionsLoading, setAssetCollectionsLoading] = useState(false)
+    const [collectionsList, setCollectionsList] = useState([])
+    const [collectionsListLoading, setCollectionsListLoading] = useState(false)
+    const [collectionFieldVisible, setCollectionFieldVisible] = useState(false)
+    const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
     
     // Reset processed flag when modal closes
     useEffect(() => {
@@ -211,6 +220,60 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
             fetchCurrentMetadataValues(currentAsset.id)
         }
     }, [currentAsset?.id, currentAsset?.title])
+
+    // C9.2: Fetch collections for current asset
+    useEffect(() => {
+        if (!currentAsset?.id) {
+            setAssetCollections([])
+            return
+        }
+        setAssetCollectionsLoading(true)
+        fetch(`/app/assets/${currentAsset.id}/collections`, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setAssetCollections(data?.collections ?? [])
+            })
+            .catch(() => setAssetCollections([]))
+            .finally(() => setAssetCollectionsLoading(false))
+    }, [currentAsset?.id])
+
+    // C9.2: Fetch collections list and check visibility
+    useEffect(() => {
+        if (!currentAsset?.category_id) {
+            setCollectionFieldVisible(false)
+            setCollectionsList([])
+            return
+        }
+
+        // Check visibility
+        fetch(`/app/collections/field-visibility?category_id=${currentAsset.category_id}`, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionFieldVisible(data?.visible ?? false)
+            })
+            .catch(() => {
+                setCollectionFieldVisible(false)
+            })
+
+        // Fetch collections list
+        setCollectionsListLoading(true)
+        fetch('/app/collections/list', {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionsList(data?.collections ?? [])
+            })
+            .catch(() => setCollectionsList([]))
+            .finally(() => setCollectionsListLoading(false))
+    }, [currentAsset?.category_id])
     
     // Fetch current metadata values from editable endpoint
     // This is used to populate initial values, but the schema comes from AssetMetadataEditForm
@@ -268,6 +331,28 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
         if (!existingField && currentAsset) {
             // Field is being edited but wasn't in the initial fetch - that's okay,
             // we'll save it using the schema's field_id when saving
+        }
+    }
+
+    // C9.2: Save collection changes
+    const saveCollectionChanges = async (assetId) => {
+        if (!assetId || !collectionFieldVisible) return
+
+        try {
+            await fetch(`/app/assets/${assetId}/collections`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    collection_ids: assetCollections.map((c) => c.id),
+                }),
+            })
+        } catch (error) {
+            console.error('[PendingAssetReviewModal] Failed to save collections', error)
         }
     }
 
@@ -364,6 +449,8 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
         try {
             // Save metadata changes before approving
             await saveMetadataChanges(currentAsset.id)
+            // C9.2: Save collection changes before approving
+            await saveCollectionChanges(currentAsset.id)
             
             // Always include title in approval request (even if unchanged, to ensure it's saved)
             const requestBody = {
@@ -435,6 +522,8 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
         try {
             // Save metadata changes before rejecting
             await saveMetadataChanges(currentAsset.id)
+            // C9.2: Save collection changes before rejecting
+            await saveCollectionChanges(currentAsset.id)
             
             // Always include title in rejection request (even if unchanged, to ensure it's saved)
             const rejectBody = {
@@ -726,6 +815,58 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
                                             filterUserDefinedOnly={true}
                                         />
                                     )}
+
+                                    {/* C9.2: Collections field (if visible for category) */}
+                                    {collectionFieldVisible && (
+                                        <div className="mt-4 pt-4 border-t border-gray-200">
+                                            <label className="block text-xs font-medium text-gray-700 mb-2">
+                                                Collections
+                                            </label>
+                                            {collectionsListLoading || assetCollectionsLoading ? (
+                                                <p className="text-sm text-gray-500">Loading collections…</p>
+                                            ) : (
+                                                <CollectionSelector
+                                                    collections={collectionsList}
+                                                    selectedIds={assetCollections.map((c) => c.id)}
+                                                    onChange={async (newCollectionIds) => {
+                                                        if (processing) return
+                                                        try {
+                                                            await fetch(`/app/assets/${currentAsset.id}/collections`, {
+                                                                method: 'PUT',
+                                                                headers: {
+                                                                    'Content-Type': 'application/json',
+                                                                    'Accept': 'application/json',
+                                                                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                                },
+                                                                credentials: 'same-origin',
+                                                                body: JSON.stringify({
+                                                                    collection_ids: newCollectionIds,
+                                                                }),
+                                                            })
+                                                            .then((r) => r.json())
+                                                            .then((data) => {
+                                                                // Refresh collections from backend
+                                                                return fetch(`/app/assets/${currentAsset.id}/collections`, {
+                                                                    headers: { Accept: 'application/json' },
+                                                                    credentials: 'same-origin',
+                                                                })
+                                                            })
+                                                            .then((r) => r.json())
+                                                            .then((data) => {
+                                                                setAssetCollections(data?.collections ?? [])
+                                                            })
+                                                        } catch (error) {
+                                                            console.error('[PendingAssetReviewModal] Failed to update collections', error)
+                                                        }
+                                                    }}
+                                                    disabled={processing}
+                                                    placeholder="Select collections…"
+                                                    showCreateButton={true}
+                                                    onCreateClick={() => setShowCreateCollectionModal(true)}
+                                                />
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Rejection Form */}
@@ -852,6 +993,23 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
                     </div>
                 </div>
             )}
+
+            {/* C9.2: Create Collection Modal */}
+            <CreateCollectionModal
+                open={showCreateCollectionModal}
+                onClose={() => setShowCreateCollectionModal(false)}
+                onCreated={async (newCollection) => {
+                    // Add new collection to list and select it
+                    setCollectionsList((prev) => {
+                        if (prev.some((c) => c.id === newCollection.id)) {
+                            return prev
+                        }
+                        return [...prev, { id: newCollection.id, name: newCollection.name }]
+                    })
+                    setAssetCollections((prev) => [...prev, { id: newCollection.id, name: newCollection.name }])
+                    setShowCreateCollectionModal(false)
+                }}
+            />
         </div>
     )
 }

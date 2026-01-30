@@ -387,6 +387,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/deliverables', [\App\Http\Controllers\DeliverableController::class, 'index'])->name('deliverables.index');
             Route::get('/collections', [\App\Http\Controllers\CollectionController::class, 'index'])->name('collections.index');
             Route::get('/collections/list', [\App\Http\Controllers\CollectionController::class, 'listForDropdown'])->name('collections.list');
+            Route::get('/collections/field-visibility', [\App\Http\Controllers\CollectionController::class, 'checkFieldVisibility'])->name('collections.field-visibility');
             Route::post('/collections', [\App\Http\Controllers\CollectionController::class, 'store'])->name('collections.store');
             Route::post('/collections/{collection}/assets', [\App\Http\Controllers\CollectionController::class, 'addAsset'])->name('collections.assets.store');
             Route::delete('/collections/{collection}/assets/{asset}', [\App\Http\Controllers\CollectionController::class, 'removeAsset'])->name('collections.assets.destroy');

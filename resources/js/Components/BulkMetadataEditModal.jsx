@@ -14,6 +14,7 @@
 import { useState, useEffect } from 'react'
 import { XMarkIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
+import CollectionSelector from './Collections/CollectionSelector' // C9.2
 
 export default function BulkMetadataEditModal({
     assetIds,
@@ -31,6 +32,68 @@ export default function BulkMetadataEditModal({
     const [editableFields, setEditableFields] = useState([])
     const [executing, setExecuting] = useState(false)
     const [results, setResults] = useState(null)
+    /** C9.2: Collections support */
+    const [collectionsList, setCollectionsList] = useState([])
+    const [collectionsListLoading, setCollectionsListLoading] = useState(false)
+    const [collectionFieldVisible, setCollectionFieldVisible] = useState(false)
+    const [firstAssetCategoryId, setFirstAssetCategoryId] = useState(null)
+    const [selectedCollectionIds, setSelectedCollectionIds] = useState([])
+
+    // C9.2: Fetch first asset to get category for collection field visibility check
+    useEffect(() => {
+        if (assetIds.length > 0) {
+            fetch(`/app/assets/${assetIds[0]}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                credentials: 'same-origin',
+            })
+            .then((res) => res.json())
+            .then((data) => {
+                const categoryId = data.asset?.category_id || data.category_id
+                setFirstAssetCategoryId(categoryId)
+            })
+            .catch(() => {
+                setFirstAssetCategoryId(null)
+            })
+        }
+    }, [assetIds])
+
+    // C9.2: Check collection field visibility and fetch collections list
+    useEffect(() => {
+        if (!firstAssetCategoryId) {
+            setCollectionFieldVisible(false)
+            return
+        }
+
+        // Check visibility
+        fetch(`/app/collections/field-visibility?category_id=${firstAssetCategoryId}`, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionFieldVisible(data?.visible ?? false)
+            })
+            .catch(() => {
+                setCollectionFieldVisible(false)
+            })
+
+        // Fetch collections list
+        setCollectionsListLoading(true)
+        fetch('/app/collections/list', {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionsList(data?.collections ?? [])
+            })
+            .catch(() => setCollectionsList([]))
+            .finally(() => setCollectionsListLoading(false))
+    }, [firstAssetCategoryId])
 
     // Fetch editable fields (use first asset's category as reference)
     useEffect(() => {
@@ -68,14 +131,25 @@ export default function BulkMetadataEditModal({
     // Handle field selection
     const handleFieldSelect = (field) => {
         setSelectedField(field)
-        setValue(field.current_value ?? null)
+        // C9.2: For collections, initialize with empty array
+        if (field === 'collections') {
+            setValue([])
+        } else {
+            setValue(field.current_value ?? null)
+        }
         setStep(3)
         setError(null)
     }
 
     // Handle preview
     const handlePreview = async () => {
-        if (!selectedField || (operationType !== 'clear' && value === null)) {
+        // C9.2: For collections, validate selectedCollectionIds
+        if (selectedField === 'collections') {
+            if (operationType !== 'clear' && selectedCollectionIds.length === 0 && value === null) {
+                setError('Please select at least one collection or use Clear operation')
+                return
+            }
+        } else if (!selectedField || (operationType !== 'clear' && value === null)) {
             setError('Please select a field and enter a value')
             return
         }
@@ -84,31 +158,95 @@ export default function BulkMetadataEditModal({
         setError(null)
 
         try {
-            const response = await fetch('/app/assets/metadata/bulk/preview', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    asset_ids: assetIds,
+            // C9.2: For collections, use sync endpoint preview (simulate for each asset)
+            if (selectedField === 'collections') {
+                // For collections, we'll preview by checking current collections for each asset
+                const previewData = {
+                    total_assets: assetIds.length,
+                    affected_assets: [],
+                    errors: [],
+                }
+
+                // Fetch current collections for each asset to build preview
+                const previewPromises = assetIds.map(async (assetId) => {
+                    try {
+                        const res = await fetch(`/app/assets/${assetId}/collections`, {
+                            headers: { Accept: 'application/json' },
+                            credentials: 'same-origin',
+                        })
+                        const data = await res.json()
+                        const currentCollectionIds = (data.collections || []).map((c) => c.id)
+                        const newCollectionIds = operationType === 'clear' ? [] : selectedCollectionIds
+                        const willChange = JSON.stringify(currentCollectionIds.sort()) !== JSON.stringify(newCollectionIds.sort())
+
+                        if (willChange) {
+                            return {
+                                asset_id: assetId,
+                                asset_title: `Asset ${assetId.substring(0, 8)}...`,
+                                changes: [{
+                                    field_label: 'Collections',
+                                    old_value: currentCollectionIds.length > 0 ? `${currentCollectionIds.length} collection(s)` : 'None',
+                                    new_value: newCollectionIds.length > 0 ? `${newCollectionIds.length} collection(s)` : 'None',
+                                }],
+                            }
+                        }
+                        return null
+                    } catch (err) {
+                        return {
+                            asset_id: assetId,
+                            asset_title: `Asset ${assetId.substring(0, 8)}...`,
+                            errors: [err.message || 'Failed to preview'],
+                        }
+                    }
+                })
+
+                const previewResults = await Promise.all(previewPromises)
+                previewData.affected_assets = previewResults.filter((r) => r !== null && !r.errors)
+                previewData.errors = previewResults.filter((r) => r?.errors).map((r) => ({
+                    asset_title: r.asset_title,
+                    errors: r.errors,
+                }))
+
+                // Generate a preview token (simple hash of operation)
+                const previewTokenData = {
                     operation_type: operationType,
-                    metadata: {
-                        [selectedField.field_key]: operationType === 'clear' ? null : value,
+                    field: 'collections',
+                    collection_ids: operationType === 'clear' ? [] : selectedCollectionIds,
+                    asset_ids: assetIds,
+                }
+                const previewToken = btoa(JSON.stringify(previewTokenData))
+
+                setPreview(previewData)
+                setPreviewToken(previewToken)
+                setStep(4)
+            } else {
+                // Regular metadata field preview
+                const response = await fetch('/app/assets/metadata/bulk/preview', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
                     },
-                }),
-            })
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        asset_ids: assetIds,
+                        operation_type: operationType,
+                        metadata: {
+                            [selectedField.field_key]: operationType === 'clear' ? null : value,
+                        },
+                    }),
+                })
 
-            if (!response.ok) {
+                if (!response.ok) {
+                    const data = await response.json()
+                    throw new Error(data.message || 'Preview failed')
+                }
+
                 const data = await response.json()
-                throw new Error(data.message || 'Preview failed')
+                setPreview(data.preview)
+                setPreviewToken(data.preview_token)
+                setStep(4)
             }
-
-            const data = await response.json()
-            setPreview(data.preview)
-            setPreviewToken(data.preview_token)
-            setStep(4)
         } catch (err) {
             console.error('[BulkMetadataEditModal] Preview failed', err)
             setError(err.message || 'Failed to preview changes')
@@ -249,10 +387,23 @@ export default function BulkMetadataEditModal({
                                         Back
                                     </button>
                                 </div>
-                                {editableFields.length === 0 ? (
+                                {(editableFields.length === 0 && !collectionFieldVisible) ? (
                                     <div className="text-sm text-gray-500">No editable fields available</div>
                                 ) : (
                                     <div className="space-y-2">
+                                        {/* C9.2: Collections field option (if visible) */}
+                                        {collectionFieldVisible && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleFieldSelect('collections')}
+                                                className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                            >
+                                                <div className="font-medium text-gray-900">Collections</div>
+                                                <div className="text-sm text-gray-500">
+                                                    Assign assets to collections (add/remove)
+                                                </div>
+                                            </button>
+                                        )}
                                         {editableFields.map((field) => (
                                             <button
                                                 key={field.metadata_field_id}
@@ -291,11 +442,35 @@ export default function BulkMetadataEditModal({
                                             <div>
                                                 <div className="text-sm font-medium text-yellow-800">Clear Operation</div>
                                                 <div className="text-sm text-yellow-700 mt-1">
-                                                    This will clear the "{selectedField.display_label}" field for all selected assets.
+                                                    {selectedField === 'collections' 
+                                                        ? 'This will remove all collections from all selected assets.'
+                                                        : `This will clear the "${selectedField.display_label}" field for all selected assets.`}
                                                     Previous values will remain in the audit history.
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                ) : selectedField === 'collections' ? (
+                                    /* C9.2: CollectionSelector for bulk collection assignment */
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-medium text-gray-700">
+                                            Select Collections
+                                        </label>
+                                        <p className="text-xs text-gray-500 mb-2">
+                                            This will sync collections for {assetIds.length} asset{assetIds.length !== 1 ? 's' : ''}. Selected collections will be added, unselected will be removed.
+                                        </p>
+                                        {collectionsListLoading ? (
+                                            <p className="text-sm text-gray-500">Loading collections…</p>
+                                        ) : (
+                                            <CollectionSelector
+                                                collections={collectionsList}
+                                                selectedIds={selectedCollectionIds}
+                                                onChange={setSelectedCollectionIds}
+                                                disabled={false}
+                                                placeholder="Select collections…"
+                                                showCreateButton={false}
+                                            />
+                                        )}
                                     </div>
                                 ) : (
                                     <MetadataFieldInput
@@ -310,7 +485,7 @@ export default function BulkMetadataEditModal({
                                 <button
                                     type="button"
                                     onClick={handlePreview}
-                                    disabled={loading || (operationType !== 'clear' && value === null)}
+                                    disabled={loading || (operationType !== 'clear' && selectedField === 'collections' ? selectedCollectionIds.length === 0 : value === null)}
                                     className="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {loading ? 'Generating Preview...' : 'Preview Changes'}
