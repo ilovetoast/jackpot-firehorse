@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\Collection;
 use App\Models\Category;
 use App\Models\DeletionError;
 use App\Models\OwnershipTransfer;
@@ -11,6 +12,7 @@ use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Policies\AssetPolicy;
 use App\Policies\BrandPolicy;
+use App\Policies\CollectionPolicy;
 use App\Policies\CategoryPolicy;
 use App\Policies\CompanyPolicy;
 use App\Policies\DeletionErrorPolicy;
@@ -29,6 +31,7 @@ class AuthServiceProvider extends ServiceProvider
         Asset::class => AssetPolicy::class,
         Tenant::class => CompanyPolicy::class,
         Brand::class => BrandPolicy::class,
+        Collection::class => CollectionPolicy::class,
         Category::class => CategoryPolicy::class,
         DeletionError::class => DeletionErrorPolicy::class,
         OwnershipTransfer::class => OwnershipTransferPolicy::class,

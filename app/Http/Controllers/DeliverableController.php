@@ -505,6 +505,7 @@ class DeliverableController extends Controller
         // Do not remove without updating Phase H contract
         // Compute distinct metadata values for the current asset grid result set
         $availableValues = [];
+        $bucketToDominantColors = []; // bucket -> dominant_colors for swatch display (first occurrence wins)
         
         if (!empty($filterableSchema) && $assets->count() > 0) {
             // Get asset IDs from the current grid result set
@@ -621,6 +622,10 @@ class DeliverableController extends Controller
                                 if (!in_array($value, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $value;
                                 }
+                                // For dominant_color_bucket, keep first asset's dominant_colors for swatch display
+                                if ($fieldKey === 'dominant_color_bucket' && !isset($bucketToDominantColors[$value])) {
+                                    $bucketToDominantColors[$value] = $fields['dominant_colors'] ?? null;
+                                }
                             }
                         }
                     }
@@ -644,11 +649,14 @@ class DeliverableController extends Controller
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
             if ($fieldKey === 'dominant_color_bucket') {
                 $bucketValues = $availableValues['dominant_color_bucket'] ?? [];
-                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService) {
+                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService, $bucketToDominantColors) {
                     return [
                         'value' => $bucketValue,
                         'label' => $bucketValue,
-                        'swatch' => $colorBucketService->bucketToHex((string) $bucketValue),
+                        'swatch' => $colorBucketService->swatchHexForAsset(
+                            (string) $bucketValue,
+                            $bucketToDominantColors[$bucketValue] ?? null
+                        ),
                     ];
                 }, $bucketValues));
                 break;

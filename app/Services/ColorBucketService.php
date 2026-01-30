@@ -65,6 +65,27 @@ class ColorBucketService
     }
 
     /**
+     * Resolve swatch hex for display: prefer the asset's actual dominant color, fall back to bucket-derived color.
+     * Display-only; does not affect bucket computation, persistence, or filter logic.
+     *
+     * @param string $bucket Bucket value (e.g. "L50_A10_B20")
+     * @param array|null $dominantColors Asset's dominant_colors (e.g. [['hex' => '#RRGGBB', ...], ...])
+     * @return string Hex color for swatch display
+     */
+    public function swatchHexForAsset(string $bucket, ?array $dominantColors): string
+    {
+        if (
+            is_array($dominantColors)
+            && isset($dominantColors[0]['hex'])
+            && is_string($dominantColors[0]['hex'])
+        ) {
+            return $dominantColors[0]['hex'];
+        }
+
+        return $this->bucketToHex($bucket);
+    }
+
+    /**
      * Convert HSL to hex color.
      *
      * @param int|float $h Hue in degrees [0-360]

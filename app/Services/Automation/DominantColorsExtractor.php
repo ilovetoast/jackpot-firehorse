@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\Log;
  * Extracts the top 3 dominant colors from color analysis cluster data
  * and persists them as hex + RGB values in asset.metadata['dominant_colors'].
  *
+ * Upstream color analysis (ColorAnalysisService) always runs against the asset's
+ * generated thumbnail image (JPEG/PNG), never the original file; this extractor
+ * consumes the resulting cluster data only.
+ *
  * Rules:
  * - Only processes image assets
  * - Uses existing _color_analysis cluster data

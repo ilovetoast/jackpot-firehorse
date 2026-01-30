@@ -2,6 +2,7 @@
 
 namespace App\Services\Automation;
 
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Support\Facades\Log;
@@ -16,6 +17,9 @@ use Illuminate\Support\Facades\Log;
  *
  * Rules:
  * - Image assets only (GD: JPEG, PNG, WebP, GIF)
+ * - Always runs against the generated thumbnail image (JPEG/PNG), never the original file.
+ * - If thumbnail_status !== COMPLETED or thumbnail path is missing, skips analysis and logs once at INFO.
+ * - No fallback to the original file.
  * - Deterministic output for identical images
  * - Internal cluster data stored in asset.metadata['_color_analysis'] (non-UI)
  * - Cluster data used by DominantColorsExtractor for dominant colors
@@ -53,15 +57,32 @@ class ColorAnalysisService
             return null;
         }
 
+        // Always use the generated thumbnail (JPEG/PNG); never the original file.
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            Log::info('[ColorAnalysisService] Skipping color analysis: thumbnail not completed', [
+                'asset_id' => $asset->id,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+            ]);
+            return null;
+        }
+
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+        if ($thumbnailPath === null || $thumbnailPath === '') {
+            Log::info('[ColorAnalysisService] Skipping color analysis: thumbnail path missing', [
+                'asset_id' => $asset->id,
+            ]);
+            return null;
+        }
+
         $bucket = $asset->storageBucket;
-        if (!$bucket || !$asset->storage_root_path) {
-            Log::warning('[ColorAnalysisService] Missing storage info', ['asset_id' => $asset->id]);
+        if (!$bucket) {
+            Log::warning('[ColorAnalysisService] Missing storage bucket', ['asset_id' => $asset->id]);
             return null;
         }
 
         $tempPath = null;
         try {
-            $tempPath = $this->downloadFromS3($bucket, $asset->storage_root_path);
+            $tempPath = $this->downloadFromS3($bucket, $thumbnailPath);
             if (!is_string($tempPath) || !file_exists($tempPath) || filesize($tempPath) === 0) {
                 return null;
             }

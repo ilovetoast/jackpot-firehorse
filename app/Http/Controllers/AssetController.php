@@ -554,6 +554,7 @@ class AssetController extends Controller
         // - Same visibility rules
         // If these differ, filter options won't match visible assets
         $availableValues = [];
+        $bucketToDominantColors = []; // bucket -> dominant_colors for swatch display (first occurrence wins)
         
         // 🔍 Step 1: Prove assets used for option harvesting
         // CRITICAL: Use the SAME asset collection that appears in the grid
@@ -754,6 +755,10 @@ class AssetController extends Controller
                                 if (!in_array($value, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $value;
                                 }
+                                // For dominant_color_bucket, keep first asset's dominant_colors for swatch display
+                                if ($fieldKey === 'dominant_color_bucket' && !isset($bucketToDominantColors[$value])) {
+                                    $bucketToDominantColors[$value] = $fields['dominant_colors'] ?? null;
+                                }
                             }
                         }
                     }
@@ -807,11 +812,14 @@ class AssetController extends Controller
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
             if ($fieldKey === 'dominant_color_bucket') {
                 $bucketValues = $availableValues['dominant_color_bucket'] ?? [];
-                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService) {
+                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService, $bucketToDominantColors) {
                     return [
                         'value' => $bucketValue,
                         'label' => $bucketValue,
-                        'swatch' => $colorBucketService->bucketToHex((string) $bucketValue),
+                        'swatch' => $colorBucketService->swatchHexForAsset(
+                            (string) $bucketValue,
+                            $bucketToDominantColors[$bucketValue] ?? null
+                        ),
                     ];
                 }, $bucketValues));
                 break;
