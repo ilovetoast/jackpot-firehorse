@@ -10,6 +10,13 @@ use App\Policies\CollectionPolicy;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
+/**
+ * Collection Policy tests (Collections C2 — LOCKED).
+ *
+ * These tests encode the immutable CollectionPolicy contract. Do not change
+ * expected outcomes; the policy is the foundation for UI, invites, sharing,
+ * and asset surfacing. New tests may be added for new policy methods only.
+ */
 class CollectionPolicyTest extends TestCase
 {
     use RefreshDatabase;

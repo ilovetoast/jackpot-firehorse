@@ -43,7 +43,7 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -64,7 +64,7 @@ import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
 import { useAssetMetrics } from '../hooks/useAssetMetrics'
 import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/solid'
 
-export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null }) {
+export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null }) {
     const { auth } = usePage().props
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
@@ -111,6 +111,13 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Metadata approval state
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
     const [approvingAllMetadata, setApprovingAllMetadata] = useState(false)
+
+    // C5: Collections (In X collections + Add to Collection)
+    const [assetCollections, setAssetCollections] = useState([])
+    const [assetCollectionsLoading, setAssetCollectionsLoading] = useState(false)
+    const [dropdownCollections, setDropdownCollections] = useState([])
+    const [dropdownCollectionsLoading, setDropdownCollectionsLoading] = useState(false)
+    const [addToCollectionLoading, setAddToCollectionLoading] = useState(false)
     
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
@@ -281,6 +288,36 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 setActivityLoading(false)
             })
     }, [asset])
+
+    // C5: Fetch collections this asset is in (for "In X collections")
+    useEffect(() => {
+        if (!collectionContext?.show || !asset?.id) {
+            setAssetCollections([])
+            return
+        }
+        setAssetCollectionsLoading(true)
+        window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+            .then(res => {
+                setAssetCollections(res.data?.collections ?? [])
+            })
+            .catch(() => setAssetCollections([]))
+            .finally(() => setAssetCollectionsLoading(false))
+    }, [collectionContext?.show, asset?.id])
+
+    // C5: Fetch collections list for "Add to Collection" dropdown
+    useEffect(() => {
+        if (!collectionContext?.show || !collectionContext?.canAddToCollection) {
+            setDropdownCollections([])
+            return
+        }
+        setDropdownCollectionsLoading(true)
+        window.axios.get('/app/collections/list', { headers: { Accept: 'application/json' } })
+            .then(res => {
+                setDropdownCollections(res.data?.collections ?? [])
+            })
+            .catch(() => setDropdownCollections([]))
+            .finally(() => setDropdownCollectionsLoading(false))
+    }, [collectionContext?.show, collectionContext?.canAddToCollection])
 
     // Phase J.3: Fetch approval comments for rejected assets (to get rejecting user role)
     useEffect(() => {
@@ -1533,6 +1570,105 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     inline={true}
                                 />
                             </div>
+                        </CollapsibleSection>
+                    </div>
+                )}
+
+                {/* C5: Collections — "In X collections" (read-only) + Add to Collection */}
+                {collectionContext?.show && displayAsset?.id && (
+                    <div className="border-t border-gray-200">
+                        <CollapsibleSection title="Collections" defaultExpanded={true}>
+                            {assetCollectionsLoading ? (
+                                <p className="text-sm text-gray-500">Loading…</p>
+                            ) : (
+                                <>
+                                    <div className="mb-3">
+                                        <p className="text-sm text-gray-600">
+                                            In {assetCollections.length} {assetCollections.length === 1 ? 'collection' : 'collections'}
+                                        </p>
+                                        {assetCollections.length > 0 && (
+                                            <ul className="mt-1.5 space-y-1 text-sm text-gray-800">
+                                                {assetCollections.map((c) => (
+                                                    <li key={c.id} className="flex items-center justify-between gap-2 group">
+                                                        <a
+                                                            href={collectionContext.collectionsBaseUrl ? `${collectionContext.collectionsBaseUrl}?collection=${c.id}` : `/app/collections?collection=${c.id}`}
+                                                            className="flex items-center gap-2 min-w-0 text-indigo-600 hover:text-indigo-800 truncate"
+                                                        >
+                                                            <RectangleStackIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                                                            <span className="truncate">{c.name}</span>
+                                                        </a>
+                                                        {collectionContext.canRemoveFromCollection && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    if (!asset?.id || addToCollectionLoading) return
+                                                                    setAddToCollectionLoading(true)
+                                                                    try {
+                                                                        await window.axios.delete(`/app/collections/${c.id}/assets/${asset.id}`, { headers: { Accept: 'application/json' } })
+                                                                        const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                                                        setAssetCollections(res.data?.collections ?? [])
+                                                                        collectionContext.onAssetRemovedFromCollection?.(asset.id, c.id)
+                                                                    } catch (err) {
+                                                                        setToastMessage(err.response?.data?.message || 'Failed to remove from collection')
+                                                                        setToastType('error')
+                                                                    } finally {
+                                                                        setAddToCollectionLoading(false)
+                                                                    }
+                                                                }}
+                                                                disabled={addToCollectionLoading}
+                                                                className="flex-shrink-0 text-xs text-gray-500 hover:text-red-600 focus:outline-none disabled:opacity-50"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                    {collectionContext.canAddToCollection && (
+                                        <div>
+                                            <label htmlFor="add-to-collection-select" className="block text-sm font-medium text-gray-700 mb-1">
+                                                Add to collection
+                                            </label>
+                                            <select
+                                                id="add-to-collection-select"
+                                                disabled={addToCollectionLoading || dropdownCollectionsLoading}
+                                                value=""
+                                                onChange={async (e) => {
+                                                    const value = e.target.value
+                                                    e.target.value = ''
+                                                    if (!value || !asset?.id) return
+                                                    if (value === '__create__') {
+                                                        collectionContext.onOpenCreateCollection?.()
+                                                        return
+                                                    }
+                                                    setAddToCollectionLoading(true)
+                                                    try {
+                                                        await window.axios.post(`/app/collections/${value}/assets`, { asset_id: asset.id }, { headers: { Accept: 'application/json' } })
+                                                        const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                                        setAssetCollections(res.data?.collections ?? [])
+                                                    } catch (err) {
+                                                        setToastMessage(err.response?.data?.message || err.response?.data?.errors?.asset_id?.[0] || 'Failed to add to collection')
+                                                        setToastType('error')
+                                                    } finally {
+                                                        setAddToCollectionLoading(false)
+                                                    }
+                                                }}
+                                                className="block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm disabled:opacity-50"
+                                            >
+                                                <option value="">Choose a collection…</option>
+                                                {dropdownCollections.filter((c) => !assetCollections.some((ac) => ac.id === c.id)).map((c) => (
+                                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                                ))}
+                                                {collectionContext.canCreateCollection && (
+                                                    <option value="__create__">+ Create collection</option>
+                                                )}
+                                            </select>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </CollapsibleSection>
                     </div>
                 )}

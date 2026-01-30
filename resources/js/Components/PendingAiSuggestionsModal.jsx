@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { XMarkIcon, CheckIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CheckIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { usePermission } from '../hooks/usePermission'
@@ -312,7 +312,7 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                     <div className="mb-3 pb-3 border-b border-gray-200">
                                         <div className="flex items-start gap-3">
                                             {/* Thumbnail - use ThumbnailPreview component for consistent thumbnail handling (same as AssetGrid) */}
-                                            <div className="flex-shrink-0 w-32 h-32 rounded border border-gray-200 overflow-hidden">
+                                            <div className="flex-shrink-0 w-44 h-44 rounded border border-gray-200 overflow-hidden">
                                                 <ThumbnailPreview
                                                     asset={{
                                                         id: currentItem.asset_id,
@@ -330,34 +330,41 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                                     size="md"
                                                 />
                                             </div>
-                                            {/* Asset details */}
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-xs text-gray-500 mb-1">Asset</div>
-                                                <div className="text-sm font-medium text-gray-900 truncate">
-                                                    {currentItem.asset_title || currentItem.asset_filename || `Asset #${currentItem.asset_id?.substring(0, 8)}`}
+                                            {/* Asset details - same label/value pattern for Asset and Category */}
+                                            <div className="flex-1 min-w-0 space-y-3">
+                                                <div>
+                                                    <div className="text-xs text-gray-500 mb-1">Asset</div>
+                                                    <div className="text-sm font-medium text-gray-900 truncate">
+                                                        {currentItem.asset_title || currentItem.asset_filename || `Asset #${currentItem.asset_id?.substring(0, 8)}`}
+                                                    </div>
                                                 </div>
+                                                {currentItem.asset_category != null && currentItem.asset_category !== '' && (
+                                                    <div>
+                                                        <div className="text-xs text-gray-500 mb-1">Category</div>
+                                                        <div className="text-sm font-medium text-gray-900 truncate">
+                                                            {currentItem.asset_category}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Suggestion type and value */}
+                                    {/* Suggestion type and value - same label/value pattern as Asset/Title */}
                                     <div className="mb-3">
                                         {currentItem.type === 'tag' ? (
                                             <>
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <TagIcon className="h-4 w-4 text-blue-500" />
-                                                    <span className="text-xs font-medium text-gray-500">Tag Suggestion</span>
-                                                </div>
-                                                <div className="text-lg font-semibold text-gray-900">
+                                                <div className="text-xs text-gray-500 mb-1">Tag Suggestion</div>
+                                                <div className="text-sm font-medium text-gray-900 truncate">
                                                     {formatValue(currentItem)}
                                                 </div>
                                             </>
                                         ) : (
                                             <>
-                                                <div className="text-xs font-medium text-gray-500 mb-1">
+                                                <div className="text-xs text-gray-500 mb-1">
                                                     {currentItem.field_label || currentItem.field_key || 'Metadata Field'}
                                                 </div>
-                                                <div className="text-lg font-semibold text-gray-900">
+                                                <div className="text-sm font-medium text-gray-900 truncate">
                                                     {formatValue(currentItem)}
                                                 </div>
                                             </>

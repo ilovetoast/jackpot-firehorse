@@ -425,6 +425,15 @@ class Asset extends Model
     }
 
     /**
+     * Get the collections this asset belongs to (C5).
+     */
+    public function collections(): BelongsToMany
+    {
+        return $this->belongsToMany(Collection::class, 'asset_collections')
+            ->withTimestamps();
+    }
+
+    /**
      * Get the S3 thumbnail path for a specific style.
      *
      * Retrieves the thumbnail path from asset metadata.

@@ -1,16 +1,29 @@
-import { useState } from 'react'
-import { usePage } from '@inertiajs/react'
+/**
+ * Collections Index (C4 read-only UI; C5 create + add/remove assets).
+ * Uses CollectionAssetQueryService for asset data; C5 adds create and assign UI.
+ */
+import { useState, useEffect } from 'react'
+import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
-import {
-    RectangleStackIcon as CollectionIcon,
-    FolderIcon,
-} from '@heroicons/react/24/outline'
+import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
+import CreateCollectionModal from '../../Components/Collections/CreateCollectionModal'
+import AssetGrid from '../../Components/AssetGrid'
+import AssetGridToolbar from '../../Components/AssetGridToolbar'
+import AssetDrawer from '../../Components/AssetDrawer'
+import { RectangleStackIcon, FolderIcon } from '@heroicons/react/24/outline'
 
-export default function CollectionsIndex({ collections = [] }) {
+export default function CollectionsIndex({
+    collections = [],
+    assets = [],
+    selected_collection = null,
+    can_create_collection = false,
+    can_add_to_collection = false,
+    can_remove_from_collection = false,
+}) {
     const { auth } = usePage().props
+    const selectedCollectionId = selected_collection?.id ?? null
 
-    // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
-    const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
+    const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937'
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
         const hex = color.replace('#', '')
@@ -22,70 +35,217 @@ export default function CollectionsIndex({ collections = [] }) {
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
 
+    const [localAssets, setLocalAssets] = useState(assets)
+    useEffect(() => {
+        setLocalAssets(assets)
+    }, [assets])
+
+    const [showCreateModal, setShowCreateModal] = useState(false)
+    const [activeAssetId, setActiveAssetId] = useState(null)
+    const activeAsset = activeAssetId ? localAssets.find((a) => a.id === activeAssetId) : null
+
+    const handleCollectionCreated = (newCollection) => {
+        router.get('/app/collections', { collection: newCollection.id }, { preserveState: false })
+    }
+
+    useEffect(() => {
+        if (activeAssetId && !localAssets.some((a) => a.id === activeAssetId)) {
+            setActiveAssetId(null)
+        }
+    }, [activeAssetId, localAssets])
+
+    useEffect(() => {
+        setActiveAssetId(null)
+    }, [selectedCollectionId])
+
+    const getStoredCardSize = () => {
+        if (typeof window === 'undefined') return 220
+        const stored = localStorage.getItem('assetGridCardSize')
+        return stored ? parseInt(stored, 10) : 220
+    }
+    const getStoredShowInfo = () => {
+        if (typeof window === 'undefined') return true
+        const stored = localStorage.getItem('assetGridShowInfo')
+        return stored ? stored === 'true' : true
+    }
+    const [cardSize, setCardSize] = useState(getStoredCardSize)
+    const [showInfo, setShowInfo] = useState(getStoredShowInfo)
+    useEffect(() => {
+        if (typeof window !== 'undefined') localStorage.setItem('assetGridCardSize', cardSize.toString())
+    }, [cardSize])
+    useEffect(() => {
+        if (typeof window !== 'undefined') localStorage.setItem('assetGridShowInfo', showInfo.toString())
+    }, [showInfo])
+
+    const handleLifecycleUpdate = (updatedAsset) => {
+        setLocalAssets((prev) =>
+            prev.map((a) => (a.id === updatedAsset?.id ? { ...a, ...updatedAsset } : a))
+        )
+    }
+
+    const showGrid = selectedCollectionId != null
+    const hasAssets = localAssets && localAssets.length > 0
+
     return (
         <div className="h-screen flex flex-col overflow-hidden">
             <AppNav brand={auth.activeBrand} tenant={null} />
-            
+
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
-                {/* Sidebar - Full Height */}
+                {/* Sidebar */}
                 <div className="hidden lg:flex lg:flex-shrink-0">
-                    <div className="flex flex-col w-72 h-full" style={{ backgroundColor: sidebarColor }}>
-                        <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
-                            <nav className="mt-5 flex-1 px-2 space-y-1">
-                                {/* Collections Actions - Placeholder for future */}
-                                {auth?.user && (
-                                    <div className="px-3 py-2 mb-4">
-                                        <button 
-                                            className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-                                            disabled
-                                        >
-                                            <CollectionIcon className="h-4 w-4 mr-2" />
-                                            Create Collection
-                                        </button>
-                                    </div>
-                                )}
-                                
-                                {/* No categories section for Collections - future enhancement */}
-                                <div className="px-3 py-2">
-                                    <h3 className="px-3 text-xs font-semibold uppercase tracking-wider" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
-                                        Collections
-                                    </h3>
-                                    <div className="mt-2 space-y-1">
-                                        <div className="px-3 py-2 text-sm" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
-                                            No collections yet
-                                        </div>
-                                    </div>
-                                </div>
-                            </nav>
-                        </div>
-                    </div>
+                    <CollectionsSidebar
+                        collections={collections}
+                        selectedCollectionId={selectedCollectionId}
+                        sidebarColor={sidebarColor}
+                        textColor={textColor}
+                        canCreateCollection={can_create_collection}
+                        onCreateCollection={() => setShowCreateModal(true)}
+                    />
                 </div>
 
-                {/* Main Content - Full Height with Scroll */}
+                <CreateCollectionModal
+                    open={showCreateModal}
+                    onClose={() => setShowCreateModal(false)}
+                    onCreated={handleCollectionCreated}
+                />
+
+                {/* Main content */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
                     <div className="h-full overflow-y-auto">
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
-                            {/* Temporary placeholder content */}
-                            <div className="max-w-2xl mx-auto py-16 px-6 text-center">
-                                <div className="mb-8">
-                                    <CollectionIcon className="mx-auto h-16 w-16 text-gray-300" />
-                                </div>
-                                <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                    Collections - TMP
-                                </h2>
-                                <p className="mt-4 text-base leading-7 text-gray-600">
-                                    Temporary placeholder page for Collections feature. This page will be developed in a future phase.
-                                </p>
-                                <div className="mt-8">
-                                    <p className="text-sm text-gray-500">
-                                        Coming Soon: Organize and manage your asset collections
-                                    </p>
-                                </div>
-                            </div>
+                            {!showGrid ? (
+                                /* No collection selected: show "No collections yet" or "Select a collection" */
+                                collections.length === 0 ? (
+                                    <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                        <div className="mb-8">
+                                            <RectangleStackIcon className="mx-auto h-16 w-16 text-gray-300" />
+                                        </div>
+                                        <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
+                                            No collections yet
+                                        </h2>
+                                        <p className="mt-4 text-base leading-7 text-gray-600">
+                                            Collections let you group and share assets. No collections have been created yet.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                        <div className="mb-8">
+                                            <RectangleStackIcon className="mx-auto h-16 w-16 text-gray-300" />
+                                        </div>
+                                        <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
+                                            Select a collection
+                                        </h2>
+                                        <p className="mt-4 text-base leading-7 text-gray-600">
+                                            Choose a collection from the sidebar to view its assets.
+                                        </p>
+                                    </div>
+                                )
+                            ) : (
+                                <>
+                                    <div className="mb-8">
+                                        <AssetGridToolbar
+                                            showInfo={showInfo}
+                                            onToggleInfo={() => setShowInfo((v) => !v)}
+                                            cardSize={cardSize}
+                                            onCardSizeChange={setCardSize}
+                                            primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                            bulkSelectedCount={0}
+                                            onBulkEdit={null}
+                                            onToggleBulkMode={null}
+                                            isBulkMode={false}
+                                            filterable_schema={[]}
+                                            selectedCategoryId={null}
+                                            available_values={{}}
+                                            showMoreFilters={false}
+                                        />
+                                    </div>
+
+                                    {hasAssets ? (
+                                        <AssetGrid
+                                            assets={localAssets}
+                                            onAssetClick={(asset) => setActiveAssetId(asset?.id ?? null)}
+                                            cardSize={cardSize}
+                                            showInfo={showInfo}
+                                            selectedAssetId={activeAssetId}
+                                            primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                            selectedAssetIds={[]}
+                                            onAssetSelect={null}
+                                        />
+                                    ) : (
+                                        /* Empty state: collection selected but no assets */
+                                        <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                            <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
+                                            <h2 className="mt-4 text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
+                                                This collection doesn&apos;t contain any assets yet.
+                                            </h2>
+                                            <p className="mt-4 text-base leading-7 text-gray-600">
+                                                Assets added to this collection will appear here.
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
                     </div>
+
+                    {/* Asset Drawer - Desktop */}
+                    {activeAssetId && (
+                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
+                            <AssetDrawer
+                                key={activeAssetId}
+                                asset={activeAsset}
+                                onClose={() => setActiveAssetId(null)}
+                                assets={localAssets}
+                                currentAssetIndex={activeAsset ? localAssets.findIndex((a) => a.id === activeAsset.id) : -1}
+                                onAssetUpdate={handleLifecycleUpdate}
+                                collectionContext={{
+                                    show: true,
+                                    selectedCollectionId,
+                                    canAddToCollection: can_add_to_collection,
+                                    canRemoveFromCollection: can_remove_from_collection,
+                                    canCreateCollection: can_create_collection,
+                                    onOpenCreateCollection: () => setShowCreateModal(true),
+                                    onAssetRemovedFromCollection: (assetId, collectionId) => {
+                                        if (collectionId === selectedCollectionId) {
+                                            setLocalAssets((prev) => prev.filter((a) => a.id !== assetId))
+                                            setActiveAssetId(null)
+                                        }
+                                    },
+                                }}
+                            />
+                        </div>
+                    )}
                 </div>
             </div>
+
+            {/* Asset Drawer - Mobile */}
+            {activeAssetId && (
+                <div className="md:hidden fixed inset-0 z-50">
+                    <div className="absolute inset-0 bg-black/50" onClick={() => setActiveAssetId(null)} aria-hidden="true" />
+                    <AssetDrawer
+                        key={activeAssetId}
+                        asset={activeAsset}
+                        onClose={() => setActiveAssetId(null)}
+                        assets={localAssets}
+                        currentAssetIndex={activeAsset ? localAssets.findIndex((a) => a.id === activeAsset.id) : -1}
+                        onAssetUpdate={handleLifecycleUpdate}
+                        collectionContext={{
+                            show: true,
+                            selectedCollectionId,
+                            canAddToCollection: can_add_to_collection,
+                            canRemoveFromCollection: can_remove_from_collection,
+                            canCreateCollection: can_create_collection,
+                            onOpenCreateCollection: () => setShowCreateModal(true),
+                            onAssetRemovedFromCollection: (assetId, collectionId) => {
+                                if (collectionId === selectedCollectionId) {
+                                    setLocalAssets((prev) => prev.filter((a) => a.id !== assetId))
+                                    setActiveAssetId(null)
+                                }
+                            },
+                        }}
+                    />
+                </div>
+            )}
         </div>
     )
 }

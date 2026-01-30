@@ -18,6 +18,7 @@ class Collection extends Model
         'tenant_id',
         'brand_id',
         'name',
+        'slug',
         'description',
         'visibility',
         'is_public',

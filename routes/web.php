@@ -32,6 +32,10 @@ Route::middleware('guest')->group(function () {
     Route::post('/invite/complete/{token}/{tenant}', [\App\Http\Controllers\TeamController::class, 'completeInviteRegistration'])->name('invite.complete');
 });
 
+// Public collections (C8) — no auth, is_public only
+Route::get('/collections/{slug}', [\App\Http\Controllers\PublicCollectionController::class, 'show'])->name('public.collections.show');
+Route::get('/collections/{slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
+
 // CSRF token refresh endpoint (for handling stale tokens after session regeneration)
 // Accessible to authenticated users (session exists, just token may be stale)
 Route::get('/csrf-token', function (Request $request) {
@@ -279,6 +283,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/view', [\App\Http\Controllers\AssetController::class, 'view'])->name('assets.view');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
+            Route::get('/assets/{asset}/collections', [\App\Http\Controllers\CollectionController::class, 'assetCollections'])->name('assets.collections.index');
             
             // AI metadata generation (Phase I)
             Route::post('/assets/{asset}/system-metadata/regenerate', [\App\Http\Controllers\AssetController::class, 'regenerateSystemMetadata'])->name('assets.system-metadata.regenerate');
@@ -381,6 +386,13 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/deliverables', [\App\Http\Controllers\DeliverableController::class, 'index'])->name('deliverables.index');
             Route::get('/collections', [\App\Http\Controllers\CollectionController::class, 'index'])->name('collections.index');
+            Route::get('/collections/list', [\App\Http\Controllers\CollectionController::class, 'listForDropdown'])->name('collections.list');
+            Route::post('/collections', [\App\Http\Controllers\CollectionController::class, 'store'])->name('collections.store');
+            Route::post('/collections/{collection}/assets', [\App\Http\Controllers\CollectionController::class, 'addAsset'])->name('collections.assets.store');
+            Route::delete('/collections/{collection}/assets/{asset}', [\App\Http\Controllers\CollectionController::class, 'removeAsset'])->name('collections.assets.destroy');
+            Route::post('/collections/{collection}/invite', [\App\Http\Controllers\CollectionInviteController::class, 'invite'])->name('collections.invite');
+            Route::post('/collections/{collection}/accept', [\App\Http\Controllers\CollectionInviteController::class, 'accept'])->name('collections.accept');
+            Route::post('/collections/{collection}/decline', [\App\Http\Controllers\CollectionInviteController::class, 'decline'])->name('collections.decline');
             Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
 

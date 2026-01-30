@@ -6,8 +6,10 @@ use App\Http\Responses\UploadErrorResponse;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
+use App\Models\Collection;
 use App\Models\UploadSession;
 use App\Services\AbandonedSessionService;
+use App\Services\CollectionAssetService;
 use App\Services\ActivityRecorder;
 use App\Services\Metadata\AssetMetadataStateResolver;
 use App\Services\MetadataApprovalResolver;
@@ -23,6 +25,7 @@ use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
 class UploadController extends Controller
@@ -41,7 +44,8 @@ class UploadController extends Controller
         protected MetadataPersistenceService $metadataPersistenceService,
         protected PlanService $planService,
         protected AssetMetadataStateResolver $metadataStateResolver,
-        protected MetadataApprovalResolver $approvalResolver
+        protected MetadataApprovalResolver $approvalResolver,
+        protected CollectionAssetService $collectionAssetService
     ) {
     }
 
@@ -1613,6 +1617,8 @@ class UploadController extends Controller
             'manifest.*.title' => 'nullable|string|max:255',
             'manifest.*.resolved_filename' => 'nullable|string|max:255',
             'manifest.*.comment' => 'nullable|string|max:1000', // Phase J.3.1: Optional comment for replace mode
+            'manifest.*.collection_ids' => 'nullable|array', // C7: Attach asset to collections post-upload
+            'manifest.*.collection_ids.*' => 'integer|exists:collections,id',
         ]);
 
         $manifest = $validated['manifest'];
@@ -1936,6 +1942,29 @@ class UploadController extends Controller
                             // This is acceptable as metadata can be added later via edit
                         }
                     }
+
+                    // C7: Attach asset to collections post-upload (collection_ids from manifest)
+                    $collectionIds = $item['collection_ids'] ?? [];
+                    if (!empty($collectionIds) && $asset && $asset->id) {
+                        foreach ($collectionIds as $collectionId) {
+                            $targetCollection = Collection::query()
+                                ->where('id', $collectionId)
+                                ->where('tenant_id', $tenant->id)
+                                ->where('brand_id', $brand->id)
+                                ->first();
+                            if ($targetCollection && Gate::forUser($user)->allows('addAsset', $targetCollection)) {
+                                try {
+                                    $this->collectionAssetService->attach($targetCollection, $asset);
+                                } catch (\Throwable $e) {
+                                    Log::warning('[UploadController::finalize] Failed to attach asset to collection', [
+                                        'asset_id' => $asset->id,
+                                        'collection_id' => $collectionId,
+                                        'error' => $e->getMessage(),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
                 } // Phase J.3.1: Close else block for create mode
 
                 // TASK 1: Check if metadata requires approval (UI-only, read-only information)
@@ -2008,7 +2037,8 @@ class UploadController extends Controller
                 }
                 
                 $category = UploadErrorResponse::getCategoryFromErrorCode($errorCode);
-                
+                $isFileMissing = $errorCode === UploadErrorResponse::CODE_FILE_MISSING;
+
                 // Extract file type from upload session
                 $fileType = $uploadSession 
                     ? UploadErrorResponse::extractFileType(null, $uploadSession)

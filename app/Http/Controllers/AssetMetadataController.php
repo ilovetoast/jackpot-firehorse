@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\EventType;
 use App\Models\Asset;
+use App\Models\Category;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiMetadataSuggestionService;
@@ -3558,6 +3559,13 @@ class AssetMetadataController extends Controller
             ->get()
             ->keyBy('id');
 
+        // Load categories for asset category display (category_id in metadata)
+        $categoryIds = $assets->pluck('metadata')->map(function ($m) {
+            $meta = is_array($m) ? $m : (is_string($m) ? json_decode($m, true) : []);
+            return $meta['category_id'] ?? null;
+        })->filter()->unique()->values()->all();
+        $categories = $categoryIds ? Category::whereIn('id', $categoryIds)->get()->keyBy('id') : collect();
+
         // Process tag candidates
         foreach ($tagCandidates as $candidate) {
             $asset = $assets->get($candidate->asset_id);
@@ -3568,6 +3576,7 @@ class AssetMetadataController extends Controller
                 ? $asset->thumbnail_status->value 
                 : ($asset->thumbnail_status ?? 'pending')) : 'pending';
             $metadata = $asset ? ($asset->metadata ?? []) : [];
+            $categoryId = $metadata['category_id'] ?? null;
             
             $items[] = [
                 'id' => $candidate->id,
@@ -3579,6 +3588,7 @@ class AssetMetadataController extends Controller
                 'source' => $candidate->source,
                 'asset_title' => $candidate->asset_title,
                 'asset_filename' => $candidate->asset_filename,
+                'asset_category' => $categoryId ? ($categories->get($categoryId)?->name ?? null) : null,
                 'final_thumbnail_url' => $thumbnailUrls['final'] ?? null,
                 'preview_thumbnail_url' => $thumbnailUrls['preview'] ?? null,
                 'thumbnail_status' => $thumbnailStatus,
@@ -3599,6 +3609,7 @@ class AssetMetadataController extends Controller
                 ? $asset->thumbnail_status->value 
                 : ($asset->thumbnail_status ?? 'pending')) : 'pending';
             $metadata = $asset ? ($asset->metadata ?? []) : [];
+            $categoryId = $metadata['category_id'] ?? null;
             
             $items[] = [
                 'id' => $candidate->id,
@@ -3614,6 +3625,7 @@ class AssetMetadataController extends Controller
                 'options' => $optionsMap[$candidate->metadata_field_id] ?? [],
                 'asset_title' => $candidate->asset_title,
                 'asset_filename' => $candidate->asset_filename,
+                'asset_category' => $categoryId ? ($categories->get($categoryId)?->name ?? null) : null,
                 'final_thumbnail_url' => $thumbnailUrls['final'] ?? null,
                 'preview_thumbnail_url' => $thumbnailUrls['preview'] ?? null,
                 'thumbnail_status' => $thumbnailStatus,

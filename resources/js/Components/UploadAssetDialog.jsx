@@ -32,6 +32,7 @@ import MetadataGroups from './Upload/MetadataGroups' // Phase 2 – Step 2: Dyna
 import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // Phase 2 – Step 3: Required field validation
 import ApprovalNotice from './Upload/ApprovalNotice' // TASK 1: Approval notice for contributors
 import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh' // CSRF token refresh for 419 errors
+import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -147,6 +148,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * Does NOT affect upload behavior.
      */
     const [selectedCategoryId, setSelectedCategoryId] = useState(initialCategoryId || null)
+
+    /** C9: Collections to attach to uploaded assets (manifest.*.collection_ids) */
+    const [selectedCollectionIds, setSelectedCollectionIds] = useState([])
+    const [collectionsList, setCollectionsList] = useState([])
+    const [collectionsListLoading, setCollectionsListLoading] = useState(false)
+    const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
 
     /**
      * CLEAN UPLOADER V2 — Global Metadata Draft
@@ -2753,6 +2760,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 metadata: metadataPayload, // Phase 2 – Step 4: Only valid fields, no empty values
                 title: normalizedTitle, // This now includes user-edited title if available
                 resolved_filename: resolvedFilename,
+                ...(selectedCollectionIds?.length > 0 && { collection_ids: selectedCollectionIds }),
             }
             
             // CRITICAL: Log the actual manifest item being sent
@@ -3464,6 +3472,19 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             })
     }, [selectedCategoryId])
 
+    // C9: Fetch collections list when dialog opens (for upload collections field)
+    useEffect(() => {
+        if (!open) return
+        setCollectionsListLoading(true)
+        fetch('/app/collections/list', { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+            .then((r) => r.json())
+            .then((data) => {
+                setCollectionsList(data?.collections ?? [])
+            })
+            .catch(() => setCollectionsList([]))
+            .finally(() => setCollectionsListLoading(false))
+    }, [open])
+
     /**
      * Handle category change callback (LEGACY - for Phase 3 manager)
      * Fetches metadata fields for the category (placeholder - should be implemented by parent)
@@ -3610,6 +3631,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         setApprovalInfo({ approvalRequired: false, pendingMetadataCount: 0 })
         setV2Files([])
         setSelectedCategoryId(initialCategoryId || null) // Reset to initial category
+        setSelectedCollectionIds([]) // C9
         setGlobalMetadataDraft({}) // Reset global metadata
         // FINAL FIX: Clear mapping when resetting state
         v2ToUploadManagerMapRef.current.clear()
@@ -4025,6 +4047,55 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     categories={filteredCategories}
                                     onCategoryChange={handleCategoryChangeV2}
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                />
+
+                                {/* C9: Collections — multi-select, attach to all files on finalize */}
+                                <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+                                    <div className="px-4 py-3 border-b border-gray-200">
+                                        <h3 className="text-sm font-medium text-gray-900">Collections</h3>
+                                        <p className="text-xs text-gray-500 mt-1">Add uploaded files to collections (optional)</p>
+                                    </div>
+                                    <div className="px-4 py-3">
+                                        {collectionsListLoading ? (
+                                            <p className="text-sm text-gray-500">Loading…</p>
+                                        ) : (
+                                            <>
+                                                <select
+                                                    multiple
+                                                    value={selectedCollectionIds.map(String)}
+                                                    onChange={(e) => {
+                                                        const selected = Array.from(e.target.selectedOptions, (o) => parseInt(o.value, 10))
+                                                        setSelectedCollectionIds(selected)
+                                                    }}
+                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
+                                                >
+                                                    {collectionsList.map((c) => (
+                                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                                    ))}
+                                                </select>
+                                                <p className="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowCreateCollectionModal(true)}
+                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                    className="mt-2 text-sm text-indigo-600 hover:text-indigo-500"
+                                                >
+                                                    + Create new collection
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <CreateCollectionModal
+                                    open={showCreateCollectionModal}
+                                    onClose={() => setShowCreateCollectionModal(false)}
+                                    onCreated={(newCollection) => {
+                                        setCollectionsList((prev) => [...prev, { id: newCollection.id, name: newCollection.name }])
+                                        setSelectedCollectionIds((prev) => [...prev, newCollection.id])
+                                        setShowCreateCollectionModal(false)
+                                    }}
                                 />
 
                                 {/* Phase 2 – Step 2: Dynamic Metadata Fields */}
