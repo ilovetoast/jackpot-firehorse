@@ -630,6 +630,74 @@ class DeliverableController extends Controller
                         }
                     }
                 }
+
+                // C9.2 / Phase C: Source 3 - Collection filter values from asset_collections pivot (not asset_metadata)
+                // Primary filter for collection requires available_values; harvest from pivot for current asset set.
+                if (isset($filterableFieldKeys['collection'])) {
+                    $collectionIds = \DB::table('asset_collections')
+                        ->whereIn('asset_id', $assetIds)
+                        ->distinct()
+                        ->pluck('collection_id')
+                        ->map(fn ($id) => (int) $id)
+                        ->unique()
+                        ->values()
+                        ->all();
+                    if (!empty($collectionIds)) {
+                        $availableValues['collection'] = array_values(array_unique(array_merge(
+                            $availableValues['collection'] ?? [],
+                            $collectionIds
+                        )));
+                    }
+                }
+
+                // Tags filter values from asset_tags table (tags are stored in asset_tags, not asset_metadata)
+                // Primary filter for tags requires available_values; harvest from asset_tags for current asset set.
+                if (isset($filterableFieldKeys['tags'])) {
+                    $tagValues = \DB::table('asset_tags')
+                        ->whereIn('asset_id', $assetIds)
+                        ->distinct()
+                        ->pluck('tag')
+                        ->filter()
+                        ->values()
+                        ->all();
+                    if (!empty($tagValues)) {
+                        $availableValues['tags'] = array_values(array_unique(array_merge(
+                            $availableValues['tags'] ?? [],
+                            $tagValues
+                        )));
+                        sort($availableValues['tags']);
+                    }
+                }
+
+                // Seed available_values for primary rating/select fields so primary filter shows when no asset has a value yet.
+                foreach ($filterableSchema as $field) {
+                    $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+                    $isPrimary = ($field['is_primary'] ?? false) === true;
+                    if (!$fieldKey || !$isPrimary || !isset($filterableFieldKeys[$fieldKey])) {
+                        continue;
+                    }
+                    $optionValues = [];
+                    $options = $field['options'] ?? [];
+                    if (!empty($options)) {
+                        foreach ($options as $opt) {
+                            $v = is_array($opt) ? ($opt['value'] ?? $opt['id'] ?? null) : $opt;
+                            if ($v !== null && $v !== '') {
+                                $optionValues[] = $v;
+                            }
+                        }
+                    }
+                    // Rating type (e.g. quality_rating) has no options in schema; seed 1–5 so primary filter shows
+                    if (empty($optionValues) && ($field['type'] ?? '') === 'rating') {
+                        $optionValues = [1, 2, 3, 4, 5];
+                    }
+                    if (!empty($optionValues)) {
+                        $availableValues[$fieldKey] = array_values(array_unique(array_merge(
+                            $availableValues[$fieldKey] ?? [],
+                            $optionValues
+                        )));
+                        sort($availableValues[$fieldKey]);
+                    }
+                }
                 
                 // Remove empty arrays (filters with no values should not appear)
                 $availableValues = array_filter($availableValues, function ($values) {
@@ -643,7 +711,7 @@ class DeliverableController extends Controller
             }
         }
 
-        // Attach color swatch data to dominant_color_bucket filter options (filter_type = 'color')
+        // Attach color swatch data to dominant_color_bucket; attach collection options (id => name) for primary filter dropdown
         $colorBucketService = app(\App\Services\ColorBucketService::class);
         foreach ($filterableSchema as &$field) {
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
@@ -659,7 +727,27 @@ class DeliverableController extends Controller
                         ),
                     ];
                 }, $bucketValues));
-                break;
+            }
+            // C9.2: Attach collection options (id => name) so primary filter is a dropdown with labels (Phase C checklist #6)
+            if ($fieldKey === 'collection') {
+                $collectionIds = $availableValues['collection'] ?? [];
+                $collections = $collectionIds
+                    ? \App\Models\Collection::whereIn('id', $collectionIds)->pluck('name', 'id')->all()
+                    : [];
+                $field['options'] = array_values(array_map(fn ($id) => [
+                    'value' => (string) $id,
+                    'label' => $collections[$id] ?? (string) $id,
+                    'display_label' => $collections[$id] ?? (string) $id,
+                ], $collectionIds));
+            }
+            // Rating type (e.g. quality_rating): schema has no options; attach 1–5 so primary filter dropdown has labels
+            if (($field['type'] ?? '') === 'rating') {
+                $ratingValues = $availableValues[$fieldKey] ?? [1, 2, 3, 4, 5];
+                $field['options'] = array_values(array_map(fn ($v) => [
+                    'value' => (string) $v,
+                    'label' => (string) $v,
+                    'display_label' => (string) $v,
+                ], $ratingValues));
             }
         }
         unset($field);

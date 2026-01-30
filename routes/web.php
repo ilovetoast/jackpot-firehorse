@@ -32,9 +32,10 @@ Route::middleware('guest')->group(function () {
     Route::post('/invite/complete/{token}/{tenant}', [\App\Http\Controllers\TeamController::class, 'completeInviteRegistration'])->name('invite.complete');
 });
 
-// Public collections (C8) — no auth, is_public only
-Route::get('/collections/{slug}', [\App\Http\Controllers\PublicCollectionController::class, 'show'])->name('public.collections.show');
-Route::get('/collections/{slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
+// Public collections (C8) — no auth, is_public only; brand-namespaced for uniqueness
+Route::get('/b/{brand_slug}/collections/{collection_slug}', [\App\Http\Controllers\PublicCollectionController::class, 'show'])->name('public.collections.show');
+Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/thumbnail', [\App\Http\Controllers\PublicCollectionController::class, 'thumbnail'])->name('public.collections.assets.thumbnail');
+Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
 
 // CSRF token refresh endpoint (for handling stale tokens after session regeneration)
 // Accessible to authenticated users (session exists, just token may be stale)
@@ -43,6 +44,9 @@ Route::get('/csrf-token', function (Request $request) {
 })->middleware(['web']);
 
 Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(function () {
+    // GET /app → redirect to dashboard (avoids 405 from OPTIONS catch-all matching path /app)
+    Route::get('', fn () => redirect()->route('dashboard'))->name('app');
+
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     
     // Company management (no tenant middleware - can access when no tenant selected)
@@ -389,6 +393,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/collections/list', [\App\Http\Controllers\CollectionController::class, 'listForDropdown'])->name('collections.list');
             Route::get('/collections/field-visibility', [\App\Http\Controllers\CollectionController::class, 'checkFieldVisibility'])->name('collections.field-visibility');
             Route::post('/collections', [\App\Http\Controllers\CollectionController::class, 'store'])->name('collections.store');
+            Route::put('/collections/{collection}', [\App\Http\Controllers\CollectionController::class, 'update'])->name('collections.update');
             Route::post('/collections/{collection}/assets', [\App\Http\Controllers\CollectionController::class, 'addAsset'])->name('collections.assets.store');
             Route::delete('/collections/{collection}/assets/{asset}', [\App\Http\Controllers\CollectionController::class, 'removeAsset'])->name('collections.assets.destroy');
             Route::put('/assets/{asset}/collections', [\App\Http\Controllers\CollectionController::class, 'syncAssetCollections'])->name('assets.collections.sync');

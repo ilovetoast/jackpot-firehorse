@@ -1,13 +1,14 @@
 /**
  * Public collection page (C8). No auth. Brand header, collection name/description, asset grid, download per asset.
+ * C11: Public Collection label, clear empty state (read-only, limited to visible assets).
  */
 import { DocumentIcon } from '@heroicons/react/24/outline'
-import AssetGrid from '../Components/AssetGrid'
+import AssetGrid from '../../Components/AssetGrid'
 
 export default function PublicCollection({ collection = {}, assets = [] }) {
     const { name, description, brand_name } = collection
 
-    // Handle asset click - for public collections, clicking downloads the asset
+    // Handle asset click - for public collections, clicking downloads the asset (tracked server-side, opens in new window)
     const handleAssetClick = (asset) => {
         if (asset.download_url) {
             window.open(asset.download_url, '_blank', 'noopener,noreferrer')
@@ -20,7 +21,15 @@ export default function PublicCollection({ collection = {}, assets = [] }) {
             <header className="bg-white border-b border-gray-200">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
                     <p className="text-sm font-medium text-gray-500">{brand_name || 'Brand'}</p>
-                    <h1 className="mt-1 text-2xl font-bold text-gray-900">{name || 'Collection'}</h1>
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
+                        <h1 className="text-2xl font-bold text-gray-900">{name || 'Collection'}</h1>
+                        <span
+                            className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                            title="This collection is viewable via a shareable link. Access is limited to the assets shown."
+                        >
+                            Public collection
+                        </span>
+                    </div>
                     {description && (
                         <p className="mt-2 text-sm text-gray-600 max-w-2xl">{description}</p>
                     )}
@@ -30,8 +39,11 @@ export default function PublicCollection({ collection = {}, assets = [] }) {
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {!assets || assets.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
-                        <DocumentIcon className="mx-auto h-12 w-12 text-gray-300" />
-                        <p className="mt-2">No assets in this collection.</p>
+                        <DocumentIcon className="mx-auto h-12 w-12 text-gray-300" aria-hidden="true" />
+                        <p className="mt-2 font-medium text-gray-600">No assets to view</p>
+                        <p className="mt-1 text-sm text-gray-500 max-w-md mx-auto">
+                            This public collection has no visible assets. Access is limited to the assets shown here.
+                        </p>
                     </div>
                 ) : (
                     <AssetGrid

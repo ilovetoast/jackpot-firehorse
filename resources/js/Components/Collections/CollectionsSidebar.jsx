@@ -1,9 +1,10 @@
 /**
  * Collections Sidebar (C4 read-only; C5 add Create button).
+ * C11: Public indicator and asset count signals (read-only; no permission implication).
  * Lists collections for the current brand; selection is URL-driven (?collection=id).
  */
 import { router } from '@inertiajs/react'
-import { RectangleStackIcon, PlusIcon } from '@heroicons/react/24/outline'
+import { RectangleStackIcon, PlusIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 
 export default function CollectionsSidebar({
     collections = [],
@@ -12,6 +13,7 @@ export default function CollectionsSidebar({
     textColor = '#ffffff',
     canCreateCollection = false,
     onCreateCollection = null,
+    publicCollectionsEnabled = false,
 }) {
     const isLight = textColor === '#000000'
     const mutedStyle = { color: isLight ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.6)' }
@@ -50,6 +52,8 @@ export default function CollectionsSidebar({
                             ) : (
                                 collections.map((c) => {
                                     const isActive = selectedCollectionId != null && c.id === selectedCollectionId
+                                    const showPublic = publicCollectionsEnabled && !!c.is_public
+                                    const count = typeof c.assets_count === 'number' ? c.assets_count : null
                                     return (
                                         <button
                                             key={c.id}
@@ -66,7 +70,19 @@ export default function CollectionsSidebar({
                                             }`}
                                         >
                                             <RectangleStackIcon className="h-4 w-4 flex-shrink-0" />
-                                            <span className="truncate">{c.name}</span>
+                                            <span className="truncate flex-1 min-w-0">{c.name}</span>
+                                            {showPublic && (
+                                                <GlobeAltIcon
+                                                    className="h-4 w-4 flex-shrink-0 opacity-80"
+                                                    title="Public collection — viewable via shareable link"
+                                                    aria-hidden="true"
+                                                />
+                                            )}
+                                            {count !== null && (
+                                                <span className="flex-shrink-0 text-xs opacity-80" aria-label={`${count} assets`}>
+                                                    {count}
+                                                </span>
+                                            )}
                                         </button>
                                     )
                                 })

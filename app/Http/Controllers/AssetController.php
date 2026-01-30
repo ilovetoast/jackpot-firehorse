@@ -9,7 +9,9 @@ use App\Models\Asset;
 use App\Models\Category;
 use App\Models\User;
 use App\Services\AiMetadataConfidenceService;
+use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
+use App\Services\AssetPublicationService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
@@ -30,6 +32,8 @@ class AssetController extends Controller
         protected SystemCategoryService $systemCategoryService,
         protected PlanService $planService,
         protected AssetDeletionService $deletionService,
+        protected AssetPublicationService $publicationService,
+        protected AssetArchiveService $archiveService,
         protected MetadataFilterService $metadataFilterService,
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected AiMetadataConfidenceService $confidenceService,
@@ -499,6 +503,24 @@ class AssetController extends Controller
                     'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
                     'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
+                    // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
+                    'published_at' => $asset->published_at?->toIso8601String(),
+                    'is_published' => $asset->published_at !== null,
+                    'published_by' => $asset->published_by_id ? [
+                        'id' => $asset->publishedBy?->id ?? null,
+                        'name' => $asset->publishedBy?->name ?? null,
+                        'first_name' => $asset->publishedBy?->first_name ?? null,
+                        'last_name' => $asset->publishedBy?->last_name ?? null,
+                        'email' => $asset->publishedBy?->email ?? null,
+                    ] : null,
+                    'archived_at' => $asset->archived_at?->toIso8601String(),
+                    'archived_by' => $asset->archived_by_id ? [
+                        'id' => $asset->archivedBy?->id ?? null,
+                        'name' => $asset->archivedBy?->name ?? null,
+                        'first_name' => $asset->archivedBy?->first_name ?? null,
+                        'last_name' => $asset->archivedBy?->last_name ?? null,
+                        'email' => $asset->archivedBy?->email ?? null,
+                    ] : null,
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
                 ];
@@ -794,6 +816,55 @@ class AssetController extends Controller
                     }
                 }
 
+                // Tags filter values from asset_tags table (tags are stored in asset_tags, not asset_metadata)
+                // Primary filter for tags requires available_values; harvest from asset_tags for current asset set
+                if (isset($filterableFieldKeys['tags'])) {
+                    $tagValues = \DB::table('asset_tags')
+                        ->whereIn('asset_id', $assetIds)
+                        ->distinct()
+                        ->pluck('tag')
+                        ->filter()
+                        ->values()
+                        ->all();
+                    if (!empty($tagValues)) {
+                        $availableValues['tags'] = array_values(array_unique(array_merge(
+                            $availableValues['tags'] ?? [],
+                            $tagValues
+                        )));
+                        sort($availableValues['tags']);
+                    }
+                }
+
+                // Seed available_values for primary rating/select fields so primary filter shows when no asset has a value yet
+                foreach ($filterableSchema as $field) {
+                    $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
+                    $isPrimary = ($field['is_primary'] ?? false) === true;
+                    if (!$fieldKey || !$isPrimary || !isset($filterableFieldKeys[$fieldKey])) {
+                        continue;
+                    }
+                    $optionValues = [];
+                    $options = $field['options'] ?? [];
+                    if (!empty($options)) {
+                        foreach ($options as $opt) {
+                            $v = is_array($opt) ? ($opt['value'] ?? $opt['id'] ?? null) : $opt;
+                            if ($v !== null && $v !== '') {
+                                $optionValues[] = $v;
+                            }
+                        }
+                    }
+                    // Rating type (e.g. quality_rating) has no options in schema; seed 1–5 so primary filter shows
+                    if (empty($optionValues) && ($field['type'] ?? '') === 'rating') {
+                        $optionValues = [1, 2, 3, 4, 5];
+                    }
+                    if (!empty($optionValues)) {
+                        $availableValues[$fieldKey] = array_values(array_unique(array_merge(
+                            $availableValues[$fieldKey] ?? [],
+                            $optionValues
+                        )));
+                        sort($availableValues[$fieldKey]);
+                    }
+                }
+
                 // Remove empty arrays (filters with no values should not appear)
                 $availableValues = array_filter($availableValues, function ($values) {
                     return !empty($values);
@@ -853,6 +924,15 @@ class AssetController extends Controller
                     'label' => $collections[$id] ?? (string) $id,
                     'display_label' => $collections[$id] ?? (string) $id, // FilterFieldInput uses display_label
                 ], $collectionIds));
+            }
+            // Rating type (e.g. quality_rating): schema has no options; attach 1–5 so primary filter dropdown has labels
+            if (($field['type'] ?? '') === 'rating') {
+                $ratingValues = $availableValues[$fieldKey] ?? [1, 2, 3, 4, 5];
+                $field['options'] = array_values(array_map(fn ($v) => [
+                    'value' => (string) $v,
+                    'label' => (string) $v,
+                    'display_label' => (string) $v,
+                ], $ratingValues));
             }
         }
         unset($field);
@@ -1446,6 +1526,152 @@ class AssetController extends Controller
                 'success' => false,
                 'error' => 'Failed to regenerate system metadata: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Publish an asset.
+     *
+     * POST /assets/{asset}/publish
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function publish(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        try {
+            $this->publicationService->publish($asset, $user);
+            return response()->json([
+                'message' => 'Asset published successfully',
+                'asset_id' => $asset->id,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::publish]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to publish asset'], 500);
+        }
+    }
+
+    /**
+     * Unpublish an asset.
+     *
+     * POST /assets/{asset}/unpublish
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function unpublish(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        try {
+            $this->publicationService->unpublish($asset, $user);
+            return response()->json([
+                'message' => 'Asset unpublished successfully',
+                'asset_id' => $asset->id,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::unpublish]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to unpublish asset'], 500);
+        }
+    }
+
+    /**
+     * Archive an asset.
+     *
+     * POST /assets/{asset}/archive
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function archive(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        try {
+            $this->archiveService->archive($asset, $user);
+            return response()->json([
+                'message' => 'Asset archived successfully',
+                'asset_id' => $asset->id,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::archive]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to archive asset'], 500);
+        }
+    }
+
+    /**
+     * Restore an archived asset.
+     *
+     * POST /assets/{asset}/restore
+     *
+     * @param Asset $asset
+     * @return JsonResponse
+     */
+    public function restore(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        try {
+            $this->archiveService->restore($asset, $user);
+            return response()->json([
+                'message' => 'Asset restored successfully',
+                'asset_id' => $asset->id,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::restore]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to restore asset'], 500);
         }
     }
 

@@ -441,7 +441,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     
     // Handle Unpublish
     const handleUnpublish = async () => {
-        if (!asset?.id || !canUnpublish) return
+        if (!asset?.id || !canUnpublishWithFallback) return
         
         setUnpublishing(true)
         setLifecycleError(null)
@@ -493,7 +493,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     
     // Handle Restore
     const handleRestore = async () => {
-        if (!asset?.id || !canRestore) return
+        if (!asset?.id || !canRestoreWithFallback) return
         
         setRestoring(true)
         setLifecycleError(null)

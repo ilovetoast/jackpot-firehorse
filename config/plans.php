@@ -35,6 +35,7 @@ return [
             'notifications.enabled' => false,
             'approval_summaries.enabled' => false,
         ],
+        'public_collections_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 50,
@@ -74,6 +75,7 @@ return [
             'notifications.enabled' => false,
             'approval_summaries.enabled' => false,
         ],
+        'public_collections_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 200,
@@ -117,6 +119,7 @@ return [
             'notifications.enabled' => true,
             'approval_summaries.enabled' => true,
         ],
+        'public_collections_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 1000,
@@ -162,6 +165,7 @@ return [
             'notifications.enabled' => true,
             'approval_summaries.enabled' => true,
         ],
+        'public_collections_enabled' => true, // C10: Enterprise only
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999, // Unlimited

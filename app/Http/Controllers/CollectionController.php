@@ -9,11 +9,13 @@ use App\Models\Collection;
 use App\Models\Tenant;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
+use App\Services\FeatureGate;
 use App\Services\MetadataVisibilityResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -22,7 +24,8 @@ class CollectionController extends Controller
 {
     public function __construct(
         protected CollectionAssetQueryService $collectionAssetQueryService,
-        protected CollectionAssetService $collectionAssetService
+        protected CollectionAssetService $collectionAssetService,
+        protected FeatureGate $featureGate
     ) {
     }
 
@@ -41,16 +44,20 @@ class CollectionController extends Controller
                 'collections' => [],
                 'assets' => [],
                 'selected_collection' => null,
+                'can_update_collection' => false,
                 'can_create_collection' => false,
                 'can_add_to_collection' => false,
                 'can_remove_from_collection' => false,
+                'public_collections_enabled' => false,
             ]);
         }
 
         // Collections: tenant + brand, then filter by CollectionPolicy::view (C6: visibility + membership)
+        // C11: Include assets_count for sidebar signals (presentation only; no schema change)
         $collectionsQuery = Collection::query()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
+            ->withCount('assets')
             ->with(['brand', 'members'])
             ->orderBy('name');
 
@@ -63,6 +70,7 @@ class CollectionController extends Controller
                 'description' => $c->description,
                 'visibility' => $c->visibility,
                 'is_public' => $c->is_public,
+                'assets_count' => (int) ($c->assets_count ?? 0),
             ])
             ->all();
 
@@ -82,13 +90,31 @@ class CollectionController extends Controller
                     $query = $this->collectionAssetQueryService->query($user, $collection);
                     $assetModels = $query->get();
                     $assets = $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
+                    $brand = $collection->brand;
                     $selectedCollection = [
                         'id' => $collection->id,
                         'name' => $collection->name,
+                        'description' => $collection->description,
+                        'visibility' => $collection->visibility ?? 'brand',
+                        'slug' => $collection->slug,
+                        'brand_slug' => $brand?->slug,
+                        'is_public' => $collection->is_public,
                     ];
                 } catch (\Throwable) {
                     // Unauthorized or other: leave assets empty, selected_collection null
                 }
+            }
+        }
+
+        // C11.1: can_update_collection = user can update the selected collection (policy: update)
+        $canUpdateCollection = false;
+        if ($selectedCollection !== null) {
+            $collectionForUpdate = Collection::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->find($selectedCollection['id'] ?? null);
+            if ($collectionForUpdate) {
+                $canUpdateCollection = Gate::forUser($user)->allows('update', $collectionForUpdate);
             }
         }
 
@@ -106,13 +132,18 @@ class CollectionController extends Controller
             $canRemoveFromCollection = Gate::forUser($user)->allows('removeAsset', $dummy);
         }
 
+        // C10: Public Collections feature (plan-gated); when disabled, public toggle is hidden/disabled
+        $publicCollectionsEnabled = $this->featureGate->publicCollectionsEnabled($tenant);
+
         return Inertia::render('Collections/Index', [
             'collections' => $collections,
             'assets' => $assets,
             'selected_collection' => $selectedCollection,
+            'can_update_collection' => $canUpdateCollection,
             'can_create_collection' => Gate::forUser($user)->allows('create', $brand),
             'can_add_to_collection' => $canAddToCollection,
             'can_remove_from_collection' => $canRemoveFromCollection,
+            'public_collections_enabled' => $publicCollectionsEnabled,
         ]);
     }
 
@@ -135,7 +166,7 @@ class CollectionController extends Controller
             ->get()
             ->filter(fn (Collection $c) => Gate::forUser($user)->allows('view', $c))
             ->values()
-            ->map(fn (Collection $c) => ['id' => $c->id, 'name' => $c->name])
+            ->map(fn (Collection $c) => ['id' => $c->id, 'name' => $c->name, 'is_public' => $c->is_public])
             ->all();
         return response()->json(['collections' => $collections]);
     }
@@ -173,6 +204,7 @@ class CollectionController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:65535'],
             'visibility' => ['nullable', 'string', 'in:brand,restricted,private'],
+            'is_public' => ['nullable', 'boolean'],
         ]);
 
         $exists = Collection::query()
@@ -184,13 +216,17 @@ class CollectionController extends Controller
         }
 
         $visibility = $validated['visibility'] ?? 'brand';
+        // C10: Only allow is_public = true when tenant has Public Collections feature
+        $isPublic = isset($validated['is_public']) && $validated['is_public']
+            && $this->featureGate->publicCollectionsEnabled($tenant);
+
         $collection = Collection::create([
             'tenant_id' => $tenant->id,
             'brand_id' => $brand->id,
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
             'visibility' => $visibility,
-            'is_public' => false,
+            'is_public' => $isPublic,
             'created_by' => $user->id,
         ]);
 
@@ -203,6 +239,70 @@ class CollectionController extends Controller
                 'is_public' => $collection->is_public,
             ],
         ], 201);
+    }
+
+    /**
+     * C10: Update collection (name, description, is_public). is_public only applied when feature enabled.
+     */
+    public function update(Request $request, Collection $collection): JsonResponse
+    {
+        $user = $request->user();
+        Gate::forUser($user)->authorize('update', $collection);
+
+        $tenant = $collection->tenant;
+        $publicCollectionsEnabled = $tenant && $this->featureGate->publicCollectionsEnabled($tenant);
+
+        $validated = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:65535'],
+            'visibility' => ['nullable', 'string', 'in:brand,restricted,private'],
+            'is_public' => ['nullable', 'boolean'],
+        ]);
+
+        if (array_key_exists('visibility', $validated) && in_array($validated['visibility'], ['brand', 'restricted', 'private'], true)) {
+            $collection->visibility = $validated['visibility'];
+        }
+        if (array_key_exists('name', $validated) && $validated['name'] !== $collection->name) {
+            $exists = Collection::query()
+                ->where('brand_id', $collection->brand_id)
+                ->where('id', '!=', $collection->id)
+                ->where('name', $validated['name'])
+                ->exists();
+            if ($exists) {
+                throw ValidationException::withMessages(['name' => ['A collection with this name already exists for this brand.']]);
+            }
+            $collection->name = $validated['name'];
+        }
+        if (array_key_exists('description', $validated)) {
+            $collection->description = $validated['description'];
+        }
+        if (array_key_exists('is_public', $validated)) {
+            $newIsPublic = $publicCollectionsEnabled && $validated['is_public'];
+            $collection->is_public = $newIsPublic;
+            // C10: When making public, ensure slug exists for public URL
+            if ($newIsPublic && (empty($collection->slug))) {
+                $baseSlug = Str::slug($collection->name);
+                $slug = $baseSlug;
+                $counter = 0;
+                while (Collection::query()->where('slug', $slug)->where('id', '!=', $collection->id)->exists()) {
+                    $counter++;
+                    $slug = $baseSlug . '-' . $counter;
+                }
+                $collection->slug = $slug;
+            }
+        }
+        $collection->save();
+
+        return response()->json([
+            'collection' => [
+                'id' => $collection->id,
+                'name' => $collection->name,
+                'description' => $collection->description,
+                'visibility' => $collection->visibility,
+                'is_public' => $collection->is_public,
+                'slug' => $collection->slug,
+            ],
+        ]);
     }
 
     /**
@@ -263,7 +363,7 @@ class CollectionController extends Controller
             ->get()
             ->filter(fn (Collection $c) => Gate::forUser($user)->allows('view', $c))
             ->values()
-            ->map(fn (Collection $c) => ['id' => $c->id, 'name' => $c->name])
+            ->map(fn (Collection $c) => ['id' => $c->id, 'name' => $c->name, 'is_public' => $c->is_public])
             ->all();
 
         // C9.1: DEBUG - Log collections returned

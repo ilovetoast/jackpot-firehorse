@@ -6,7 +6,9 @@ import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
+import CollectionPublicBar from '../../Components/Collections/CollectionPublicBar'
 import CreateCollectionModal from '../../Components/Collections/CreateCollectionModal'
+import EditCollectionModal from '../../Components/Collections/EditCollectionModal'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
@@ -16,9 +18,11 @@ export default function CollectionsIndex({
     collections = [],
     assets = [],
     selected_collection = null,
+    can_update_collection = false,
     can_create_collection = false,
     can_add_to_collection = false,
     can_remove_from_collection = false,
+    public_collections_enabled = false,
 }) {
     const { auth } = usePage().props
     const selectedCollectionId = selected_collection?.id ?? null
@@ -41,6 +45,7 @@ export default function CollectionsIndex({
     }, [assets])
 
     const [showCreateModal, setShowCreateModal] = useState(false)
+    const [showEditModal, setShowEditModal] = useState(false)
     const [activeAssetId, setActiveAssetId] = useState(null)
     const activeAsset = activeAssetId ? localAssets.find((a) => a.id === activeAssetId) : null
 
@@ -100,6 +105,7 @@ export default function CollectionsIndex({
                         textColor={textColor}
                         canCreateCollection={can_create_collection}
                         onCreateCollection={() => setShowCreateModal(true)}
+                        publicCollectionsEnabled={public_collections_enabled}
                     />
                 </div>
 
@@ -107,6 +113,16 @@ export default function CollectionsIndex({
                     open={showCreateModal}
                     onClose={() => setShowCreateModal(false)}
                     onCreated={handleCollectionCreated}
+                />
+                <EditCollectionModal
+                    open={showEditModal}
+                    collection={selected_collection}
+                    publicCollectionsEnabled={public_collections_enabled}
+                    onClose={() => setShowEditModal(false)}
+                    onSaved={() => {
+                        setShowEditModal(false)
+                        router.reload()
+                    }}
                 />
 
                 {/* Main content */}
@@ -142,6 +158,19 @@ export default function CollectionsIndex({
                                 )
                             ) : (
                                 <>
+                                    {/* C10: Collection bar: name + Public toggle (only when feature enabled) */}
+                                    {selected_collection && (
+                                        <CollectionPublicBar
+                                            collection={selected_collection}
+                                            publicCollectionsEnabled={public_collections_enabled}
+                                            assetCount={localAssets.length}
+                                            canUpdateCollection={can_update_collection}
+                                            onEditClick={() => setShowEditModal(true)}
+                                            onPublicChange={() => {
+                                                router.reload()
+                                            }}
+                                        />
+                                    )}
                                     <div className="mb-8">
                                         <AssetGridToolbar
                                             showInfo={showInfo}

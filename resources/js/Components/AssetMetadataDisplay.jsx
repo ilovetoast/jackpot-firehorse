@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
@@ -364,9 +364,13 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                         <span
                                                             key={c.id}
                                                             className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium"
+                                                            title={c.is_public ? 'Public collection' : undefined}
                                                         >
-                                                            <RectangleStackIcon className="h-3 w-3" />
+                                                            <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
                                                             {c.name}
+                                                            {c.is_public && (
+                                                                <GlobeAltIcon className="h-3 w-3 opacity-80" aria-hidden="true" title="Public" />
+                                                            )}
                                                         </span>
                                                     ))}
                                                 </div>

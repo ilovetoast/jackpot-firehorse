@@ -2772,16 +2772,6 @@ class UploadController extends Controller
                     $assetType,
                     $userRole
                 );
-                // DEBUG: Log schema field keys for drawer collection visibility
-                $groupFieldKeys = [];
-                foreach ($schema['groups'] ?? [] as $g) {
-                    $groupFieldKeys[$g['key'] ?? '?'] = array_map(fn ($f) => $f['key'] ?? $f['field_key'] ?? '?', $g['fields'] ?? []);
-                }
-                Log::info('[UploadController] getMetadataSchema context=edit response', [
-                    'category_id' => $category->id,
-                    'group_field_keys' => $groupFieldKeys,
-                    'has_collection' => collect($schema['groups'] ?? [])->contains(fn ($g) => collect($g['fields'] ?? [])->contains(fn ($f) => ($f['key'] ?? $f['field_key'] ?? null) === 'collection')),
-                ]);
             } else {
                 $schema = $this->uploadMetadataSchemaResolver->resolve(
                     $tenant->id,

@@ -265,7 +265,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
         }
     }, [showInfo])
 
-    // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
+    // Handle category selection - triggers Inertia reload with slug-based category query param (?category=slug)
+    // ARCHITECTURAL: Reload filterable_schema and available_values so primary/secondary filters match the selected category (same as Assets).
     const handleCategorySelect = (category) => {
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
@@ -281,7 +282,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
             { 
                 preserveState: true, 
                 preserveScroll: true,
-                only: ['assets', 'selected_category', 'selected_category_slug'] // Only reload assets and category props
+                only: ['filterable_schema', 'available_values', 'assets', 'selected_category', 'selected_category_slug']
             }
         )
     }
@@ -601,6 +602,9 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
                                 primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                filterable_schema={filterable_schema}
+                                selectedCategoryId={selectedCategoryId}
+                                available_values={available_values}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */

@@ -71,6 +71,8 @@ class PublicCollectionTest extends TestCase
 
     public function test_public_collection_loads_without_auth(): void
     {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
         $collection = Collection::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -80,7 +82,7 @@ class PublicCollectionTest extends TestCase
             'is_public' => true,
         ]);
 
-        $response = $this->get('/collections/press-kit');
+        $response = $this->get('/b/' . $this->brand->slug . '/collections/press-kit');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -103,13 +105,15 @@ class PublicCollectionTest extends TestCase
             'is_public' => false,
         ]);
 
-        $response = $this->get('/collections/private-collection');
+        $response = $this->get('/b/' . $this->brand->slug . '/collections/private-collection');
 
         $response->assertStatus(404);
     }
 
     public function test_assets_returned_are_brand_scoped_only(): void
     {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
         $collection = Collection::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -122,7 +126,7 @@ class PublicCollectionTest extends TestCase
         $asset = $this->createAsset(['title' => 'Test Asset']);
         $collection->assets()->attach($asset->id);
 
-        $response = $this->get('/collections/public-collection');
+        $response = $this->get('/b/' . $this->brand->slug . '/collections/public-collection');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -135,6 +139,8 @@ class PublicCollectionTest extends TestCase
 
     public function test_asset_from_another_brand_never_appears(): void
     {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
         $otherBrand = Brand::create(['tenant_id' => $this->tenant->id, 'name' => 'Other', 'slug' => 'other']);
 
         $collection = Collection::create([
@@ -179,7 +185,7 @@ class PublicCollectionTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->get('/collections/public-collection');
+        $response = $this->get('/b/' . $this->brand->slug . '/collections/public-collection');
 
         $response->assertStatus(200);
         // Only same-brand asset must appear (queryPublic filters by collection brand)
@@ -211,7 +217,7 @@ class PublicCollectionTest extends TestCase
         $user->brands()->attach($this->brand->id, ['role' => 'admin', 'removed_at' => null]);
 
         $response = $this->actingAs($user)
-            ->get('/collections/restricted-collection');
+            ->get('/b/' . $this->brand->slug . '/collections/restricted-collection');
 
         $response->assertStatus(404);
     }

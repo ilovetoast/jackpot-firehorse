@@ -120,22 +120,7 @@ class UploadMetadataSchemaResolver
         $tenant = \App\Models\Tenant::find($tenantId);
 
         $editFields = $this->filterForEdit($resolvedSchema['fields'], $category, $tenant);
-
-        // DEBUG: Log edit field keys to trace collection visibility in drawer
-        $editKeys = array_column($editFields, 'key');
-        \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] resolveForEdit after filterForEdit', [
-            'category_id' => $categoryId,
-            'field_keys' => $editKeys,
-            'has_collection' => in_array('collection', $editKeys, true),
-        ]);
-
         $editFields = $this->visibilityResolver->filterVisibleFields($editFields, $category, $tenant);
-
-        $visibleKeys = array_column($editFields, 'key');
-        \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] resolveForEdit after filterVisibleFields', [
-            'field_keys' => $visibleKeys,
-            'has_collection' => in_array('collection', $visibleKeys, true),
-        ]);
 
         if ($userRole !== null) {
             $editFields = $this->addPermissionFlags(
@@ -159,11 +144,7 @@ class UploadMetadataSchemaResolver
     {
         $editFields = [];
         foreach ($fields as $field) {
-            $key = $field['key'] ?? $field['field_key'] ?? null;
             if (!$field['is_visible']) {
-                if ($key === 'collection') {
-                    \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] filterForEdit SKIP collection', ['reason' => 'is_visible=false']);
-                }
                 continue;
             }
             // C9.2: Respect Quick View (show_on_edit) from Metadata Management – no special case for collection
@@ -175,9 +156,6 @@ class UploadMetadataSchemaResolver
                 continue;
             }
             if ($field['is_internal_only'] ?? false) {
-                if ($key === 'collection') {
-                    \Illuminate\Support\Facades\Log::info('[UploadMetadataSchemaResolver] filterForEdit SKIP collection', ['reason' => 'is_internal_only=true']);
-                }
                 continue;
             }
             $editFields[] = $field;

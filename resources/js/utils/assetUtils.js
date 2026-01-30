@@ -1,8 +1,21 @@
 /**
  * Asset utility functions
- * 
+ *
  * Helper functions for asset-related operations and guards.
  */
+
+/**
+ * Resolves category ID from an asset object.
+ * Backend may send category as category: { id, name } or metadata.category_id; not always top-level category_id.
+ * Single source of truth for drawer, filters, and any component that needs asset category.
+ *
+ * @param {Object} asset - Asset object from API (may have category, metadata.category_id, or category_id)
+ * @returns {number|null} - Category ID or null
+ */
+export function getAssetCategoryId(asset) {
+    if (!asset) return null
+    return asset.category?.id ?? asset.metadata?.category_id ?? asset.category_id ?? null
+}
 
 /**
  * Determines if a preview/thumbnail URL can be mutated for an asset.

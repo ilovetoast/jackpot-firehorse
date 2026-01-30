@@ -11,7 +11,7 @@
  * Design intent: Similar to Tailwind UI command-style dropdowns.
  */
 import { useState, useRef, useEffect } from 'react'
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 
 export default function CollectionSelector({
     collections = [],
@@ -176,6 +176,14 @@ export default function CollectionSelector({
                                                 >
                                                     {collection.name}
                                                 </span>
+                                                {/* C11: Public indicator (read-only signal; does not imply access) */}
+                                                {collection.is_public && (
+                                                    <GlobeAltIcon
+                                                        className="h-4 w-4 flex-shrink-0 text-gray-400 ml-1.5"
+                                                        title="Public collection"
+                                                        aria-hidden="true"
+                                                    />
+                                                )}
                                             </div>
 
                                             {/* C9.1: Optional icon slot (non-functional, placeholder for future) */}
