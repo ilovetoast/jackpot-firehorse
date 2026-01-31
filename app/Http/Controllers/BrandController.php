@@ -288,7 +288,7 @@ class BrandController extends Controller
         }
 
         try {
-            $brand = $this->brandService->create($tenant, $validated);
+            $brand = $this->brandService->create($tenant, $validated, $user);
 
             return redirect()->route('brands.index')->with('success', 'Brand created successfully.');
         } catch (\App\Exceptions\PlanLimitExceededException $e) {

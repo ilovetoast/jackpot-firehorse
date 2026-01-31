@@ -67,6 +67,7 @@ class BuildDownloadZipJob implements ShouldQueue
      */
     public function handle(): void
     {
+        $startTime = microtime(true);
         Log::info('[BuildDownloadZipJob] Job started', [
             'download_id' => $this->downloadId,
         ]);
@@ -125,10 +126,15 @@ class BuildDownloadZipJob implements ShouldQueue
                 $this->deleteOldZip($download->zip_path, $bucket, $s3Client);
             }
 
-            // Update download model
+            // Update download model (store S3 key, not local path — Phase D1 fix)
+            $s3ZipKey = "downloads/{$download->id}/download.zip";
             $download->zip_status = ZipStatus::READY;
-            $download->zip_path = $zipPath;
+            $download->zip_path = $s3ZipKey;
             $download->zip_size_bytes = $zipSizeBytes;
+            $options = $download->download_options ?? [];
+            $options['generation_time_seconds'] = round(microtime(true) - $startTime, 2);
+            $options['asset_count'] = $assets->count();
+            $download->download_options = $options;
             $download->save();
 
             // Phase 3.1 Step 5: Emit ZIP build success event

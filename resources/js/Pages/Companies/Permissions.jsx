@@ -198,7 +198,13 @@ export default function CompanyPermissions({
                                         </svg>
                                     </div>
                                     <div className="ml-3 flex-1">
-                                        <h3 className="text-sm font-semibold text-blue-900 mb-2">About Restricted Categories</h3>
+                                        <h3 className="text-sm font-semibold text-blue-900 mb-2">Permission Cascade</h3>
+                                        <div className="text-sm text-blue-800 space-y-2">
+                                            <p>
+                                                <strong>Tenant-level permissions override brand-level restrictions.</strong> Owners and Admins can manage brands, create collections, and perform other brand operations even when their brand role is Viewer or when they have no brand assignment. This matches AssetPolicy, BrandPolicy, and CategoryPolicy.
+                                            </p>
+                                        </div>
+                                        <h3 className="text-sm font-semibold text-blue-900 mb-2 mt-4">About Restricted Categories</h3>
                                         <div className="text-sm text-blue-800 space-y-2">
                                             <p>
                                                 <strong>Owners</strong> and <strong>Admins</strong> automatically have access to view all restricted (private) categories, regardless of category-level access rules. This ensures company administrators can always access important content.

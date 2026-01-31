@@ -9,6 +9,7 @@ import AssetGridMetadataPrimaryFilters from '../../Components/AssetGridMetadataP
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
+import DownloadBucketBar from '../../Components/DownloadBucketBar'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
@@ -90,7 +91,125 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
     const [isBulkMode, setIsBulkMode] = useState(false)
     const [showBulkEditModal, setShowBulkEditModal] = useState(false)
-    
+
+    // Phase D1: Download bucket — IDs for grid selection; count = bucketAssetIds.length
+    const [bucketAssetIds, setBucketAssetIds] = useState([])
+    const lastClickedRef = useRef({ assetId: null, at: 0, index: null })
+
+    // Fetch bucket items on mount and when returning to page (sync from server)
+    useEffect(() => {
+        if (typeof window === 'undefined' || !window.route) return
+        fetch(route('download-bucket.items'), {
+            method: 'GET',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.ok ? r.json() : Promise.reject(new Error('Failed to load bucket')))
+            .then((data) => {
+                const ids = (data.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+                setBucketAssetIds(ids)
+            })
+            .catch(() => setBucketAssetIds([]))
+    }, [selectedCategoryId])
+
+    // Sync bucket count from shared props when it changes (e.g. after Create Download on another tab)
+    useEffect(() => {
+        const count = pageProps.download_bucket_count ?? 0
+        if (typeof count === 'number' && count === 0 && bucketAssetIds.length > 0) {
+            setBucketAssetIds([])
+        }
+    }, [pageProps.download_bucket_count])
+
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
+
+    const applyBucketResponse = useCallback((data) => {
+        const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+        setBucketAssetIds(ids)
+    }, [])
+
+    // Phase D1: Add asset to bucket (API), then update local state from response
+    const bucketAdd = useCallback((assetId) => {
+        return fetch(route('download-bucket.add'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ asset_id: assetId }),
+        }).then((r) => r.json()).then(applyBucketResponse)
+    }, [applyBucketResponse])
+
+    const bucketRemove = useCallback((assetId) => {
+        return fetch(route('download-bucket.remove', { asset: assetId }), {
+            method: 'DELETE',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        }).then((r) => r.json()).then(applyBucketResponse)
+    }, [applyBucketResponse])
+
+    const bucketClear = useCallback(() => {
+        return fetch(route('download-bucket.clear'), {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        }).then((r) => r.json()).then(applyBucketResponse)
+    }, [applyBucketResponse])
+
+    const bucketAddBatch = useCallback((assetIds) => {
+        if (!assetIds.length) return Promise.resolve()
+        return fetch(route('download-bucket.add_batch'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ asset_ids: assetIds }),
+        }).then((r) => r.json()).then(applyBucketResponse)
+    }, [applyBucketResponse])
+
+    // Phase D1: Single click = add to bucket; second click on same = open preview. Shift+click = range add.
+    const handleAssetClick = useCallback((asset, e) => {
+        if (isBulkMode) {
+            setActiveAssetId(asset?.id || null)
+            return
+        }
+        const id = asset?.id
+        const idx = localAssets.findIndex((a) => a.id === id)
+        if (e?.shiftKey) {
+            const last = lastClickedRef.current.index
+            if (last != null && last >= 0) {
+                const low = Math.min(last, idx)
+                const high = Math.max(last, idx)
+                const rangeIds = localAssets.slice(low, high + 1).map((a) => a.id).filter(Boolean)
+                bucketAddBatch(rangeIds).then(() => {
+                    lastClickedRef.current = { assetId: id, at: Date.now(), index: idx }
+                })
+            } else {
+                bucketAdd(id).then(() => {
+                    lastClickedRef.current = { assetId: id, at: Date.now(), index: idx }
+                })
+            }
+            return
+        }
+        const sameAndRecent = lastClickedRef.current.assetId === id && (Date.now() - lastClickedRef.current.at) < 500
+        if (sameAndRecent) {
+            setActiveAssetId(id)
+            return
+        }
+        bucketAdd(id).then(() => {
+            lastClickedRef.current = { assetId: id, at: Date.now(), index: idx }
+        })
+    }, [isBulkMode, localAssets, bucketAdd, bucketAddBatch])
+
+    const handleBucketToggle = useCallback((assetId) => {
+        if (bucketAssetIds.includes(assetId)) {
+            bucketRemove(assetId)
+        } else {
+            bucketAdd(assetId)
+        }
+    }, [bucketAssetIds, bucketAdd, bucketRemove])
+
+    const handleSelectAllForDownload = useCallback(() => {
+        const ids = (localAssets || []).map((a) => a.id).filter(Boolean)
+        bucketAddBatch(ids)
+    }, [localAssets, bucketAddBatch])
+
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
@@ -712,7 +831,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
                     <div 
-                        className="h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative"
+                        className={`h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -774,6 +893,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     }
                                 }}
                                 isBulkMode={isBulkMode}
+                                onSelectAllForDownload={handleSelectAllForDownload}
+                                bucketCount={bucketAssetIds.length}
+                                showSelectAllForDownload={!isBulkMode && localAssets?.length > 0}
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={availableValues}
@@ -948,6 +1070,14 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     initialFiles={droppedFiles}
                 />
             )}
+
+            {/* Phase D1 / D1.1: Sticky download bucket bar when items > 0 */}
+            <DownloadBucketBar
+                bucketCount={bucketAssetIds.length}
+                onCountChange={() => setBucketAssetIds([])}
+                onRemove={bucketRemove}
+                onClear={bucketClear}
+            />
         </div>
     )
 }

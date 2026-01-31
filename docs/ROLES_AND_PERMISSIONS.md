@@ -104,7 +104,7 @@ Brand roles control access to:
 **Example 4: Tenant Admin + Brand Viewer**
 - Company level: Admin (company administration)
 - Brand level: Viewer (read-only access)
-- **Result**: User has company-wide admin access, but only read-only access to this specific brand
+- **Result**: Tenant permissions cascade—user can manage brands, create collections, and perform brand operations. For asset-level actions (upload, edit) brand role applies. See Permission Cascade.
 
 **Example 5: Tenant Owner + Brand Admin**
 - Company level: Owner (full company access)

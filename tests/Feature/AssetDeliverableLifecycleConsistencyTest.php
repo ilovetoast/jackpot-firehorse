@@ -177,13 +177,13 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
             'published_by_id' => $this->user->id,
         ]);
 
-        // Create unpublished asset
+        // Create unpublished asset - CRITICAL: status=HIDDEN (matches AssetPublicationService::unpublish)
         $this->unpublishedAsset = Asset::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
             'user_id' => $this->user->id,
             'upload_session_id' => $uploadSessions['unpublished_asset']->id,
-            'status' => AssetStatus::VISIBLE,
+            'status' => AssetStatus::HIDDEN,
             'type' => AssetType::ASSET,
             'title' => 'Unpublished Asset',
             'original_filename' => 'unpublished-asset.jpg',
@@ -215,13 +215,13 @@ class AssetDeliverableLifecycleConsistencyTest extends TestCase
             'published_by_id' => $this->user->id,
         ]);
 
-        // Create unpublished deliverable
+        // Create unpublished deliverable - CRITICAL: status=HIDDEN (matches unpublish behavior)
         $this->unpublishedDeliverable = Asset::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
             'user_id' => $this->user->id,
             'upload_session_id' => $uploadSessions['unpublished_deliverable']->id,
-            'status' => AssetStatus::VISIBLE,
+            'status' => AssetStatus::HIDDEN,
             'type' => AssetType::DELIVERABLE,
             'title' => 'Unpublished Deliverable',
             'original_filename' => 'unpublished-deliverable.jpg',

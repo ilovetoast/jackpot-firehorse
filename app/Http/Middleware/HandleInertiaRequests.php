@@ -506,6 +506,8 @@ class HandleInertiaRequests extends Middleware
                 ],
             ],
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
+            // Phase D1: Download bucket count (session-based) for sticky bar
+            'download_bucket_count' => $user && $tenant ? app(\App\Services\DownloadBucketService::class)->count() : 0,
         ];
         
         // Add pending items counts for notification bell (simple, lightweight)

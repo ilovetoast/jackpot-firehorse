@@ -70,9 +70,23 @@ class CollectionPolicy
     /**
      * Determine if the user can create collections for the brand.
      * C9: Brand admin, brand manager, and contributor may create; viewer may not.
+     * Tenant owner/admin can create (permission cascade - matches AssetPolicy, BrandPolicy, CategoryPolicy).
      */
     public function create(User $user, Brand $brand): bool
     {
+        if (! $user->tenants()->where('tenants.id', $brand->tenant_id)->exists()) {
+            return false;
+        }
+
+        $tenant = $brand->tenant;
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+
+        // Tenant owners/admins can create collections for any brand (permission cascade)
+        if ($isTenantOwnerOrAdmin && $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            return true;
+        }
+
         $membership = $user->activeBrandMembership($brand);
         if ($membership === null) {
             return false;
@@ -87,9 +101,22 @@ class CollectionPolicy
     /**
      * Determine if the user can update the collection.
      * Only brand admins and brand managers may update.
+     * Tenant owner/admin can update (permission cascade - matches create, addAsset).
      */
     public function update(User $user, Collection $collection): bool
     {
+        if (! $user->tenants()->where('tenants.id', $collection->tenant_id)->exists()) {
+            return false;
+        }
+
+        $tenant = $collection->tenant;
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+
+        if ($isTenantOwnerOrAdmin && $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            return true;
+        }
+
         $membership = $user->activeBrandMembership($collection->brand);
         if ($membership === null) {
             return false;
@@ -129,9 +156,22 @@ class CollectionPolicy
     /**
      * Determine if the user can add assets to the collection (C5).
      * Brand admin, brand manager, and contributor may add; viewer may not.
+     * Tenant owner/admin can add (permission cascade - matches create).
      */
     public function addAsset(User $user, Collection $collection): bool
     {
+        if (! $user->tenants()->where('tenants.id', $collection->tenant_id)->exists()) {
+            return false;
+        }
+
+        $tenant = $collection->tenant;
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+
+        if ($isTenantOwnerOrAdmin && $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            return true;
+        }
+
         $membership = $user->activeBrandMembership($collection->brand);
         if ($membership === null) {
             return false;
@@ -146,9 +186,22 @@ class CollectionPolicy
     /**
      * Determine if the user can remove assets from the collection (C5).
      * Only brand admin and brand manager may remove; contributor and viewer may not.
+     * Tenant owner/admin can remove (permission cascade - matches create).
      */
     public function removeAsset(User $user, Collection $collection): bool
     {
+        if (! $user->tenants()->where('tenants.id', $collection->tenant_id)->exists()) {
+            return false;
+        }
+
+        $tenant = $collection->tenant;
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+
+        if ($isTenantOwnerOrAdmin && $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            return true;
+        }
+
         $membership = $user->activeBrandMembership($collection->brand);
         if ($membership === null) {
             return false;

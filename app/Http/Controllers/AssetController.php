@@ -225,17 +225,16 @@ class AssetController extends Controller
             }
         }
 
-        // Query visible assets for this brand and asset type
-        // AssetStatus represents VISIBILITY only, not processing progress.
+        // Query assets for this brand and asset type
+        // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
+        // CRITICAL: Do NOT add status filter here - unpublished/archived filters need HIDDEN assets.
+        // Unpublishing sets status=HIDDEN; LifecycleResolver applies correct status per filter.
         // Processing state is tracked via thumbnail_status, metadata flags, and activity events.
 
         $assetsQuery = Asset::query()
         ->where('tenant_id', $tenant->id)
         ->where('brand_id', $brand->id)
         ->where('type', AssetType::ASSET)
-
-        // Visibility-only filter - assets with VISIBLE status are shown in grid
-        ->where('status', AssetStatus::VISIBLE)
 
         // Exclude soft-deleted assets only
         ->whereNull('deleted_at');

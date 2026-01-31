@@ -21,6 +21,8 @@ return [
             'max_upload_size_mb' => 10,
             'max_users' => 2,
             'max_downloads_per_month' => 50,
+            'max_download_assets' => 50, // Phase D1: max assets per download
+            'max_download_zip_mb' => 500, // Phase D1: max ZIP size (MB)
             'max_custom_metadata_fields' => 0, // Phase C3: No custom fields on free plan
             'max_tags_per_asset' => 1, // Maximum tags allowed per asset
             // AI Usage caps (per month)
@@ -61,6 +63,8 @@ return [
             'max_upload_size_mb' => 50,
             'max_users' => 5,
             'max_downloads_per_month' => 200,
+            'max_download_assets' => 100,
+            'max_download_zip_mb' => 1000,
             'max_custom_metadata_fields' => 5, // Phase C3: 5 custom fields on starter plan
             'max_tags_per_asset' => 5, // Maximum tags allowed per asset
             // AI Usage caps (per month)
@@ -102,6 +106,8 @@ return [
             'max_upload_size_mb' => 999999,
             'max_users' => 20,
             'max_downloads_per_month' => 1000,
+            'max_download_assets' => 500,
+            'max_download_zip_mb' => 2048,
             'max_custom_metadata_fields' => 20, // Phase C3: 20 custom fields on pro plan
             'max_tags_per_asset' => 10, // Maximum tags allowed per asset
             // AI Usage caps (per month)
@@ -147,6 +153,8 @@ return [
             'max_upload_size_mb' => 999999, // Unlimited
             'max_users' => 200, // Unlimited
             'max_downloads_per_month' => 999999, // Unlimited
+            'max_download_assets' => 2000,
+            'max_download_zip_mb' => 5120,
             'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on enterprise plan
             'max_tags_per_asset' => 15, // Maximum tags allowed per asset
             // AI Usage caps (per month)

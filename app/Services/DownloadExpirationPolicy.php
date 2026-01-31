@@ -59,13 +59,8 @@ class DownloadExpirationPolicy
      */
     public function calculateExpiresAt(Tenant $tenant, DownloadType $downloadType): ?Carbon
     {
-        // TODO: Implement in future phase
-        // This method will:
-        // 1. Get tenant plan via PlanService
-        // 2. Look up expiration rules from config or database
-        // 3. Apply plan-specific expiration periods
-        // 4. Return calculated expiration timestamp
-        return null;
+        // Phase D1: Fixed 30-day expiration for all plans (locked).
+        return now()->addDays(30);
     }
 
     /**
@@ -92,13 +87,11 @@ class DownloadExpirationPolicy
      */
     public function calculateHardDeleteAt(Download $download, ?Carbon $expiresAt): ?Carbon
     {
-        // TODO: Implement in future phase
-        // This method will:
-        // 1. If expires_at is null: return null (unlimited, manual deletion only)
-        // 2. If expires_at is set: calculate grace window based on plan
-        // 3. Return expires_at + grace_window
-        // 4. Handle soft-deleted downloads with null expires_at
-        return null;
+        // Phase D1: hard_delete_at = expires_at + 7 days grace.
+        if ($expiresAt === null) {
+            return null;
+        }
+        return $expiresAt->copy()->addDays($this->getGraceWindowDays($download->tenant));
     }
 
     /**

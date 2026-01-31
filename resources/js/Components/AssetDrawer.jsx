@@ -1852,15 +1852,15 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     )}
                     
                     <dl className="space-y-3">
-                        <div className="flex justify-between">
-                            <dt className="text-sm text-gray-500">File Type</dt>
-                            <dd className="text-sm font-semibold text-gray-900 uppercase">
+                        <div className="flex items-start gap-4">
+                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">File Type</dt>
+                            <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left uppercase">
                                 {fileExtension || 'Unknown'}
                             </dd>
                         </div>
-                        <div className="flex justify-between">
-                            <dt className="text-sm text-gray-500">File Size</dt>
-                            <dd className="text-sm font-semibold text-gray-900">
+                        <div className="flex items-start gap-4">
+                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">File Size</dt>
+                            <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                 {formatFileSize(displayAsset.size_bytes)}
                             </dd>
                         </div>
@@ -1868,26 +1868,26 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {isVideo && (
                             <>
                                 {displayAsset.video_duration && (
-                                    <div className="flex justify-between">
-                                        <dt className="text-sm text-gray-500">Duration</dt>
-                                        <dd className="text-sm font-semibold text-gray-900">
+                                    <div className="flex items-start gap-4">
+                                        <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Duration</dt>
+                                        <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                             {formatVideoDuration(displayAsset.video_duration)}
                                         </dd>
                                     </div>
                                 )}
                                 {displayAsset.video_width && displayAsset.video_height && (
-                                    <div className="flex justify-between">
-                                        <dt className="text-sm text-gray-500">Resolution</dt>
-                                        <dd className="text-sm font-semibold text-gray-900">
+                                    <div className="flex items-start gap-4">
+                                        <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Resolution</dt>
+                                        <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                             {displayAsset.video_width.toLocaleString()} × {displayAsset.video_height.toLocaleString()} px
                                         </dd>
                                     </div>
                                 )}
                             </>
                         )}
-                        <div className="flex justify-between">
-                            <dt className="text-sm text-gray-500">Status</dt>
-                            <dd className="text-sm font-medium">
+                        <div className="flex items-start gap-4">
+                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Status</dt>
+                            <dd className="text-sm font-medium flex-1 min-w-0 text-left">
                                 <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
                                     isVisible
                                         ? 'bg-green-100 text-green-800'
@@ -1898,25 +1898,25 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </dd>
                         </div>
                         {displayAsset.created_at && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Uploaded</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Uploaded</dt>
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {formatDate(displayAsset.created_at)}
                                 </dd>
                             </div>
                         )}
-                        <div className="flex justify-between">
-                            <dt className="text-sm text-gray-500">Category</dt>
-                            <dd className="text-sm font-semibold text-gray-900">
+                        <div className="flex items-start gap-4">
+                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Category</dt>
+                            <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                 {categoryName}
                             </dd>
                         </div>
                         
                         {/* Phase L.4: Lifecycle Information (read-only) */}
                         {displayAsset.published_at && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Published</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Published</dt>
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {formatDate(displayAsset.published_at)}
                                     {displayAsset.published_by && (
                                         <span className="ml-2 text-xs font-normal text-gray-500">
@@ -1927,9 +1927,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </div>
                         )}
                         {displayAsset.archived_at && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Archived</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Archived</dt>
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {formatDate(displayAsset.archived_at)}
                                     {displayAsset.archived_by && (
                                         <span className="ml-2 text-xs font-normal text-gray-500">
@@ -1941,11 +1941,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         )}
                         {/* Phase M: Expiration date display (read-only) */}
                         {displayAsset.expires_at && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">
                                     {new Date(displayAsset.expires_at) < new Date() ? 'Expired on' : 'Expires on'}
                                 </dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {formatDate(displayAsset.expires_at)}
                                 </dd>
                             </div>
@@ -1953,9 +1953,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {/* Phase AF-1: Approval information (read-only) */}
                         {/* Phase AF-5: Only show if approvals are enabled */}
                         {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'approved' && displayAsset.approved_at && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Approved on</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Approved on</dt>
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {formatDate(displayAsset.approved_at)}
                                     {displayAsset.approved_by && (
                                         <span className="ml-2 text-xs font-normal text-gray-500">
@@ -1968,9 +1968,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {/* Phase AF-5: Only show if approvals are enabled */}
                         {/* Phase J.3: Show rejected info for contributors too */}
                         {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'rejected' && displayAsset.rejected_at && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Rejected on</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Rejected on</dt>
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {formatDate(displayAsset.rejected_at)}
                                     {displayAsset.rejection_reason && (
                                         <span className="ml-2 text-xs font-normal text-gray-500">
@@ -1983,9 +1983,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {/* Phase AF-4: Pending aging information */}
                         {/* Phase AF-5: Only show if approvals are enabled */}
                         {auth?.approval_features?.approvals_enabled && displayAsset.approval_status === 'pending' && displayAsset.pending_since && (
-                            <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Awaiting approval for</dt>
-                                <dd className="text-sm font-semibold text-gray-900">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Awaiting approval for</dt>
+                                <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {displayAsset.pending_days !== null && displayAsset.pending_days >= 0 ? (
                                         <>
                                             {displayAsset.pending_days} {displayAsset.pending_days === 1 ? 'day' : 'days'}
@@ -2006,9 +2006,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             // Priority 1: Check source_dimensions (from original image file)
                             if (displayAsset.source_dimensions && displayAsset.source_dimensions.width && displayAsset.source_dimensions.height) {
                                 return (
-                                    <div className="flex justify-between">
-                                        <dt className="text-sm text-gray-500">Dimensions</dt>
-                                        <dd className="text-sm font-semibold text-gray-900">
+                                    <div className="flex items-start gap-4">
+                                        <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Dimensions</dt>
+                                        <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                             {displayAsset.source_dimensions.width.toLocaleString()} × {displayAsset.source_dimensions.height.toLocaleString()} px
                                         </dd>
                                     </div>
@@ -2018,9 +2018,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             // Priority 2: Try to get dimensions from metadata (from thumbnail generation)
                             if (displayAsset.metadata?.image_width && displayAsset.metadata?.image_height) {
                                 return (
-                                    <div className="flex justify-between">
-                                        <dt className="text-sm text-gray-500">Dimensions</dt>
-                                        <dd className="text-sm font-semibold text-gray-900">
+                                    <div className="flex items-start gap-4">
+                                        <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Dimensions</dt>
+                                        <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                             {parseInt(displayAsset.metadata.image_width).toLocaleString()} × {parseInt(displayAsset.metadata.image_height).toLocaleString()} px
                                         </dd>
                                     </div>
@@ -2044,9 +2044,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 const [width, height] = dimensionsValue.split('x')
                                 if (width && height && !isNaN(width) && !isNaN(height)) {
                                     return (
-                                        <div className="flex justify-between">
-                                            <dt className="text-sm text-gray-500">Dimensions</dt>
-                                            <dd className="text-sm font-semibold text-gray-900">
+                                        <div className="flex items-start gap-4">
+                                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Dimensions</dt>
+                                            <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                                 {parseInt(width).toLocaleString()} × {parseInt(height).toLocaleString()} px
                                             </dd>
                                         </div>
@@ -2056,11 +2056,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             return null
                         })()}
                         
-                        {/* Dominant Colors removed from File Information - now displayed as a metadata field */}
+                        {/* Filename at bottom — label column + wider left-aligned value column (matches Metadata) */}
                         {displayAsset.original_filename && (
-                            <div>
-                                <dt className="text-sm text-gray-500 mb-1">Filename</dt>
-                                <dd className="text-sm font-mono font-semibold text-gray-900 break-all">
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Filename</dt>
+                                <dd className="text-sm font-mono font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {displayAsset.original_filename}
                                 </dd>
                             </div>

@@ -146,6 +146,11 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
         setAddToBrandErrors({})
     }
 
+    const openAddToBrandModalWithBrand = (user, brand) => {
+        setAddToBrandModal({ open: true, user, brandId: String(brand.id), role: 'viewer' })
+        setAddToBrandErrors({})
+    }
+
     const handleAddToBrandSubmit = (e) => {
         e.preventDefault()
         if (!addToBrandModal.user?.id || !addToBrandModal.brandId) return
@@ -319,88 +324,85 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                                                 </p>
                                             )}
                                             
-                                            {/* Brand Assignments - Displayed prominently with role selectors */}
-                                            {member.brand_assignments && Array.isArray(member.brand_assignments) && member.brand_assignments.length > 0 ? (
+                                            {/* Brand Assignments - Show ALL tenant brands; for each: role or Add to brand */}
+                                            {brands && brands.length > 0 && (
                                                 <div className="mt-3">
                                                     <p className="text-xs font-medium text-gray-700 mb-2">Brand Roles:</p>
                                                     <div className="flex flex-col gap-2">
-                                                        {member.brand_assignments.map((ba, index) => {
-                                                            const isUpdating = updatingRoles[`brand_${member.id}_${ba.id}`]
-                                                            
+                                                        {brands.map((brand) => {
+                                                            const ba = (member.brand_assignments || []).find(a => a.id === brand.id)
+                                                            const hasAccess = !!ba
+                                                            const isUpdating = updatingRoles[`brand_${member.id}_${brand.id}`]
+
                                                             return (
-                                                                <div key={`${ba.id}-${ba.pivot_id || index}`} className="flex items-center gap-1.5">
-                                                                    <span className="text-xs font-medium text-gray-700">{ba.name}:</span>
-                                                                    {member.is_orphaned ? (
-                                                                        // For orphaned records, show role as text and allow removal
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium ${getRoleColors(ba.role)}`}>
-                                                                                {ba.role || 'member'}
-                                                                            </span>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleRemoveBrandAssignment(member.id, ba.id, ba.name)}
-                                                                                className="text-red-600 hover:text-red-800 text-xs"
-                                                                                title="Remove orphaned brand assignment"
-                                                                            >
-                                                                                Remove
-                                                                            </button>
-                                                                        </div>
-                                                                    ) : (
-                                                                        // For regular members, show role selector and remove button
-                                                                        <>
-                                                                            <div className="relative inline-flex items-center">
-                                                                                <select
-                                                                                    value={ba.role?.toLowerCase() === 'member' ? 'viewer' : (ba.role?.toLowerCase() || 'viewer')}
-                                                                                    onChange={(e) => {
-                                                                                        // Convert 'member' to 'viewer' if somehow selected (member is tenant-level only)
-                                                                                        const role = e.target.value === 'member' ? 'viewer' : e.target.value;
-                                                                                        handleBrandRoleChange(member.id, ba.id, role);
-                                                                                    }}
-                                                                                    disabled={isUpdating}
-                                                                                    className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
+                                                                <div key={brand.id} className="flex items-center gap-1.5">
+                                                                    <span className="text-xs font-medium text-gray-700">{brand.name}:</span>
+                                                                    {hasAccess ? (
+                                                                        member.is_orphaned ? (
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium ${getRoleColors(ba.role)}`}>
+                                                                                    {ba.role || 'member'}
+                                                                                </span>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleRemoveBrandAssignment(member.id, brand.id, brand.name)}
+                                                                                    className="text-red-600 hover:text-red-800 text-xs"
+                                                                                    title="Remove orphaned brand assignment"
                                                                                 >
-                                                                                    <option value="viewer">Viewer</option>
-                                                                                    <option value="contributor">Contributor</option>
-                                                                                    <option value="brand_manager">Brand Manager</option>
-                                                                                    <option value="admin">Admin</option>
-                                                                                </select>
-                                                                                <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                                                </svg>
+                                                                                    Remove
+                                                                                </button>
                                                                             </div>
-                                                                            {isUpdating && (
-                                                                                <span className="text-xs text-gray-500">Updating...</span>
-                                                                            )}
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleRemoveBrandAssignment(member.id, ba.id, ba.name)}
-                                                                                className="text-red-600 hover:text-red-800 text-xs font-medium ml-2"
-                                                                                title="Remove brand access"
-                                                                            >
-                                                                                Remove
-                                                                            </button>
-                                                                        </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <div className="relative inline-flex items-center">
+                                                                                    <select
+                                                                                        value={ba.role?.toLowerCase() === 'member' ? 'viewer' : (ba.role?.toLowerCase() || 'viewer')}
+                                                                                        onChange={(e) => {
+                                                                                            const role = e.target.value === 'member' ? 'viewer' : e.target.value;
+                                                                                            handleBrandRoleChange(member.id, brand.id, role);
+                                                                                        }}
+                                                                                        disabled={isUpdating}
+                                                                                        className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-7 ${getRoleColors(ba.role)}`}
+                                                                                    >
+                                                                                        <option value="viewer">Viewer</option>
+                                                                                        <option value="contributor">Contributor</option>
+                                                                                        <option value="brand_manager">Brand Manager</option>
+                                                                                        <option value="admin">Admin</option>
+                                                                                    </select>
+                                                                                    <svg className="absolute right-1.5 h-3 w-3 pointer-events-none text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                                                    </svg>
+                                                                                </div>
+                                                                                {isUpdating && (
+                                                                                    <span className="text-xs text-gray-500">Updating...</span>
+                                                                                )}
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleRemoveBrandAssignment(member.id, brand.id, brand.name)}
+                                                                                    className="text-red-600 hover:text-red-800 text-xs font-medium ml-2"
+                                                                                    title="Remove brand access"
+                                                                                >
+                                                                                    Remove
+                                                                                </button>
+                                                                            </>
+                                                                        )
+                                                                    ) : !member.is_orphaned ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => openAddToBrandModalWithBrand(member, brand)}
+                                                                            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+                                                                        >
+                                                                            Add to brand
+                                                                        </button>
+                                                                    ) : (
+                                                                        <span className="text-xs text-gray-400">—</span>
                                                                     )}
                                                                 </div>
                                                             )
                                                         })}
                                                     </div>
                                                 </div>
-                                            ) : !member.is_orphaned && brands?.length > 0 ? (
-                                                <div className="mt-3">
-                                                    <p className="text-xs font-medium text-gray-700 mb-2">Brand access:</p>
-                                                    <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded mb-2">
-                                                        No brand access. Add them to a brand to give access.
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => openAddToBrandModal(member)}
-                                                        className="inline-flex items-center rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
-                                                    >
-                                                        Add to brand
-                                                    </button>
-                                                </div>
-                                            ) : null}
+                                            )}
                                             
                                             <p className="mt-2 text-xs text-gray-400">
                                                 Joined {formatDate(member.joined_at)}

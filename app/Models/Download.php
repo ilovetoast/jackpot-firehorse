@@ -54,6 +54,7 @@ class Download extends Model
      */
     protected $fillable = [
         'tenant_id',
+        'brand_id', // Phase D1: nullable for collection-only users
         'created_by_user_id',
         'download_type',
         'source',
@@ -99,6 +100,14 @@ class Download extends Model
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    /**
+     * Get the brand (nullable for collection-only users). Phase D1.
+     */
+    public function brand(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Brand::class);
     }
 
     /**

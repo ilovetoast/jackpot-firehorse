@@ -33,6 +33,8 @@ export default function AssetGrid({
     primaryColor = '#6366f1',
     selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
     onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
+    bucketAssetIds = [], // Phase D1: Download bucket IDs
+    onBucketToggle = null, // Phase D1: Toggle single asset in bucket
     isPendingApprovalMode = false, // Phase L.6.2: Approval inbox mode
     isPendingPublicationFilter = false, // Phase J.3.1: Pending publication filter active
     onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
@@ -64,6 +66,8 @@ export default function AssetGrid({
                     primaryColor={primaryColor}
                     isBulkSelected={selectedAssetIds.includes(asset.id)} // Phase 2 – Step 7
                     onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null} // Phase 2 – Step 7
+                    isInBucket={bucketAssetIds.includes(asset.id)} // Phase D1
+                    onBucketToggle={onBucketToggle ? () => onBucketToggle(asset.id) : null} // Phase D1
                     isPendingApprovalMode={isPendingApprovalMode} // Phase L.6.2
                     isPendingPublicationFilter={isPendingPublicationFilter} // Phase J.3.1
                     onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null} // Phase L.6.2

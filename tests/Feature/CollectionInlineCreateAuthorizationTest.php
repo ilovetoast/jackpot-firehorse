@@ -25,6 +25,7 @@ class CollectionInlineCreateAuthorizationTest extends TestCase
     protected User $contributorUser;
     protected User $viewerUser;
     protected User $notInBrandUser;
+    protected User $ownerWithBrandViewerUser;
 
     protected function setUp(): void
     {
@@ -68,6 +69,16 @@ class CollectionInlineCreateAuthorizationTest extends TestCase
         ]);
         $this->notInBrandUser->tenants()->attach($this->tenant->id, ['role' => 'member']);
         // No brand_user row — not in this brand
+
+        // Tenant owner with brand viewer — permission cascade: tenant role overrides brand role
+        $this->ownerWithBrandViewerUser = User::create([
+            'email' => 'owner-viewer@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Owner',
+            'last_name' => 'Viewer',
+        ]);
+        $this->ownerWithBrandViewerUser->tenants()->attach($this->tenant->id, ['role' => 'owner']);
+        $this->ownerWithBrandViewerUser->brands()->attach($this->brand->id, ['role' => 'viewer', 'removed_at' => null]);
     }
 
     public function test_brand_admin_can_create_collection_from_uploader(): void
@@ -102,6 +113,23 @@ class CollectionInlineCreateAuthorizationTest extends TestCase
             'brand_id' => $this->brand->id,
             'name' => 'Contributor Inline',
             'created_by' => $this->contributorUser->id,
+        ]);
+    }
+
+    public function test_tenant_owner_with_brand_viewer_can_create_collection_permission_cascade(): void
+    {
+        $response = $this->actingAs($this->ownerWithBrandViewerUser)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson('/app/collections', [
+                'name' => 'Owner Viewer Creates',
+                'description' => null,
+            ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('collections', [
+            'brand_id' => $this->brand->id,
+            'name' => 'Owner Viewer Creates',
+            'created_by' => $this->ownerWithBrandViewerUser->id,
         ]);
     }
 

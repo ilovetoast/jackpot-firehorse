@@ -42,6 +42,9 @@ Route::get('/b/{brand_slug}/collections/{collection_slug}', [\App\Http\Controlle
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/thumbnail', [\App\Http\Controllers\PublicCollectionController::class, 'thumbnail'])->name('public.collections.assets.thumbnail');
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
 
+// Phase D1: Public download link (no auth — anyone with link can download)
+Route::get('/d/{download}', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.public')->middleware(['web']);
+
 // CSRF token refresh endpoint (for handling stale tokens after session regeneration)
 // Accessible to authenticated users (session exists, just token may be stale)
 Route::get('/csrf-token', function (Request $request) {
@@ -369,6 +372,13 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             
             // Download group endpoints (Phase 3.1 Step 4)
             Route::get('/downloads/{download}/download', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.download');
+            // Phase D1: Download bucket and create download
+            Route::get('/download-bucket/items', [\App\Http\Controllers\DownloadBucketController::class, 'items'])->name('download-bucket.items');
+            Route::post('/download-bucket/add', [\App\Http\Controllers\DownloadBucketController::class, 'add'])->name('download-bucket.add');
+            Route::post('/download-bucket/add-batch', [\App\Http\Controllers\DownloadBucketController::class, 'addBatch'])->name('download-bucket.add_batch');
+            Route::delete('/download-bucket/remove/{asset}', [\App\Http\Controllers\DownloadBucketController::class, 'remove'])->name('download-bucket.remove');
+            Route::post('/download-bucket/clear', [\App\Http\Controllers\DownloadBucketController::class, 'clear'])->name('download-bucket.clear');
+            Route::post('/downloads', [\App\Http\Controllers\DownloadController::class, 'store'])->name('downloads.store');
             
             // Metric endpoints
             Route::post('/assets/{asset}/metrics/track', [\App\Http\Controllers\AssetMetricController::class, 'track'])->name('assets.metrics.track');
@@ -418,6 +428,17 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/collections/{collection}/grants/{collection_user}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'revoke'])->name('collections.grants.revoke');
             Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
+            Route::get('/downloads/limits', function () {
+                $tenant = app('tenant');
+                if (! $tenant) {
+                    return response()->json(['max_download_assets' => 50, 'max_download_zip_mb' => 500]);
+                }
+                $plan = app(\App\Services\PlanService::class);
+                return response()->json([
+                    'max_download_assets' => $plan->getMaxDownloadAssets($tenant),
+                    'max_download_zip_mb' => (int) round($plan->getMaxDownloadZipBytes($tenant) / 1024 / 1024),
+                ]);
+            })->name('downloads.limits');
 
             // Upload routes (tenant-scoped)
             Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');

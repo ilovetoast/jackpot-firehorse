@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Support\Str;
 
 class BrandService
@@ -24,10 +25,11 @@ class BrandService
 
     /**
      * Create a brand with plan check.
+     * The creator is automatically added as brand admin so they have access.
      *
      * @throws PlanLimitExceededException
      */
-    public function create(Tenant $tenant, array $data): Brand
+    public function create(Tenant $tenant, array $data, ?User $creator = null): Brand
     {
         // Check plan limit
         $this->planService->checkLimit('brands', $tenant);
@@ -54,7 +56,14 @@ class BrandService
             $data['show_in_selector'] = true;
         }
 
-        return Brand::create($data);
+        $brand = Brand::create($data);
+
+        // Creator must be added as brand admin so they have access to the brand they created
+        if ($creator && $creator->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            $creator->setRoleForBrand($brand, 'admin');
+        }
+
+        return $brand;
     }
 
     /**

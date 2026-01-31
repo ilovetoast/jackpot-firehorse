@@ -17,7 +17,7 @@ import { EyeSlashIcon } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null }) {
     const { auth } = usePage().props
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
@@ -88,6 +88,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     
     // Phase V-1: Hover preview state (desktop only)
     const [isHovering, setIsHovering] = useState(false)
+    // Phase D1: Card hover for bucket checkbox visibility
+    const [isCardHovering, setIsCardHovering] = useState(false)
     const [previewLoaded, setPreviewLoaded] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
@@ -194,6 +196,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     return (
         <div
             onClick={handleClick}
+            onMouseEnter={() => setIsCardHovering(true)}
+            onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
             className={`group relative bg-white rounded-lg border overflow-hidden transition-all duration-200 cursor-pointer ${
@@ -273,6 +277,23 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                             }}
                             onClick={(e) => e.stopPropagation()}
                             className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm"
+                        />
+                    </div>
+                )}
+
+                {/* Phase D1: Download bucket checkbox (on hover when not in bulk mode) */}
+                {!onBulkSelect && onBucketToggle && (
+                    <div className={`absolute top-2 left-2 z-10 transition-opacity ${isHovering || isInBucket ? 'opacity-100' : 'opacity-0'}`}>
+                        <input
+                            type="checkbox"
+                            checked={isInBucket}
+                            onChange={(e) => {
+                                e.stopPropagation()
+                                onBucketToggle()
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm"
+                            aria-label={isInBucket ? 'Remove from download' : 'Add to download'}
                         />
                     </div>
                 )}

@@ -67,6 +67,7 @@ This document is the **SINGLE SOURCE OF TRUTH** for understanding phase structur
 **Phase Documents:**
 - `PHASE_3_1_DOWNLOADER_FOUNDATIONS.md` — Initial downloader design (HISTORICAL)
 - `PHASE_3_1_DOWNLOADER_LOCK.md` — Complete downloader system (LOCKED)
+- `PHASE_D_DOWNLOADER.md` — Downloader phased plan D1–D4 (PLANNING)
 
 **Key Components:**
 - Download model and lifecycle
@@ -364,6 +365,7 @@ Phase G is **COMPLETE and PAUSED**. No further metadata UI improvements are expe
 
 | File | Status | Purpose |
 |------|--------|---------|
+| `PHASE_D_DOWNLOADER.md` | 📋 PLANNING | Downloader phased plan D1–D4 (foundation → management → advanced output → dynamic) |
 | `admin/ai/phase-7-5-tenant-ai-capabilities.md` | 📋 FUTURE | Tenant AI capabilities design specification |
 
 ### Related Technical Documentation

@@ -41,6 +41,9 @@ export default function AssetGridToolbar({
     onBulkEdit = null, // Phase 2 – Step 7
     onToggleBulkMode = null, // Phase 2 – Step 7
     isBulkMode = false, // Phase 2 – Step 7
+    onSelectAllForDownload = null, // Phase D1: Select all on screen for download bucket
+    bucketCount = 0, // Phase D1: Download bucket count
+    showSelectAllForDownload = false, // Phase D1: Show "Select all" when not in bulk mode
     filterable_schema = [], // Primary metadata filters
     selectedCategoryId = null, // Current category
     available_values = {}, // Available filter values
@@ -297,6 +300,16 @@ export default function AssetGridToolbar({
                                     </button>
                                 )}
                             </>
+                        )}
+                        {/* Phase D1: Select all on screen for download bucket */}
+                        {showSelectAllForDownload && onSelectAllForDownload && (
+                            <button
+                                type="button"
+                                onClick={onSelectAllForDownload}
+                                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                            >
+                                Select all on screen
+                            </button>
                         )}
 
                         {/* Show Info Toggle */}

@@ -372,6 +372,25 @@ class PlanService
     }
 
     /**
+     * Phase D1: Get maximum assets allowed per download for tenant's plan.
+     */
+    public function getMaxDownloadAssets(Tenant $tenant): int
+    {
+        $limits = $this->getPlanLimits($tenant);
+        return $limits['max_download_assets'] ?? 50;
+    }
+
+    /**
+     * Phase D1: Get maximum ZIP size in bytes for tenant's plan.
+     */
+    public function getMaxDownloadZipBytes(Tenant $tenant): int
+    {
+        $limits = $this->getPlanLimits($tenant);
+        $mb = $limits['max_download_zip_mb'] ?? 500;
+        return $mb * 1024 * 1024;
+    }
+
+    /**
      * Get current tag count for an asset.
      */
     public function getCurrentTagCount(Asset $asset): int
