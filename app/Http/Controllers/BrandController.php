@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\EventType;
 use App\Mail\InviteMember;
 use App\Models\Brand;
+use App\Models\CollectionUser;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\BrandService;
@@ -947,6 +948,14 @@ class BrandController extends Controller
                 'removed_at' => now(),
                 'updated_at' => now(),
             ]);
+
+        // C12: Revoke collection-only access for this brand's collections (remove from brand = no viewer, no collection access)
+        $brandCollectionIds = \App\Models\Collection::where('brand_id', $brand->id)->pluck('id')->toArray();
+        if (! empty($brandCollectionIds)) {
+            CollectionUser::where('user_id', $user->id)
+                ->whereIn('collection_id', $brandCollectionIds)
+                ->delete();
+        }
 
         // Log activity
         ActivityRecorder::record(

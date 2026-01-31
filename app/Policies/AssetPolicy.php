@@ -32,19 +32,30 @@ class AssetPolicy
             return false;
         }
 
-        // User must be assigned to the brand (or be tenant admin/owner)
+        // User must be assigned to the brand (or be tenant admin/owner), or have collection-only access to a collection containing this asset
         if ($asset->brand_id) {
-            $brand = $asset->brand;
             $tenant = $asset->tenant;
             $tenantRole = $user->getRoleForTenant($tenant);
-            
+
             // Tenant admins/owners have access to all brands
-            if (!in_array($tenantRole, ['admin', 'owner'])) {
-                // Phase MI-1: Check active brand membership
-                if (!$user->activeBrandMembership($asset->brand)) {
-                    return false;
-                }
+            if (in_array($tenantRole, ['admin', 'owner'])) {
+                return true;
             }
+
+            // Phase MI-1: Check active brand membership
+            if ($user->activeBrandMembership($asset->brand)) {
+                return true;
+            }
+
+            // C12: Collection-only access — user can view asset if it is in a collection they have an accepted grant for
+            $accessibleCollectionIds = $user->collectionAccessGrants()
+                ->whereNotNull('accepted_at')
+                ->pluck('collection_id');
+            if ($accessibleCollectionIds->isNotEmpty() && $asset->collections()->whereIn('collections.id', $accessibleCollectionIds)->exists()) {
+                return true;
+            }
+
+            return false;
         }
 
         return true;

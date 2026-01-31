@@ -72,10 +72,26 @@ class Collection extends Model
     }
 
     /**
-     * Get the collection members.
+     * Get the collection members (brand-related; see CollectionMember).
      */
     public function members(): HasMany
     {
         return $this->hasMany(CollectionMember::class);
+    }
+
+    /**
+     * Phase C12.0: Collection access grants (collection-only access, NOT brand membership).
+     */
+    public function collectionAccessGrants(): HasMany
+    {
+        return $this->hasMany(CollectionUser::class, 'collection_id');
+    }
+
+    /**
+     * Phase C12.0: Pending collection-only invites (by email).
+     */
+    public function collectionInvitations(): HasMany
+    {
+        return $this->hasMany(CollectionInvitation::class, 'collection_id');
     }
 }

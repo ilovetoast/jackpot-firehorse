@@ -1,9 +1,10 @@
 /**
  * C11.1: Minimal edit surface for collection (name, description, public toggle).
- * Uses existing PUT /app/collections/{collection}. Policy-guarded; Save/Cancel only.
+ * C12.0: Private collection access invites (collection-only; no brand membership).
  */
 import { useState, useEffect } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
+import Avatar from '../Avatar'
 
 const PUBLIC_TOOLTIP = 'Viewable via a shareable link. Collections do not grant access to assets outside this view.'
 
@@ -20,6 +21,13 @@ export default function EditCollectionModal({
     const [isPublic, setIsPublic] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
+    // C12: Collection-only access (private collections)
+    const [accessGrants, setAccessGrants] = useState([])
+    const [accessPending, setAccessPending] = useState([])
+    const [accessLoading, setAccessLoading] = useState(false)
+    const [inviteEmail, setInviteEmail] = useState('')
+    const [inviteSubmitting, setInviteSubmitting] = useState(false)
+    const [inviteError, setInviteError] = useState(null)
 
     useEffect(() => {
         if (open && collection) {
@@ -28,8 +36,28 @@ export default function EditCollectionModal({
             setVisibility(collection.visibility ?? 'brand')
             setIsPublic(!!collection.is_public)
             setError(null)
+            setInviteError(null)
+            setInviteEmail('')
         }
     }, [open, collection])
+
+    const isPrivate = (visibility || collection?.visibility) === 'private'
+
+    useEffect(() => {
+        if (!open || !collection?.id || !isPrivate) return
+        setAccessLoading(true)
+        fetch(`/app/collections/${collection.id}/access-invites`, {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                setAccessGrants(data.grants ?? [])
+                setAccessPending(data.pending ?? [])
+            })
+            .catch(() => { setAccessGrants([]); setAccessPending([]) })
+            .finally(() => setAccessLoading(false))
+    }, [open, collection?.id, isPrivate])
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -81,6 +109,51 @@ export default function EditCollectionModal({
             setError(null)
             onClose()
         }
+    }
+
+    const handleInvite = async (e) => {
+        e.preventDefault()
+        if (!collection?.id || !inviteEmail.trim()) return
+        setInviteError(null)
+        setInviteSubmitting(true)
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''
+        try {
+            const form = new FormData()
+            form.append('email', inviteEmail.trim())
+            form.append('_token', csrf)
+            const r = await fetch(`/app/collections/${collection.id}/access-invite`, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                credentials: 'same-origin',
+                body: form,
+            })
+            const data = await r.json().catch(() => ({}))
+            if (r.ok) {
+                setInviteEmail('')
+                setAccessPending((prev) => [...prev, { id: data?.id, email: inviteEmail.trim(), sent_at: new Date().toISOString() }])
+                return
+            }
+            setInviteError(data?.errors?.email?.[0] ?? data?.message ?? 'Failed to send invite.')
+        } catch (err) {
+            setInviteError(err?.message ?? 'Failed to send invite.')
+        } finally {
+            setInviteSubmitting(false)
+        }
+    }
+
+    const handleRevoke = async (grantId) => {
+        if (!collection?.id) return
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''
+        try {
+            const r = await fetch(`/app/collections/${collection.id}/grants/${grantId}`, {
+                method: 'DELETE',
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            })
+            if (r.ok) {
+                setAccessGrants((prev) => prev.filter((g) => g.id !== grantId))
+            }
+        } catch (_) {}
     }
 
     if (!open) return null
@@ -175,6 +248,79 @@ export default function EditCollectionModal({
                                         <span className="text-sm font-medium text-gray-700" title={PUBLIC_TOOLTIP}>
                                             Public
                                         </span>
+                                    </div>
+                                )}
+                                {/* C12: Collection-only access (private collections) */}
+                                {isPrivate && (
+                                    <div className="border-t border-gray-200 pt-4">
+                                        <h4 className="text-sm font-medium text-gray-900 mb-2">Collection access</h4>
+                                        <p className="text-xs text-gray-500 mb-3">Invite people to view this collection only (no brand access).</p>
+                                        <div className="flex gap-2 mb-3" role="group" aria-label="Invite by email">
+                                            <input
+                                                type="email"
+                                                value={inviteEmail}
+                                                onChange={(e) => setInviteEmail(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleInvite(e))}
+                                                placeholder="Email"
+                                                disabled={inviteSubmitting}
+                                                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleInvite}
+                                                disabled={inviteSubmitting || !inviteEmail.trim()}
+                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                                            >
+                                                {inviteSubmitting ? 'Sending…' : 'Invite'}
+                                            </button>
+                                        </div>
+                                        {inviteError && (
+                                            <p className="mb-2 text-sm text-red-600">{inviteError}</p>
+                                        )}
+                                        {accessLoading ? (
+                                            <p className="text-sm text-gray-500">Loading…</p>
+                                        ) : (
+                                            <>
+                                                {accessGrants.length > 0 && (
+                                                    <div className="mb-2">
+                                                        <p className="text-xs font-medium text-gray-700 mb-1">Has access</p>
+                                                        <ul className="text-sm space-y-1">
+                                                            {accessGrants.map((g) => (
+                                                                <li key={g.id} className="flex items-center justify-between gap-2 py-1">
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <Avatar
+                                                                            avatarUrl={g.user?.avatar_url}
+                                                                            firstName={g.user?.first_name}
+                                                                            lastName={g.user?.last_name}
+                                                                            email={g.user?.email}
+                                                                            size="sm"
+                                                                        />
+                                                                        <span className="truncate">{g.user?.name || g.user?.email || '—'}</span>
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleRevoke(g.id)}
+                                                                        className="text-red-600 hover:text-red-800 text-xs flex-shrink-0"
+                                                                    >
+                                                                        Revoke
+                                                                    </button>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                                {accessPending.length > 0 && (
+                                                    <div>
+                                                        <p className="text-xs font-medium text-gray-700 mb-1">Pending</p>
+                                                        <ul className="text-sm text-gray-600">
+                                                            {accessPending.map((p) => (
+                                                                <li key={p.id || p.email}>{p.email}</li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>

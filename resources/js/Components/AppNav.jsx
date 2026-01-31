@@ -6,13 +6,15 @@ import Avatar from './Avatar'
 import NotificationBell from './NotificationBell'
 
 export default function AppNav({ brand, tenant }) {
-    const { auth } = usePage().props
+    const page = usePage()
+    const { auth, collection_only: collectionOnly, collection_only_collection: collectionOnlyCollection, collection_only_collections: collectionOnlyCollections = [] } = page.props
     const { post } = useForm()
     const [userMenuOpen, setUserMenuOpen] = useState(false)
     const [showPlanAlert, setShowPlanAlert] = useState(false)
+    const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     
-    // Get current URL for active link detection
-    const currentUrl = typeof window !== 'undefined' ? window.location.pathname : ''
+    // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
+    const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
 
     const handleLogout = () => {
         post('/app/logout')
@@ -42,9 +44,27 @@ export default function AppNav({ brand, tenant }) {
     const activeCompany = auth.companies?.find((c) => c.is_active)
     const permissions = Array.isArray(auth.permissions) ? auth.permissions : []
     const isSiteOwner = auth.user?.id === 1 || permissions.includes('site admin') || permissions.includes('site owner')
-    const brands = auth.brands || []
-    // Always use auth.activeBrand - this is the currently active brand from the session
-    const activeBrand = auth.activeBrand
+    const brands = collectionOnly ? [] : (auth.brands || [])
+    // C12: In collection-only mode there is no active brand
+    const activeBrand = collectionOnly ? null : auth.activeBrand
+
+    // C12: Treat as collection-only for nav when backend says so OR when on collection-access URL (fallback if shared prop missing)
+    const isOnCollectionAccessUrl = currentUrl.startsWith('/app') && /\/collection-access\/[^/]+(\/view)?$/.test(currentUrl.replace(/\?.*$/, ''))
+    const isCollectionOnlyNav = Boolean(
+        collectionOnly ||
+        isOnCollectionAccessUrl ||
+        collectionOnlyCollection ||
+        (collectionOnlyCollections && collectionOnlyCollections.length > 0)
+    )
+    // When on collection-access URL, parse current collection id for Collections link (fallback when backend didn't send collection_only_collection)
+    const collectionIdFromUrl = (() => {
+        const m = currentUrl.match(/\/collection-access\/([^/]+)/)
+        return m ? m[1] : null
+    })()
+    const effectiveCollection = collectionOnlyCollection || (collectionIdFromUrl ? { id: collectionIdFromUrl, name: 'Collection', slug: '' } : null)
+    const effectiveCollectionsList = (collectionOnlyCollections && collectionOnlyCollections.length > 0)
+        ? collectionOnlyCollections
+        : (effectiveCollection ? [effectiveCollection] : [])
     
     // Check if user has admin or owner role (not member) for company/brand settings access
     // Use tenant_role from auth (tenant-scoped) instead of filtering roles
@@ -93,6 +113,8 @@ export default function AppNav({ brand, tenant }) {
     // Check for plan limit alerts
     const planLimitInfo = auth.brand_plan_limit_info
     const hasPlanLimitIssue = planLimitInfo && planLimitInfo.brand_limit_exceeded && isAppPage && !isAdminPage
+    // User is in company but has no brand access (e.g. removed from all brands)
+    const showNoBrandAccessAlert = Boolean(auth?.no_brand_access ?? (auth?.activeCompany && !collectionOnly && (!auth?.brands || auth.brands.length === 0)))
     
     // Track last shown brand ID to detect brand switches
     const [lastShownBrandId, setLastShownBrandId] = useState(() => {
@@ -229,14 +251,57 @@ export default function AppNav({ brand, tenant }) {
                     </div>
                 </div>
             )}
+
+            {/* No brand access alert — user is in company but has no brand access */}
+            {showNoBrandAccessAlert && (
+                <div className="relative bg-amber-50 border-b border-amber-200 shadow-sm">
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />
+                    <div className={isAppPage ? 'px-4 sm:px-6 lg:px-8' : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8'}>
+                        <div className="py-3 flex items-center">
+                            <div className="flex items-center ml-4">
+                                <svg className="h-5 w-5 text-amber-600 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                </svg>
+                                <p className="text-sm text-amber-800">
+                                    <span className="font-medium">No brand access.</span> You're in the company but not assigned to any brands. Contact your company administrator to get access.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             
-            <nav className="shadow-sm relative" style={{ backgroundColor: navColor }}>
+            <nav
+                className={`shadow-sm relative app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''}`}
+                style={{
+                    backgroundColor: navColor,
+                    ...(isCollectionOnlyNav ? { '--collection-only-user': '1' } : {}),
+                }}
+                data-collection-only={isCollectionOnlyNav ? 'true' : undefined}
+                aria-label={isCollectionOnlyNav ? 'Collection-only access — some links disabled' : undefined}
+            >
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                 <div className="flex h-20 justify-between">
                     <div className="flex flex-1 items-center">
-                        {/* Brand Logo Component */}
+                        {/* Brand Logo Component (C12: show collection name when collection-only) */}
                         <div className="flex flex-shrink-0 items-center">
-                            {isAppPage ? (
+                            {isAppPage ? (isCollectionOnlyNav && effectiveCollection?.brand ? (
+                                <AppBrandLogo
+                                    activeBrand={effectiveCollection.brand}
+                                    brands={effectiveCollectionsList.length > 1 ? [...new Map(effectiveCollectionsList.filter(c => c.brand).map(c => [c.brand.id, { ...c.brand, is_active: c.brand.id === effectiveCollection?.brand?.id }])).values()] : []}
+                                    textColor={textColor}
+                                    logoFilterStyle={effectiveCollection.brand?.logo_filter === 'white' ? { filter: 'brightness(0) invert(1)' } : effectiveCollection.brand?.logo_filter === 'black' ? { filter: 'brightness(0)' } : {}}
+                                    onSwitchBrand={(brandId) => {
+                                        const col = effectiveCollectionsList.find(c => c.brand?.id === brandId)
+                                        if (col) router.post(route('collection-invite.switch', { collection: col.id }))
+                                    }}
+                                    rootLinkHref={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                />
+                            ) : isCollectionOnlyNav && effectiveCollection ? (
+                                <span className="text-base font-semibold text-gray-900" title="Collection-only access">
+                                    {effectiveCollection.name}
+                                </span>
+                            ) : (
                                 <AppBrandLogo
                                     activeBrand={activeBrand}
                                     brands={brands}
@@ -244,7 +309,7 @@ export default function AppNav({ brand, tenant }) {
                                     logoFilterStyle={logoFilterStyle}
                                     onSwitchBrand={handleSwitchBrand}
                                 />
-                            ) : (
+                            )) : (
                                 <Link href="/" className="flex items-center">
                                     <h1 className="text-xl font-bold text-gray-900">
                                         Jackpot
@@ -253,9 +318,97 @@ export default function AppNav({ brand, tenant }) {
                             )}
                         </div>
 
-                        {/* Navigation Links - Aligned with content area (after sidebar) */}
-                        {isAppPage ? (
-                            <div className="hidden sm:flex sm:space-x-8 absolute" style={{ left: '18rem' }}>
+                        {/* Main menu: Dashboard, Assets, Deliverables, Collections, Generative, Downloads (C12: flag + .app-nav-main-links for CSS) */}
+                        {isAppPage ? (isCollectionOnlyNav ? (
+                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute items-center" style={{ left: '18rem' }} data-collection-only="true">
+                                {['Dashboard', 'Assets', 'Deliverables'].map((label) => (
+                                    <span
+                                        key={label}
+                                        className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
+                                        title="Collection-only access — not available"
+                                        aria-disabled="true"
+                                    >
+                                        {label}
+                                    </span>
+                                ))}
+                                {collectionOnlyCollection?.id && collectionOnlyCollections?.length > 0 ? (
+                                    collectionOnlyCollections.length > 1 ? (
+                                        <div className="relative">
+                                            <button
+                                                type="button"
+                                                onClick={() => setCollectionsDropdownOpen(open => !open)}
+                                                onBlur={() => setTimeout(() => setCollectionsDropdownOpen(false), 150)}
+                                                className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700 focus:outline-none focus:ring-0"
+                                                style={{
+                                                    borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
+                                                    color: currentUrl.includes('/collection-access/') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
+                                                }}
+                                            >
+                                                Collections
+                                                <svg className="ml-1 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                </svg>
+                                            </button>
+                                            {collectionsDropdownOpen && (
+                                                <div className="absolute left-0 top-full mt-1 w-56 rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                                                    {collectionOnlyCollections.map((c) => (
+                                                        <button
+                                                            key={c.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setCollectionsDropdownOpen(false)
+                                                                router.post(route('collection-invite.switch', { collection: c.id }))
+                                                            }}
+                                                            className={`block w-full text-left px-4 py-2 text-sm ${c.id === collectionOnlyCollection?.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                        >
+                                                            {c.name}
+                                                            {c.id === collectionOnlyCollection?.id && ' (current)'}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <Link
+                                            href={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                            className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700"
+                                            style={{
+                                                borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
+                                                color: currentUrl.includes('/collection-access/') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
+                                            }}
+                                        >
+                                            Collections
+                                        </Link>
+                                    )
+                                ) : (
+                                    <span
+                                        className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
+                                        title="Collection-only access"
+                                        aria-disabled="true"
+                                    >
+                                        Collections
+                                    </span>
+                                )}
+                                <span
+                                    className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
+                                    title="Collection-only access — not available"
+                                    aria-disabled="true"
+                                >
+                                    Generative
+                                </span>
+                                <Link
+                                    href="/app/downloads"
+                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700"
+                                    style={{
+                                        borderBottomColor: currentUrl.startsWith('/app/downloads') ? '#4f46e5' : 'transparent',
+                                        color: currentUrl.startsWith('/app/downloads') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
+                                    }}
+                                >
+                                    Downloads
+                                </Link>
+                            </div>
+                        ) : (
+                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute" style={{ left: '18rem' }}>
                                 <Link
                                     href="/app/dashboard"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
@@ -341,8 +494,8 @@ export default function AppNav({ brand, tenant }) {
                                     Downloads
                                 </Link>
                             </div>
-                        ) : (
-                            <div className="hidden sm:flex sm:space-x-8 sm:ml-6">
+                        )) : (
+                            <div className="app-nav-main-links hidden sm:flex sm:space-x-8 sm:ml-6">
                                 <Link
                                     href="/app/dashboard"
                                     className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
@@ -431,6 +584,18 @@ export default function AppNav({ brand, tenant }) {
                         )}
                     </div>
                     <div className="flex items-center gap-4">
+                        {/* C12: Collection access link on the right when in collection-only mode */}
+                        {isCollectionOnlyNav && effectiveCollection?.id && (
+                            <Link
+                                href={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-700 hover:text-gray-900"
+                                style={{
+                                    borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
+                                }}
+                            >
+                                Collection access
+                            </Link>
+                        )}
                         {/* Phase AF-3: Notification Bell */}
                         <NotificationBell textColor={textColor} />
                         
@@ -597,8 +762,8 @@ export default function AppNav({ brand, tenant }) {
                                         </div>
                                         )}
 
-                                        {/* Brands Section */}
-                                        {activeBrand && hasAnyBrandAccess && (
+                                        {/* Brands Section (C12: hidden when collection-only) */}
+                                        {activeBrand && hasAnyBrandAccess && !collectionOnly && (
                                             <div className="px-4 py-2 border-b border-gray-200">
                                                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Brands</p>
                                                 <PermissionGate permission="brand_settings.manage">

@@ -110,6 +110,24 @@ class User extends Authenticatable
     }
 
     /**
+     * Phase C12.0: Collection access grants (collection-only access, NOT brand membership).
+     */
+    public function collectionAccessGrants(): HasMany
+    {
+        return $this->hasMany(CollectionUser::class, 'user_id');
+    }
+
+    /**
+     * Phase C12.0: Collections this user can access via collection-only grants.
+     */
+    public function collectionAccessibleCollections(): BelongsToMany
+    {
+        return $this->belongsToMany(Collection::class, 'collection_user')
+            ->withPivot('invited_by_user_id', 'accepted_at')
+            ->withTimestamps();
+    }
+
+    /**
      * Get the tickets created by this user.
      */
     public function createdTickets(): \Illuminate\Database\Eloquent\Relations\HasMany

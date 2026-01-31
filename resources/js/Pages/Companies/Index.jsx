@@ -53,9 +53,6 @@ export default function CompaniesIndex({ companies }) {
                                             Billing
                                         </th>
                                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Timezone
-                                        </th>
-                                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Status
                                         </th>
                                         <th scope="col" className="relative px-6 py-3">
@@ -90,23 +87,6 @@ export default function CompaniesIndex({ companies }) {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                {company.ai_estimates ? (
-                                                    <>
-                                                        <div className="text-sm font-medium text-gray-900">
-                                                            ${company.ai_estimates.current_month_cost.toFixed(2)}
-                                                        </div>
-                                                        <div className="text-xs text-gray-500">
-                                                            {company.ai_estimates.current_month_calls.toLocaleString()} calls
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    <div className="text-sm text-gray-400">—</div>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm text-gray-900">{company.timezone}</div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
                                                 {company.is_active ? (
                                                     <span className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
                                                         Active
@@ -131,7 +111,7 @@ export default function CompaniesIndex({ companies }) {
                                                         href="/app/companies/settings"
                                                         className="text-indigo-600 hover:text-indigo-900"
                                                     >
-                                                        Settings
+                                                        More info
                                                     </Link>
                                                 )}
                                             </td>

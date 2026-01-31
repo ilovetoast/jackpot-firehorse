@@ -32,6 +32,11 @@ Route::middleware('guest')->group(function () {
     Route::post('/invite/complete/{token}/{tenant}', [\App\Http\Controllers\TeamController::class, 'completeInviteRegistration'])->name('invite.complete');
 });
 
+// Phase C12.0: Collection-only invite accept (guest or auth; no tenant required)
+Route::get('/invite/collection/{token}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'acceptShow'])->name('collection-invite.accept');
+Route::post('/invite/collection/{token}/accept', [\App\Http\Controllers\CollectionAccessInviteController::class, 'accept'])->middleware('auth')->name('collection-invite.accept.submit');
+Route::post('/invite/collection/{token}/complete', [\App\Http\Controllers\CollectionAccessInviteController::class, 'complete'])->name('collection-invite.complete');
+
 // Public collections (C8) — no auth, is_public only; brand-namespaced for uniqueness
 Route::get('/b/{brand_slug}/collections/{collection_slug}', [\App\Http\Controllers\PublicCollectionController::class, 'show'])->name('public.collections.show');
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/thumbnail', [\App\Http\Controllers\PublicCollectionController::class, 'thumbnail'])->name('public.collections.assets.thumbnail');
@@ -65,8 +70,12 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     // User limit error can be accessed even if tenant is resolved (user just can't access other routes)
     Route::get('/errors/user-limit-exceeded', [\App\Http\Controllers\ErrorController::class, 'userLimitExceeded'])->name('errors.user-limit-exceeded');
     
-    // Company settings (requires tenant to be selected)
-    Route::middleware('tenant')->group(function () {
+    // Company settings (requires tenant to be selected). C12: RestrictCollectionOnlyUser gates collection-only users.
+    Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
+        // Phase C12.0: Collection-only access landing (inside tenant so ResolveTenant can set collection_only)
+        Route::get('/collection-access/{collection}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'landing'])->name('collection-invite.landing');
+        Route::get('/collection-access/{collection}/view', [\App\Http\Controllers\CollectionAccessInviteController::class, 'viewCollection'])->name('collection-invite.view');
+        Route::post('/collection-access/switch/{collection}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'switchCollection'])->name('collection-invite.switch');
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
         Route::put('/companies/settings/widgets', [\App\Http\Controllers\CompanyController::class, 'updateWidgetSettings'])->name('companies.settings.widgets.update');
@@ -75,7 +84,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');
         Route::put('/companies/{tenant}/team/{user}/role', [\App\Http\Controllers\TeamController::class, 'updateTenantRole'])->name('companies.team.update-role');
         Route::put('/companies/{tenant}/team/{user}/brands/{brand}/role', [\App\Http\Controllers\TeamController::class, 'updateBrandRole'])->name('companies.team.update-brand-role');
+        Route::post('/companies/{tenant}/team/{user}/add-to-brand', [\App\Http\Controllers\TeamController::class, 'addToBrand'])->name('companies.team.add-to-brand');
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
+        Route::delete('/companies/{tenant}/team/{user}/delete-from-company', [\App\Http\Controllers\TeamController::class, 'deleteFromCompany'])->name('companies.team.delete-from-company');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
         
         // Phase C3: Tenant metadata field management
@@ -270,7 +281,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     // Payment confirmation route for incomplete payments (Cashier-style)
     Route::get('/subscription/payment/{payment}', [\App\Http\Controllers\BillingController::class, 'payment'])->name('cashier.payment');
     
-    Route::middleware('tenant')->group(function () {
+    // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.
+    Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'index'])->name('dashboard');
@@ -400,6 +412,10 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/collections/{collection}/invite', [\App\Http\Controllers\CollectionInviteController::class, 'invite'])->name('collections.invite');
             Route::post('/collections/{collection}/accept', [\App\Http\Controllers\CollectionInviteController::class, 'accept'])->name('collections.accept');
             Route::post('/collections/{collection}/decline', [\App\Http\Controllers\CollectionInviteController::class, 'decline'])->name('collections.decline');
+            // Phase C12.0: Collection-only access (private collections; creates collection_user grant, NOT brand membership)
+            Route::post('/collections/{collection}/access-invite', [\App\Http\Controllers\CollectionAccessInviteController::class, 'invite'])->name('collections.access-invite');
+            Route::get('/collections/{collection}/access-invites', [\App\Http\Controllers\CollectionAccessInviteController::class, 'index'])->name('collections.access-invites');
+            Route::delete('/collections/{collection}/grants/{collection_user}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'revoke'])->name('collections.grants.revoke');
             Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
 
@@ -479,7 +495,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');
         Route::put('/companies/{tenant}/team/{user}/role', [\App\Http\Controllers\TeamController::class, 'updateTenantRole'])->name('companies.team.update-role');
         Route::put('/companies/{tenant}/team/{user}/brands/{brand}/role', [\App\Http\Controllers\TeamController::class, 'updateBrandRole'])->name('companies.team.update-brand-role');
+        Route::post('/companies/{tenant}/team/{user}/add-to-brand', [\App\Http\Controllers\TeamController::class, 'addToBrand'])->name('companies.team.add-to-brand');
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
+        Route::delete('/companies/{tenant}/team/{user}/delete-from-company', [\App\Http\Controllers\TeamController::class, 'deleteFromCompany'])->name('companies.team.delete-from-company');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
     });
 });

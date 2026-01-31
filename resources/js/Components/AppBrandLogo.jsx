@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, router } from '@inertiajs/react'
 import { getContrastTextColor } from '../utils/colorUtils'
 
-export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand }) {
+export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilterStyle, onSwitchBrand, rootLinkHref }) {
     const [brandMenuOpen, setBrandMenuOpen] = useState(false)
     // Filter out disabled brands and ensure we have a valid array
     const validBrands = (brands || []).filter((brand) => !brand.is_disabled)
@@ -64,13 +64,11 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
             )
         }
         
-        // No brands available, show minimal placeholder
+        // No brands available — show app name (e.g. on no-company / errors page)
         return (
-            <div className="flex items-center">
-                <div className="h-12 w-12 rounded-full bg-indigo-600 flex items-center justify-center" style={{ backgroundColor: '#4f46e5' }}>
-                    <span className="text-sm font-medium text-white">B</span>
-                </div>
-            </div>
+            <Link href="/" className="flex items-center text-xl font-bold text-gray-900 hover:text-gray-700">
+                Jackpot
+            </Link>
         )
     }
 
@@ -240,9 +238,10 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         )
     }
 
-    // Single brand - simple link to dashboard
+    // Single brand - simple link to dashboard (or rootLinkHref when provided, e.g. collection landing)
+    const singleBrandHref = rootLinkHref ?? '/app/dashboard'
     return (
-        <Link href="/app/dashboard" className="flex items-center min-w-0 max-w-full">
+        <Link href={singleBrandHref} className="flex items-center min-w-0 max-w-full">
             {activeBrand.logo_path ? (
                 <img
                     src={activeBrand.logo_path}

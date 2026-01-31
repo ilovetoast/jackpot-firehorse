@@ -17,8 +17,10 @@ class CollectionPolicy
 {
     /**
      * Determine if the user can view the collection (C6: visibility + membership).
+     * C12: Users with collection-only access grant can view without brand membership.
      *
      * Rules:
+     * - C12: If user has accepted collection_user grant for this collection → allow (no brand required)
      * - If user cannot view the brand → deny
      * - If visibility = brand → allow (anyone who can view the brand)
      * - If visibility = restricted → allow if user is creator or in collection_members
@@ -29,6 +31,11 @@ class CollectionPolicy
      */
     public function view(User $user, Collection $collection): bool
     {
+        // C12: Collection-only access grant (no brand membership)
+        if ($user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
+            return true;
+        }
+
         if ($user->activeBrandMembership($collection->brand) === null) {
             return false;
         }

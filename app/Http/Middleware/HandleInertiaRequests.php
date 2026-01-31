@@ -41,16 +41,26 @@ class HandleInertiaRequests extends Middleware
     {
         $user = $request->user();
         $currentTenantId = session('tenant_id');
-        
+
         // Resolve tenant if not already bound (HandleInertiaRequests runs before ResolveTenant middleware)
         $tenant = app()->bound('tenant') ? app('tenant') : null;
         if (! $tenant && $currentTenantId) {
             $tenant = \App\Models\Tenant::find($currentTenantId);
             if ($tenant) {
-                app()->instance('tenant', $tenant);
+                // If user is no longer a member of this tenant (e.g. removed from company), clear session
+                // so we don't show their old company/brand in the header on /app/companies or errors.no-companies
+                if ($user && ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+                    session()->forget(['tenant_id', 'brand_id', 'collection_id']);
+                    $tenant = null;
+                } else {
+                    app()->instance('tenant', $tenant);
+                }
             }
         }
-        
+        if ($tenant && ! app()->bound('tenant')) {
+            app()->instance('tenant', $tenant);
+        }
+
         // Resolve active brand if not already bound
         // Note: ResolveTenant middleware will handle brand access verification
         // This is just for early resolution if tenant is available
@@ -386,6 +396,49 @@ class HandleInertiaRequests extends Middleware
                 'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
                 'app_env' => config('app.env'),
             ],
+            // Phase C12.0: Collection-only mode (no brand; user has only collection access)
+            'collection_only' => app()->bound('collection_only') && app('collection_only'),
+            'collection_only_collection' => app()->bound('collection') ? (function () {
+                $collection = app('collection');
+                $brand = $collection->brand;
+                return [
+                    'id' => $collection->id,
+                    'name' => $collection->name,
+                    'slug' => $collection->slug,
+                    'brand' => $brand ? [
+                        'id' => $brand->id,
+                        'name' => $brand->name,
+                        'slug' => $brand->slug,
+                        'logo_path' => $brand->logo_path,
+                        'logo_filter' => $brand->logo_filter ?? 'none',
+                        'primary_color' => $brand->primary_color,
+                    ] : null,
+                ];
+            })() : null,
+            // C12: All collections this user has access to (when collection-only), for switching / dropdown
+            'collection_only_collections' => (app()->bound('collection_only') && app('collection_only') && $user && $tenant)
+                ? $user->collectionAccessGrants()
+                    ->whereNotNull('accepted_at')
+                    ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
+                    ->with(['collection:id,name,slug,brand_id', 'collection.brand'])
+                    ->get()
+                    ->map(fn ($grant) => [
+                        'id' => $grant->collection->id,
+                        'name' => $grant->collection->name,
+                        'slug' => $grant->collection->slug,
+                        'brand' => $grant->collection->brand ? [
+                            'id' => $grant->collection->brand->id,
+                            'name' => $grant->collection->brand->name,
+                            'slug' => $grant->collection->brand->slug,
+                            'logo_path' => $grant->collection->brand->logo_path,
+                            'logo_filter' => $grant->collection->brand->logo_filter ?? 'none',
+                            'primary_color' => $grant->collection->brand->primary_color,
+                        ] : null,
+                    ])
+                    ->unique('id')
+                    ->values()
+                    ->toArray()
+                : [],
             'auth' => [
                 'user' => $user ? [
                     'id' => $user->id,
@@ -419,6 +472,8 @@ class HandleInertiaRequests extends Middleware
                     'settings' => $activeBrand->settings ?? [], // Phase J.3.1: Include brand settings for approval checks
                 ] : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
+                // User is in company but has no brand access (removed from all brands)
+                'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && (is_array($brands) && count($brands) === 0),
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
                 'permissions' => array_values($permissions), // Ensure it's a proper array (not an object with numeric keys)
                 'roles' => $roles,

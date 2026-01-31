@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Brand;
+use App\Models\Collection;
 use App\Models\Tenant;
 use Closure;
 use Illuminate\Http\Request;
@@ -114,9 +115,18 @@ class ResolveTenant
                             // Update session with accessible brand
                             session(['brand_id' => $brand->id]);
                         } else {
-                            // User has no active brand membership - redirect to error page
-                            // Don't allow access to default brand if user isn't assigned to any brand
-                            // Clear the brand_id from session to prevent loop
+                            // C12: Collection-only mode — user has no brand but may have collection access grant
+                            $collectionId = session('collection_id');
+                            if ($collectionId && $user) {
+                                $collection = Collection::where('id', $collectionId)
+                                    ->where('tenant_id', $tenant->id)
+                                    ->first();
+                                if ($collection && $user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
+                                    app()->instance('collection_only', true);
+                                    app()->instance('collection', $collection);
+                                    return $next($request);
+                                }
+                            }
                             session()->forget('brand_id');
                             return redirect()->route('errors.no-brand-assignment');
                         }
@@ -146,9 +156,18 @@ class ResolveTenant
                     $brand = $userBrand;
                     session(['brand_id' => $brand->id]);
                 } else {
-                    // User has no active brand membership - redirect to error page
-                    // Don't allow access to default brand if user isn't assigned to any brand
-                    // Clear the brand_id from session to prevent loop
+                    // C12: Collection-only mode
+                    $collectionId = session('collection_id');
+                    if ($collectionId && $user) {
+                        $collection = Collection::where('id', $collectionId)
+                            ->where('tenant_id', $tenant->id)
+                            ->first();
+                        if ($collection && $user->collectionAccessGrants()->where('collection_id', $collection->id)->whereNotNull('accepted_at')->exists()) {
+                            app()->instance('collection_only', true);
+                            app()->instance('collection', $collection);
+                            return $next($request);
+                        }
+                    }
                     session()->forget('brand_id');
                     return redirect()->route('errors.no-brand-assignment');
                 }

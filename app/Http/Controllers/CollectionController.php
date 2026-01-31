@@ -7,6 +7,7 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Tenant;
+use App\Models\User;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
 use App\Services\FeatureGate;
@@ -145,6 +146,24 @@ class CollectionController extends Controller
             'can_remove_from_collection' => $canRemoveFromCollection,
             'public_collections_enabled' => $publicCollectionsEnabled,
         ]);
+    }
+
+    /**
+     * C12: Return assets grid data for a single collection (used by collection-only view).
+     * Authorizes view, then returns same shape as index() assets array.
+     */
+    public function getCollectionAssetsGridData(Collection $collection, User $user): array
+    {
+        Gate::forUser($user)->authorize('view', $collection);
+        $tenant = $collection->tenant;
+        $brand = $collection->brand;
+        if (! $tenant || ! $brand) {
+            return [];
+        }
+        $query = $this->collectionAssetQueryService->query($user, $collection);
+        $assetModels = $query->get();
+
+        return $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
     }
 
     /**

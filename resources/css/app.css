@@ -48,3 +48,23 @@
 .gap-7{
     gap: 1.7rem;
 }
+
+/* C12: Collection-only user — main menu (Dashboard, Assets, etc.) disabled
+   Flags you can use for overrides:
+   - nav.app-nav.is-collection-only (class on <nav>)
+   - nav[data-collection-only="true"] (data attribute on <nav>)
+   - --collection-only-user: 1 (CSS variable on <nav>, use var(--collection-only-user) in your rules)
+   - .app-nav-main-links (class on the div wrapping Dashboard, Assets, Deliverables, Collections, Generative, Downloads)
+   - .app-nav-main-links[data-collection-only="true"] (that div when collection-only)
+*/
+nav.app-nav.is-collection-only .app-nav-main-links .nav-link-disabled,
+nav.app-nav[data-collection-only="true"] .app-nav-main-links .nav-link-disabled,
+.app-nav-main-links[data-collection-only="true"] .nav-link-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+    user-select: none;
+    color: #9ca3af;
+}
+
+/* Optional: use the CSS variable for your own overrides, e.g. .my-thing { opacity: var(--collection-only-user, 1); } */

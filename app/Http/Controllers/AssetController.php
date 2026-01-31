@@ -19,9 +19,11 @@ use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Illuminate\Support\Facades\DB;
@@ -1385,6 +1387,92 @@ class AssetController extends Controller
         return response()->json([
             'events' => $events,
         ], 200);
+    }
+
+    /**
+     * View an asset: JSON view URL for AJAX (e.g. AssetDrawer video) or Inertia page for full-page view (e.g. collection-only user).
+     *
+     * GET /assets/{asset}/view
+     */
+    public function view(Request $request, Asset $asset): JsonResponse|Response
+    {
+        Gate::authorize('view', $asset);
+
+        if ($request->wantsJson() || $request->header('Accept') === 'application/json') {
+            return $this->previewUrl($asset);
+        }
+
+        $tenant = app('tenant');
+        $collectionOnly = app()->bound('collection_only') && app('collection_only');
+        $collection = $collectionOnly && app()->bound('collection') ? app('collection') : null;
+
+        // Build thumbnail URLs from metadata (same logic as index) — Asset has no final/preview URL accessors
+        $metadata = $asset->metadata ?? [];
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+            ? $asset->thumbnail_status->value
+            : ($asset->thumbnail_status ?? 'pending');
+        $previewThumbnailUrl = null;
+        $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+        if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+            $previewThumbnailUrl = route('assets.thumbnail.preview', [
+                'asset' => $asset->id,
+                'style' => 'preview',
+            ]);
+        }
+        $finalThumbnailUrl = null;
+        if ($thumbnailStatus === 'completed') {
+            $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+            $finalThumbnailUrl = route('assets.thumbnail.final', [
+                'asset' => $asset->id,
+                'style' => 'thumb',
+            ]);
+            if ($thumbnailVersion) {
+                $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+            }
+        }
+        $thumbnailUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
+
+        $asset->load(['collections' => fn ($q) => $q->select('collections.id', 'collections.name')]);
+        $payload = [
+            'id' => $asset->id,
+            'title' => $asset->title,
+            'original_filename' => $asset->original_filename,
+            'mime_type' => $asset->mime_type,
+            'thumbnail_url' => $thumbnailUrl,
+            'download_url' => route('assets.download', ['asset' => $asset->id]),
+            'collection_only' => $collectionOnly,
+            'collection' => $collection ? ['id' => $collection->id, 'name' => $collection->name] : null,
+        ];
+
+        return Inertia::render('Assets/View', ['asset' => $payload]);
+    }
+
+    /**
+     * Download an asset. Redirects to a signed storage URL.
+     * GET /assets/{asset}/download
+     */
+    public function download(Asset $asset): RedirectResponse
+    {
+        Gate::authorize('view', $asset);
+
+        $tenant = app('tenant');
+        if ($asset->tenant_id !== $tenant->id) {
+            abort(404, 'Asset not found.');
+        }
+
+        if (! $asset->storage_root_path) {
+            abort(404, 'File not available.');
+        }
+
+        try {
+            $disk = Storage::disk('s3');
+            $signedUrl = $disk->temporaryUrl($asset->storage_root_path, now()->addMinutes(15));
+
+            return redirect($signedUrl);
+        } catch (\Throwable $e) {
+            report($e);
+            abort(500, 'Failed to generate download link.');
+        }
     }
 
     /**

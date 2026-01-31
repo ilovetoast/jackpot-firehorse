@@ -9,6 +9,9 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 
 export default function Team({ tenant, members, brands = [], tenant_roles = [], current_user_count, max_users, user_limit_reached }) {
     const { auth } = usePage().props
+    const fullMembers = (members || []).filter(m => !m.collection_only)
+    const collectionOnlyMembers = (members || []).filter(m => m.collection_only === true)
+
     const [showInviteModal, setShowInviteModal] = useState(false)
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
     const [ownershipTransferTarget, setOwnershipTransferTarget] = useState(null)
@@ -16,6 +19,10 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
     const [updatingRoles, setUpdatingRoles] = useState({})
     const [removeBrandConfirm, setRemoveBrandConfirm] = useState({ open: false, userId: null, brandId: null, brandName: '' })
     const [removeMemberConfirm, setRemoveMemberConfirm] = useState({ open: false, userId: null, userName: '' })
+    const [deleteFromCompanyConfirm, setDeleteFromCompanyConfirm] = useState({ open: false, userId: null, userName: '' })
+    const [addToBrandModal, setAddToBrandModal] = useState({ open: false, user: null, brandId: '', role: 'viewer' })
+    const [addToBrandSubmitting, setAddToBrandSubmitting] = useState(false)
+    const [addToBrandErrors, setAddToBrandErrors] = useState({})
     const { data, setData, post, processing, errors, reset } = useForm({
         email: '',
         role: 'member',
@@ -32,6 +39,21 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                 preserveScroll: true,
                 onSuccess: () => {
                     setRemoveMemberConfirm({ open: false, userId: null, userName: '' })
+                }
+            })
+        }
+    }
+
+    const handleDeleteFromCompany = (userId, userName) => {
+        setDeleteFromCompanyConfirm({ open: true, userId, userName })
+    }
+
+    const confirmDeleteFromCompany = () => {
+        if (deleteFromCompanyConfirm.userId) {
+            router.delete(`/app/companies/${tenant.id}/team/${deleteFromCompanyConfirm.userId}/delete-from-company`, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setDeleteFromCompanyConfirm({ open: false, userId: null, userName: '' })
                 }
             })
         }
@@ -119,6 +141,34 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
         setRemoveBrandConfirm({ open: true, userId, brandId, brandName })
     }
 
+    const openAddToBrandModal = (user) => {
+        setAddToBrandModal({ open: true, user, brandId: '', role: 'viewer' })
+        setAddToBrandErrors({})
+    }
+
+    const handleAddToBrandSubmit = (e) => {
+        e.preventDefault()
+        if (!addToBrandModal.user?.id || !addToBrandModal.brandId) return
+        setAddToBrandSubmitting(true)
+        setAddToBrandErrors({})
+        router.post(
+            `/app/companies/${tenant.id}/team/${addToBrandModal.user.id}/add-to-brand`,
+            { brand_id: addToBrandModal.brandId, role: addToBrandModal.role },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setAddToBrandModal({ open: false, user: null, brandId: '', role: 'viewer' })
+                    setAddToBrandSubmitting(false)
+                    router.reload({ preserveScroll: true })
+                },
+                onError: (errors) => {
+                    setAddToBrandErrors(errors || {})
+                    setAddToBrandSubmitting(false)
+                },
+            }
+        )
+    }
+
     const confirmRemoveBrandAssignment = () => {
         if (removeBrandConfirm.userId && removeBrandConfirm.brandId) {
             router.delete(`/app/brands/${removeBrandConfirm.brandId}/users/${removeBrandConfirm.userId}`, {
@@ -190,14 +240,14 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                     </button>
                 </div>
 
-                {/* Active Members Section */}
-                <div className="mb-6">
+                {/* Active Members Section (full brand access) */}
+                <div className="mb-8">
                     <div className="flex items-center justify-between mb-4">
                         <div>
                             <h2 className="text-lg font-semibold text-gray-900">Active Members</h2>
-                            <p className="mt-1 text-sm text-gray-500">People who have joined {tenant.name}</p>
+                            <p className="mt-1 text-sm text-gray-500">People who have joined {tenant.name} with brand access</p>
                         </div>
-                        <span className="text-sm text-gray-500">{current_user_count} of {max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users} users</span>
+                        <span className="text-sm text-gray-500">{fullMembers.length} of {max_users === Number.MAX_SAFE_INTEGER || max_users > 1000 ? '∞' : max_users} users</span>
                     </div>
 
                     {/* User Limit Reached Banner */}
@@ -208,11 +258,12 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                         />
                     )}
 
-                    {/* Members List */}
+                    {/* Full Members List */}
                     <div className="space-y-4">
-                        {members.map((member) => {
+                        {fullMembers.map((member) => {
                             const isOwner = member.role === 'Owner'
                             const canRemove = !isOwner && member.id !== auth.user?.id
+                            const canDeleteFromCompany = !isOwner && member.id !== auth.user?.id
 
                             return (
                                 <div key={member.id} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4">
@@ -264,12 +315,12 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                                             <p className="mt-1 text-sm text-gray-500">{member.email}</p>
                                             {member.is_orphaned && (
                                                 <p className="mt-1 text-xs text-yellow-700 bg-yellow-50 px-2 py-1 rounded">
-                                                    This user is not a member of the company but has brand assignments. Remove the brand assignment to clean up.
+                                                    This user is not a member of the company but has brand or collection access. Remove brand assignments above or delete from company to remove all access.
                                                 </p>
                                             )}
                                             
                                             {/* Brand Assignments - Displayed prominently with role selectors */}
-                                            {member.brand_assignments && Array.isArray(member.brand_assignments) && member.brand_assignments.length > 0 && (
+                                            {member.brand_assignments && Array.isArray(member.brand_assignments) && member.brand_assignments.length > 0 ? (
                                                 <div className="mt-3">
                                                     <p className="text-xs font-medium text-gray-700 mb-2">Brand Roles:</p>
                                                     <div className="flex flex-col gap-2">
@@ -335,7 +386,21 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                                                         })}
                                                     </div>
                                                 </div>
-                                            )}
+                                            ) : !member.is_orphaned && brands?.length > 0 ? (
+                                                <div className="mt-3">
+                                                    <p className="text-xs font-medium text-gray-700 mb-2">Brand access:</p>
+                                                    <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded mb-2">
+                                                        No brand access. Add them to a brand to give access.
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openAddToBrandModal(member)}
+                                                        className="inline-flex items-center rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
+                                                    >
+                                                        Add to brand
+                                                    </button>
+                                                </div>
+                                            ) : null}
                                             
                                             <p className="mt-2 text-xs text-gray-400">
                                                 Joined {formatDate(member.joined_at)}
@@ -343,14 +408,15 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                                         </div>
                                     </div>
 
-                                    {/* Remove Button */}
-                                    {canRemove && (
+                                    {/* Delete from company (remove all relations: tenant, brand, collection) */}
+                                    {canDeleteFromCompany && (
                                         <button
                                             type="button"
-                                            onClick={() => handleRemoveMember(member.id, member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email)}
-                                            className="text-red-600 hover:text-red-800"
+                                            onClick={() => handleDeleteFromCompany(member.id, member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email)}
+                                            className="p-1.5 rounded text-red-600 hover:bg-red-50 hover:text-red-800"
+                                            title="Delete from company — remove all access (brand and collection)"
                                         >
-                                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.12m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                                             </svg>
                                         </button>
@@ -360,6 +426,71 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                         })}
                     </div>
                 </div>
+
+                {/* Collection access only — sectioned off, muted, with Add to brand */}
+                {collectionOnlyMembers.length > 0 && (
+                    <div className="mb-8">
+                        <div className="mb-3">
+                            <h2 className="text-base font-semibold text-slate-600">Collection access only</h2>
+                            <p className="mt-0.5 text-sm text-slate-500">
+                                These users can only view specific collections. They don&apos;t have brand or company access. Add them to a brand to give full access.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            {collectionOnlyMembers.map((member) => (
+                                <div key={member.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                                    <div className="flex items-center space-x-3 min-w-0">
+                                        <Avatar
+                                            avatarUrl={member.avatar_url}
+                                            firstName={member.first_name}
+                                            lastName={member.last_name}
+                                            email={member.email}
+                                            size="sm"
+                                        />
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="text-sm font-medium text-slate-700">
+                                                    {member.first_name} {member.last_name}
+                                                </span>
+                                                <span className="inline-flex items-center rounded bg-slate-200 text-slate-700 px-2 py-0.5 text-xs font-medium">
+                                                    Collection access only
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 truncate">{member.email}</p>
+                                            {member.collection_grants && member.collection_grants.length > 0 && (
+                                                <p className="mt-0.5 text-xs text-slate-500">
+                                                    Access: {member.collection_grants.join(', ')}
+                                                </p>
+                                            )}
+                                            <p className="mt-0.5 text-xs text-slate-400">Joined {formatDate(member.joined_at)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => openAddToBrandModal(member)}
+                                            className="inline-flex items-center rounded-md bg-slate-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-500"
+                                        >
+                                            Add to brand
+                                        </button>
+                                        {member.id !== auth.user?.id && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteFromCompany(member.id, member.first_name && member.last_name ? `${member.first_name} ${member.last_name}` : member.email)}
+                                                className="p-1.5 rounded text-red-600 hover:bg-red-50 hover:text-red-800"
+                                                title="Delete from company — remove all collection access"
+                                            >
+                                                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.12m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Invite Member Modal */}
                 {showInviteModal && (
@@ -559,6 +690,78 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                         </div>
                     </div>
                 )}
+
+                {/* Add to Brand Modal (collection-only users) */}
+                {addToBrandModal.open && addToBrandModal.user && (
+                    <div className="fixed inset-0 z-50 overflow-y-auto">
+                        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setAddToBrandModal(prev => ({ ...prev, open: false }))} />
+                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-md sm:p-6">
+                                <h3 className="text-lg font-semibold leading-6 text-gray-900 mb-4">
+                                    Add to brand
+                                </h3>
+                                <p className="text-sm text-gray-500 mb-4">
+                                    Give {addToBrandModal.user.first_name} {addToBrandModal.user.last_name} access to a brand. Choose a brand and role below.
+                                </p>
+                                <form onSubmit={handleAddToBrandSubmit}>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label htmlFor="add-to-brand-brand" className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+                                            <select
+                                                id="add-to-brand-brand"
+                                                value={addToBrandModal.brandId}
+                                                onChange={(e) => setAddToBrandModal(prev => ({ ...prev, brandId: e.target.value }))}
+                                                className="block w-full rounded-md border-gray-300 py-2 px-3 text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                                                required
+                                            >
+                                                <option value="">Select a brand...</option>
+                                                {brands?.map((b) => (
+                                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                                ))}
+                                            </select>
+                                            {addToBrandErrors.brand_id && (
+                                                <p className="mt-1 text-sm text-red-600">{addToBrandErrors.brand_id}</p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label htmlFor="add-to-brand-role" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                                            <select
+                                                id="add-to-brand-role"
+                                                value={addToBrandModal.role}
+                                                onChange={(e) => setAddToBrandModal(prev => ({ ...prev, role: e.target.value }))}
+                                                className="block w-full rounded-md border-gray-300 py-2 px-3 text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                                            >
+                                                <option value="viewer">Viewer</option>
+                                                <option value="contributor">Contributor</option>
+                                                <option value="brand_manager">Brand Manager</option>
+                                                <option value="admin">Admin</option>
+                                            </select>
+                                            {addToBrandErrors.role && (
+                                                <p className="mt-1 text-sm text-red-600">{addToBrandErrors.role}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
+                                        <button
+                                            type="submit"
+                                            disabled={addToBrandSubmitting || !addToBrandModal.brandId}
+                                            className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed sm:col-start-2"
+                                        >
+                                            {addToBrandSubmitting ? 'Adding...' : 'Add to brand'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAddToBrandModal({ open: false, user: null, brandId: '', role: 'viewer' })}
+                                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </main>
             <AppFooter />
             
@@ -586,6 +789,18 @@ export default function Team({ tenant, members, brands = [], tenant_roles = [], 
                 title="Remove Team Member"
                 message={`Are you sure you want to remove ${removeMemberConfirm.userName || 'this team member'} from the account? This action cannot be undone.`}
                 confirmText="Remove Member"
+                cancelText="Cancel"
+                variant="danger"
+            />
+
+            {/* Delete from Company Confirmation Dialog — removes all relations (tenant, brand, collection) */}
+            <ConfirmDialog
+                open={deleteFromCompanyConfirm.open}
+                onClose={() => setDeleteFromCompanyConfirm({ open: false, userId: null, userName: '' })}
+                onConfirm={confirmDeleteFromCompany}
+                title="Delete from company"
+                message={`This will remove ${deleteFromCompanyConfirm.userName || 'this user'} from the company and revoke all access (brand and collection) for ${tenant.name}. This cannot be undone.`}
+                confirmText="Delete from company"
                 cancelText="Cancel"
                 variant="danger"
             />

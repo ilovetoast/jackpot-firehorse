@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\EventType;
 use App\Mail\InviteMember;
 use App\Models\Brand;
+use App\Models\CollectionUser;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
 use App\Models\User;
@@ -157,17 +158,37 @@ class TeamController extends Controller
                 'assignments' => $brandAssignments,
             ]);
             
+            // C12: Collection-only users have no brand assignments but have collection_user grants for this tenant
+            $hasCollectionGrants = $member->collectionAccessGrants()
+                ->whereNotNull('accepted_at')
+                ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
+                ->exists();
+            $collectionOnly = empty($brandAssignments) && $hasCollectionGrants;
+            $collectionGrantNames = $collectionOnly
+                ? $member->collectionAccessGrants()
+                    ->whereNotNull('accepted_at')
+                    ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
+                    ->with('collection:id,name')
+                    ->get()
+                    ->pluck('collection.name')
+                    ->unique()
+                    ->values()
+                    ->toArray()
+                : [];
+
             return [
                 'id' => $member->id,
                 'first_name' => $member->first_name,
                 'last_name' => $member->last_name,
                 'email' => $member->email,
                 'avatar_url' => $member->avatar_url,
-                'role' => $roleDisplay,
-                'role_value' => strtolower($role), // Raw role value for selectors
+                'role' => $collectionOnly ? 'Collection access' : $roleDisplay,
+                'role_value' => $collectionOnly ? 'collection_only' : strtolower($role), // C12: Never show Owner/Admin for collection-only
                 'joined_at' => $member->pivot->created_at ?? $member->created_at,
                 'brand_assignments' => $brandAssignments, // Already converted to array on line 144
                 'is_orphaned' => false, // Current tenant members are not orphaned
+                'collection_only' => $collectionOnly,
+                'collection_grants' => $collectionGrantNames,
             ];
         });
 
@@ -222,8 +243,47 @@ class TeamController extends Controller
             ->filter() // Remove null entries
             ->values();
         
+        // C12: Find collection-only orphans (users with collection_user for this tenant but not in tenant and not already in orphanedBrandUsers)
+        $tenantUserIds = $tenant->users()->pluck('users.id')->toArray();
+        $orphanedBrandUserIds = $orphanedBrandUsers->pluck('id')->unique()->values()->toArray();
+        $tenantCollectionIds = \App\Models\Collection::where('tenant_id', $tenant->id)->pluck('id')->toArray();
+        $collectionOnlyOrphans = collect();
+        if (! empty($tenantCollectionIds)) {
+            $collectionUserUserIds = CollectionUser::whereIn('collection_id', $tenantCollectionIds)
+                ->pluck('user_id')
+                ->unique()
+                ->diff($tenantUserIds)
+                ->diff($orphanedBrandUserIds)
+                ->values()
+                ->toArray();
+            foreach ($collectionUserUserIds as $uid) {
+                $user = User::find($uid);
+                if (! $user) {
+                    continue;
+                }
+                $grants = CollectionUser::where('user_id', $uid)
+                    ->whereIn('collection_id', $tenantCollectionIds)
+                    ->with('collection:id,name')
+                    ->get();
+                $collectionGrantNames = $grants->map(fn ($g) => $g->collection?->name)->filter()->values()->toArray();
+                $collectionOnlyOrphans->push([
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'avatar_url' => $user->avatar_url,
+                    'role' => 'N/A',
+                    'role_value' => null,
+                    'joined_at' => $grants->min('created_at'),
+                    'brand_assignments' => [],
+                    'is_orphaned' => true,
+                    'collection_grants' => $collectionGrantNames,
+                ]);
+            }
+        }
+
         // Merge orphaned records with regular members
-        $allMembers = $members->merge($orphanedBrandUsers)->values();
+        $allMembers = $members->merge($orphanedBrandUsers)->merge($collectionOnlyOrphans)->values();
 
         // Get plan limits
         $planLimits = $this->planService->getPlanLimits($tenant);
@@ -267,6 +327,8 @@ class TeamController extends Controller
                 'joined_at' => $member['joined_at'],
                 'brand_assignments' => $brandAssignments,
                 'is_orphaned' => $member['is_orphaned'] ?? false,
+                'collection_only' => $member['collection_only'] ?? false,
+                'collection_grants' => $member['collection_grants'] ?? [],
             ];
         })->values()->toArray();
         
@@ -355,6 +417,64 @@ class TeamController extends Controller
         );
 
         return redirect()->route('companies.team')->with('success', 'Team member removed successfully.');
+    }
+
+    /**
+     * Delete a user from the company entirely: remove from tenant, all brand assignments, and all collection access.
+     * Use for full cleanup (including orphans). Requires team.manage.
+     */
+    public function deleteFromCompany(Request $request, Tenant $tenant, User $user)
+    {
+        $authUser = Auth::user();
+
+        if (! $authUser->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+            abort(403, 'Only administrators and owners can remove users from the company.');
+        }
+        if ($user->id === $authUser->id) {
+            return back()->withErrors(['delete' => 'You cannot remove yourself from the company.']);
+        }
+
+        $tenantBrandIds = $tenant->brands()->pluck('id')->toArray();
+        $tenantCollectionIds = \App\Models\Collection::where('tenant_id', $tenant->id)->pluck('id')->toArray();
+        $wasInTenant = $user->tenants()->where('tenants.id', $tenant->id)->exists();
+        $owner = $tenant->owner();
+        if ($wasInTenant && $owner && $owner->id === $user->id) {
+            return back()->withErrors(['delete' => 'You cannot remove the company owner. Transfer ownership first.']);
+        }
+
+        DB::transaction(function () use ($user, $tenant, $tenantBrandIds, $tenantCollectionIds, $wasInTenant) {
+            if ($wasInTenant) {
+                $tenant->users()->detach($user->id);
+            }
+            if (! empty($tenantBrandIds)) {
+                DB::table('brand_user')
+                    ->where('user_id', $user->id)
+                    ->whereIn('brand_id', $tenantBrandIds)
+                    ->delete();
+            }
+            if (! empty($tenantCollectionIds)) {
+                CollectionUser::where('user_id', $user->id)
+                    ->whereIn('collection_id', $tenantCollectionIds)
+                    ->delete();
+            }
+        });
+
+        ActivityRecorder::record(
+            tenant: $tenant,
+            eventType: EventType::USER_REMOVED_FROM_COMPANY,
+            subject: $user,
+            actor: $authUser,
+            brand: null,
+            metadata: [
+                'deleted_from_company' => true,
+                'was_tenant_member' => $wasInTenant,
+            ]
+        );
+
+        return redirect()->route('companies.team')->with('success', 'User has been removed from the company and all access revoked.');
     }
 
     /**
@@ -519,6 +639,67 @@ class TeamController extends Controller
         );
 
         return back()->with('success', 'Brand role updated successfully.');
+    }
+
+    /**
+     * C12: Add an existing tenant user (e.g. collection-only) to a brand. Gives them brand access without email invite.
+     */
+    public function addToBrand(Request $request, Tenant $tenant, User $user)
+    {
+        $authUser = Auth::user();
+
+        if (! $authUser->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+            abort(403, 'Only administrators and owners can add users to brands.');
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(404, 'User is not a member of this company.');
+        }
+
+        $validated = $request->validate([
+            'brand_id' => 'required|exists:brands,id',
+            'role' => [
+                'required',
+                'string',
+                function ($attribute, $value, $fail) {
+                    try {
+                        RoleRegistry::validateBrandRoleAssignment($value);
+                    } catch (\InvalidArgumentException $e) {
+                        $fail($e->getMessage());
+                    }
+                },
+            ],
+        ]);
+
+        $brand = Brand::where('id', $validated['brand_id'])->where('tenant_id', $tenant->id)->first();
+        if (! $brand) {
+            abort(403, 'Brand does not belong to this company.');
+        }
+
+        if ($user->activeBrandMembership($brand)) {
+            return back()->withErrors(['brand_id' => 'User already has access to this brand. Use the role dropdown to change their role.']);
+        }
+
+        $user->setRoleForBrand($brand, $validated['role']);
+
+        ActivityRecorder::record(
+            tenant: $tenant,
+            eventType: EventType::USER_ROLE_UPDATED,
+            subject: $user,
+            actor: $authUser,
+            brand: $brand,
+            metadata: [
+                'old_role' => null,
+                'new_role' => $validated['role'],
+                'scope' => 'brand',
+                'added_from_collection_only' => true,
+            ]
+        );
+
+        return redirect()->route('companies.team')->with('success', "{$user->name} has been added to {$brand->name}.");
     }
 
     /**
