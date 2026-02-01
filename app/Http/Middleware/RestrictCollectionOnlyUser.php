@@ -17,11 +17,13 @@ class RestrictCollectionOnlyUser
      *
      * @var list<string>
      */
+    /**
+     * D12.2: Collection-only users must not access downloads index (visibility by brand/role).
+     */
     protected array $allowedRouteNames = [
         'collection-invite.landing',
         'collection-invite.view',
         'collection-invite.switch',
-        'downloads.index',
         'assets.view',
         'assets.download',
         'assets.thumbnail.final',

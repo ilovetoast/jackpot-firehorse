@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Tenant;
 use App\Services\AiUsageService;
+use App\Services\DownloadNameResolver;
 use App\Services\AiTagPolicyService;
 use App\Services\BillingService;
 use App\Services\CompanyCostService;
+use App\Services\EnterpriseDownloadPolicy;
 use App\Services\TagQualityMetricsService;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
@@ -197,6 +199,21 @@ class CompanyController extends Controller
             ];
         }
 
+        $defaultBrand = $tenant->defaultBrand;
+
+        // Enterprise Download Policy (read-only UX surface; Enterprise plan only)
+        $enterpriseDownloadPolicy = null;
+        if ($currentPlan === 'enterprise') {
+            $policy = app(EnterpriseDownloadPolicy::class);
+            $enterpriseDownloadPolicy = [
+                'disable_single_asset_downloads' => $policy->disableSingleAssetDownloads($tenant),
+                'require_landing_page_for_public' => $policy->requireLandingPageForPublic($tenant),
+                'require_password_for_public' => $policy->requirePasswordForPublic($tenant),
+                'force_expiration_days' => $policy->forceExpirationDays($tenant),
+                'disallow_non_expiring' => $policy->disallowNonExpiring($tenant),
+            ];
+        }
+
         // Phase M-2: Include tenant settings
         return Inertia::render('Companies/Settings', [
             'tenant' => [
@@ -205,6 +222,7 @@ class CompanyController extends Controller
                 'slug' => $tenant->slug,
                 'timezone' => $tenant->timezone ?? 'UTC',
                 'settings' => $tenant->settings ?? [],
+                'default_brand_name' => $defaultBrand?->name ?? null,
             ],
             'billing' => [
                 'current_plan' => $currentPlan,
@@ -215,6 +233,7 @@ class CompanyController extends Controller
             'is_current_user_owner' => $isCurrentUserOwner,
             'tenant_users' => $tenantUsers,
             'pending_transfer' => $pendingTransferData,
+            'enterprise_download_policy' => $enterpriseDownloadPolicy,
         ]);
     }
 
@@ -275,6 +294,27 @@ class CompanyController extends Controller
             'settings.enable_metadata_approval' => 'nullable|boolean', // Phase M-2
             'settings.features' => 'nullable|array', // Phase J.3.1
             'settings.features.contributor_asset_approval' => 'nullable|boolean', // Phase J.3.1
+            'settings.download_name_template' => [
+                'nullable',
+                'string',
+                'max:500',
+                function ($attribute, $value, $fail) use ($tenant) {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    $resolver = app(DownloadNameResolver::class);
+                    $msg = $resolver->validateTemplate($value);
+                    if ($msg !== null) {
+                        $fail($msg);
+                        return;
+                    }
+                    $resolved = $resolver->resolve($value, $tenant, $tenant->defaultBrand ?? null, null);
+                    $resolvedMsg = $resolver->validateResolved($resolved);
+                    if ($resolvedMsg !== null) {
+                        $fail('Resolved preview: ' . $resolvedMsg);
+                    }
+                },
+            ],
         ]);
 
         // Phase M-2: Handle settings separately
@@ -292,11 +332,59 @@ class CompanyController extends Controller
         if (isset($settings['features']['contributor_asset_approval'])) {
             $mergedSettings['features']['contributor_asset_approval'] = $settings['features']['contributor_asset_approval'];
         }
-        
+        if (array_key_exists('download_name_template', $settings)) {
+            $mergedSettings['download_name_template'] = $settings['download_name_template'] === ''
+                ? null
+                : $settings['download_name_template'];
+        }
+
         $tenant->update($validated);
         $tenant->update(['settings' => $mergedSettings]);
 
         return $this->backWithSuccess('Updated');
+    }
+
+    /**
+     * D12: Update Enterprise Download Policy (tenant-level overrides). Enterprise plan only.
+     */
+    public function updateDownloadPolicy(Request $request)
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors(['settings' => 'You must select a company to update settings.']);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
+            abort(403, 'Only administrators and owners can update company settings.');
+        }
+
+        $currentPlan = $this->billingService->getCurrentPlan($tenant);
+        if ($currentPlan !== 'enterprise') {
+            return redirect()->back()->withErrors(['download_policy' => 'Download policy is available on the Enterprise plan.']);
+        }
+
+        $validated = $request->validate([
+            'disable_single_asset_downloads' => 'nullable|boolean',
+            'require_landing_page_for_public' => 'nullable|boolean',
+            'require_password_for_public' => 'nullable|boolean',
+            'force_expiration_days' => 'nullable|integer|min:1|max:365',
+            'disallow_non_expiring' => 'nullable|boolean',
+        ]);
+
+        $overrides = array_filter($validated, fn ($v) => $v !== null);
+        $currentSettings = $tenant->settings ?? [];
+        $currentPolicy = $currentSettings['download_policy'] ?? [];
+        $mergedPolicy = is_array($currentPolicy) ? array_merge($currentPolicy, $overrides) : $overrides;
+        $currentSettings['download_policy'] = $mergedPolicy;
+        $tenant->update(['settings' => $currentSettings]);
+
+        return redirect()->back()->with('success', 'Download policy updated.');
     }
 
     /**

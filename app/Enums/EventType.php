@@ -164,6 +164,9 @@ class EventType
     public const DOWNLOAD_ZIP_FAILED = 'download.zip.failed';
     public const DOWNLOAD_GROUP_FAILED = 'download_group.failed';
 
+    // D9 — Download access (internal analytics)
+    public const DOWNLOAD_ACCESS_GRANTED = 'download.access.granted';
+
     // Subscription/Billing events
     public const SUBSCRIPTION_CREATED = 'subscription.created';
     public const SUBSCRIPTION_UPDATED = 'subscription.updated';
@@ -304,6 +307,7 @@ class EventType
             self::DOWNLOAD_ZIP_COMPLETED,
             self::DOWNLOAD_ZIP_FAILED,
             self::DOWNLOAD_GROUP_FAILED,
+            self::DOWNLOAD_ACCESS_GRANTED,
             self::SUBSCRIPTION_CREATED,
             self::SUBSCRIPTION_UPDATED,
             self::SUBSCRIPTION_CANCELED,

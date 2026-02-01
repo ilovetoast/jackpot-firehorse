@@ -94,7 +94,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
 
     // Phase D1: Download bucket — IDs for grid selection; count = bucketAssetIds.length
     const [bucketAssetIds, setBucketAssetIds] = useState([])
-    const lastClickedRef = useRef({ assetId: null, at: 0, index: null })
+    const [bucketAddFeedback, setBucketAddFeedback] = useState(null) // Brief message when asset can't be added (e.g. not published)
 
     // Fetch bucket items on mount and when returning to page (sync from server)
     useEffect(() => {
@@ -127,14 +127,26 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         setBucketAssetIds(ids)
     }, [])
 
-    // Phase D1: Add asset to bucket (API), then update local state from response
+    // Phase D1: Add asset to bucket (API), then update local state from response.
+    // Server returns 200 with current bucket state (soft filter). If asset wasn't added (unpublished/archived or no access), show brief feedback.
     const bucketAdd = useCallback((assetId) => {
         return fetch(route('download-bucket.add'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
             body: JSON.stringify({ asset_id: assetId }),
-        }).then((r) => r.json()).then(applyBucketResponse)
+        })
+            .then((r) => r.json().catch(() => ({})))
+            .then((data) => {
+                if (Array.isArray(data?.items) || typeof data?.count === 'number') {
+                    applyBucketResponse(data)
+                    const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+                    if (!ids.includes(assetId)) {
+                        setBucketAddFeedback("This asset can't be added to the download (it may not be published yet).")
+                        setTimeout(() => setBucketAddFeedback(null), 4000)
+                    }
+                }
+            })
     }, [applyBucketResponse])
 
     const bucketRemove = useCallback((assetId) => {
@@ -163,39 +175,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         }).then((r) => r.json()).then(applyBucketResponse)
     }, [applyBucketResponse])
 
-    // Phase D1: Single click = add to bucket; second click on same = open preview. Shift+click = range add.
-    const handleAssetClick = useCallback((asset, e) => {
-        if (isBulkMode) {
-            setActiveAssetId(asset?.id || null)
-            return
-        }
-        const id = asset?.id
-        const idx = localAssets.findIndex((a) => a.id === id)
-        if (e?.shiftKey) {
-            const last = lastClickedRef.current.index
-            if (last != null && last >= 0) {
-                const low = Math.min(last, idx)
-                const high = Math.max(last, idx)
-                const rangeIds = localAssets.slice(low, high + 1).map((a) => a.id).filter(Boolean)
-                bucketAddBatch(rangeIds).then(() => {
-                    lastClickedRef.current = { assetId: id, at: Date.now(), index: idx }
-                })
-            } else {
-                bucketAdd(id).then(() => {
-                    lastClickedRef.current = { assetId: id, at: Date.now(), index: idx }
-                })
-            }
-            return
-        }
-        const sameAndRecent = lastClickedRef.current.assetId === id && (Date.now() - lastClickedRef.current.at) < 500
-        if (sameAndRecent) {
-            setActiveAssetId(id)
-            return
-        }
-        bucketAdd(id).then(() => {
-            lastClickedRef.current = { assetId: id, at: Date.now(), index: idx }
-        })
-    }, [isBulkMode, localAssets, bucketAdd, bucketAddBatch])
+    // UX: Click on asset card always opens drawer. Checkbox is the only way to add/remove from download bucket.
+    const handleAssetClick = useCallback((asset) => {
+        setActiveAssetId(asset?.id || null)
+    }, [])
 
     const handleBucketToggle = useCallback((assetId) => {
         if (bucketAssetIds.includes(assetId)) {
@@ -871,6 +854,12 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             )
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
+                        {/* Brief feedback when an asset can't be added to the download bucket (e.g. not published) */}
+                        {bucketAddFeedback && (
+                            <div className="mb-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-2 text-sm text-amber-800" role="alert">
+                                {bucketAddFeedback}
+                            </div>
+                        )}
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Primary metadata filters are now integrated into the toolbar (between search and controls) */}
                         <div className="mb-8">
@@ -945,11 +934,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             {localAssets && localAssets.length > 0 ? (
                                 <AssetGrid 
                                     assets={localAssets} 
-                                    onAssetClick={(asset) => {
-                                        if (!isBulkMode) {
-                                            setActiveAssetId(asset?.id || null)
-                                        }
-                                    }}
+                                    onAssetClick={handleAssetClick}
                                     cardSize={cardSize}
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}
@@ -962,6 +947,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                 : [...prev, assetId]
                                         )
                                     }) : null}
+                                    bucketAssetIds={bucketAssetIds}
+                                    onBucketToggle={handleBucketToggle}
                                     isPendingApprovalMode={isPendingApprovalMode}
                                     isPendingPublicationFilter={isPendingPublicationFilter}
                                     onAssetApproved={(assetId) => {
@@ -1017,6 +1004,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 assets={localAssets}
                                 currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
+                                bucketAssetIds={bucketAssetIds}
+                                onBucketToggle={handleBucketToggle}
                             />
                         </div>
                     )}
@@ -1036,6 +1025,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             assets={localAssets}
                             currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
+                            bucketAssetIds={bucketAssetIds}
+                            onBucketToggle={handleBucketToggle}
                         />
                     </div>
                 )}

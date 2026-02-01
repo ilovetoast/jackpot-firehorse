@@ -74,3 +74,10 @@ Schedule::job(\App\Jobs\AggregateMetricsJob::class)
     ->withoutOverlapping()
     ->name('aggregate-metrics')
     ->description('Aggregate asset metrics into periodic aggregates');
+
+// Phase D5: Expired download cleanup (delete artifacts, verify, record metrics)
+Schedule::job(new \App\Jobs\CleanupExpiredDownloadsJob())
+    ->daily()
+    ->withoutOverlapping()
+    ->name('cleanup-expired-downloads')
+    ->description('Delete expired download ZIPs from storage and verify cleanup');

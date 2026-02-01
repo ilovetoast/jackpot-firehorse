@@ -389,6 +389,8 @@ class HandleInertiaRequests extends Middleware
                 'warning' => $request->session()->get('warning'),
                 'info' => $request->session()->get('info'),
                 'status' => $request->session()->get('status'), // For password reset status messages
+                'download_action' => $request->session()->get('download_action'),
+                'download_action_id' => $request->session()->get('download_action_id'),
             ],
             // Phase 2.5: Environment detection for dev-only features
             'env' => [
@@ -508,6 +510,25 @@ class HandleInertiaRequests extends Middleware
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
             // Phase D1: Download bucket count (session-based) for sticky bar
             'download_bucket_count' => $user && $tenant ? app(\App\Services\DownloadBucketService::class)->count() : 0,
+            // Phase D3: Download creation UX — feature flags for Create Download panel
+            'download_features' => $tenant ? (function () use ($tenant) {
+                $features = app(PlanService::class)->getDownloadManagementFeatures($tenant);
+                return [
+                    'extend_expiration' => $features['extend_expiration'] ?? false,
+                    'revoke' => $features['revoke'] ?? false,
+                    'restrict_access_brand' => $features['restrict_access_brand'] ?? false,
+                    'restrict_access_company' => $features['restrict_access_company'] ?? false,
+                    'restrict_access_users' => $features['restrict_access_users'] ?? false,
+                    'non_expiring' => $features['non_expiring'] ?? false,
+                    'regenerate' => $features['regenerate'] ?? false,
+                    'rename' => $features['rename'] ?? false,
+                    'password_protection' => $features['password_protection'] ?? false, // D7: Enterprise only
+                    'branding' => $features['branding'] ?? false, // D7: Pro + Enterprise
+                    'max_expiration_days' => $features['max_expiration_days'] ?? 30,
+                ];
+            })() : [],
+            // D11: Enterprise Download Policy — disable single-asset (drawer) download when policy requires packaging
+            'download_policy_disable_single_asset' => $tenant ? app(\App\Services\EnterpriseDownloadPolicy::class)->disableSingleAssetDownloads($tenant) : false,
         ];
         
         // Add pending items counts for notification bell (simple, lightweight)

@@ -171,9 +171,10 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         }
     }
     
-    const handleClick = () => {
+    // UX invariant: Click on card always opens drawer. Only the checkbox adds/removes from download bucket.
+    const handleClick = (e) => {
         if (onClick) {
-            onClick(asset)
+            onClick(asset, e)
         }
     }
 
@@ -281,17 +282,17 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     </div>
                 )}
 
-                {/* Phase D1: Download bucket checkbox (on hover when not in bulk mode) */}
+                {/* Phase D1: Download bucket checkbox. Only affordance for add/remove; visible on hover or when selected. */}
                 {!onBulkSelect && onBucketToggle && (
-                    <div className={`absolute top-2 left-2 z-10 transition-opacity ${isHovering || isInBucket ? 'opacity-100' : 'opacity-0'}`}>
+                    <div className={`absolute top-2 left-2 z-10 transition-opacity ${isCardHovering || isInBucket ? 'opacity-100' : 'opacity-0'}`}>
                         <input
                             type="checkbox"
                             checked={isInBucket}
-                            onChange={(e) => {
+                            onChange={() => {}}
+                            onClick={(e) => {
                                 e.stopPropagation()
                                 onBucketToggle()
                             }}
-                            onClick={(e) => e.stopPropagation()}
                             className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer bg-white shadow-sm"
                             aria-label={isInBucket ? 'Remove from download' : 'Add to download'}
                         />

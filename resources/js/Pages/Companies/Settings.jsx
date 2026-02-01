@@ -9,14 +9,39 @@ import DashboardWidgetSettings from '../../Components/Companies/DashboardWidgetS
 import { usePermission } from '../../hooks/usePermission'
 import { debounce } from 'lodash-es'
 
-export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null }) {
+const DEFAULT_DOWNLOAD_POLICY = {
+    disable_single_asset_downloads: false,
+    require_landing_page_for_public: false,
+    require_password_for_public: false,
+    force_expiration_days: null,
+    disallow_non_expiring: false,
+}
+
+export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
     const { auth } = usePage().props
     const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
     const { hasPermission: canEditViaPermission } = usePermission('companies.settings.edit')
     // Company owners should always be able to edit settings
     const canEditCompanySettings = is_current_user_owner || canEditViaPermission
     const [activeSection, setActiveSection] = useState('company-information')
+    const isEnterprise = billing?.current_plan === 'enterprise'
+    const [downloadPolicy, setDownloadPolicy] = useState(() => ({
+        ...DEFAULT_DOWNLOAD_POLICY,
+        ...(enterpriseDownloadPolicy || {}),
+    }))
+    const [downloadPolicySaving, setDownloadPolicySaving] = useState(false)
     
+    // Sync download policy from server (Enterprise only)
+    useEffect(() => {
+        if (enterpriseDownloadPolicy) {
+            setDownloadPolicy({
+                ...DEFAULT_DOWNLOAD_POLICY,
+                ...enterpriseDownloadPolicy,
+                force_expiration_days: enterpriseDownloadPolicy.force_expiration_days ?? null,
+            })
+        }
+    }, [enterpriseDownloadPolicy])
+
     // Debug permission check
     useEffect(() => {
         console.log('[AI Settings] Permission check:', {
@@ -44,8 +69,37 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
             features: {
                 contributor_asset_approval: tenant.settings?.features?.contributor_asset_approval ?? false, // Phase J.3.1
             },
+            download_name_template: tenant.settings?.download_name_template ?? '', // Download default name template
         },
     })
+
+    // Preview for download name template (mirrors backend DownloadNameResolver)
+    const sanitizeTokenValue = (value) => {
+        if (!value || typeof value !== 'string') return ''
+        let v = value.trim().replace(/[^\p{L}\p{N}\s\-_]/gu, '-').replace(/\s+/g, '-').replace(/-+/g, '-')
+        return v.replace(/^-|-$/g, '')
+    }
+    const sanitizeFilename = (value) => {
+        if (!value || typeof value !== 'string') return 'download'
+        let v = value.trim().replace(/[^\p{L}\p{N}\s\-_.]/gu, '-').replace(/\s+/g, '-').replace(/-+/g, '-')
+        v = v.replace(/^[-._]+|[-._]+$/g, '')
+        return v || 'download'
+    }
+    const defaultDownloadTemplate = '{{brand}}-download-{{date}}'
+    const downloadNamePreview = (() => {
+        const t = (data.settings?.download_name_template ?? '').trim() || defaultDownloadTemplate
+        const now = new Date()
+        const date = now.toISOString().slice(0, 10)
+        const datetime = now.toISOString().slice(0, 10) + '-' + now.toTimeString().slice(0, 5).replace(':', '-')
+        const company = sanitizeTokenValue(tenant.name || '')
+        const brand = sanitizeTokenValue(tenant.default_brand_name || 'Brand')
+        const resolved = t
+            .replace(/\{\{\s*company\s*\}\}/gi, company)
+            .replace(/\{\{\s*brand\s*\}\}/gi, brand)
+            .replace(/\{\{\s*date\s*\}\}/gi, date)
+            .replace(/\{\{\s*datetime\s*\}\}/gi, datetime)
+        return sanitizeFilename(resolved)
+    })()
 
     // Utility function to generate slug from company name
     const generateSlugFromName = (name) => {
@@ -170,6 +224,22 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         }
     }
 
+    const persistDownloadPolicy = (next) => {
+        if (!isEnterprise) return
+        setDownloadPolicy(next)
+        setDownloadPolicySaving(true)
+        router.put(route('companies.settings.download-policy'), {
+            disable_single_asset_downloads: next.disable_single_asset_downloads ?? false,
+            require_landing_page_for_public: next.require_landing_page_for_public ?? false,
+            require_password_for_public: next.require_password_for_public ?? false,
+            force_expiration_days: next.force_expiration_days ?? null,
+            disallow_non_expiring: next.disallow_non_expiring ?? false,
+        }, {
+            preserveScroll: true,
+            onFinish: () => setDownloadPolicySaving(false),
+        })
+    }
+
     const submit = (e) => {
         e.preventDefault()
         
@@ -284,6 +354,17 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                 }`}
                             >
                                 Brands Settings
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('enterprise-download-policy')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'enterprise-download-policy'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Enterprise Download Policy
                             </button>
                             {(Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage'))) && (
                                 <button
@@ -549,6 +630,37 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                     </div>
                                 )}
 
+                                {/* Download name template — default name for new downloads */}
+                                <div className="border-t border-gray-200 pt-6">
+                                    <label htmlFor="download_name_template" className="block text-sm font-medium leading-6 text-gray-900">
+                                        Default download name template
+                                    </label>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Optional. When creating a download, this template is used if the user does not rename it. Tokens: <code className="rounded bg-gray-100 px-1 text-xs">&#123;&#123;company&#125;&#125;</code>, <code className="rounded bg-gray-100 px-1 text-xs">&#123;&#123;brand&#125;&#125;</code>, <code className="rounded bg-gray-100 px-1 text-xs">&#123;&#123;date&#125;&#125;</code>, <code className="rounded bg-gray-100 px-1 text-xs">&#123;&#123;datetime&#125;&#125;</code>. Spaces and special characters become hyphens in the final filename.
+                                    </p>
+                                    <div className="mt-2">
+                                        <input
+                                            type="text"
+                                            name="download_name_template"
+                                            id="download_name_template"
+                                            value={data.settings?.download_name_template ?? ''}
+                                            onChange={(e) => setData('settings.download_name_template', e.target.value)}
+                                            placeholder="{{brand}}-download-{{date}}"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                        />
+                                        <p className="mt-2 text-sm text-gray-600">
+                                            <span className="font-medium">Preview:</span>{' '}
+                                            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-800">{downloadNamePreview}</code>
+                                            {(data.settings?.download_name_template ?? '').trim() === '' && (
+                                                <span className="ml-1.5 text-gray-500">(default when empty)</span>
+                                            )}
+                                        </p>
+                                        {errors.settings?.download_name_template && (
+                                            <p className="mt-2 text-sm text-red-600">{errors.settings.download_name_template}</p>
+                                        )}
+                                    </div>
+                                </div>
+
                                 {errors.error && (
                                     <div className="rounded-md bg-red-50 p-4">
                                         <div className="flex">
@@ -683,6 +795,165 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                                             </svg>
                                         </Link>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Enterprise Download Policy — Company Settings → Downloads → Policy (D12: single card like other sections) */}
+                    <div id="enterprise-download-policy" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                {/* Left: Header */}
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Enterprise Download Policy</h2>
+                                    <p className="mt-1 text-sm text-gray-500">Controls how assets leave the system.</p>
+                                    {!isEnterprise && (
+                                        <p className="mt-3 rounded-md bg-gray-100 px-3 py-2 text-sm text-gray-700">
+                                            Download policy controls are available on the Enterprise plan.
+                                        </p>
+                                    )}
+                                </div>
+                                {/* Right: All policy options */}
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <div className="space-y-6">
+                                        {/* Delivery Controls */}
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-900">Delivery Controls</h3>
+                                            <div className="mt-4 space-y-5">
+                                                <div className="flex items-start gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="policy-disable-single"
+                                                        checked={downloadPolicy.disable_single_asset_downloads ?? false}
+                                                        disabled={!isEnterprise}
+                                                        onChange={(e) => isEnterprise && persistDownloadPolicy({ ...downloadPolicy, disable_single_asset_downloads: e.target.checked })}
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                    />
+                                                    <div>
+                                                        <label htmlFor="policy-disable-single" className="text-sm font-medium text-gray-900">
+                                                            Disable single-asset downloads
+                                                        </label>
+                                                        <p className="mt-0.5 text-sm text-gray-500">
+                                                            Require assets to be delivered as packaged downloads instead of individual files. This helps ensure assets are shared intentionally and with context.
+                                                        </p>
+                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-start gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="policy-landing-page"
+                                                        checked={downloadPolicy.require_landing_page_for_public ?? false}
+                                                        disabled={!isEnterprise}
+                                                        onChange={(e) => isEnterprise && persistDownloadPolicy({ ...downloadPolicy, require_landing_page_for_public: e.target.checked })}
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                    />
+                                                    <div>
+                                                        <label htmlFor="policy-landing-page" className="text-sm font-medium text-gray-900">
+                                                            Require landing page for public downloads
+                                                        </label>
+                                                        <p className="mt-0.5 text-sm text-gray-500">
+                                                            Force public downloads to use a branded landing page instead of direct file links. Landing pages provide clearer context and usage intent.
+                                                        </p>
+                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Security Controls */}
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-900">Security Controls</h3>
+                                            <div className="mt-4">
+                                                <div className="flex items-start gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="policy-password"
+                                                        checked={downloadPolicy.require_password_for_public ?? false}
+                                                        disabled={!isEnterprise}
+                                                        onChange={(e) => isEnterprise && persistDownloadPolicy({ ...downloadPolicy, require_password_for_public: e.target.checked })}
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                    />
+                                                    <div>
+                                                        <label htmlFor="policy-password" className="text-sm font-medium text-gray-900">
+                                                            Require password for public downloads
+                                                        </label>
+                                                        <p className="mt-0.5 text-sm text-gray-500">
+                                                            Require a password before accessing public download links. Passwords add a basic security layer for external sharing.
+                                                        </p>
+                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Expiration Controls */}
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-900">Expiration Controls</h3>
+                                            <div className="mt-4 space-y-4">
+                                                <div className="flex items-start gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="policy-expiration"
+                                                        checked={(downloadPolicy.force_expiration_days != null || downloadPolicy.disallow_non_expiring) ?? false}
+                                                        disabled={!isEnterprise}
+                                                        onChange={(e) => {
+                                                            if (!isEnterprise) return
+                                                            const on = e.target.checked
+                                                            persistDownloadPolicy({
+                                                                ...downloadPolicy,
+                                                                force_expiration_days: on ? (downloadPolicy.force_expiration_days || 30) : null,
+                                                                disallow_non_expiring: on,
+                                                            })
+                                                        }}
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                    />
+                                                    <div className="flex-1">
+                                                        <label htmlFor="policy-expiration" className="text-sm font-medium text-gray-900">
+                                                            Enforce expiration
+                                                        </label>
+                                                        <p className="mt-0.5 text-sm text-gray-500">
+                                                            Automatically limit how long downloads remain available. Expired downloads cannot be accessed, even if links are shared.
+                                                        </p>
+                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                    </div>
+                                                </div>
+                                                <div className="ml-7 flex items-center gap-2">
+                                                    <label htmlFor="policy-max-days" className="text-sm text-gray-600">Max days:</label>
+                                                    <input
+                                                        type="number"
+                                                        id="policy-max-days"
+                                                        value={downloadPolicy.force_expiration_days ?? ''}
+                                                        disabled={!isEnterprise}
+                                                        min={1}
+                                                        max={365}
+                                                        placeholder="—"
+                                                        onChange={(e) => {
+                                                            if (!isEnterprise) return
+                                                            const v = e.target.value ? parseInt(e.target.value, 10) : null
+                                                            if (v != null && (v < 1 || v > 365)) return
+                                                            persistDownloadPolicy({ ...downloadPolicy, force_expiration_days: v || null })
+                                                        }}
+                                                        className="block w-20 rounded-md border border-gray-300 py-1.5 px-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:opacity-70 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Important — neutral callout inside card */}
+                                        <div className="rounded-lg border-l-4 border-gray-400 bg-gray-50/50 px-4 py-3">
+                                            <p className="text-sm font-medium text-gray-800">Important</p>
+                                            <p className="mt-1 text-sm text-gray-600">
+                                                Policy enforcement affects downloads across your organization.
+                                            </p>
+                                        </div>
+
+                                        {/* Legal disclaimer */}
+                                        <p className="border-t border-gray-200 pt-4 text-xs text-gray-500">
+                                            Download policies enforce technical delivery rules only. Your organization remains responsible for defining and enforcing legal usage rights.
+                                        </p>
                                     </div>
                                 </div>
                             </div>

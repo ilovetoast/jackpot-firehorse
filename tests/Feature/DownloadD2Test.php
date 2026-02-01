@@ -131,7 +131,11 @@ class DownloadD2Test extends TestCase
 
         $response = $this->get(route('downloads.public', ['download' => $this->download->id]));
         $response->assertStatus(410);
-        $response->assertJsonFragment(['message' => 'This download has been revoked']);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Downloads/Public')
+            ->where('state', 'revoked')
+            ->where('message', 'This download has been revoked.')
+        );
     }
 
     public function test_contributor_cannot_revoke_download(): void

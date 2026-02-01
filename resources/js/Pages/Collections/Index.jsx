@@ -2,7 +2,7 @@
  * Collections Index (C4 read-only UI; C5 create + add/remove assets).
  * Uses CollectionAssetQueryService for asset data; C5 adds create and assign UI.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
@@ -12,6 +12,7 @@ import EditCollectionModal from '../../Components/Collections/EditCollectionModa
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
+import DownloadBucketBar from '../../Components/DownloadBucketBar'
 import { RectangleStackIcon, FolderIcon } from '@heroicons/react/24/outline'
 
 export default function CollectionsIndex({
@@ -24,7 +25,7 @@ export default function CollectionsIndex({
     can_remove_from_collection = false,
     public_collections_enabled = false,
 }) {
-    const { auth } = usePage().props
+    const { auth, download_bucket_count } = usePage().props
     const selectedCollectionId = selected_collection?.id ?? null
 
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937'
@@ -62,6 +63,66 @@ export default function CollectionsIndex({
     useEffect(() => {
         setActiveAssetId(null)
     }, [selectedCollectionId])
+
+    // Phase D1: Download bucket — same as Assets/Index; persists across /app/assets, /app/deliverables, /app/collections (session)
+    const [bucketAssetIds, setBucketAssetIds] = useState([])
+    useEffect(() => {
+        if (typeof window === 'undefined' || !window.route) return
+        fetch(route('download-bucket.items'), {
+            method: 'GET',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then((r) => r.ok ? r.json() : Promise.reject(new Error('Failed to load bucket')))
+            .then((data) => {
+                const ids = (data.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+                setBucketAssetIds(ids)
+            })
+            .catch(() => setBucketAssetIds([]))
+    }, [selectedCollectionId])
+
+    useEffect(() => {
+        const count = download_bucket_count ?? 0
+        if (typeof count === 'number' && count === 0 && bucketAssetIds.length > 0) {
+            setBucketAssetIds([])
+        }
+    }, [download_bucket_count])
+
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
+    const applyBucketResponse = useCallback((data) => {
+        const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+        setBucketAssetIds(ids)
+    }, [])
+    const bucketAdd = useCallback((assetId) => {
+        return fetch(route('download-bucket.add'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ asset_id: assetId }),
+        })
+            .then((r) => r.json().catch(() => ({})))
+            .then((data) => {
+                if (Array.isArray(data?.items) || typeof data?.count === 'number') applyBucketResponse(data)
+            })
+    }, [applyBucketResponse])
+    const bucketRemove = useCallback((assetId) => {
+        return fetch(route('download-bucket.remove', { asset: assetId }), {
+            method: 'DELETE',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        }).then((r) => r.json()).then(applyBucketResponse)
+    }, [applyBucketResponse])
+    const bucketClear = useCallback(() => {
+        return fetch(route('download-bucket.clear'), {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        }).then((r) => r.json()).then(applyBucketResponse)
+    }, [applyBucketResponse])
+    const handleBucketToggle = useCallback((assetId) => {
+        if (bucketAssetIds.includes(assetId)) bucketRemove(assetId)
+        else bucketAdd(assetId)
+    }, [bucketAssetIds, bucketAdd, bucketRemove])
 
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220
@@ -127,7 +188,7 @@ export default function CollectionsIndex({
 
                 {/* Main content */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
-                    <div className="h-full overflow-y-auto">
+                    <div className={`h-full overflow-y-auto ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}>
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
                             {!showGrid ? (
                                 /* No collection selected: show "No collections yet" or "Select a collection" */
@@ -199,6 +260,8 @@ export default function CollectionsIndex({
                                             primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
                                             selectedAssetIds={[]}
                                             onAssetSelect={null}
+                                            bucketAssetIds={bucketAssetIds}
+                                            onBucketToggle={handleBucketToggle}
                                         />
                                     ) : (
                                         /* Empty state: collection selected but no assets */
@@ -217,6 +280,13 @@ export default function CollectionsIndex({
                         </div>
                     </div>
 
+                    <DownloadBucketBar
+                        bucketCount={bucketAssetIds.length}
+                        onCountChange={() => setBucketAssetIds([])}
+                        onRemove={bucketRemove}
+                        onClear={bucketClear}
+                    />
+
                     {/* Asset Drawer - Desktop */}
                     {activeAssetId && (
                         <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
@@ -227,6 +297,8 @@ export default function CollectionsIndex({
                                 assets={localAssets}
                                 currentAssetIndex={activeAsset ? localAssets.findIndex((a) => a.id === activeAsset.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
+                                bucketAssetIds={bucketAssetIds}
+                                onBucketToggle={handleBucketToggle}
                                 collectionContext={{
                                     show: true,
                                     selectedCollectionId,
@@ -258,6 +330,8 @@ export default function CollectionsIndex({
                         assets={localAssets}
                         currentAssetIndex={activeAsset ? localAssets.findIndex((a) => a.id === activeAsset.id) : -1}
                         onAssetUpdate={handleLifecycleUpdate}
+                        bucketAssetIds={bucketAssetIds}
+                        onBucketToggle={handleBucketToggle}
                         collectionContext={{
                             show: true,
                             selectedCollectionId,

@@ -64,19 +64,32 @@ class BuildDownloadZipJob implements ShouldQueue
 
     /**
      * Execute the job.
+     *
+     * D9.2: ZIP build timing is observability only. It must never affect permissions,
+     * access, or UX state directly. Event names: download.zip.build.started | completed | failed.
      */
     public function handle(): void
     {
-        $startTime = microtime(true);
-        Log::info('[BuildDownloadZipJob] Job started', [
-            'download_id' => $this->downloadId,
-        ]);
-
-        // Find download (including soft-deleted, as cleanup may still need ZIP)
+        // Find download first (D9.2: set timing at job start)
         $download = Download::withTrashed()->findOrFail($this->downloadId);
 
+        // D9.2: Record build start (idempotent — do not overwrite on re-run)
+        if (! $download->zip_build_started_at) {
+            $download->forceFill([
+                'zip_build_started_at' => now(),
+            ])->saveQuietly();
+        }
+
+        Log::info('download.zip.build.started', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'asset_count' => $download->assets()->count(),
+        ]);
+
+        $startTime = microtime(true);
+
         // Verify download exists and status allows ZIP build
-        if (!$this->canBuildZip($download)) {
+        if (! $this->canBuildZip($download)) {
             Log::warning('[BuildDownloadZipJob] Cannot build ZIP for download', [
                 'download_id' => $download->id,
                 'status' => $download->status->value,
@@ -126,6 +139,11 @@ class BuildDownloadZipJob implements ShouldQueue
                 $this->deleteOldZip($download->zip_path, $bucket, $s3Client);
             }
 
+            // D9.2: Record build completed (right before marking READY)
+            $download->forceFill([
+                'zip_build_completed_at' => now(),
+            ])->saveQuietly();
+
             // Update download model (store S3 key, not local path — Phase D1 fix)
             $s3ZipKey = "downloads/{$download->id}/download.zip";
             $download->zip_status = ZipStatus::READY;
@@ -140,11 +158,13 @@ class BuildDownloadZipJob implements ShouldQueue
             // Phase 3.1 Step 5: Emit ZIP build success event
             DownloadEventEmitter::emitDownloadZipBuildSuccess($download, $zipSizeBytes);
 
-            Log::info('[BuildDownloadZipJob] ZIP build completed successfully', [
+            Log::info('download.zip.build.completed', [
                 'download_id' => $download->id,
-                'zip_path' => $zipPath,
-                'zip_size_bytes' => $zipSizeBytes,
-                'asset_count' => $assets->count(),
+                'tenant_id' => $download->tenant_id,
+                'asset_count' => $download->assets()->count(),
+                'zip_size_bytes' => $download->zip_size_bytes,
+                'duration_ms' => $download->zipBuildDurationMs(),
+                'attempt' => $this->attempts(),
             ]);
 
             // Clean up temporary ZIP file
@@ -152,6 +172,18 @@ class BuildDownloadZipJob implements ShouldQueue
                 @unlink($zipPath);
             }
         } catch (\Throwable $e) {
+            // D9.2: Record build failed (do not reset started_at on retry)
+            $download->forceFill([
+                'zip_build_failed_at' => now(),
+            ])->saveQuietly();
+
+            Log::error('download.zip.build.failed', [
+                'download_id' => $download->id,
+                'tenant_id' => $download->tenant_id,
+                'asset_count' => $download->assets()->count(),
+                'attempt' => $this->attempts(),
+                'exception' => $e->getMessage(),
+            ]);
             Log::error('[BuildDownloadZipJob] ZIP build failed', [
                 'download_id' => $download->id,
                 'error' => $e->getMessage(),
@@ -411,11 +443,16 @@ class BuildDownloadZipJob implements ShouldQueue
 
     /**
      * Create S3 client instance.
-     * 
+     * When S3Client is bound in the container (e.g. in tests), use it for fake storage.
+     *
      * @return S3Client
      */
     protected function createS3Client(): S3Client
     {
+        if (app()->bound(S3Client::class)) {
+            return app(S3Client::class);
+        }
+
         return new S3Client([
             'version' => 'latest',
             'region' => config('filesystems.disks.s3.region'),
@@ -436,6 +473,11 @@ class BuildDownloadZipJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
+        Log::info('download.build.failure', [
+            'download_id' => $this->downloadId,
+            'tenant_id' => null,
+            'error' => $exception->getMessage(),
+        ]);
         Log::error('[BuildDownloadZipJob] Job failed permanently', [
             'download_id' => $this->downloadId,
             'error' => $exception->getMessage(),

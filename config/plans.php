@@ -38,13 +38,14 @@ return [
             'approval_summaries.enabled' => false,
         ],
         'public_collections_enabled' => false,
+        'public_collection_downloads_enabled' => false, // D6: Download collection as ZIP (Enterprise only)
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 50,
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
         ],
-        // Phase D2: Download management capabilities
+        // Phase D2: Download management capabilities | D3: rename | D7: password_protection, branding
         'download_management' => [
             'extend_expiration' => false,
             'revoke' => false,
@@ -53,6 +54,9 @@ return [
             'restrict_access_users' => false,
             'non_expiring' => false,
             'regenerate' => false,
+            'rename' => false,
+            'password_protection' => false, // D7: Enterprise only
+            'branding' => false, // D7: Pro + Enterprise
             'max_expiration_days' => 30,
         ],
         'notes' => [
@@ -91,6 +95,7 @@ return [
             'approval_summaries.enabled' => false,
         ],
         'public_collections_enabled' => false,
+        'public_collection_downloads_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 200,
@@ -105,6 +110,9 @@ return [
             'restrict_access_users' => false,
             'non_expiring' => false,
             'regenerate' => false,
+            'rename' => false,
+            'password_protection' => false,
+            'branding' => false,
             'max_expiration_days' => 30,
         ],
         'notes' => [
@@ -147,6 +155,7 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => false,
+        'public_collection_downloads_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 1000,
@@ -161,6 +170,9 @@ return [
             'restrict_access_users' => false,
             'non_expiring' => false,
             'regenerate' => false,
+            'rename' => false,
+            'password_protection' => false, // D7: Enterprise only
+            'branding' => true, // D7: Pro + Enterprise
             'max_expiration_days' => 90,
         ],
         'notes' => [
@@ -205,6 +217,7 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => true, // C10: Enterprise only
+        'public_collection_downloads_enabled' => true, // D6: Download collection as ZIP
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999, // Unlimited
@@ -219,7 +232,18 @@ return [
             'restrict_access_users' => true,
             'non_expiring' => true,
             'regenerate' => true,
+            'rename' => true,
+            'password_protection' => true, // D7: Enterprise only
+            'branding' => true, // D7: Pro + Enterprise
             'max_expiration_days' => 365,
+        ],
+        // D11: Enterprise Download Policy — organizational delivery rules (Enterprise only). Non-enterprise: no key / null.
+        'download_policy' => [
+            'disable_single_asset_downloads' => true,
+            'require_landing_page_for_public' => true,
+            'force_expiration_days' => 30,
+            'disallow_non_expiring' => true,
+            'require_password_for_public' => false, // default: not required; set true per-tenant if needed
         ],
         'notes' => [
             '"All" button in Assets/Deliverables category sidebar to view all assets across categories',

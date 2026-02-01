@@ -237,7 +237,11 @@ class DownloadD1Test extends TestCase
 
         $response = $this->get(route('downloads.public', ['download' => $download->id]));
         $response->assertStatus(410);
-        $response->assertJsonFragment(['message' => 'This download has expired']);
+        $response->assertInertia(fn ($page) => $page
+            ->component('Downloads/Public')
+            ->where('state', 'expired')
+            ->where('message', 'This download has expired.')
+        );
     }
 
     public function test_downloads_index_returns_user_downloads(): void

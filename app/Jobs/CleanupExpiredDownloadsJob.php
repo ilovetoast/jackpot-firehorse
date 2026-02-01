@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Download;
-use Aws\S3\Exception\S3Exception;
+use App\Models\StorageBucket;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,192 +14,259 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * 🔒 Phase 3.1 — Downloader System (LOCKED)
- * 
- * Do not refactor or change behavior.
- * Future phases may consume outputs only.
- * 
- * Cleans up expired downloads by:
- * - Finding downloads where shouldHardDelete() === true
- * - Deleting ZIP files from S3
- * - Soft or hard deleting Download records as appropriate
- * 
- * Safety Rules:
- * - Never deletes asset files (only ZIP files)
- * - Never blocks user requests (runs in background)
- * - Job is idempotent
- * - Uses best-effort deletion patterns
- * - NO asset deletion here
+ * Phase D5 — Expiration Cleanup & Verification
+ *
+ * Two flows:
+ * 1) D5: Expired (expires_at < now()) with artifact → delete ZIP, verify, set zip_deleted_at / cleanup_verified_at (or cleanup_failed_at). Record metrics. Do NOT force-delete.
+ * 2) Hard-delete: hard_delete_at <= now() → delete ZIP, force-delete record (existing behavior).
+ *
+ * Safety: idempotent, does not throw on missing file, does not resurrect artifacts.
+ * Logs: download.cleanup.started, .deleted, .verified, .missing_file, .failed, download.metrics.recorded.
  */
 class CleanupExpiredDownloadsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * The number of times the job may be attempted.
-     *
-     * @var int
-     */
     public $tries = 3;
-
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [60, 300, 900]; // 1 minute, 5 minutes, 15 minutes
-
-    /**
-     * Number of downloads to process per batch.
-     *
-     * @var int
-     */
+    public $backoff = [60, 300, 900];
     protected $batchSize = 50;
 
-    /**
-     * Execute the job.
-     */
+    private const ACTOR = 'system';
+
     public function handle(): void
     {
-        Log::info('[CleanupExpiredDownloadsJob] Job started');
-
-        $s3Client = $this->createS3Client();
-        $processedCount = 0;
-        $deletedCount = 0;
+        $s3Client = app()->bound('download.cleanup.s3') ? app('download.cleanup.s3') : $this->createS3Client();
+        $processedHardDelete = 0;
+        $processedD5 = 0;
         $errorCount = 0;
 
-        // Process downloads in batches
+        // D5: Expired with artifact (expires_at < now() AND zip_path AND !zip_deleted_at)
         Download::withTrashed()
-            ->with('tenant')
-            ->where(function ($query) {
-                // Find downloads ready for hard delete
-                $query->whereNotNull('hard_delete_at')
-                    ->where('hard_delete_at', '<=', now());
-            })
-            ->chunk($this->batchSize, function ($downloads) use ($s3Client, &$processedCount, &$deletedCount, &$errorCount) {
+            ->with(['tenant', 'assets'])
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<', now())
+            ->whereNotNull('zip_path')
+            ->whereNull('zip_deleted_at')
+            ->chunk($this->batchSize, function ($downloads) use ($s3Client, &$processedD5, &$errorCount) {
                 foreach ($downloads as $download) {
-                    $processedCount++;
-
                     try {
-                        // Verify download should be hard deleted (double-check with model method)
-                        if (!$download->shouldHardDelete()) {
-                            Log::debug('[CleanupExpiredDownloadsJob] Download should not be hard deleted, skipping', [
-                                'download_id' => $download->id,
-                                'hard_delete_at' => $download->hard_delete_at?->toIso8601String(),
-                            ]);
-                            continue;
-                        }
-
-                        // Delete ZIP from S3 if it exists (Phase D1: audit logging)
-                        $zipPath = $download->zip_path;
-                        if ($zipPath) {
-                            $deleteResult = $this->deleteZipFromS3($download, $s3Client);
-                            Log::info('[CleanupExpiredDownloadsJob] ZIP deletion audit', [
-                                'download_id' => $download->id,
-                                'zip_path' => $zipPath,
-                                'result' => $deleteResult,
-                                'event' => 'cleanup_expired_download',
-                            ]);
-                        } else {
-                            Log::info('[CleanupExpiredDownloadsJob] No ZIP path to delete', [
-                                'download_id' => $download->id,
-                                'event' => 'cleanup_expired_download_no_zip',
-                            ]);
-                        }
-
-                        // Permanently delete download record from database
-                        DB::transaction(function () use ($download) {
-                            $download->forceDelete();
-                        });
-
-                        $deletedCount++;
-
-                        Log::info('[CleanupExpiredDownloadsJob] Download cleanup completed', [
-                            'download_id' => $download->id,
-                            'had_zip' => !empty($zipPath),
-                            'zip_path' => $zipPath ?? null,
-                            'event' => 'cleanup_expired_download_success',
-                        ]);
+                        $this->processExpiredDownload($download, $s3Client);
+                        $processedD5++;
                     } catch (\Throwable $e) {
                         $errorCount++;
-
-                        Log::error('[CleanupExpiredDownloadsJob] Failed to cleanup download', [
+                        Log::error('download.cleanup.failed', [
                             'download_id' => $download->id,
+                            'tenant_id' => $download->tenant_id,
+                            'artifact_path' => $download->zip_path,
+                            'bytes' => $download->zip_size_bytes,
+                            'actor' => self::ACTOR,
+                            'timestamp' => now()->toIso8601String(),
                             'error' => $e->getMessage(),
-                            'trace' => $e->getTraceAsString(),
                         ]);
+                    }
+                }
+            });
 
-                        // Continue with next download - best effort
+        // Hard-delete: hard_delete_at <= now()
+        Download::withTrashed()
+            ->with('tenant')
+            ->whereNotNull('hard_delete_at')
+            ->where('hard_delete_at', '<=', now())
+            ->chunk($this->batchSize, function ($downloads) use ($s3Client, &$processedHardDelete, &$errorCount) {
+                foreach ($downloads as $download) {
+                    if (! $download->shouldHardDelete()) {
+                        continue;
+                    }
+                    try {
+                        $zipPath = $download->zip_path;
+                        if ($zipPath) {
+                            $this->deleteZipFromStorage($download, $s3Client);
+                        }
+                        DB::transaction(fn () => $download->forceDelete());
+                        $processedHardDelete++;
+                    } catch (\Throwable $e) {
+                        $errorCount++;
+                        Log::error('download.cleanup.failed', [
+                            'download_id' => $download->id,
+                            'tenant_id' => $download->tenant_id,
+                            'artifact_path' => $download->zip_path ?? null,
+                            'bytes' => $download->zip_size_bytes,
+                            'actor' => self::ACTOR,
+                            'timestamp' => now()->toIso8601String(),
+                            'error' => $e->getMessage(),
+                        ]);
                     }
                 }
             });
 
         Log::info('[CleanupExpiredDownloadsJob] Job completed', [
-            'processed_count' => $processedCount,
-            'deleted_count' => $deletedCount,
+            'processed_d5' => $processedD5,
+            'processed_hard_delete' => $processedHardDelete,
             'error_count' => $errorCount,
         ]);
     }
 
     /**
-     * Delete ZIP file from S3 (best-effort). Phase D1: returns result for audit.
-     *
+     * D5: Process one expired download — delete artifact, verify, update timestamps, record metrics.
+     */
+    protected function processExpiredDownload(Download $download, S3Client $s3Client): void
+    {
+        $artifactPath = $download->zip_path;
+        $bytes = $download->zip_size_bytes ?? 0;
+
+        Log::info('download.cleanup.started', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'artifact_path' => $artifactPath,
+            'bytes' => $bytes,
+            'actor' => self::ACTOR,
+            'timestamp' => now()->toIso8601String(),
+        ]);
+
+        $result = $this->deleteZipFromStorage($download, $s3Client);
+
+        if ($result === 'missing') {
+            Log::info('download.cleanup.missing_file', [
+                'download_id' => $download->id,
+                'tenant_id' => $download->tenant_id,
+                'artifact_path' => $artifactPath,
+                'bytes' => $bytes,
+                'actor' => self::ACTOR,
+                'timestamp' => now()->toIso8601String(),
+            ]);
+            $download->update([
+                'zip_deleted_at' => now(),
+                'cleanup_verified_at' => now(),
+            ]);
+            $download->refresh();
+            $this->recordMetrics($download, $bytes);
+            return;
+        }
+
+        if ($result === 'no_bucket' || $result === 'failure') {
+            return;
+        }
+
+        // result === 'deleted' — verify file is gone
+        $stillExists = $this->artifactExistsInStorage($download, $s3Client);
+        if ($stillExists) {
+            Log::warning('download.cleanup.failed', [
+                'download_id' => $download->id,
+                'tenant_id' => $download->tenant_id,
+                'artifact_path' => $artifactPath,
+                'bytes' => $bytes,
+                'actor' => self::ACTOR,
+                'timestamp' => now()->toIso8601String(),
+                'message' => 'Verification failed: file still present after delete',
+            ]);
+            $download->update(['cleanup_failed_at' => now()]);
+            return;
+        }
+
+        Log::info('download.cleanup.deleted', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'artifact_path' => $artifactPath,
+            'bytes' => $bytes,
+            'actor' => self::ACTOR,
+            'timestamp' => now()->toIso8601String(),
+        ]);
+        Log::info('download.cleanup.verified', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'artifact_path' => $artifactPath,
+            'bytes' => $bytes,
+            'actor' => self::ACTOR,
+            'timestamp' => now()->toIso8601String(),
+        ]);
+
+        $download->update([
+            'zip_deleted_at' => now(),
+            'cleanup_verified_at' => now(),
+        ]);
+        $download->refresh();
+        $this->recordMetrics($download, $bytes);
+    }
+
+    /**
      * @return string 'deleted'|'missing'|'no_bucket'|'failure'
      */
-    protected function deleteZipFromS3(Download $download, S3Client $s3Client): string
+    protected function deleteZipFromStorage(Download $download, S3Client $s3Client): string
     {
+        $bucket = StorageBucket::where('tenant_id', $download->tenant_id)
+            ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
+            ->first();
+
+        if (! $bucket) {
+            Log::warning('download.cleanup.failed', [
+                'download_id' => $download->id,
+                'tenant_id' => $download->tenant_id,
+                'artifact_path' => $download->zip_path,
+                'bytes' => $download->zip_size_bytes,
+                'actor' => self::ACTOR,
+                'timestamp' => now()->toIso8601String(),
+                'message' => 'No storage bucket for tenant',
+            ]);
+            return 'no_bucket';
+        }
+
+        if (! $s3Client->doesObjectExist($bucket->name, $download->zip_path)) {
+            return 'missing';
+        }
+
         try {
-            $bucket = \App\Models\StorageBucket::where('tenant_id', $download->tenant_id)
-                ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
-                ->first();
-
-            if (! $bucket) {
-                Log::warning('[CleanupExpiredDownloadsJob] Cannot find storage bucket for tenant', [
-                    'download_id' => $download->id,
-                    'tenant_id' => $download->tenant_id,
-                    'zip_path' => $download->zip_path,
-                    'event' => 'cleanup_expired_download_no_bucket',
-                ]);
-                return 'no_bucket';
-            }
-
-            if (! $s3Client->doesObjectExist($bucket->name, $download->zip_path)) {
-                Log::info('[CleanupExpiredDownloadsJob] ZIP missing in S3 (already deleted or never built)', [
-                    'download_id' => $download->id,
-                    'zip_path' => $download->zip_path,
-                    'bucket' => $bucket->name,
-                    'event' => 'cleanup_expired_download_missing_file',
-                ]);
-                return 'missing';
-            }
-
             $s3Client->deleteObject([
                 'Bucket' => $bucket->name,
                 'Key' => $download->zip_path,
             ]);
-
-            Log::info('[CleanupExpiredDownloadsJob] ZIP deleted from S3', [
-                'download_id' => $download->id,
-                'zip_path' => $download->zip_path,
-                'bucket' => $bucket->name,
-            ]);
             return 'deleted';
         } catch (\Throwable $e) {
-            Log::warning('[CleanupExpiredDownloadsJob] Failed to delete ZIP from S3', [
+            Log::warning('download.cleanup.failed', [
                 'download_id' => $download->id,
-                'zip_path' => $download->zip_path,
+                'tenant_id' => $download->tenant_id,
+                'artifact_path' => $download->zip_path,
+                'bytes' => $download->zip_size_bytes,
+                'actor' => self::ACTOR,
+                'timestamp' => now()->toIso8601String(),
                 'error' => $e->getMessage(),
-                'event' => 'cleanup_expired_download_failure',
             ]);
             return 'failure';
         }
     }
 
-    /**
-     * Create S3 client instance.
-     * 
-     * @return S3Client
-     */
+    protected function artifactExistsInStorage(Download $download, S3Client $s3Client): bool
+    {
+        $bucket = StorageBucket::where('tenant_id', $download->tenant_id)
+            ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
+            ->first();
+
+        if (! $bucket || ! $download->zip_path) {
+            return false;
+        }
+
+        try {
+            return $s3Client->doesObjectExist($bucket->name, $download->zip_path);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    protected function recordMetrics(Download $download, ?int $bytes): void
+    {
+        $duration = $download->storageDurationSeconds();
+        Log::info('download.metrics.recorded', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'artifact_path' => $download->zip_path,
+            'bytes' => $bytes ?? $download->zip_size_bytes,
+            'actor' => self::ACTOR,
+            'timestamp' => now()->toIso8601String(),
+            'total_bytes' => $bytes ?? $download->zip_size_bytes,
+            'asset_count' => $download->assets->count(),
+            'storage_duration_seconds' => $duration,
+        ]);
+    }
+
     protected function createS3Client(): S3Client
     {
         return new S3Client([
@@ -214,12 +281,6 @@ class CleanupExpiredDownloadsJob implements ShouldQueue
         ]);
     }
 
-    /**
-     * Handle job failure.
-     * 
-     * @param \Throwable $exception
-     * @return void
-     */
     public function failed(\Throwable $exception): void
     {
         Log::error('[CleanupExpiredDownloadsJob] Job failed permanently', [

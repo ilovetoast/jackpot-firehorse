@@ -1,8 +1,11 @@
 <?php
 
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -32,5 +35,22 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Graceful degradation: /d/* 404 (download not found) → HTML "Jackpot access denied" page, not JSON
+        $exceptions->render(function (ModelNotFoundException $e, Request $request) {
+            if (! $request->is('d/*') || $request->expectsJson()) {
+                return null;
+            }
+            $appName = config('app.name', 'Jackpot');
+            return Inertia::render('Downloads/Public', [
+                'state' => 'not_found',
+                'message' => 'This link is invalid or has been removed.',
+                'password_required' => false,
+                'download_id' => null,
+                'unlock_url' => '',
+                'branding_options' => [
+                    'headline' => $appName,
+                    'subtext' => 'This link is invalid or has been removed.',
+                ],
+            ])->toResponse($request)->setStatusCode(404);
+        });
     })->create();

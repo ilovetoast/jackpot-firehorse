@@ -63,7 +63,14 @@ class Download extends Model
         'version',
         'status',
         'zip_status',
+        'zip_build_started_at',    // D9.2: observability only
+        'zip_build_completed_at',  // D9.2: observability only
+        'zip_build_failed_at',     // D9.2: observability only
         'zip_path',
+        'direct_asset_path',   // UX-R2: S3 key for single-asset download (no ZIP)
+        'zip_deleted_at',      // Phase D5: when artifact was deleted from storage
+        'cleanup_verified_at',  // Phase D5: when we confirmed file absence
+        'cleanup_failed_at',   // Phase D5: when verification failed
         'zip_size_bytes',
         'expires_at',
         'hard_delete_at',
@@ -72,6 +79,10 @@ class Download extends Model
         'download_options',
         'access_mode',
         'allow_reshare',
+        'password_hash',   // D7: bcrypt hash for public download link (optional)
+        'branding_options', // D7: legacy; R3.1+ use landing_copy + brand settings
+        'uses_landing_page', // R3.1: when true, show landing page; when false, go straight to ZIP
+        'landing_copy',     // R3.1: JSON { headline?, subtext? } copy overrides
     ];
 
     /**
@@ -86,12 +97,21 @@ class Download extends Model
             'source' => DownloadSource::class,
             'status' => DownloadStatus::class,
             'zip_status' => ZipStatus::class,
+            'zip_build_started_at' => 'datetime',   // D9.2: observability only
+            'zip_build_completed_at' => 'datetime', // D9.2: observability only
+            'zip_build_failed_at' => 'datetime',    // D9.2: observability only
             'access_mode' => DownloadAccessMode::class,
             'expires_at' => 'datetime',
             'hard_delete_at' => 'datetime',
+            'zip_deleted_at' => 'datetime',     // Phase D5
+            'cleanup_verified_at' => 'datetime', // Phase D5
+            'cleanup_failed_at' => 'datetime',  // Phase D5
             'revoked_at' => 'datetime',
             'download_options' => 'array',
             'allow_reshare' => 'boolean',
+            'branding_options' => 'array', // D7: legacy
+            'uses_landing_page' => 'boolean', // R3.1
+            'landing_copy' => 'array',       // R3.1: headline, subtext
             'version' => 'integer',
             'zip_size_bytes' => 'integer',
         ];
@@ -134,8 +154,7 @@ class Download extends Model
      */
     public function allowedUsers(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'download_user')
-            ->withTimestamps();
+        return $this->belongsToMany(User::class, 'download_user');
     }
 
     /**
@@ -144,6 +163,67 @@ class Download extends Model
     public function isRevoked(): bool
     {
         return $this->revoked_at !== null;
+    }
+
+    /**
+     * Phase D4: Check if ZIP build failed (derived from zip_status, no new column).
+     */
+    public function hasFailed(): bool
+    {
+        return $this->zip_status === ZipStatus::FAILED;
+    }
+
+    /**
+     * Phase D4: Check if download is ready (ZIP or single-asset file exists and not expired/revoked).
+     * UX-R2: Single-asset downloads are ready when direct_asset_path is set.
+     */
+    public function isReady(): bool
+    {
+        if ($this->isExpired() || $this->isRevoked()) {
+            return false;
+        }
+        return $this->hasZip() || ! empty($this->direct_asset_path);
+    }
+
+    /**
+     * Phase D4: Check if download is processing (ZIP being built, not failed/expired/revoked).
+     * UX-R2: Single-asset downloads are never "processing" (no ZIP build).
+     */
+    public function isProcessing(): bool
+    {
+        if ($this->isRevoked() || $this->isExpired() || $this->hasFailed()) {
+            return false;
+        }
+        if (! empty($this->direct_asset_path)) {
+            return false;
+        }
+        $noZipYet = empty($this->zip_path) || $this->zip_status === ZipStatus::NONE || $this->zip_status === ZipStatus::BUILDING;
+
+        return $noZipYet;
+    }
+
+    /**
+     * Phase D4: Get derived UI state (processing|ready|expired|revoked|failed). Not stored.
+     */
+    public function getState(): string
+    {
+        if ($this->isRevoked()) {
+            return 'revoked';
+        }
+        if ($this->isExpired()) {
+            return 'expired';
+        }
+        if ($this->hasFailed()) {
+            return 'failed';
+        }
+        if ($this->isReady()) {
+            return 'ready';
+        }
+        if ($this->isProcessing()) {
+            return 'processing';
+        }
+
+        return 'processing';
     }
 
     /**
@@ -209,6 +289,45 @@ class Download extends Model
     public function hasZip(): bool
     {
         return $this->zip_status === ZipStatus::READY && !empty($this->zip_path);
+    }
+
+    /**
+     * Phase D5: Check if download still has an artifact in storage (ZIP path set and not yet deleted).
+     */
+    public function hasArtifact(): bool
+    {
+        return !empty($this->zip_path) && $this->zip_deleted_at === null;
+    }
+
+    /**
+     * Phase D5: Storage duration in seconds (created_at → zip_deleted_at or now if not yet deleted).
+     * For metrics only; does not affect plan limits.
+     */
+    public function storageDurationSeconds(): ?int
+    {
+        $end = $this->zip_deleted_at ?? now();
+        return $this->created_at->diffInSeconds($end);
+    }
+
+    /**
+     * Phase D5: Total bytes of artifact (alias for zip_size_bytes). For metrics.
+     */
+    public function totalBytes(): ?int
+    {
+        return $this->zip_size_bytes;
+    }
+
+    /**
+     * Phase D9.2: ZIP build duration in milliseconds (derived from timestamps, never persisted).
+     * Returns null if started or completed timestamp is missing.
+     */
+    public function zipBuildDurationMs(): ?int
+    {
+        if (! $this->zip_build_started_at || ! $this->zip_build_completed_at) {
+            return null;
+        }
+
+        return (int) $this->zip_build_started_at->diffInMilliseconds($this->zip_build_completed_at);
     }
 
     /**

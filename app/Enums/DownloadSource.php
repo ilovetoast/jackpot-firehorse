@@ -33,4 +33,14 @@ enum DownloadSource: string
      * Download initiated from admin interface.
      */
     case ADMIN = 'admin';
+
+    /**
+     * Download initiated from a public collection page (D6). Collection-scoped, no brand access.
+     */
+    case PUBLIC_COLLECTION = 'public_collection';
+
+    /**
+     * Single-asset download from drawer (UX-R2). No ZIP; direct file stream. Tracked for audit.
+     */
+    case SINGLE_ASSET = 'single_asset';
 }

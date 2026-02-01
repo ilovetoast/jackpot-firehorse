@@ -168,6 +168,18 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                 features.push('Custom download link permissions')
             }
         }
+        // Phase D3: Download creation UX — plan features/limits
+        if (plan.download_management) {
+            const dm = plan.download_management
+            if (dm.rename) features.push('Rename downloads')
+            if (dm.non_expiring) features.push('Non-expiring downloads')
+            if (dm.restrict_access_brand) features.push('Restrict access to brand members')
+            if (dm.restrict_access_company) features.push('Restrict access to company members')
+            if (dm.restrict_access_users) features.push('Restrict access to specific users')
+            if (dm.extend_expiration) features.push(`Extend expiration (up to ${dm.max_expiration_days || 30} days)`)
+            if (dm.revoke) features.push('Revoke download links')
+            if (dm.regenerate) features.push('Regenerate download links')
+        }
         
         // Add plan-specific features
         if (plan.id === 'starter' || plan.id === 'pro' || plan.id === 'enterprise') {

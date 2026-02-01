@@ -39,11 +39,16 @@ Route::post('/invite/collection/{token}/complete', [\App\Http\Controllers\Collec
 
 // Public collections (C8) — no auth, is_public only; brand-namespaced for uniqueness
 Route::get('/b/{brand_slug}/collections/{collection_slug}', [\App\Http\Controllers\PublicCollectionController::class, 'show'])->name('public.collections.show');
+Route::post('/b/{brand_slug}/collections/{collection_slug}/download', [\App\Http\Controllers\PublicCollectionController::class, 'createDownload'])->name('public.collections.download');
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/thumbnail', [\App\Http\Controllers\PublicCollectionController::class, 'thumbnail'])->name('public.collections.assets.thumbnail');
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
 
 // Phase D1: Public download link (no auth — anyone with link can download)
 Route::get('/d/{download}', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.public')->middleware(['web']);
+// Public file delivery only (ZIP redirect) — rate-limited to prevent abuse; landing page remains unthrottled
+Route::get('/d/{download}/file', [\App\Http\Controllers\DownloadController::class, 'deliverFile'])->name('downloads.public.file')->middleware(['web', 'throttle:20,10']);
+// D7: Unlock password-protected download (light rate limit)
+Route::post('/d/{download}/unlock', [\App\Http\Controllers\DownloadController::class, 'unlock'])->name('downloads.public.unlock')->middleware(['web', 'throttle:5,1']);
 
 // CSRF token refresh endpoint (for handling stale tokens after session regeneration)
 // Accessible to authenticated users (session exists, just token may be stale)
@@ -81,6 +86,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::post('/collection-access/switch/{collection}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'switchCollection'])->name('collection-invite.switch');
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
+        Route::put('/companies/settings/download-policy', [\App\Http\Controllers\CompanyController::class, 'updateDownloadPolicy'])->name('companies.settings.download-policy');
         Route::put('/companies/settings/widgets', [\App\Http\Controllers\CompanyController::class, 'updateWidgetSettings'])->name('companies.settings.widgets.update');
         Route::get('/companies/permissions', [\App\Http\Controllers\CompanyController::class, 'permissions'])->name('companies.permissions');
         Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
@@ -367,8 +373,10 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/metadata/candidates/{candidateId}/approve', [\App\Http\Controllers\AssetMetadataController::class, 'approveCandidate'])->name('metadata.candidates.approve');
             Route::post('/metadata/candidates/{candidateId}/reject', [\App\Http\Controllers\AssetMetadataController::class, 'rejectCandidate'])->name('metadata.candidates.reject');
             Route::post('/metadata/candidates/{candidateId}/defer', [\App\Http\Controllers\AssetMetadataController::class, 'deferCandidate'])->name('metadata.candidates.defer');
-            // Asset download endpoint with metric tracking
+            // Asset download endpoint with metric tracking (GET = direct signed URL, no record)
             Route::get('/assets/{asset}/download', [\App\Http\Controllers\AssetController::class, 'download'])->name('assets.download');
+            // UX-R2: Single-asset tracked download (POST = create Download record + redirect to file)
+            Route::post('/assets/{asset}/download', [\App\Http\Controllers\DownloadController::class, 'downloadSingleAsset'])->name('assets.download.single');
             
             // Download group endpoints (Phase 3.1 Step 4)
             Route::get('/downloads/{download}/download', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.download');
@@ -379,6 +387,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/download-bucket/remove/{asset}', [\App\Http\Controllers\DownloadBucketController::class, 'remove'])->name('download-bucket.remove');
             Route::post('/download-bucket/clear', [\App\Http\Controllers\DownloadBucketController::class, 'clear'])->name('download-bucket.clear');
             Route::post('/downloads', [\App\Http\Controllers\DownloadController::class, 'store'])->name('downloads.store');
+            Route::get('/downloads/company-users', [\App\Http\Controllers\DownloadController::class, 'companyUsers'])->name('downloads.company-users');
             
             // Metric endpoints
             Route::post('/assets/{asset}/metrics/track', [\App\Http\Controllers\AssetMetricController::class, 'track'])->name('assets.metrics.track');
@@ -431,7 +440,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/downloads/{download}/revoke', [\App\Http\Controllers\DownloadController::class, 'revoke'])->name('downloads.revoke');
             Route::post('/downloads/{download}/extend', [\App\Http\Controllers\DownloadController::class, 'extend'])->name('downloads.extend');
             Route::post('/downloads/{download}/change-access', [\App\Http\Controllers\DownloadController::class, 'changeAccess'])->name('downloads.change-access');
+            Route::put('/downloads/{download}/settings', [\App\Http\Controllers\DownloadController::class, 'updateSettings'])->name('downloads.settings');
             Route::post('/downloads/{download}/regenerate', [\App\Http\Controllers\DownloadController::class, 'regenerate'])->name('downloads.regenerate');
+            Route::get('/downloads/{download}/analytics', [\App\Http\Controllers\DownloadAnalyticsController::class, 'show'])->name('downloads.analytics');
             Route::get('/downloads/limits', function () {
                 $tenant = app('tenant');
                 if (! $tenant) {
@@ -468,6 +479,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
 
             // Brand routes (tenant-scoped)
             Route::resource('brands', \App\Http\Controllers\BrandController::class);
+            Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
             
             // Brand user management routes
@@ -515,6 +527,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         // Routes that don't require user to be within plan limit (like billing, company settings)
         Route::get('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'settings'])->name('companies.settings');
         Route::put('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'updateSettings'])->name('companies.settings.update');
+        Route::put('/companies/settings/download-policy', [\App\Http\Controllers\CompanyController::class, 'updateDownloadPolicy'])->name('companies.settings.download-policy');
         Route::delete('/companies/settings', [\App\Http\Controllers\CompanyController::class, 'destroy'])->name('companies.destroy');
         Route::get('/companies/team', [\App\Http\Controllers\TeamController::class, 'index'])->name('companies.team');
         Route::post('/companies/{tenant}/team/invite', [\App\Http\Controllers\TeamController::class, 'invite'])->name('companies.team.invite');

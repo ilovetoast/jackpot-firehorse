@@ -42,6 +42,24 @@
     .asset-grid-container {
         grid-template-columns: repeat(auto-fill, minmax(var(--asset-card-size), 1fr));
     }
+
+    /* Download bucket: count "bump" when an asset is added (slot-machine style feedback) */
+    @keyframes bucket-count-bump {
+        0% {
+            transform: scale(1.35);
+            color: rgb(99 102 241);
+        }
+        60% {
+            transform: scale(1.05);
+        }
+        100% {
+            transform: scale(1);
+            color: inherit;
+        }
+    }
+    .animate-bucket-count-bump {
+        animation: bucket-count-bump 0.45s ease-out;
+    }
 }
 
 

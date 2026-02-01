@@ -9,18 +9,19 @@ use Illuminate\Support\Facades\Session;
 
 /**
  * Phase D1 — Secure Asset Downloader (Foundation)
- *
- * Session-backed download bucket. Stores only asset IDs.
- * All IDs are validated against brand/collection visibility before add.
+ * D6.1: Only eligible assets (published, non-archived) are addable and visible.
  */
 class DownloadBucketService
 {
     private const SESSION_KEY = 'download_bucket_asset_ids';
 
+    /** @var User|null */
+    protected $user;
+
     public function __construct(
-        protected ?User $user = null
+        protected AssetEligibilityService $eligibilityService
     ) {
-        $this->user ??= auth()->user();
+        $this->user = auth()->user();
     }
 
     /**
@@ -42,6 +43,7 @@ class DownloadBucketService
             return false;
         }
 
+        // D6.1: Eligibility (published, non-archived) is enforced at visibleItems() and download creation — any viewable asset can be added to the bucket so the toolbar works; only eligible assets are included in the ZIP.
         $ids = $this->ids();
         if (in_array($assetId, $ids, true)) {
             return true;
@@ -75,7 +77,7 @@ class DownloadBucketService
             if (! $asset || ! Gate::forUser($this->user)->allows('view', $asset)) {
                 continue;
             }
-
+            // D6.1: Eligibility enforced at visibleItems() and download creation; any viewable asset can be in the bucket.
             $ids[] = $assetId;
             $added++;
         }
@@ -118,8 +120,10 @@ class DownloadBucketService
     }
 
     /**
-     * Return bucket items filtered to only assets the user can still view.
+     * Return bucket items filtered to only assets the user can view AND that are eligible (published, non-archived).
      * Use this for display and for creating the download (resolved snapshot).
+     *
+     * IMPORTANT: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
      *
      * @return list<string>
      */
@@ -137,7 +141,8 @@ class DownloadBucketService
         $assets = Asset::query()
             ->whereIn('id', $ids)
             ->get()
-            ->filter(fn (Asset $asset) => Gate::forUser($this->user)->allows('view', $asset));
+            ->filter(fn (Asset $asset) => Gate::forUser($this->user)->allows('view', $asset)
+                && $this->eligibilityService->isEligibleForDownloads($asset));
 
         return $assets->pluck('id')->values()->all();
     }

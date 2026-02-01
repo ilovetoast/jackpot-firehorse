@@ -122,6 +122,7 @@ class BillingController extends Controller
                 'limits' => $plan['limits'],
                 'features' => $plan['features'],
                 'download_features' => $plan['download_features'] ?? null,
+                'download_management' => $plan['download_management'] ?? null,
                 'is_current' => $key === $currentPlan,
                 'price' => $priceData,
                 'monthly_price' => $monthlyPrice,

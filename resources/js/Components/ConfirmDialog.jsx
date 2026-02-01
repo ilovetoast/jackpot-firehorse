@@ -11,6 +11,7 @@ export default function ConfirmDialog({
     cancelText = 'Cancel',
     variant = 'info',
     loading = false,
+    error = null,
 }) {
     // Handle ESC key
     useEffect(() => {
@@ -109,6 +110,11 @@ export default function ConfirmDialog({
 
                         {/* Content */}
                         <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
+                            {error && (
+                                <div className="mb-3 rounded-md bg-red-50 p-3">
+                                    <p className="text-sm text-red-700">{error}</p>
+                                </div>
+                            )}
                             <h3 className="text-base font-semibold leading-6 text-gray-900">
                                 {title}
                             </h3>

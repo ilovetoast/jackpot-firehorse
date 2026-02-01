@@ -107,6 +107,16 @@ class FeatureGate
     }
 
     /**
+     * D6: Check if tenant can create downloads from public collection page (Download collection as ZIP).
+     */
+    public function publicCollectionDownloadsEnabled(Tenant $tenant): bool
+    {
+        $planName = $this->planService->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}", config('plans.free'));
+        return (bool) ($plan['public_collection_downloads_enabled'] ?? false);
+    }
+
+    /**
      * Phase M-2: Check if metadata approval is enabled for company and brand.
      * 
      * Returns true ONLY if:

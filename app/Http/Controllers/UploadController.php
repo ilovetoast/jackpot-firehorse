@@ -9,6 +9,7 @@ use App\Models\Category;
 use App\Models\Collection;
 use App\Models\UploadSession;
 use App\Services\AbandonedSessionService;
+use App\Services\AssetEligibilityService;
 use App\Services\CollectionAssetService;
 use App\Services\ActivityRecorder;
 use App\Services\Metadata\AssetMetadataStateResolver;
@@ -45,7 +46,8 @@ class UploadController extends Controller
         protected PlanService $planService,
         protected AssetMetadataStateResolver $metadataStateResolver,
         protected MetadataApprovalResolver $approvalResolver,
-        protected CollectionAssetService $collectionAssetService
+        protected CollectionAssetService $collectionAssetService,
+        protected AssetEligibilityService $assetEligibilityService
     ) {
     }
 
@@ -1780,6 +1782,13 @@ class UploadController extends Controller
                             }
                         }
 
+                        // D6.1: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
+                        if (! empty($toAdd) && ! $this->assetEligibilityService->isEligibleForCollections($asset)) {
+                            return response()->json([
+                                'message' => 'Some selected assets are not published and cannot be added to collections.',
+                            ], 422);
+                        }
+
                         // Process additions
                         foreach ($toAdd as $collectionId) {
                             // C9.1: DEBUG - Log each collection addition attempt
@@ -2194,6 +2203,13 @@ class UploadController extends Controller
                                     'error' => $e->getMessage(),
                                 ]);
                             }
+                        }
+
+                        // D6.1: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
+                        if (! empty($toAdd) && ! $this->assetEligibilityService->isEligibleForCollections($asset)) {
+                            return response()->json([
+                                'message' => 'Some selected assets are not published and cannot be added to collections.',
+                            ], 422);
                         }
 
                         // Process additions

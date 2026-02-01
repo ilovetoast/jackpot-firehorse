@@ -67,8 +67,8 @@ import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/sol
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 
-export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null }) {
-    const { auth } = usePage().props
+export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null }) {
+    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = usePage().props
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
     const [showZoomModal, setShowZoomModal] = useState(false)
@@ -1544,25 +1544,115 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </button>
                             )}
                             
-                            <div className="grid grid-cols-2 gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowDetailsModal(true)}
-                                    className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-                                >
-                                    <EyeIcon className="h-4 w-4 mr-2" />
-                                    Details
-                                </button>
-                                <a
-                                    href={`/app/assets/${displayAsset.id}/download`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                                >
-                                    <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                                    Download
-                                </a>
-                            </div>
+                            {/* UX-R2: View + Add to download on one line; Download full width below; policy message under Download. */}
+                            {(() => {
+                                const isEligibleForDownload = displayAsset && displayAsset.is_published !== false && !displayAsset.archived_at
+                                const singleAssetDisabledByPolicy = !!policyDisableSingleAsset
+                                const canSingleAssetDownload = isEligibleForDownload && !singleAssetDisabledByPolicy
+                                const isInBucket = bucketAssetIds && bucketAssetIds.includes(displayAsset?.id)
+                                return (
+                                    <div className="space-y-2">
+                                        {/* Row 1: View (Details) + Add to download */}
+                                        <div className={`grid gap-2 ${onBucketToggle != null ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowDetailsModal(true)}
+                                                className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                                            >
+                                                <EyeIcon className="h-4 w-4 mr-2" />
+                                                View
+                                            </button>
+                                            {onBucketToggle != null && (
+                                                <button
+                                                    type="button"
+                                                    disabled={!isEligibleForDownload}
+                                                    onClick={() => onBucketToggle(displayAsset.id)}
+                                                    className={`inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                                        isInBucket
+                                                            ? 'bg-indigo-100 text-indigo-800 ring-indigo-500'
+                                                            : isEligibleForDownload
+                                                                ? 'bg-white border border-gray-300 text-gray-700 shadow-sm hover:bg-gray-50 ring-gray-500'
+                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed ring-gray-300'
+                                                    }`}
+                                                    title={!isEligibleForDownload ? 'Publish this asset to add to download' : isInBucket ? 'Remove from download' : 'Add to download'}
+                                                >
+                                                    {isInBucket ? (
+                                                        <>
+                                                            <CheckIcon className="h-4 w-4 mr-2" />
+                                                            In download
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <RectangleStackIcon className="h-4 w-4 mr-2" />
+                                                            Add to download
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                        {/* Row 2: Download full width */}
+                                        <button
+                                            type="button"
+                                            disabled={!canSingleAssetDownload}
+                                            onClick={async () => {
+                                                if (!canSingleAssetDownload || !displayAsset?.id) return
+                                                const url = typeof route !== 'undefined' ? route('assets.download.single', { asset: displayAsset.id }) : `/app/assets/${displayAsset.id}/download`
+                                                const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+                                                setToastMessage('Preparing download…')
+                                                setToastType('success')
+                                                try {
+                                                    const res = await fetch(url, {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'Accept': 'application/json',
+                                                            'X-Requested-With': 'XMLHttpRequest',
+                                                            'X-CSRF-TOKEN': csrf || '',
+                                                        },
+                                                        credentials: 'same-origin',
+                                                    })
+                                                    const data = await res.json().catch(() => ({}))
+                                                    if (!res.ok) {
+                                                        setToastMessage(data?.message || 'Download failed')
+                                                        setToastType('error')
+                                                        setTimeout(() => setToastMessage(null), 4000)
+                                                        return
+                                                    }
+                                                    const downloadUrl = data?.download_url
+                                                    const filename = data?.filename || displayAsset?.original_filename || 'download'
+                                                    if (downloadUrl) {
+                                                        const iframe = document.createElement('iframe')
+                                                        iframe.style.display = 'none'
+                                                        iframe.setAttribute('aria-hidden', 'true')
+                                                        document.body.appendChild(iframe)
+                                                        iframe.src = downloadUrl
+                                                        setTimeout(() => document.body.removeChild(iframe), 60000)
+                                                        setToastMessage('Download started')
+                                                    } else {
+                                                        setToastMessage('Download started')
+                                                    }
+                                                } catch (e) {
+                                                    setToastMessage('Download failed')
+                                                    setToastType('error')
+                                                }
+                                                setTimeout(() => setToastMessage(null), 3000)
+                                            }}
+                                            className={`w-full inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                                                canSingleAssetDownload
+                                                    ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            }`}
+                                            title={!isEligibleForDownload ? 'Publish this asset to download' : singleAssetDisabledByPolicy ? 'Your organization requires downloads to be packaged.' : 'Download this asset (tracked)'}
+                                        >
+                                            <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
+                                            Download
+                                        </button>
+                                        {singleAssetDisabledByPolicy && (
+                                            <p className="text-xs text-slate-500">Enforced by your organization&apos;s download policy.</p>
+                                        )}
+                                    </div>
+                                )
+                            })()}
                         </div>
                     )}
                 </div>

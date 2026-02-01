@@ -9,6 +9,7 @@ import CategoryIconSelector from '../../Components/CategoryIconSelector'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 import { getImageBackgroundStyle } from '../../utils/imageUtils'
 import BrandAvatar from '../../Components/BrandAvatar'
+import DownloadBrandingSelector from '../../Components/branding/DownloadBrandingSelector'
 
 // CategoryCard component matching Categories/Index clean design
 function CategoryCard({ category, brandId, brand_users, brand_roles, private_category_limits, can_edit_system_categories, onUpgradeClick, editingId, setEditingId, onEditStart, onEditSave, onEditCancel }) {
@@ -560,6 +561,15 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             metadata_approval_enabled: brand.settings?.metadata_approval_enabled === true || brand.settings?.metadata_approval_enabled === '1' || brand.settings?.metadata_approval_enabled === 1, // Phase M-2
             contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval === true || brand.settings?.contributor_upload_requires_approval === '1' || brand.settings?.contributor_upload_requires_approval === 1, // Phase J.3.1
         },
+        // D10: Brand-level download landing branding (logo from assets, color from palette, no raw URL/hex)
+        download_landing_settings: {
+            enabled: brand.download_landing_settings?.enabled === true,
+            logo_asset_id: brand.download_landing_settings?.logo_asset_id ?? null,
+            color_role: brand.download_landing_settings?.color_role || 'primary',
+            default_headline: brand.download_landing_settings?.default_headline || '',
+            default_subtext: brand.download_landing_settings?.default_subtext || '',
+            background_asset_ids: Array.isArray(brand.download_landing_settings?.background_asset_ids) ? brand.download_landing_settings.background_asset_ids : [],
+        },
     })
 
     const submit = (e) => {
@@ -572,8 +582,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         
         put(`/app/brands/${brand.id}`, {
             forceFormData: true, // Important for file uploads
-            // Inertia will automatically flatten nested objects when using forceFormData
-            // settings.contributor_upload_requires_approval will be sent as a nested field
+            // Inertia flattens nested objects; download_landing_settings.* sent as nested fields
             onSuccess: () => {
                 // Cleanup preview URLs
                 if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
@@ -634,7 +643,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     // Update active section on scroll
     useEffect(() => {
         const handleScroll = () => {
-            const sections = ['basic-information', 'brand-colors', 'sidebar-settings', 'metadata', 'categories']
+            const sections = ['basic-information', 'brand-colors', 'sidebar-settings', 'downloads-landing', 'metadata', 'categories']
             const scrollPosition = window.scrollY + 100
 
             for (let i = sections.length - 1; i >= 0; i--) {
@@ -1418,6 +1427,76 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 </Link>
                                             </div>
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* D10: Downloads → Landing Page — brand-level visuals (logo from assets, color from palette) */}
+                    <div id="downloads-landing" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-1">
+                            <h3 className="text-base font-semibold leading-6 text-gray-900">Downloads → Landing Page</h3>
+                            <p className="mt-2 text-sm text-gray-500">
+                                Brand-level defaults for download landing pages. Visuals come from brand assets and palette; per-download you only set headline and subtext.
+                            </p>
+                        </div>
+                        <div className="lg:col-span-2">
+                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
+                                <div className="px-4 py-5 sm:p-6">
+                                    <div className="space-y-6">
+                                        <div className="flex items-center justify-between">
+                                            <label htmlFor="download_landing_enabled" className="block text-sm font-medium leading-6 text-gray-900">
+                                                Enable landing pages
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setData('download_landing_settings.enabled', !data.download_landing_settings?.enabled)}
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
+                                                    data.download_landing_settings?.enabled ? 'bg-indigo-600' : 'bg-gray-200'
+                                                }`}
+                                                role="switch"
+                                                aria-checked={data.download_landing_settings?.enabled}
+                                            >
+                                                <span
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                        data.download_landing_settings?.enabled ? 'translate-x-5' : 'translate-x-0'
+                                                    }`}
+                                                />
+                                            </button>
+                                        </div>
+                                        {data.download_landing_settings?.enabled && (
+                                            <DownloadBrandingSelector
+                                                logoAssets={brand.logo_assets || []}
+                                                selectedLogoAssetId={data.download_landing_settings?.logo_asset_id ?? null}
+                                                onLogoChange={(id) => setData('download_landing_settings.logo_asset_id', id)}
+                                                primaryColor={data.primary_color || '#6366f1'}
+                                                secondaryColor={data.secondary_color || '#64748b'}
+                                                accentColor={data.accent_color || '#6366f1'}
+                                                selectedColorRole={data.download_landing_settings?.color_role || 'primary'}
+                                                onColorRoleChange={(role) => setData('download_landing_settings.color_role', role)}
+                                                backgroundAssets={(brand.background_asset_details || []).slice(0, 5)}
+                                                onRemoveBackground={(id) => {
+                                                    const ids = (data.download_landing_settings?.background_asset_ids || []).filter((x) => x !== id)
+                                                    setData('download_landing_settings.background_asset_ids', ids)
+                                                }}
+                                                onAddBackground={(id) => {
+                                                    const ids = (data.download_landing_settings?.background_asset_ids || []).slice(0, 5)
+                                                    if (ids.length < 5 && !ids.includes(id)) setData('download_landing_settings.background_asset_ids', [...ids, id])
+                                                }}
+                                                fetchBackgroundCandidates={() =>
+                                                    fetch(typeof route === 'function' ? route('brands.download-branding-assets', brand.id) : `/app/brands/${brand.id}/download-branding-assets`, {
+                                                        credentials: 'same-origin',
+                                                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                    }).then((r) => r.json())
+                                                }
+                                                maxBackgrounds={5}
+                                                defaultHeadline={data.download_landing_settings?.default_headline || ''}
+                                                defaultSubtext={data.download_landing_settings?.default_subtext || ''}
+                                                onHeadlineChange={(v) => setData('download_landing_settings.default_headline', v)}
+                                                onSubtextChange={(v) => setData('download_landing_settings.default_subtext', v)}
+                                            />
+                                        )}
                                     </div>
                                 </div>
                             </div>

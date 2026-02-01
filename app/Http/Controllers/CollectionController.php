@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\AssetEligibilityService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
 use App\Services\FeatureGate;
@@ -26,7 +27,8 @@ class CollectionController extends Controller
     public function __construct(
         protected CollectionAssetQueryService $collectionAssetQueryService,
         protected CollectionAssetService $collectionAssetService,
-        protected FeatureGate $featureGate
+        protected FeatureGate $featureGate,
+        protected AssetEligibilityService $assetEligibilityService
     ) {
     }
 
@@ -344,6 +346,13 @@ class CollectionController extends Controller
             throw ValidationException::withMessages(['asset_id' => ['Asset not found or does not belong to this collection\'s brand.']]);
         }
 
+        // D6.1: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
+        if (! $this->assetEligibilityService->isEligibleForCollections($asset)) {
+            return response()->json([
+                'message' => 'Some selected assets are not published and cannot be added to collections.',
+            ], 422);
+        }
+
         $this->collectionAssetService->attach($collection, $asset);
 
         return response()->json(['attached' => true], 201);
@@ -474,6 +483,13 @@ class CollectionController extends Controller
             if (! Gate::forUser($user)->allows('addAsset', $collection)) {
                 $errors[] = "You do not have permission to add assets to collection: {$collection->name}.";
                 continue;
+            }
+
+            // D6.1: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
+            if (! $this->assetEligibilityService->isEligibleForCollections($asset)) {
+                return response()->json([
+                    'message' => 'Some selected assets are not published and cannot be added to collections.',
+                ], 422);
             }
 
             try {

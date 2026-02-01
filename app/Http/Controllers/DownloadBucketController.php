@@ -33,12 +33,9 @@ class DownloadBucketController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $added = $this->bucket->add($request->input('asset_id'));
-        if (! $added) {
-            return response()->json([
-                'message' => 'Asset could not be added. You may not have access to it.',
-            ], 403);
-        }
+        // D6.1 / bucket UX: always return 200 with current bucket state so the UI doesn't break.
+        // Ineligible or non-viewable assets are simply not added (soft filter).
+        $this->bucket->add($request->input('asset_id'));
 
         return response()->json([
             'items' => $this->bucket->items(),

@@ -6,13 +6,19 @@
  * - Clickable count with expandable preview (thumbnails, per-item remove)
  * - Clear (with app ConfirmDialog when > 5 items)
  * - View downloads link, Create Download CTA
+ *
+ * IMPORTANT (phase locked): When download-create errors exist in usePage().props.errors, auto-open
+ * Create Download panel so the user sees validation inline. Do not remove this behavior.
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { router, Link } from '@inertiajs/react'
+import { router, Link, usePage } from '@inertiajs/react'
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import ConfirmDialog from './ConfirmDialog'
+import CreateDownloadPanel from './CreateDownloadPanel'
 
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
+
+const DOWNLOAD_CREATE_ERROR_KEYS = ['expires_at', 'name', 'password', 'access_mode', 'branding_options', 'message']
 
 export default function DownloadBucketBar({
   bucketCount = 0,
@@ -20,12 +26,24 @@ export default function DownloadBucketBar({
   onRemove = null,
   onClear = null,
 }) {
-  const [creating, setCreating] = useState(false)
+  const { errors: pageErrors = {} } = usePage().props
   const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showCreatePanel, setShowCreatePanel] = useState(false)
+
+  // Open Create Download panel when page has download-create errors (e.g. redirect back with validation errors)
+  const hasDownloadCreateError = DOWNLOAD_CREATE_ERROR_KEYS.some(
+    (key) => pageErrors[key] !== undefined && (typeof pageErrors[key] === 'string' || Array.isArray(pageErrors[key]))
+  )
+  useEffect(() => {
+    if (hasDownloadCreateError && bucketCount > 0) setShowCreatePanel(true)
+  }, [hasDownloadCreateError, bucketCount])
   const [previewItems, setPreviewItems] = useState([])
   const [loadingPreview, setLoadingPreview] = useState(false)
   const expandedOnceRef = useRef(false)
+  const prevCountRef = useRef(bucketCount)
+  const [countJustBumped, setCountJustBumped] = useState(false)
 
   // When count becomes 0, collapse and reset
   useEffect(() => {
@@ -33,6 +51,17 @@ export default function DownloadBucketBar({
       setExpanded(false)
       setPreviewItems([])
       expandedOnceRef.current = false
+    }
+  }, [bucketCount])
+
+  // Trigger count "bump" animation when user adds an asset (count goes up)
+  useEffect(() => {
+    const prev = prevCountRef.current
+    prevCountRef.current = bucketCount
+    if (bucketCount > prev && prev >= 0) {
+      setCountJustBumped(true)
+      const t = setTimeout(() => setCountJustBumped(false), 450)
+      return () => clearTimeout(t)
     }
   }, [bucketCount])
 
@@ -120,29 +149,22 @@ export default function DownloadBucketBar({
     router.get(route('assets.index'), { asset: assetId }, { preserveState: true, preserveScroll: true })
   }
 
-  const handleCreateDownload = () => {
+  const handleOpenCreatePanel = () => {
     setError(null)
-    setCreating(true)
-    router.post(route('downloads.store'), { source: 'grid' }, {
-      preserveScroll: true,
-      onSuccess: () => {
-        setCreating(false)
-        setExpanded(false)
-        if (onCountChange) onCountChange(0)
-        router.visit(route('downloads.index'))
-      },
-      onError: (errors) => {
-        setCreating(false)
-        setError(errors?.message || 'Could not create download.')
-      },
-    })
+    setShowCreatePanel(true)
+  }
+
+  const handleCreateSuccess = () => {
+    setShowCreatePanel(false)
+    setExpanded(false)
+    if (onCountChange) onCountChange(0)
   }
 
   if (bucketCount <= 0) return null
 
   return (
     <>
-    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white shadow-lg safe-area-pb">
+    <div className="fixed bottom-0 left-0 right-0 z-[60] border-t border-gray-200 bg-white shadow-lg safe-area-pb">
       {/* Expandable preview panel — grows upward */}
       {expanded && (
         <div className="border-b border-gray-200 bg-gray-50 max-h-64 overflow-y-auto">
@@ -228,8 +250,15 @@ export default function DownloadBucketBar({
             ) : (
               <ChevronDownIcon className="h-5 w-5 text-gray-500" />
             )}
-            <span>
-              {bucketCount} item{bucketCount !== 1 ? 's' : ''} selected
+            <span className="inline-flex items-baseline gap-0.5">
+              <span
+                key={bucketCount}
+                className={`inline-block tabular-nums font-semibold ${countJustBumped ? 'animate-bucket-count-bump' : ''}`}
+                aria-live="polite"
+              >
+                {bucketCount}
+              </span>
+              <span> item{bucketCount !== 1 ? 's' : ''} selected</span>
             </span>
           </button>
           <button
@@ -252,11 +281,10 @@ export default function DownloadBucketBar({
           </Link>
           <button
             type="button"
-            onClick={handleCreateDownload}
-            disabled={creating}
-            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleOpenCreatePanel}
+            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
           >
-            {creating ? 'Creating…' : 'Create Download'}
+            Create Download
           </button>
         </div>
       </div>
@@ -271,6 +299,14 @@ export default function DownloadBucketBar({
       confirmText="Clear"
       cancelText="Cancel"
       variant="warning"
+    />
+
+    <CreateDownloadPanel
+      open={showCreatePanel}
+      onClose={() => setShowCreatePanel(false)}
+      bucketCount={bucketCount}
+      previewItems={previewItems}
+      onSuccess={handleCreateSuccess}
     />
     </>
   )

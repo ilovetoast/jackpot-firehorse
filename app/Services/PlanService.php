@@ -405,8 +405,19 @@ class PlanService
             'restrict_access_users' => false,
             'non_expiring' => false,
             'regenerate' => false,
+            'rename' => false,
+            'password_protection' => false,
+            'branding' => false,
             'max_expiration_days' => 30,
         ]);
+    }
+
+    /**
+     * Phase D3: Check if tenant can rename downloads (Enterprise).
+     */
+    public function canRenameDownload(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['rename'] ?? false) === true;
     }
 
     /**
@@ -447,6 +458,22 @@ class PlanService
     public function canRestrictDownloadToUsers(Tenant $tenant): bool
     {
         return ($this->getDownloadManagementFeatures($tenant)['restrict_access_users'] ?? false) === true;
+    }
+
+    /**
+     * D7: Check if tenant can set password protection on public downloads (Enterprise only).
+     */
+    public function canPasswordProtectDownload(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['password_protection'] ?? false) === true;
+    }
+
+    /**
+     * D7: Check if tenant can set branding on download landing pages (Pro + Enterprise).
+     */
+    public function canBrandDownload(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['branding'] ?? false) === true;
     }
 
     /**

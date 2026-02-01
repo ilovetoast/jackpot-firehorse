@@ -43,6 +43,7 @@ class Brand extends Model
         'nav_color',
         'logo_filter',
         'settings',
+        'download_landing_settings', // R3.2: JSON { enabled, logo_url, accent_color, default_headline, default_subtext, background_asset_ids }
     ];
 
     /**
@@ -53,10 +54,11 @@ class Brand extends Model
     protected function casts(): array
     {
         return [
-            'is_default' => 'boolean',
-            'show_in_selector' => 'boolean',
-            'settings' => 'array',
-        ];
+        'is_default' => 'boolean',
+        'show_in_selector' => 'boolean',
+        'settings' => 'array',
+        'download_landing_settings' => 'array', // R3.2
+    ];
     }
 
     /**

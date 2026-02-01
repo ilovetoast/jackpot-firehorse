@@ -106,7 +106,48 @@ class DownloadManagementService
 
         BuildDownloadZipJob::dispatch($download->id);
 
+        \Illuminate\Support\Facades\Log::info('download.regenerate.triggered', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'actor_user_id' => $actor->id,
+        ]);
+
         $this->logAction('regenerate', $download, $actor, $previousState, $this->captureState($download));
+    }
+
+    /**
+     * Update download settings (access, landing page, password). Caller must gate by plan.
+     * $updates can contain: access_mode, user_ids, uses_landing_page, landing_copy (array), password_hash (string|null to clear).
+     */
+    public function updateSettings(Download $download, array $updates, User $actor): void
+    {
+        $previousState = $this->captureState($download);
+
+        if (array_key_exists('access_mode', $updates)) {
+            $accessMode = $updates['access_mode'];
+            $download->update(['access_mode' => $accessMode]);
+            if ($accessMode === DownloadAccessMode::USERS->value && isset($updates['user_ids']) && is_array($updates['user_ids'])) {
+                $download->allowedUsers()->sync($updates['user_ids']);
+            } else {
+                $download->allowedUsers()->detach();
+            }
+        }
+
+        $modelUpdates = [];
+        if (array_key_exists('uses_landing_page', $updates)) {
+            $modelUpdates['uses_landing_page'] = (bool) $updates['uses_landing_page'];
+        }
+        if (array_key_exists('landing_copy', $updates)) {
+            $modelUpdates['landing_copy'] = is_array($updates['landing_copy']) ? $updates['landing_copy'] : null;
+        }
+        if (array_key_exists('password_hash', $updates)) {
+            $modelUpdates['password_hash'] = $updates['password_hash'];
+        }
+        if (! empty($modelUpdates)) {
+            $download->update($modelUpdates);
+        }
+
+        $this->logAction('settings_update', $download, $actor, $previousState, $this->captureState($download));
     }
 
     /**
@@ -123,6 +164,8 @@ class DownloadManagementService
             'zip_status' => $download->zip_status?->value ?? $download->zip_status,
             'zip_path' => $download->zip_path,
             'version' => $download->version,
+            'uses_landing_page' => $download->uses_landing_page ?? false,
+            'landing_copy' => $download->landing_copy,
         ];
     }
 

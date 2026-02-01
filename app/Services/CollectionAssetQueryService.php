@@ -62,7 +62,9 @@ class CollectionAssetQueryService
 
     /**
      * Build an asset query for a public collection (C8). No user; no Gate.
-     * Extra guards: VISIBLE, not deleted, not archived, not expired.
+     * Extra guards: VISIBLE, not deleted, not archived, published, not expired.
+     *
+     * IMPORTANT: Asset eligibility (published, non-archived) is enforced here. Do not bypass this query for collections or downloads.
      *
      * @return Builder<Asset>
      */
@@ -75,6 +77,7 @@ class CollectionAssetQueryService
             ->where('status', AssetStatus::VISIBLE)
             ->whereNull('deleted_at')
             ->whereNull('archived_at')
+            ->whereNotNull('published_at') // D6.1: Only published assets eligible for public collection downloads
             ->where(function ($q) {
                 $q->whereNull('expires_at')
                     ->orWhere('expires_at', '>', now());
