@@ -391,6 +391,89 @@ class PlanService
     }
 
     /**
+     * Phase D2: Get download management features for tenant's plan.
+     */
+    public function getDownloadManagementFeatures(Tenant $tenant): array
+    {
+        $planName = $this->getCurrentPlan($tenant);
+        $plan = config("plans.{$planName}");
+        return $plan['download_management'] ?? config('plans.free.download_management', [
+            'extend_expiration' => false,
+            'revoke' => false,
+            'restrict_access_brand' => false,
+            'restrict_access_company' => false,
+            'restrict_access_users' => false,
+            'non_expiring' => false,
+            'regenerate' => false,
+            'max_expiration_days' => 30,
+        ]);
+    }
+
+    /**
+     * Phase D2: Check if tenant can extend download expiration.
+     */
+    public function canExtendDownloadExpiration(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['extend_expiration'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Check if tenant can revoke downloads.
+     */
+    public function canRevokeDownload(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['revoke'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Check if tenant can restrict access to brand members.
+     */
+    public function canRestrictDownloadToBrand(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['restrict_access_brand'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Check if tenant can restrict access to company users.
+     */
+    public function canRestrictDownloadToCompany(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['restrict_access_company'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Check if tenant can restrict access to specific users (Enterprise).
+     */
+    public function canRestrictDownloadToUsers(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['restrict_access_users'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Check if tenant can create non-expiring downloads (Enterprise).
+     */
+    public function canCreateNonExpiringDownload(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['non_expiring'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Check if tenant can regenerate downloads (Enterprise).
+     */
+    public function canRegenerateDownload(Tenant $tenant): bool
+    {
+        return ($this->getDownloadManagementFeatures($tenant)['regenerate'] ?? false) === true;
+    }
+
+    /**
+     * Phase D2: Get maximum download expiration days (for extension limit).
+     */
+    public function getMaxDownloadExpirationDays(Tenant $tenant): int
+    {
+        return $this->getDownloadManagementFeatures($tenant)['max_expiration_days'] ?? 30;
+    }
+
+    /**
      * Get current tag count for an asset.
      */
     public function getCurrentTagCount(Asset $asset): int

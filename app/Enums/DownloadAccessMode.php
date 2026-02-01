@@ -5,25 +5,32 @@ namespace App\Enums;
 /**
  * Download access mode enum.
  *
- * Controls who can access the download group and its ZIP file.
+ * Phase D2: Controls who can access the download group and its ZIP file.
+ * Access scopes: public, brand, company, users.
  */
 enum DownloadAccessMode: string
 {
     /**
      * Public access - anyone with the link can access.
-     * Used for public press-kit pages and shareable downloads.
      */
     case PUBLIC = 'public';
 
     /**
-     * Team access - only team members of the tenant can access.
-     * Default for internal downloads.
+     * Brand access - only brand members can access (Pro+).
      */
-    case TEAM = 'team';
+    case BRAND = 'brand';
 
     /**
-     * Restricted access - only specific users can access.
-     * More granular permission control for sensitive downloads.
+     * Company access - only tenant/company users can access (Pro+).
+     * TEAM is alias for backward compatibility.
      */
-    case RESTRICTED = 'restricted';
+    case COMPANY = 'company';
+    case TEAM = 'team'; // Alias: maps to company
+
+    /**
+     * Users access - only specific users in download_user pivot (Enterprise only).
+     * RESTRICTED is alias for backward compatibility.
+     */
+    case USERS = 'users';
+    case RESTRICTED = 'restricted'; // Alias: maps to users
 }

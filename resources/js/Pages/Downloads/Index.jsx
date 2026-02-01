@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
-import { ArrowDownTrayIcon, ChevronDownIcon, ChevronUpIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
+import ConfirmDialog from '../../Components/ConfirmDialog'
+import { ArrowDownTrayIcon, ChevronDownIcon, ChevronUpIcon, ClipboardDocumentIcon, NoSymbolIcon } from '@heroicons/react/24/outline'
 
 function formatDate(iso) {
   if (!iso) return '—'
@@ -22,17 +23,26 @@ function statusLabel(status, zipStatus) {
   if (zipStatus === 'ready' && status === 'ready') return 'Ready'
   if (zipStatus === 'failed') return 'Failed'
   if (status === 'failed') return 'Failed'
-  const expired = (expiresAt) => {
-    if (!expiresAt) return false
-    return new Date(expiresAt) < new Date()
-  }
   return 'Pending'
 }
 
-export default function DownloadsIndex({ downloads = [], bucket_count: bucketCount = 0 }) {
+export default function DownloadsIndex({
+  downloads = [],
+  bucket_count: bucketCount = 0,
+  can_manage: canManage = false,
+  filters: initialFilters = {},
+  download_features: features = {},
+}) {
   const { auth } = usePage().props
   const [expandedId, setExpandedId] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
+  const [revokeConfirmId, setRevokeConfirmId] = useState(null)
+  const [revoking, setRevoking] = useState(false)
+  const [filters, setFilters] = useState({
+    scope: initialFilters.scope ?? 'mine',
+    status: initialFilters.status ?? '',
+    access: initialFilters.access ?? '',
+  })
 
   const copyLink = (url, id) => {
     navigator.clipboard.writeText(url).then(() => {
@@ -41,15 +51,82 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
     })
   }
 
+  const handleScopeChange = (e) => {
+    const scope = e.target.value
+    const next = { ...filters, scope }
+    setFilters(next)
+    router.get('/app/downloads', next, { preserveState: true })
+  }
+
+  const handleStatusChange = (e) => {
+    const status = e.target.value
+    const next = { ...filters, status }
+    setFilters(next)
+    router.get('/app/downloads', next, { preserveState: true })
+  }
+
+  const handleAccessChange = (e) => {
+    const access = e.target.value
+    const next = { ...filters, access }
+    setFilters(next)
+    router.get('/app/downloads', next, { preserveState: true })
+  }
+
+  const handleRevoke = (d) => {
+    setRevoking(true)
+    router.post(route('downloads.revoke', d.id), {}, {
+      preserveScroll: true,
+      onFinish: () => setRevoking(false),
+      onSuccess: () => setRevokeConfirmId(null),
+    })
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <AppNav />
       <main className="flex-1 py-6 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-gray-900">My Downloads</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Download links expire after 30 days. Anyone with the link can download.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {canManage && filters.scope === 'all' ? 'All Downloads' : 'My Downloads'}
+              </h1>
+              <p className="mt-1 text-sm text-gray-500">
+                Download links expire after 30 days. Anyone with the link can download (unless restricted).
+              </p>
+            </div>
+            {canManage && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={filters.scope}
+                  onChange={handleScopeChange}
+                  className="rounded-md border-gray-300 text-sm"
+                >
+                  <option value="mine">My Downloads</option>
+                  <option value="all">All Downloads</option>
+                </select>
+                <select
+                  value={filters.status}
+                  onChange={handleStatusChange}
+                  className="rounded-md border-gray-300 text-sm"
+                >
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="expired">Expired</option>
+                  <option value="revoked">Revoked</option>
+                </select>
+                <select
+                  value={filters.access}
+                  onChange={handleAccessChange}
+                  className="rounded-md border-gray-300 text-sm"
+                >
+                  <option value="">All access</option>
+                  <option value="public">Public</option>
+                  <option value="restricted">Restricted</option>
+                </select>
+              </div>
+            )}
+          </div>
 
           {bucketCount > 0 && (
             <div className="mt-4 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
@@ -82,10 +159,12 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
               </div>
             ) : (
               downloads.map((d) => {
-                const isExpired = d.expires_at && new Date(d.expires_at) < new Date()
+                const isRevoked = !!d.revoked_at
+                const isExpired = !isRevoked && d.expires_at && new Date(d.expires_at) < new Date()
                 const isBuilding = d.zip_status === 'building'
-                const isReady = d.zip_status === 'ready' && d.status === 'ready'
+                const isReady = d.zip_status === 'ready' && d.status === 'ready' && !isRevoked
                 const isOpen = expandedId === d.id
+                const canRevoke = canManage && features.revoke && !isRevoked
 
                 return (
                   <div
@@ -96,16 +175,18 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
                       <div className="flex items-center gap-3 min-w-0">
                         <span
                           className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            isBuilding
-                              ? 'bg-amber-100 text-amber-800'
-                              : isReady && !isExpired
-                                ? 'bg-green-100 text-green-800'
-                                : isExpired
-                                  ? 'bg-gray-100 text-gray-600'
-                                  : 'bg-gray-100 text-gray-700'
+                            isRevoked
+                              ? 'bg-red-100 text-red-800'
+                              : isBuilding
+                                ? 'bg-amber-100 text-amber-800'
+                                : isReady && !isExpired
+                                  ? 'bg-green-100 text-green-800'
+                                  : isExpired
+                                    ? 'bg-gray-100 text-gray-600'
+                                    : 'bg-gray-100 text-gray-700'
                           }`}
                         >
-                          {isBuilding ? 'Building…' : isExpired ? 'Expired' : isReady ? 'Ready' : 'Pending'}
+                          {isRevoked ? 'Revoked' : isBuilding ? 'Building…' : isExpired ? 'Expired' : isReady ? 'Ready' : 'Pending'}
                         </span>
                         <span className="text-sm text-gray-500">
                           Expires {formatDate(d.expires_at)}
@@ -116,7 +197,7 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        {isReady && !isExpired && (
+                        {isReady && !isExpired && !isRevoked && (
                           <>
                             <button
                               type="button"
@@ -143,6 +224,17 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
                             </a>
                           </>
                         )}
+                        {canRevoke && (
+                          <button
+                            type="button"
+                            onClick={() => setRevokeConfirmId(d.id)}
+                            className="inline-flex items-center rounded-md bg-white px-2.5 py-1.5 text-sm font-medium text-red-700 shadow-sm ring-1 ring-inset ring-red-200 hover:bg-red-50"
+                            title="Revoke download"
+                          >
+                            <NoSymbolIcon className="mr-1.5 h-4 w-4 text-red-500" />
+                            Revoke
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setExpandedId(isOpen ? null : d.id)}
@@ -160,19 +252,27 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
 
                     {isOpen && (
                       <div className="border-t border-gray-200 bg-gray-50 px-4 py-3">
-                        <p className="text-xs font-medium text-gray-500 mb-2">Public link (anyone with this link can download):</p>
-                        <div className="flex items-center gap-2 mb-3">
-                          <code className="flex-1 text-xs bg-white px-2 py-1.5 rounded border border-gray-200 truncate">
-                            {d.public_url}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => copyLink(d.public_url, d.id)}
-                            className="shrink-0 text-xs text-indigo-600 hover:text-indigo-500"
-                          >
-                            Copy
-                          </button>
-                        </div>
+                        {isRevoked ? (
+                          <p className="text-sm text-red-600 mb-3">This download has been revoked. The link no longer works.</p>
+                        ) : (
+                          <>
+                            <p className="text-xs font-medium text-gray-500 mb-2">
+                              {d.access_mode === 'public' ? 'Public link (anyone with this link can download):' : 'Restricted link (access limited):'}
+                            </p>
+                            <div className="flex items-center gap-2 mb-3">
+                              <code className="flex-1 text-xs bg-white px-2 py-1.5 rounded border border-gray-200 truncate">
+                                {d.public_url}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => copyLink(d.public_url, d.id)}
+                                className="shrink-0 text-xs text-indigo-600 hover:text-indigo-500"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </>
+                        )}
                         {d.thumbnails && d.thumbnails.length > 0 && (
                           <>
                             <p className="text-xs font-medium text-gray-500 mb-2">Assets in this download (click to preview):</p>
@@ -210,6 +310,21 @@ export default function DownloadsIndex({ downloads = [], bucket_count: bucketCou
         </div>
       </main>
       <AppFooter />
+
+      <ConfirmDialog
+        open={!!revokeConfirmId}
+        onClose={() => setRevokeConfirmId(null)}
+        onConfirm={() => {
+          const d = downloads.find((x) => x.id === revokeConfirmId)
+          if (d) handleRevoke(d)
+        }}
+        title="Revoke download"
+        message="This will immediately invalidate the download link and delete the ZIP file. This cannot be undone."
+        confirmText="Revoke"
+        cancelText="Cancel"
+        variant="danger"
+        loading={revoking}
+      />
     </div>
   )
 }

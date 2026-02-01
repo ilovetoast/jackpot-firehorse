@@ -67,6 +67,8 @@ class Download extends Model
         'zip_size_bytes',
         'expires_at',
         'hard_delete_at',
+        'revoked_at', // Phase D2: when set, download is inaccessible
+        'revoked_by_user_id',
         'download_options',
         'access_mode',
         'allow_reshare',
@@ -87,6 +89,7 @@ class Download extends Model
             'access_mode' => DownloadAccessMode::class,
             'expires_at' => 'datetime',
             'hard_delete_at' => 'datetime',
+            'revoked_at' => 'datetime',
             'download_options' => 'array',
             'allow_reshare' => 'boolean',
             'version' => 'integer',
@@ -116,6 +119,31 @@ class Download extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /**
+     * Get the user who revoked this download (Phase D2).
+     */
+    public function revokedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'revoked_by_user_id');
+    }
+
+    /**
+     * Phase D2: Get users allowed to access (when access_mode is users).
+     */
+    public function allowedUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'download_user')
+            ->withTimestamps();
+    }
+
+    /**
+     * Phase D2: Check if download is revoked.
+     */
+    public function isRevoked(): bool
+    {
+        return $this->revoked_at !== null;
     }
 
     /**

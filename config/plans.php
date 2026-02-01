@@ -44,6 +44,17 @@ return [
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
         ],
+        // Phase D2: Download management capabilities
+        'download_management' => [
+            'extend_expiration' => false,
+            'revoke' => false,
+            'restrict_access_brand' => false,
+            'restrict_access_company' => false,
+            'restrict_access_users' => false,
+            'non_expiring' => false,
+            'regenerate' => false,
+            'max_expiration_days' => 30,
+        ],
         'notes' => [
             'No "All" button in Assets/Deliverables category sidebar',
             'Download links limited to 50 per month',
@@ -85,6 +96,16 @@ return [
             'download_links_limit' => 200,
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
+        ],
+        'download_management' => [
+            'extend_expiration' => false,
+            'revoke' => false,
+            'restrict_access_brand' => false,
+            'restrict_access_company' => false,
+            'restrict_access_users' => false,
+            'non_expiring' => false,
+            'regenerate' => false,
+            'max_expiration_days' => 30,
         ],
         'notes' => [
             '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
@@ -131,6 +152,16 @@ return [
             'download_links_limit' => 1000,
             'custom_download_permissions' => true,
             'share_downloads_with_permissions' => true,
+        ],
+        'download_management' => [
+            'extend_expiration' => true,
+            'revoke' => true,
+            'restrict_access_brand' => true,
+            'restrict_access_company' => true,
+            'restrict_access_users' => false,
+            'non_expiring' => false,
+            'regenerate' => false,
+            'max_expiration_days' => 90,
         ],
         'notes' => [
             '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
@@ -179,6 +210,16 @@ return [
             'download_links_limit' => 999999, // Unlimited
             'custom_download_permissions' => true,
             'share_downloads_with_permissions' => true,
+        ],
+        'download_management' => [
+            'extend_expiration' => true,
+            'revoke' => true,
+            'restrict_access_brand' => true,
+            'restrict_access_company' => true,
+            'restrict_access_users' => true,
+            'non_expiring' => true,
+            'regenerate' => true,
+            'max_expiration_days' => 365,
         ],
         'notes' => [
             '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
