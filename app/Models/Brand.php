@@ -43,7 +43,7 @@ class Brand extends Model
         'nav_color',
         'logo_filter',
         'settings',
-        'download_landing_settings', // R3.2: JSON { enabled, logo_url, accent_color, default_headline, default_subtext, background_asset_ids }
+        'download_landing_settings', // D10: JSON { enabled, logo_asset_id, color_role, background_asset_ids, default_headline, default_subtext }
     ];
 
     /**

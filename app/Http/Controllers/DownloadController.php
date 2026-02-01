@@ -33,6 +33,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -1149,7 +1150,8 @@ class DownloadController extends Controller
     }
 
     /**
-     * R3.1: Build props for public download page. Copy from landing_copy then branding_options; visuals from brand (R3.2).
+     * D10: Build props for public download page. Copy from landing_copy then brand defaults; visuals from brand (logo_asset_id, color_role, background_asset_ids).
+     * Legacy: if brand settings empty and download has branding_options.logo_url or accent_color, use those read-only (do not write back).
      *
      * @param  array<string, mixed>  $extra
      * @return array<string, mixed>
@@ -1161,22 +1163,59 @@ class DownloadController extends Controller
         $legacy = $download->branding_options ?? [];
         $brand = $download->brand_id ? $download->brand : null;
         $brandSettings = $brand ? ($brand->download_landing_settings ?? []) : [];
-        // Copy: download landing_copy > legacy branding_options > brand default_headline/default_subtext
+
+        // Copy: download landing_copy > legacy > brand default_headline/default_subtext
         $brandingOptions = [
             'headline' => $landingCopy['headline'] ?? $legacy['headline'] ?? $brandSettings['default_headline'] ?? null,
             'subtext' => $landingCopy['subtext'] ?? $legacy['subtext'] ?? $brandSettings['default_subtext'] ?? null,
         ];
-        // R3.2: Visuals from brand first; fall back to legacy for existing downloads
-        if (! empty($brandSettings['logo_url'])) {
-            $brandingOptions['logo_url'] = $brandSettings['logo_url'];
-        } elseif (! empty($legacy['logo_url'])) {
+
+        // D10: Logo — brand logo_asset_id → thumbnail URL; legacy fallback (read-only) when brand has no logo_asset_id
+        if (! empty($brandSettings['logo_asset_id']) && $brand) {
+            $logoAsset = Asset::where('id', $brandSettings['logo_asset_id'])->where('brand_id', $brand->id)->first();
+            if ($logoAsset) {
+                $brandingOptions['logo_url'] = route('assets.thumbnail.final', ['asset' => $logoAsset->id, 'style' => 'thumb']);
+            }
+        }
+        if (empty($brandingOptions['logo_url']) && ! empty($legacy['logo_url'])) {
+            // Backward compatibility: existing download with legacy logo_url; brand settings empty. Do NOT write back.
             $brandingOptions['logo_url'] = $legacy['logo_url'];
         }
-        if (! empty($brandSettings['accent_color'])) {
-            $brandingOptions['accent_color'] = $brandSettings['accent_color'];
-        } elseif (! empty($legacy['accent_color'])) {
+
+        // D10: Accent — resolve from brand palette via color_role; no raw hex in DB. Legacy fallback when brand has no color_role.
+        $colorRole = $brandSettings['color_role'] ?? null;
+        if ($colorRole && $brand) {
+            $resolved = match ($colorRole) {
+                'primary' => $brand->primary_color,
+                'secondary' => $brand->secondary_color,
+                'accent' => $brand->accent_color,
+                default => $brand->primary_color,
+            };
+            if (! empty($resolved)) {
+                $brandingOptions['accent_color'] = $resolved;
+            }
+        }
+        if (empty($brandingOptions['accent_color']) && ! empty($legacy['accent_color'])) {
+            // Backward compatibility: existing download with legacy accent_color. Do NOT write back.
             $brandingOptions['accent_color'] = $legacy['accent_color'];
         }
+        if (empty($brandingOptions['accent_color'])) {
+            $brandingOptions['accent_color'] = '#4F46E5';
+        }
+        $brandingOptions['overlay_color'] = $brandingOptions['accent_color'];
+
+        // D10.1: Random background — choose one image per request; use optimized thumbnail (medium for full-screen)
+        $backgroundImageUrl = null;
+        if (! empty($brandSettings['background_asset_ids']) && is_array($brandSettings['background_asset_ids']) && $brand) {
+            $backgroundIds = $brandSettings['background_asset_ids'];
+            $chosenId = Arr::random($backgroundIds);
+            $backgroundAsset = Asset::where('brand_id', $brand->id)->where('id', $chosenId)->first();
+            if ($backgroundAsset) {
+                $backgroundImageUrl = route('assets.thumbnail.final', ['asset' => $backgroundAsset->id, 'style' => 'medium']);
+            }
+        }
+        $brandingOptions['background_image_url'] = $backgroundImageUrl;
+
         return array_merge([
             'state' => $state,
             'message' => $message,

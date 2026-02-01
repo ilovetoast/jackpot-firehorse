@@ -1475,17 +1475,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                 accentColor={data.accent_color || '#6366f1'}
                                                 selectedColorRole={data.download_landing_settings?.color_role || 'primary'}
                                                 onColorRoleChange={(role) => setData('download_landing_settings.color_role', role)}
-                                                backgroundAssets={(brand.background_asset_details || []).slice(0, 5)}
+                                                backgroundAssets={(data.download_landing_settings?.background_asset_ids || []).map((id) =>
+                                                    (brand.background_asset_details || []).find((a) => a.id === id) || { id, thumbnail_url: null, original_filename: '' }
+                                                )}
+                                                backgroundAssetIds={data.download_landing_settings?.background_asset_ids || []}
                                                 onRemoveBackground={(id) => {
                                                     const ids = (data.download_landing_settings?.background_asset_ids || []).filter((x) => x !== id)
                                                     setData('download_landing_settings.background_asset_ids', ids)
                                                 }}
-                                                onAddBackground={(id) => {
-                                                    const ids = (data.download_landing_settings?.background_asset_ids || []).slice(0, 5)
-                                                    if (ids.length < 5 && !ids.includes(id)) setData('download_landing_settings.background_asset_ids', [...ids, id])
-                                                }}
+                                                onBackgroundsConfirm={(ids) => setData('download_landing_settings.background_asset_ids', ids)}
                                                 fetchBackgroundCandidates={() =>
-                                                    fetch(typeof route === 'function' ? route('brands.download-branding-assets', brand.id) : `/app/brands/${brand.id}/download-branding-assets`, {
+                                                    fetch(typeof route === 'function' ? route('brands.download-background-candidates', brand.id) : `/app/brands/${brand.id}/download-background-candidates`, {
                                                         credentials: 'same-origin',
                                                         headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                                                     }).then((r) => r.json())

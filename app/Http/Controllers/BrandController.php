@@ -10,6 +10,7 @@ use App\Models\Category;
 use App\Models\CollectionUser;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Services\AssetEligibilityService;
 use App\Services\BrandService;
 use App\Services\CategoryService;
 use App\Services\FeatureGate;
@@ -34,7 +35,8 @@ class BrandController extends Controller
         protected BrandService $brandService,
         protected PlanService $planService,
         protected CategoryService $categoryService,
-        protected SystemCategoryService $systemCategoryService
+        protected SystemCategoryService $systemCategoryService,
+        protected AssetEligibilityService $assetEligibilityService
     ) {
     }
 
@@ -729,10 +731,15 @@ class BrandController extends Controller
         if (isset($input['background_asset_ids']) && is_array($input['background_asset_ids'])) {
             $ids = array_values(array_filter(array_slice($input['background_asset_ids'], 0, 5), fn ($id) => is_string($id) && preg_match('/^[0-9a-f-]{36}$/i', $id)));
             foreach ($ids as $id) {
-                $asset = Asset::where('id', $id)->where('brand_id', $brand->id)->exists();
+                $asset = Asset::where('id', $id)->where('brand_id', $brand->id)->first();
                 if (! $asset) {
                     throw ValidationException::withMessages([
                         'download_landing_settings.background_asset_ids' => ['All background assets must belong to this brand.'],
+                    ]);
+                }
+                if (! $this->assetEligibilityService->isEligibleForDownloadBackground($asset)) {
+                    throw ValidationException::withMessages([
+                        'download_landing_settings.background_asset_ids' => ['Background images must be at least 1920×1080.'],
                     ]);
                 }
             }
@@ -743,7 +750,7 @@ class BrandController extends Controller
     }
 
     /**
-     * D10: List brand assets for download landing background picker (published, limit 50).
+     * D10: List brand assets for download landing (generic picker; no category filter).
      */
     public function downloadBrandingAssets(Brand $brand): \Illuminate\Http\JsonResponse
     {
@@ -763,6 +770,65 @@ class BrandController extends Controller
                 'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $a->id, 'style' => 'thumb']),
                 'original_filename' => $a->original_filename ?? '',
             ])
+            ->values()
+            ->all();
+
+        return response()->json(['assets' => $assets]);
+    }
+
+    /**
+     * D10.1: List brand assets for download landing background picker — Photography or Graphics (image categories), with dimensions.
+     */
+    public function downloadBackgroundCandidates(Brand $brand): \Illuminate\Http\JsonResponse
+    {
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        $this->authorize('update', $brand);
+
+        $imageCategoryIds = Category::where('brand_id', $brand->id)
+            ->whereIn('slug', ['photography', 'graphics'])
+            ->pluck('id')
+            ->all();
+
+        if (empty($imageCategoryIds)) {
+            return response()->json(['assets' => []]);
+        }
+
+        $query = Asset::where('brand_id', $brand->id)
+            ->whereNotNull('published_at')
+            ->whereNull('archived_at')
+            ->where(function ($q) use ($imageCategoryIds) {
+                foreach ($imageCategoryIds as $cid) {
+                    $q->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = ?', [(string) $cid]);
+                }
+            });
+
+        $assets = $query->orderByDesc('created_at')
+            ->limit(100)
+            ->get()
+            ->map(function (Asset $a) {
+                $w = null;
+                $h = null;
+                $meta = $a->metadata ?? [];
+                if (isset($meta['image_width'], $meta['image_height'])) {
+                    $w = (int) $meta['image_width'];
+                    $h = (int) $meta['image_height'];
+                } elseif ($a->video_width !== null && $a->video_height !== null) {
+                    $w = (int) $a->video_width;
+                    $h = (int) $a->video_height;
+                }
+                $qualityRating = $meta['fields']['quality_rating'] ?? $meta['quality_rating'] ?? null;
+                return [
+                    'id' => $a->id,
+                    'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $a->id, 'style' => 'thumb']),
+                    'original_filename' => $a->original_filename ?? '',
+                    'width' => $w,
+                    'height' => $h,
+                    'quality_rating' => $qualityRating,
+                ];
+            })
             ->values()
             ->all();
 

@@ -1,10 +1,10 @@
 /**
  * D10 — Reusable brand-level download landing branding selector.
- * Stateless: parent owns data. Used in Brand Settings → Downloads → Landing Page.
- * Reusable for press kits, public brand pages, shareable collections.
+ * D10.1: Background selection uses MiniAssetPicker (Photography/Graphics, ≥1920×1080).
  */
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
+import MiniAssetPicker from '../media/MiniAssetPicker'
 
 const COLOR_ROLES = [
   { role: 'primary', label: 'Primary' },
@@ -22,8 +22,9 @@ export default function DownloadBrandingSelector({
   selectedColorRole = 'primary',
   onColorRoleChange,
   backgroundAssets = [],
+  backgroundAssetIds = [],
   onRemoveBackground,
-  onAddBackground,
+  onBackgroundsConfirm,
   fetchBackgroundCandidates,
   maxBackgrounds = 5,
   defaultHeadline = '',
@@ -32,9 +33,7 @@ export default function DownloadBrandingSelector({
   onSubtextChange,
   disabled = false,
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [pickerAssets, setPickerAssets] = useState([])
-  const [pickerLoading, setPickerLoading] = useState(false)
+  const [showMiniPicker, setShowMiniPicker] = useState(false)
 
   const palette = [
     { role: 'primary', label: 'Primary', hex: primaryColor || '#6366f1' },
@@ -42,21 +41,11 @@ export default function DownloadBrandingSelector({
     { role: 'accent', label: 'Accent', hex: accentColor || '#6366f1' },
   ]
 
-  const openPicker = useCallback(() => {
-    if (!fetchBackgroundCandidates || backgroundAssets.length >= maxBackgrounds) return
-    setPickerOpen(true)
-    setPickerLoading(true)
-    fetchBackgroundCandidates()
-      .then((list) => setPickerAssets(list?.assets ?? list ?? []))
-      .catch(() => setPickerAssets([]))
-      .finally(() => setPickerLoading(false))
-  }, [fetchBackgroundCandidates, backgroundAssets.length, maxBackgrounds])
-
-  const selectBackground = (asset) => {
-    if (asset?.id && onAddBackground && backgroundAssets.length < maxBackgrounds) {
-      onAddBackground(asset.id)
-      setPickerOpen(false)
+  const disabledAssetReason = (asset) => {
+    if (asset.width != null && asset.height != null && (asset.width < 1920 || asset.height < 1080)) {
+      return 'Must be at least 1920×1080'
     }
+    return null
   }
 
   return (
@@ -131,7 +120,7 @@ export default function DownloadBrandingSelector({
         </div>
       </div>
 
-      {/* Background images — multi-select with remove */}
+      {/* Background images — D10.1: Mini Asset Picker (Photography/Graphics, ≥1920×1080) */}
       <div>
         <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">Background images (max {maxBackgrounds})</label>
         <div className="flex flex-wrap gap-2 items-center">
@@ -156,57 +145,31 @@ export default function DownloadBrandingSelector({
               )}
             </div>
           ))}
-          {!disabled && backgroundAssets.length < maxBackgrounds && (
+          {!disabled && (
             <button
               type="button"
-              onClick={openPicker}
-              className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 flex items-center justify-center text-xs hover:border-indigo-400 hover:text-indigo-600"
+              onClick={() => setShowMiniPicker(true)}
+              className="rounded-lg border-2 border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:border-indigo-400 hover:text-indigo-600"
             >
-              + Add
+              Select background images
             </button>
           )}
         </div>
+        <p className="mt-1 text-xs text-gray-500">Random image shown per visit.</p>
 
-        {/* Background picker modal */}
-        {pickerOpen && (
-          <div className="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <div className="fixed inset-0 bg-black/50" onClick={() => setPickerOpen(false)} aria-hidden />
-              <div className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-900">Choose background image</h3>
-                  <button type="button" onClick={() => setPickerOpen(false)} className="text-gray-400 hover:text-gray-600">
-                    <XMarkIcon className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="p-4 overflow-y-auto flex-1">
-                  {pickerLoading ? (
-                    <p className="text-sm text-gray-500">Loading…</p>
-                  ) : (
-                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                      {pickerAssets.map((asset) => (
-                        <button
-                          key={asset.id}
-                          type="button"
-                          onClick={() => selectBackground(asset)}
-                          className="rounded-lg border border-gray-200 overflow-hidden hover:ring-2 hover:ring-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        >
-                          {asset.thumbnail_url ? (
-                            <img src={asset.thumbnail_url} alt="" className="w-full aspect-square object-cover" />
-                          ) : (
-                            <div className="w-full aspect-square bg-gray-100 flex items-center justify-center text-xs text-gray-400">
-                              {asset.original_filename || '—'}
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <MiniAssetPicker
+          open={showMiniPicker}
+          onClose={() => setShowMiniPicker(false)}
+          fetchAssets={fetchBackgroundCandidates}
+          maxSelection={maxBackgrounds}
+          initialSelectedIds={backgroundAssetIds}
+          disabledAssetReason={disabledAssetReason}
+          onConfirm={(ids) => {
+            onBackgroundsConfirm?.(ids)
+            setShowMiniPicker(false)
+          }}
+          title="Select background images"
+        />
       </div>
 
       {/* Default copy */}

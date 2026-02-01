@@ -78,6 +78,39 @@ class AssetEligibilityService
     }
 
     /**
+     * D10.1: Check if asset is eligible for download landing background (brand-level).
+     * Must: belong to brand (caller enforces), be eligible for public display, be image, width >= 1920, height >= 1080.
+     */
+    public function isEligibleForDownloadBackground(Asset $asset): bool
+    {
+        if (! ($asset->archived_at === null && $asset->published_at !== null)) {
+            return false;
+        }
+
+        $width = null;
+        $height = null;
+        $metadata = $asset->metadata ?? [];
+        if (isset($metadata['image_width'], $metadata['image_height'])) {
+            $width = (int) $metadata['image_width'];
+            $height = (int) $metadata['image_height'];
+        } elseif ($asset->video_width !== null && $asset->video_height !== null) {
+            $width = (int) $asset->video_width;
+            $height = (int) $asset->video_height;
+        } elseif (isset($metadata['dimensions']) && is_string($metadata['dimensions'])) {
+            if (preg_match('/^(\d+)\s*[x×]\s*(\d+)$/i', trim($metadata['dimensions']), $m)) {
+                $width = (int) $m[1];
+                $height = (int) $m[2];
+            }
+        }
+
+        if ($width === null || $height === null) {
+            return false;
+        }
+
+        return $width >= 1920 && $height >= 1080;
+    }
+
+    /**
      * Filter asset IDs to only those that are eligible (for the given query scope).
      * Optionally log filtered count for observability.
      *

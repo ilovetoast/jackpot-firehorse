@@ -1,8 +1,7 @@
 /**
  * Phase D4 — Public download page (trust signals).
  * D7: Password-protected view + branded skinning (logo, accent, headline, subtext).
- *
- * Shown when visiting /d/{id}: processing, expired, revoked, failed, or password_required.
+ * D10.1: When uses_landing_page — full-screen background (random image or solid), overlay, content stack (logo 64–96px, headline, subtext, CTA).
  */
 import { useForm } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
@@ -13,6 +12,7 @@ export default function DownloadsPublic({
   password_required = false,
   download_id = null,
   unlock_url = '',
+  uses_landing_page = false,
   branding_options = {},
 }) {
   const { errors: pageErrors = {} } = usePage().props
@@ -20,9 +20,11 @@ export default function DownloadsPublic({
   const isPasswordRequired = password_required && unlock_url && download_id
 
   const accentColor = branding_options?.accent_color || '#4F46E5'
+  const overlayColor = branding_options?.overlay_color || accentColor
   const logoUrl = branding_options?.logo_url || null
   const headline = branding_options?.headline || null
   const subtext = branding_options?.subtext || null
+  const backgroundImageUrl = branding_options?.background_image_url || null
   const hasBranding = logoUrl || headline || subtext || accentColor
 
   const { data, setData, post, processing, error: formError } = useForm({
@@ -34,31 +36,59 @@ export default function DownloadsPublic({
     post(unlock_url)
   }
 
-  const containerClass = hasBranding
-    ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12'
-    : 'min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-12'
+  // D10.1: Landing page layout — full-screen background, 60–75% overlay, centered content stack
+  const isLandingLayout = uses_landing_page && hasBranding
+  const containerClass = isLandingLayout
+    ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12 relative'
+    : hasBranding
+      ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12'
+      : 'min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-12'
 
   const accentStyle = hasBranding ? { '--accent': accentColor } : {}
 
+  const backgroundSection = isLandingLayout && (
+    <>
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={backgroundImageUrl ? { backgroundImage: `url(${backgroundImageUrl})` } : { backgroundColor: overlayColor }}
+        aria-hidden
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundColor: overlayColor,
+          opacity: backgroundImageUrl ? 0.65 : 1,
+        }}
+        aria-hidden
+      />
+    </>
+  )
+
   return (
     <div className={containerClass} style={accentStyle}>
-      <div className="max-w-md w-full text-center">
+      {backgroundSection}
+      <div className={`max-w-md w-full text-center ${isLandingLayout ? 'relative z-10' : ''}`}>
         {hasBranding && logoUrl && (
-          <div className="mb-6 flex justify-center">
-            <img src={logoUrl} alt="" className="h-12 object-contain object-center" />
+          <div className={`flex justify-center ${isLandingLayout ? 'mb-6' : 'mb-6'}`}>
+            <img
+              src={logoUrl}
+              alt=""
+              className={`object-contain object-center ${isLandingLayout ? 'max-h-24 w-auto' : 'h-12'}`}
+              style={isLandingLayout ? { maxHeight: '96px' } : {}}
+            />
           </div>
         )}
         {hasBranding && headline && (
-          <h2 className="text-lg font-medium text-gray-900 mb-1">{headline}</h2>
+          <h2 className={`font-medium text-gray-900 mb-1 ${isLandingLayout ? 'text-xl text-white drop-shadow-md' : 'text-lg'}`}>{headline}</h2>
         )}
         {hasBranding && subtext && (
-          <p className="text-sm text-gray-600 mb-6">{subtext}</p>
+          <p className={`mb-6 ${isLandingLayout ? 'text-sm text-white/95 drop-shadow' : 'text-sm text-gray-600'}`}>{subtext}</p>
         )}
 
         {isPasswordRequired && (
           <>
-            <h1 className="text-xl font-semibold text-gray-900">This download is protected.</h1>
-            <p className="mt-2 text-sm text-gray-600">{message || 'Enter the password to continue.'}</p>
+            <h1 className={`font-semibold ${isLandingLayout ? 'text-xl text-white drop-shadow-md' : 'text-xl text-gray-900'}`}>This download is protected.</h1>
+            <p className={`mt-2 text-sm ${isLandingLayout ? 'text-white/95 drop-shadow' : 'text-gray-600'}`}>{message || 'Enter the password to continue.'}</p>
             <form onSubmit={handleUnlock} className="mt-6 text-left">
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Password
@@ -94,12 +124,12 @@ export default function DownloadsPublic({
             {isProcessing && (
               <div className="flex justify-center mb-6">
                 <svg
-                  className="animate-spin h-12 w-12 text-indigo-600"
+                  className="animate-spin h-12 w-12"
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
                   viewBox="0 0 24 24"
                   aria-hidden="true"
-                  style={accentColor ? { color: accentColor } : {}}
+                  style={isLandingLayout ? { color: 'rgba(255,255,255,0.9)' } : (accentColor ? { color: accentColor } : { color: '#4F46E5' })}
                 >
                   <circle
                     className="opacity-25"
@@ -117,7 +147,7 @@ export default function DownloadsPublic({
                 </svg>
               </div>
             )}
-            <h1 className="text-xl font-semibold text-gray-900">
+            <h1 className={`text-xl font-semibold ${isLandingLayout ? 'text-white drop-shadow-md' : 'text-gray-900'}`}>
               {isProcessing
                 ? "We're preparing your download"
                 : state === 'not_found'
@@ -132,9 +162,9 @@ export default function DownloadsPublic({
                           ? 'Download not available'
                           : 'Download not available'}
             </h1>
-            <p className="mt-2 text-sm text-gray-600">{message}</p>
+            <p className={`mt-2 text-sm ${isLandingLayout ? 'text-white/95 drop-shadow' : 'text-gray-600'}`}>{message}</p>
             {isProcessing && (
-              <p className="mt-4 text-xs text-gray-500">
+              <p className={`mt-4 text-xs ${isLandingLayout ? 'text-white/80' : 'text-gray-500'}`}>
                 Large downloads may take a few moments to prepare.
               </p>
             )}

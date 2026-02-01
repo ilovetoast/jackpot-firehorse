@@ -480,6 +480,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Brand routes (tenant-scoped)
             Route::resource('brands', \App\Http\Controllers\BrandController::class);
             Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
+            Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
             
             // Brand user management routes

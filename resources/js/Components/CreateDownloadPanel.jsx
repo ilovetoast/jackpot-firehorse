@@ -505,6 +505,7 @@ export default function CreateDownloadPanel({
                         <span className="text-sm font-medium text-gray-700">Enable landing page for this download</span>
                       </label>
                       <p className="text-xs text-gray-500">When unchecked, the link goes straight to the ZIP. When checked, recipients see a branded landing page (using your brand’s logo and colors).</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Visual styling comes from brand settings.</p>
                       {usesLandingPage && (
                         <div className="space-y-3 border-t border-gray-200 pt-2">
                           <div>
