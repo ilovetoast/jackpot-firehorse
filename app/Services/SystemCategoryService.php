@@ -406,7 +406,7 @@ class SystemCategoryService
         // Create category from template (latest version)
         // Note: is_locked is set to true for system categories and is site admin only
         // Tenants cannot change is_locked - it can only be modified by site administrators
-        return Category::create([
+        $category = Category::create([
             'tenant_id' => $brand->tenant_id,
             'brand_id' => $brand->id,
             'asset_type' => $template->asset_type,
@@ -421,6 +421,21 @@ class SystemCategoryService
             'system_version' => $template->version,
             'upgrade_available' => false,
         ]);
+
+        // Phase 3b: Apply seeded default metadata visibility for new category (from config/metadata_category_defaults.php)
+        $tenant = $brand->tenant ?? \App\Models\Tenant::find($brand->tenant_id);
+        if ($tenant) {
+            try {
+                app(TenantMetadataVisibilityService::class)->applySeededDefaultsForCategory($tenant, $category);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('SystemCategoryService: failed to apply seeded defaults for new category', [
+                    'category_id' => $category->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $category;
     }
 
     /**

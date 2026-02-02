@@ -486,77 +486,15 @@ class MetadataFieldsSeeder extends Seeder
 
     /**
      * Configure category-specific settings for metadata fields.
-     * 
-     * Format: 'field_key' => [
-     *     'category_slug' => [
-     *         'enabled' => true/false,
-     *         'is_primary' => true/false,
-     *         'ai_eligible' => true/false, // Optional: overrides field default
-     *     ]
-     * ]
+     * Uses config/metadata_category_defaults.php as single source of truth (same config used by "Reset to default" API).
      */
     protected function configureCategorySettings(): void
     {
-        $categoryConfig = [
-            'collection' => [
-                'photography' => [
-                    'enabled' => true,
-                    'is_primary' => true, // Primary field for Photography category
-                ],
-            ],
-            'photo_type' => [
-                'photography' => [
-                    'enabled' => true,
-                    'is_primary' => true, // Primary field for Photography category
-                    'ai_eligible' => true, // AI suggestions enabled for Photography category
-                ],
-                'logos' => [
-                    'enabled' => false, // Disabled for Logos category
-                ],
-            ],
-            'expiration_date' => [
-                'photography' => [
-                    'enabled' => true,
-                    'is_primary' => true, // Primary field for Photography category
-                ],
-                // Disabled for all other categories (handled below)
-            ],
-            'scene_classification' => [
-                'photography' => [
-                    'enabled' => true,
-                    'is_primary' => true, // Primary field for Photography category
-                    'ai_eligible' => true, // AI suggestions enabled for Photography category
-                ],
-            ],
-            'usage_rights' => [
-                'photography' => [
-                    'enabled' => true,
-                    'is_primary' => false,
-                ],
-                // Disabled for all other categories (handled below)
-            ],
-            'logo_type' => [
-                'logos' => [
-                    'enabled' => true,
-                    'is_primary' => true, // Primary field for Logos category
-                    'ai_eligible' => true, // AI suggestions enabled for Logos category
-                ],
-            ],
-            // Dominant color fields configuration
-            // Note: dominant_colors is the existing field (array of colors)
-            // dominant_color_hex would be extracted from first color if needed
-            // For now, we configure dominant_colors and dominant_color_bucket
-            'dominant_colors' => [
-                // Enabled for all image categories by default (handled below)
-            ],
-            'dominant_color_bucket' => [
-                // Enabled for all image categories by default (handled below)
-                // Always hidden from asset views, only used for filtering
-            ],
-            // Tags: Not in config = enabled for all categories by default
-            // Quality Rating: Not in config = enabled for all categories by default
-            // Add more field configurations here as needed
-        ];
+        $defaultsConfig = config('metadata_category_defaults', []);
+        $categoryConfig = $defaultsConfig['category_config'] ?? [];
+        $fieldsToRestrict = $defaultsConfig['restrict_fields'] ?? [];
+        $videoSlug = $defaultsConfig['video_slug'] ?? 'video';
+        $dominantColorsVisibility = $defaultsConfig['dominant_colors_visibility'] ?? [];
 
         // Get all tenants and their brands
         $tenants = DB::table('tenants')->get();
@@ -632,21 +570,12 @@ class MetadataFieldsSeeder extends Seeder
                     }
                 }
                 
-                // Handle fields that should be disabled for categories NOT in config
-                // These fields are only enabled for specific categories:
-                // - expiration_date: only photography
-                // - usage_rights: only photography
-                // - logo_type: only logos
-                // - scene_classification: only photography
-                // - photo_type: only photography (disabled for logos)
-                // - Video category: Only tags and collection enabled (all other fields disabled)
-                $fieldsToRestrict = ['expiration_date', 'usage_rights', 'logo_type', 'scene_classification', 'photo_type'];
-                
+                // Handle fields that should be disabled for categories NOT in config (from metadata_category_defaults)
                 // Configure Video category: Only tags and collection enabled, all other fields disabled
                 $videoCategory = DB::table('categories')
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
-                    ->where('slug', 'video')
+                    ->where('slug', $videoSlug)
                     ->where('is_system', true)
                     ->first();
                 
@@ -747,13 +676,8 @@ class MetadataFieldsSeeder extends Seeder
                     }
                 }
                 
-                // Configure dominant color fields for all image categories
-                // Defaults per requirements:
-                // - dominant_colors: enabled=true, upload=false, quick_view=true, filter=false
-                // - dominant_color_bucket: enabled=true, upload=false, quick_view=false, filter=true
-                $colorFields = ['dominant_colors', 'dominant_color_bucket'];
-                
-                foreach ($colorFields as $fieldKey) {
+                // Configure dominant color fields for all image categories (from metadata_category_defaults)
+                foreach ($dominantColorsVisibility as $fieldKey => $visibilityDefaults) {
                     $field = DB::table('metadata_fields')
                         ->where('key', $fieldKey)
                         ->first();
@@ -762,16 +686,14 @@ class MetadataFieldsSeeder extends Seeder
                         continue;
                     }
                     
-                    // Get all image categories for this brand
                     $imageCategories = DB::table('categories')
                         ->where('tenant_id', $tenant->id)
                         ->where('brand_id', $brand->id)
                         ->where('is_system', true)
-                        ->where('asset_type', 'asset') // Only asset categories (images)
+                        ->where('asset_type', 'asset')
                         ->get();
                     
                     foreach ($imageCategories as $category) {
-                        // Check if visibility record exists
                         $visibility = DB::table('metadata_field_visibility')
                             ->where('metadata_field_id', $field->id)
                             ->where('tenant_id', $tenant->id)
@@ -779,42 +701,23 @@ class MetadataFieldsSeeder extends Seeder
                             ->where('category_id', $category->id)
                             ->first();
                         
-                        // Configure defaults based on field type
-                        if ($fieldKey === 'dominant_colors') {
-                            // dominant_colors: enabled, not in upload, visible in edit, NOT filterable by default
-                            $visibilityData = [
-                                'metadata_field_id' => $field->id,
-                                'tenant_id' => $tenant->id,
-                                'brand_id' => $brand->id,
-                                'category_id' => $category->id,
-                                'is_hidden' => false, // Enabled
-                                'is_upload_hidden' => true, // Hidden from upload
-                                'is_filter_hidden' => true, // NOT filterable by default (tenant can enable)
-                                'is_primary' => null,
-                                'updated_at' => now(),
-                            ];
-                        } else { // dominant_color_bucket
-                            // dominant_color_bucket: enabled, not in upload, hidden from edit, filterable
-                            $visibilityData = [
-                                'metadata_field_id' => $field->id,
-                                'tenant_id' => $tenant->id,
-                                'brand_id' => $brand->id,
-                                'category_id' => $category->id,
-                                'is_hidden' => false, // Enabled
-                                'is_upload_hidden' => true, // Hidden from upload
-                                'is_filter_hidden' => false, // Filterable
-                                'is_primary' => null,
-                                'updated_at' => now(),
-                            ];
-                        }
+                        $visibilityData = [
+                            'metadata_field_id' => $field->id,
+                            'tenant_id' => $tenant->id,
+                            'brand_id' => $brand->id,
+                            'category_id' => $category->id,
+                            'is_hidden' => $visibilityDefaults['is_hidden'] ?? false,
+                            'is_upload_hidden' => $visibilityDefaults['is_upload_hidden'] ?? true,
+                            'is_filter_hidden' => $visibilityDefaults['is_filter_hidden'] ?? true,
+                            'is_primary' => $visibilityDefaults['is_primary'] ?? null,
+                            'updated_at' => now(),
+                        ];
                         
                         if ($visibility) {
-                            // Update existing visibility record
                             DB::table('metadata_field_visibility')
                                 ->where('id', $visibility->id)
                                 ->update($visibilityData);
                         } else {
-                            // Create new visibility record
                             $visibilityData['created_at'] = now();
                             DB::table('metadata_field_visibility')->insert($visibilityData);
                         }

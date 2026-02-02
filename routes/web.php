@@ -151,6 +151,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::post('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'suppressForCategory'])->name('tenant.metadata.category.suppress');
         Route::delete('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'unsuppressForCategory'])->name('tenant.metadata.category.unsuppress');
         Route::get('/api/tenant/metadata/fields/{field}/categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getSuppressedCategories'])->name('tenant.metadata.category.list');
+        Route::post('/api/tenant/metadata/categories/{targetCategory}/copy-from/{sourceCategory}', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'copyCategoryFrom'])->name('tenant.metadata.category.copy-from');
+        Route::post('/api/tenant/metadata/categories/{category}/reset', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'resetCategory'])->name('tenant.metadata.category.reset');
+        Route::get('/api/tenant/metadata/categories/{category}/apply-to-other-brands', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getApplyToOtherBrandsTargets'])->name('tenant.metadata.category.apply-to-other-brands.targets');
+        Route::post('/api/tenant/metadata/categories/{category}/apply-to-other-brands', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'applyToOtherBrands'])->name('tenant.metadata.category.apply-to-other-brands');
+        Route::get('/api/tenant/metadata/profiles', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'listProfiles'])->name('tenant.metadata.profiles.list');
+        Route::get('/api/tenant/metadata/profiles/{profile}', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getProfile'])->name('tenant.metadata.profiles.show');
+        Route::post('/api/tenant/metadata/profiles', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'storeProfile'])->name('tenant.metadata.profiles.store');
+        Route::post('/api/tenant/metadata/profiles/{profile}/apply', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'applyProfile'])->name('tenant.metadata.profiles.apply');
         
         // Ownership transfer management routes
         Route::post('/companies/{tenant}/ownership-transfer/initiate', [\App\Http\Controllers\OwnershipTransferController::class, 'initiate'])

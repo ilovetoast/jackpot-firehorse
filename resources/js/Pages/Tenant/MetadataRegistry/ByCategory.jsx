@@ -1,11 +1,16 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { router } from '@inertiajs/react'
 import {
+    ArrowPathIcon,
     Bars3Icon,
+    BookmarkIcon,
     CheckCircleIcon,
+    DocumentDuplicateIcon,
     PencilIcon,
     PlusIcon,
+    Squares2X2Icon,
 } from '@heroicons/react/24/outline'
+import ConfirmDialog from '../../../Components/ConfirmDialog'
 import MetadataFieldModal from '../../../Components/MetadataFieldModal'
 import PlanLimitIndicator from '../../../Components/PlanLimitIndicator'
 
@@ -51,6 +56,24 @@ export default function ByCategoryView({
     const [modalOpen, setModalOpen] = useState(false)
     const [editingField, setEditingField] = useState(null)
     const [loadingFieldData, setLoadingFieldData] = useState(false)
+    const [copyFromSourceId, setCopyFromSourceId] = useState(null) // Source category for Copy from
+    const [copyOrResetLoading, setCopyOrResetLoading] = useState(false)
+    const [confirmCopyOpen, setConfirmCopyOpen] = useState(false)
+    const [confirmResetOpen, setConfirmResetOpen] = useState(false)
+    const [confirmApplyOtherBrandsOpen, setConfirmApplyOtherBrandsOpen] = useState(false)
+    const [applyOtherBrandsTargets, setApplyOtherBrandsTargets] = useState([]) // { brand_name, category_name }[]
+    const [applyOtherBrandsLoading, setApplyOtherBrandsLoading] = useState(false)
+    // Phase 3a: Named profiles
+    const [saveProfileModalOpen, setSaveProfileModalOpen] = useState(false)
+    const [saveProfileName, setSaveProfileName] = useState('')
+    const [profileAvailableToAllBrands, setProfileAvailableToAllBrands] = useState(false)
+    const [saveProfileLoading, setSaveProfileLoading] = useState(false)
+    const [profiles, setProfiles] = useState([]) // { id, name, category_slug }[]
+    const [profilesLoading, setProfilesLoading] = useState(false)
+    const [applyProfileId, setApplyProfileId] = useState(null)
+    const [confirmApplyProfileOpen, setConfirmApplyProfileOpen] = useState(false)
+    const [previewSnapshot, setPreviewSnapshot] = useState(null) // profile snapshot for preview (not saved)
+    const [previewProfileName, setPreviewProfileName] = useState(null)
 
     // Sync ref with state
     useEffect(() => {
@@ -305,7 +328,7 @@ export default function ByCategoryView({
                 setSuccessMessage(`${contextLabel} visibility ${newValue ? 'enabled' : 'disabled'}`)
                 setTimeout(() => setSuccessMessage(null), 3000)
 
-                // C9.2: Invalidate and refetch category data for this field so checkboxes show saved state
+                // Invalidate and refetch category data for this field so checkboxes show saved state (no full reload to avoid resetting view)
                 setFieldCategoryData(prev => {
                     const next = { ...prev }
                     delete next[fieldId]
@@ -315,18 +338,6 @@ export default function ByCategoryView({
                 if (fieldToRefetch) {
                     loadFieldCategoryData(fieldToRefetch, true).catch(() => {})
                 }
-
-                // Silently reload registry in background without page refresh
-                router.reload({
-                    only: ['registry'],
-                    preserveState: true,
-                    preserveScroll: true,
-                    onSuccess: () => {
-                        if (currentCategoryId) {
-                            setTimeout(() => setSelectedCategoryId(currentCategoryId), 0)
-                        }
-                    }
-                })
             } else {
                 // C9.2: Enhanced error handling for visibility save failures
                 const errorMsg = responseData?.error || responseData?.message || `Failed to update visibility (${response.status})`
@@ -500,7 +511,29 @@ export default function ByCategoryView({
         }
     }
 
-    // Get fields for selected category with ordering
+    // When previewing a profile, overlay snapshot onto field data so UI shows profile without saving
+    const previewOverlay = useMemo(() => {
+        if (!previewSnapshot || !selectedCategoryId) return {}
+        const overlay = {}
+        previewSnapshot.forEach(entry => {
+            const fid = entry.metadata_field_id
+            overlay[fid] = {
+                suppressed: entry.is_hidden ? [selectedCategoryId] : [],
+                visible: entry.is_hidden ? [] : [selectedCategoryId],
+                overrides: {
+                    [selectedCategoryId]: {
+                        show_on_upload: !entry.is_upload_hidden,
+                        show_on_edit: !(entry.is_edit_hidden ?? false),
+                        show_in_filters: !entry.is_filter_hidden,
+                        is_primary: entry.is_primary ?? false,
+                    },
+                },
+            }
+        })
+        return overlay
+    }, [previewSnapshot, selectedCategoryId])
+
+    // Get fields for selected category with ordering (uses previewOverlay when previewing a profile)
     const getFieldsForCategory = useMemo(() => {
         if (!selectedCategoryId) {
             return { enabled: [], available: [], enabledAutomated: [], availableAutomated: [] }
@@ -512,7 +545,7 @@ export default function ByCategoryView({
         const availableAutomated = []
 
         manageableFields.forEach(field => {
-            const categoryData = fieldCategoryData[field.id] || { suppressed: [], visible: [] }
+            const categoryData = (previewOverlay[field.id] ?? fieldCategoryData[field.id]) || { suppressed: [], visible: [] }
             const isEnabled = !categoryData.suppressed.includes(selectedCategoryId)
             
             if (isEnabled) {
@@ -524,7 +557,7 @@ export default function ByCategoryView({
 
         // Separate automated fields
         automatedFields.forEach(field => {
-            const categoryData = fieldCategoryData[field.id] || { suppressed: [], visible: [] }
+            const categoryData = (previewOverlay[field.id] ?? fieldCategoryData[field.id]) || { suppressed: [], visible: [] }
             const isEnabled = !categoryData.suppressed.includes(selectedCategoryId)
             
             if (isEnabled) {
@@ -546,7 +579,7 @@ export default function ByCategoryView({
         }
 
         return { enabled, available, enabledAutomated, availableAutomated }
-    }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData, fieldOrder])
+    }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData, fieldOrder, previewOverlay])
 
     // Drag handlers
     const handleDragStart = (e, fieldId) => {
@@ -659,6 +692,262 @@ export default function ByCategoryView({
             preserveState: true,
             preserveScroll: true,
         })
+    }
+
+    // Copy visibility settings from another category to the selected category (called after confirm)
+    const handleCopyFromConfirm = async () => {
+        if (!canManageVisibility || !selectedCategoryId || !copyFromSourceId) return
+        const sourceCat = categories.find(c => c.id === copyFromSourceId)
+        const targetCat = selectedCategory
+        if (!sourceCat || !targetCat) return
+        setCopyOrResetLoading(true)
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/categories/${selectedCategoryId}/copy-from/${copyFromSourceId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message || 'Settings copied.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setCopyFromSourceId(null)
+                setConfirmCopyOpen(false)
+                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+            } else {
+                setSuccessMessage(data.error || 'Failed to copy settings.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setCopyOrResetLoading(false)
+        }
+    }
+
+    // Reset selected category visibility to default (called after confirm)
+    const handleResetConfirm = async () => {
+        if (!canManageVisibility || !selectedCategoryId || !selectedCategory) return
+        setCopyOrResetLoading(true)
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/categories/${selectedCategoryId}/reset`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message || 'Category reset to default.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setConfirmResetOpen(false)
+                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+            } else {
+                setSuccessMessage(data.error || 'Failed to reset.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setCopyOrResetLoading(false)
+        }
+    }
+
+    // Phase 2: Open "Apply to other brands" confirm (fetch targets first)
+    const handleApplyToOtherBrandsClick = async () => {
+        if (!canManageVisibility || !selectedCategoryId || !selectedCategory) return
+        setApplyOtherBrandsLoading(true)
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/categories/${selectedCategoryId}/apply-to-other-brands`, {
+                method: 'GET',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            const targets = data.targets ?? []
+            if (targets.length === 0) {
+                setSuccessMessage('No other brands have a category of this type.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                return
+            }
+            setApplyOtherBrandsTargets(targets)
+            setConfirmApplyOtherBrandsOpen(true)
+        } catch (err) {
+            setSuccessMessage('Failed to load target categories.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setApplyOtherBrandsLoading(false)
+        }
+    }
+
+    // Phase 2: Apply current category settings to other brands (called after confirm)
+    const handleApplyToOtherBrandsConfirm = async () => {
+        if (!canManageVisibility || !selectedCategoryId) return
+        setCopyOrResetLoading(true)
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/categories/${selectedCategoryId}/apply-to-other-brands`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message ?? 'Settings applied to other brands.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setApplyOtherBrandsTargets([])
+                setConfirmApplyOtherBrandsOpen(false)
+                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+            } else {
+                setSuccessMessage(data.error ?? 'Failed to apply to other brands.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setCopyOrResetLoading(false)
+        }
+    }
+
+    // Phase 3a: Fetch profiles for Apply profile dropdown
+    const fetchProfiles = useCallback(async () => {
+        setProfilesLoading(true)
+        try {
+            const url = selectedBrandId
+                ? `/app/api/tenant/metadata/profiles?brand_id=${selectedBrandId}`
+                : '/app/api/tenant/metadata/profiles'
+            const response = await fetch(url, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            setProfiles(data.profiles ?? [])
+        } catch (err) {
+            setProfiles([])
+        } finally {
+            setProfilesLoading(false)
+        }
+    }, [selectedBrandId])
+
+    // Phase 3a: Save current category as named profile
+    const handleSaveProfileSubmit = async () => {
+        if (!canManageVisibility || !selectedCategoryId || !selectedCategory || !saveProfileName.trim()) return
+        setSaveProfileLoading(true)
+        try {
+            const response = await fetch('/app/api/tenant/metadata/profiles', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    name: saveProfileName.trim(),
+                    category_id: selectedCategoryId,
+                    brand_id: profileAvailableToAllBrands ? null : (selectedBrandId ?? undefined),
+                }),
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message || 'Profile saved.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setSaveProfileModalOpen(false)
+                setSaveProfileName('')
+                setProfileAvailableToAllBrands(false)
+                setProfiles(prev => [...prev, data.profile].filter(Boolean))
+            } else {
+                setSuccessMessage(data.error || 'Failed to save profile.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setSaveProfileLoading(false)
+        }
+    }
+
+    // Phase 3a: Preview profile (see result without saving)
+    const handlePreviewProfile = async () => {
+        if (!applyProfileId || !selectedCategoryId) return
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/profiles/${applyProfileId}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok && data.profile) {
+                setPreviewSnapshot(data.profile.snapshot ?? [])
+                setPreviewProfileName(data.profile.name ?? 'Profile')
+            } else {
+                setSuccessMessage(data.error || 'Failed to load profile.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+            }
+        } catch (err) {
+            setSuccessMessage('Failed to load profile.')
+            setTimeout(() => setSuccessMessage(null), 4000)
+        }
+    }
+
+    const handleRevertPreview = () => {
+        setPreviewSnapshot(null)
+        setPreviewProfileName(null)
+    }
+
+    // Phase 3a: Open Apply profile confirm (need profile selected)
+    const handleApplyProfileClick = async () => {
+        if (!applyProfileId || !canManageVisibility || !selectedCategoryId || !selectedCategory) return
+        setConfirmApplyProfileOpen(true)
+    }
+
+    // Phase 3a: Apply selected profile to current category (called after confirm)
+    const handleApplyProfileConfirm = async () => {
+        if (!applyProfileId || !canManageVisibility || !selectedCategoryId) return
+        setCopyOrResetLoading(true)
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/profiles/${applyProfileId}/apply`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ category_id: selectedCategoryId }),
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message ?? 'Profile applied.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setApplyProfileId(null)
+                setConfirmApplyProfileOpen(false)
+                setPreviewSnapshot(null)
+                setPreviewProfileName(null)
+                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+            } else {
+                setSuccessMessage(data.error ?? 'Failed to apply profile.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setCopyOrResetLoading(false)
+        }
     }
 
     return (
@@ -783,6 +1072,101 @@ export default function ByCategoryView({
                             <p className="mt-2 text-sm text-gray-600">
                                 Enable which metadata fields appear for assets in this category. Configure filter visibility and primary placement to control how fields appear in the asset grid.
                             </p>
+                            {previewProfileName && (
+                                <div className="mt-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-2 flex items-center justify-between">
+                                    <span className="text-sm text-amber-800">
+                                        Previewing profile &quot;{previewProfileName}&quot; — not saved. Apply to save, or Revert to cancel.
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <button type="button" onClick={handleRevertPreview} className="text-sm font-medium text-amber-700 hover:text-amber-900">Revert</button>
+                                        <button type="button" onClick={() => { setConfirmApplyProfileOpen(true) }} disabled={copyOrResetLoading} className="rounded-md bg-amber-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">Apply to save</button>
+                                    </div>
+                                </div>
+                            )}
+                            {canManageVisibility && (
+                                <div className="mt-4 border-t border-gray-100 pt-4 space-y-4">
+                                    <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+                                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Copy from category</span>
+                                        <select
+                                            id="copy-from-category"
+                                            value={copyFromSourceId ?? ''}
+                                            onChange={(e) => setCopyFromSourceId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                                            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        >
+                                            <option value="">Select category…</option>
+                                            {categoriesForBrand
+                                                .filter(c => c.id !== selectedCategoryId)
+                                                .map(c => (
+                                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                                ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => copyFromSourceId && setConfirmCopyOpen(true)}
+                                            disabled={!copyFromSourceId || copyOrResetLoading}
+                                            className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
+                                        >
+                                            <DocumentDuplicateIcon className="h-4 w-4" />
+                                            Copy settings
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Reset</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setConfirmResetOpen(true)}
+                                            disabled={copyOrResetLoading}
+                                            className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
+                                        >
+                                            <ArrowPathIcon className="h-4 w-4" />
+                                            Reset to default
+                                        </button>
+                                    </div>
+                                    {brands.length > 1 && (
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Propagate</span>
+                                            <button
+                                                type="button"
+                                                onClick={handleApplyToOtherBrandsClick}
+                                                disabled={copyOrResetLoading || applyOtherBrandsLoading}
+                                                className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
+                                                title="Apply this category's settings to the same category type in all other brands"
+                                            >
+                                                <Squares2X2Icon className="h-4 w-4" />
+                                                Apply to other brands
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Profiles</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSaveProfileModalOpen(true)}
+                                            disabled={copyOrResetLoading}
+                                            className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
+                                            title="Save current category visibility as a named profile"
+                                        >
+                                            <BookmarkIcon className="h-4 w-4" />
+                                            Save as profile
+                                        </button>
+                                        <select
+                                            id="apply-profile"
+                                            value={applyProfileId ?? ''}
+                                            onFocus={fetchProfiles}
+                                            onChange={(e) => setApplyProfileId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                                            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                            title="Select a saved profile"
+                                        >
+                                            <option value="">Select profile…</option>
+                                            {profiles.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}{p.category_slug ? ` (${p.category_slug})` : ''}</option>
+                                            ))}
+                                        </select>
+                                        <button type="button" onClick={handlePreviewProfile} disabled={!applyProfileId || copyOrResetLoading} className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50" title="Preview profile without saving">Preview</button>
+                                        <button type="button" onClick={handleApplyProfileClick} disabled={!applyProfileId || copyOrResetLoading} className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50" title="Apply selected profile to this category">Apply</button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Plan Limit Indicator */}
@@ -837,10 +1221,10 @@ export default function ByCategoryView({
                                             onPrimaryToggle={togglePrimary}
                                             onAiEligibleToggle={toggleAiEligible}
                                             onEdit={canManageFields ? handleEditField : null}
-                                            canManage={canManageVisibility}
+                                            canManage={canManageVisibility && !previewProfileName}
                                             canManageFields={canManageFields}
                                             systemFields={systemFields}
-                                            fieldCategoryData={fieldCategoryData[field.id]}
+                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
                                             isDraggable={true}
                                             onDragStart={handleDragStart}
                                             onDragOver={handleDragOver}
@@ -882,9 +1266,9 @@ export default function ByCategoryView({
                                                         isEnabled={true}
                                                         onToggle={toggleCategoryField}
                                                         onVisibilityToggle={toggleVisibility}
-                                                        canManage={canManageVisibility}
+                                                        canManage={canManageVisibility && !previewProfileName}
                                                         systemFields={systemFields}
-                                                        fieldCategoryData={fieldCategoryData[field.id]}
+                                                        fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
                                                     />
                                                 ))}
                                             </div>
@@ -903,9 +1287,9 @@ export default function ByCategoryView({
                                                         isEnabled={false}
                                                         onToggle={toggleCategoryField}
                                                         onVisibilityToggle={toggleVisibility}
-                                                        canManage={canManageVisibility}
+                                                        canManage={canManageVisibility && !previewProfileName}
                                                         systemFields={systemFields}
-                                                        fieldCategoryData={fieldCategoryData[field.id]}
+                                                        fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
                                                     />
                                                 ))}
                                             </div>
@@ -937,9 +1321,9 @@ export default function ByCategoryView({
                                             onVisibilityToggle={toggleVisibility}
                                             onPrimaryToggle={togglePrimary}
                                             onAiEligibleToggle={toggleAiEligible}
-                                            canManage={canManageVisibility}
+                                            canManage={canManageVisibility && !previewProfileName}
                                             systemFields={systemFields}
-                                            fieldCategoryData={fieldCategoryData[field.id]}
+                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
                                             isDraggable={false}
                                         />
                                     ))}
@@ -957,6 +1341,111 @@ export default function ByCategoryView({
             </div>
             </div>
 
+            {/* Copy settings confirmation */}
+            <ConfirmDialog
+                open={confirmCopyOpen}
+                onClose={() => setConfirmCopyOpen(false)}
+                onConfirm={handleCopyFromConfirm}
+                title="Copy settings"
+                message={copyFromSourceId && selectedCategory
+                    ? `Copy settings from "${categories.find(c => c.id === copyFromSourceId)?.name ?? ''}" to "${selectedCategory.name}"? This will overwrite current visibility for ${selectedCategory.name}.`
+                    : ''}
+                confirmText="OK"
+                cancelText="Cancel"
+                variant="warning"
+                loading={copyOrResetLoading}
+            />
+            {/* Reset to default confirmation */}
+            <ConfirmDialog
+                open={confirmResetOpen}
+                onClose={() => setConfirmResetOpen(false)}
+                onConfirm={handleResetConfirm}
+                title="Reset to default"
+                message={selectedCategory
+                    ? `Reset visibility for "${selectedCategory.name}" to default? This removes all category-level overrides.`
+                    : ''}
+                confirmText="OK"
+                cancelText="Cancel"
+                variant="warning"
+                loading={copyOrResetLoading}
+            />
+            {/* Apply profile confirmation */}
+            <ConfirmDialog
+                open={confirmApplyProfileOpen}
+                onClose={() => setConfirmApplyProfileOpen(false)}
+                onConfirm={handleApplyProfileConfirm}
+                title="Apply profile"
+                message={applyProfileId && selectedCategory && profiles.find(p => p.id === applyProfileId)
+                    ? `Apply profile "${profiles.find(p => p.id === applyProfileId)?.name}" to "${selectedCategory.name}"? This will overwrite current visibility for this category.`
+                    : ''}
+                confirmText="Apply"
+                cancelText="Cancel"
+                variant="warning"
+                loading={copyOrResetLoading}
+            />
+            {/* Apply to other brands confirmation */}
+            <ConfirmDialog
+                open={confirmApplyOtherBrandsOpen}
+                onClose={() => {
+                    setConfirmApplyOtherBrandsOpen(false)
+                    setApplyOtherBrandsTargets([])
+                }}
+                onConfirm={handleApplyToOtherBrandsConfirm}
+                title="Apply to other brands"
+                message={applyOtherBrandsTargets.length > 0 && selectedCategory
+                    ? `Apply "${selectedCategory.name}" settings to the same category type in ${applyOtherBrandsTargets.length} other brand(s)? This will overwrite current visibility for: ${applyOtherBrandsTargets.map(t => `${t.brand_name} – ${t.category_name}`).join(', ')}.`
+                    : ''}
+                confirmText="Apply"
+                cancelText="Cancel"
+                variant="warning"
+                loading={copyOrResetLoading}
+            />
+            {/* Save as profile modal */}
+            {saveProfileModalOpen && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-center justify-center p-4">
+                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => { if (!saveProfileLoading) { setSaveProfileModalOpen(false); setProfileAvailableToAllBrands(false) } }} />
+                        <div className="relative bg-white rounded-lg shadow-xl px-4 pb-4 pt-5 sm:p-6 w-full max-w-sm">
+                            <h3 className="text-base font-semibold text-gray-900">Save as profile</h3>
+                            <p className="mt-1 text-sm text-gray-500">Save current visibility as a named profile you can apply later.</p>
+                            <div className="mt-4">
+                                <label htmlFor="profile-name" className="block text-sm font-medium text-gray-700">Profile name</label>
+                                <input
+                                    id="profile-name"
+                                    type="text"
+                                    value={saveProfileName}
+                                    onChange={(e) => setSaveProfileName(e.target.value)}
+                                    placeholder="e.g. Graphics Standard"
+                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                    disabled={saveProfileLoading}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSaveProfileSubmit()}
+                                />
+                            </div>
+                            <div className="mt-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={profileAvailableToAllBrands}
+                                        onChange={(e) => setProfileAvailableToAllBrands(e.target.checked)}
+                                        disabled={saveProfileLoading}
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <span className="text-sm text-gray-700">Available to all brands</span>
+                                </label>
+                                <p className="mt-1 text-xs text-gray-500 ml-6">
+                                    {brands.length > 1
+                                        ? 'When checked, this profile can be applied from any brand. When unchecked, it is only visible for the current brand.'
+                                        : 'When checked, this profile will be available to all brands when you add more.'}
+                                </p>
+                            </div>
+                            <div className="mt-5 flex justify-end gap-2">
+                                <button type="button" onClick={() => { setSaveProfileModalOpen(false); setProfileAvailableToAllBrands(false) }} disabled={saveProfileLoading} className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                                <button type="button" onClick={handleSaveProfileSubmit} disabled={!saveProfileName.trim() || saveProfileLoading} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50">{saveProfileLoading ? 'Saving…' : 'Save'}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Metadata Field Modal */}
             <MetadataFieldModal
                 isOpen={modalOpen}

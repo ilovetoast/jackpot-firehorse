@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\MetadataVisibilityProfile;
 use App\Models\Tenant;
 use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
@@ -504,5 +505,341 @@ class TenantMetadataRegistryController extends Controller
             'suppressed_category_ids' => $suppressedCategoryIds,
             'category_overrides' => $categoryOverrides, // Keyed by category_id, includes is_primary
         ]);
+    }
+
+    /**
+     * Copy metadata visibility settings from one category to another.
+     *
+     * POST /api/tenant/metadata/categories/{targetCategory}/copy-from/{sourceCategory}
+     */
+    public function copyCategoryFrom(int $targetCategory, int $sourceCategory): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $sourceModel = Category::where('id', $sourceCategory)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+        $targetModel = Category::where('id', $targetCategory)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$sourceModel || !$targetModel) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        try {
+            $count = $this->visibilityService->copyCategoryVisibility($tenant, $sourceModel, $targetModel);
+            return response()->json([
+                'success' => true,
+                'message' => "Settings copied from {$sourceModel->name} to {$targetModel->name}.",
+                'rows_copied' => $count,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Reset a category's metadata visibility to default (remove all category-level overrides).
+     *
+     * POST /api/tenant/metadata/categories/{category}/reset
+     */
+    public function resetCategory(int $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $categoryModel = Category::where('id', $category)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$categoryModel) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        $count = $this->visibilityService->applySeededDefaultsForCategory($tenant, $categoryModel);
+        return response()->json([
+            'success' => true,
+            'message' => 'Category reset to seeded default. Visibility now matches the configured defaults for this category type.',
+            'rows_written' => $count,
+        ]);
+    }
+
+    /**
+     * Get target categories for "Apply to other brands" (same slug + asset_type in other brands).
+     *
+     * GET /api/tenant/metadata/categories/{category}/apply-to-other-brands
+     */
+    public function getApplyToOtherBrandsTargets(int $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $categoryModel = Category::where('id', $category)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$categoryModel) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        try {
+            $targets = $this->visibilityService->getApplyToOtherBrandsTargets($tenant, $categoryModel);
+            return response()->json(['targets' => $targets]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Apply current category's metadata visibility settings to the same category type in other brands.
+     *
+     * POST /api/tenant/metadata/categories/{category}/apply-to-other-brands
+     */
+    public function applyToOtherBrands(int $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $categoryModel = Category::where('id', $category)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$categoryModel) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        try {
+            $results = $this->visibilityService->applyCategoryVisibilityToOtherBrands($tenant, $categoryModel);
+            $count = count($results);
+            return response()->json([
+                'success' => true,
+                'message' => $count > 0
+                    ? "Settings applied to {$count} categor" . ($count === 1 ? 'y' : 'ies') . " in other brands."
+                    : 'No other brands have a category of this type.',
+                'results' => $results,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Phase 3a: List metadata visibility profiles for the tenant.
+     *
+     * GET /api/tenant/metadata/profiles?brand_id= (optional)
+     */
+    public function listProfiles(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $query = MetadataVisibilityProfile::where('tenant_id', $tenant->id)
+            ->orderBy('name');
+
+        if ($request->has('brand_id') && $request->brand_id !== null && $request->brand_id !== '') {
+            $brandId = (int) $request->brand_id;
+            $query->where(function ($q) use ($brandId) {
+                $q->where('brand_id', $brandId)->orWhereNull('brand_id');
+            });
+        }
+
+        $profiles = $query->get(['id', 'tenant_id', 'brand_id', 'name', 'category_slug', 'created_at'])
+            ->map(fn ($p) => [
+                'id' => $p->id,
+                'tenant_id' => $p->tenant_id,
+                'brand_id' => $p->brand_id,
+                'name' => $p->name,
+                'category_slug' => $p->category_slug,
+                'created_at' => $p->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json(['profiles' => $profiles]);
+    }
+
+    /**
+     * Phase 3a: Get a single profile (including snapshot for preview).
+     *
+     * GET /api/tenant/metadata/profiles/{profile}
+     */
+    public function getProfile(int $profile): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $profileModel = MetadataVisibilityProfile::where('id', $profile)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$profileModel) {
+            return response()->json(['error' => 'Profile not found'], 404);
+        }
+
+        return response()->json([
+            'profile' => [
+                'id' => $profileModel->id,
+                'name' => $profileModel->name,
+                'category_slug' => $profileModel->category_slug,
+                'snapshot' => $profileModel->snapshot ?? [],
+            ],
+        ]);
+    }
+
+    /**
+     * Phase 3a: Save current category visibility as a named profile.
+     *
+     * POST /api/tenant/metadata/profiles
+     * Body: name (required), category_id (required), brand_id (optional, for scope)
+     */
+    public function storeProfile(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'category_id' => 'required|integer|exists:categories,id',
+            'brand_id' => 'nullable|integer|exists:brands,id',
+        ]);
+
+        $category = Category::where('id', $validated['category_id'])
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$category) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        try {
+            $snapshot = $this->visibilityService->snapshotFromCategory($tenant, $category);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $profile = MetadataVisibilityProfile::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $validated['brand_id'] ?? null,
+            'name' => $validated['name'],
+            'category_slug' => $category->slug,
+            'snapshot' => $snapshot,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile saved.',
+            'profile' => [
+                'id' => $profile->id,
+                'name' => $profile->name,
+                'category_slug' => $profile->category_slug,
+            ],
+        ]);
+    }
+
+    /**
+     * Phase 3a: Apply a saved profile to a category.
+     *
+     * POST /api/tenant/metadata/profiles/{profile}/apply
+     * Body: category_id (required)
+     */
+    public function applyProfile(Request $request, int $profile): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage metadata visibility.');
+        }
+
+        $profileModel = MetadataVisibilityProfile::where('id', $profile)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$profileModel) {
+            return response()->json(['error' => 'Profile not found'], 404);
+        }
+
+        $validated = $request->validate([
+            'category_id' => 'required|integer|exists:categories,id',
+        ]);
+
+        $category = Category::where('id', $validated['category_id'])
+            ->where('tenant_id', $tenant->id)
+            ->first();
+
+        if (!$category) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        try {
+            $count = $this->visibilityService->applySnapshotToCategory($tenant, $category, $profileModel->snapshot ?? []);
+            return response()->json([
+                'success' => true,
+                'message' => "Profile \"{$profileModel->name}\" applied. {$count} visibility settings updated.",
+                'rows_written' => $count,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 }

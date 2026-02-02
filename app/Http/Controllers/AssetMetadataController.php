@@ -230,6 +230,15 @@ class AssetMetadataController extends Controller
             ]);
         });
 
+        // Sync sort-relevant fields to assets.metadata so grid sort sees them
+        $suggestionField = DB::table('metadata_fields')->where('id', $suggestion->metadata_field_id)->first();
+        if ($suggestionField && in_array($suggestionField->key ?? '', ['starred', 'quality_rating'], true)) {
+            $value = json_decode($suggestion->value_json, true);
+            if ($value !== null) {
+                $this->syncSortFieldToAsset($asset, $suggestionField->key, $value);
+            }
+        }
+
         Log::info('[AssetMetadataController] AI suggestion approved', [
             'asset_id' => $asset->id,
             'suggestion_id' => $suggestionId,
@@ -364,6 +373,11 @@ class AssetMetadataController extends Controller
                 ]);
             }
         });
+
+        // Sync sort-relevant fields to assets.metadata so grid sort sees them
+        if (in_array($fieldKey, ['starred', 'quality_rating'], true) && !empty($normalizedValue)) {
+            $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValue[0]);
+        }
 
         Log::info('[AssetMetadataController] AI suggestion edited and accepted', [
             'asset_id' => $asset->id,
@@ -1534,6 +1548,11 @@ class AssetMetadataController extends Controller
             }
         });
 
+        // Sync sort-relevant fields to assets.metadata so grid sort sees them (display uses asset_metadata)
+        if (!$requiresApproval && in_array($fieldKey, ['starred', 'quality_rating'], true) && !empty($normalizedValues)) {
+            $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValues[0]);
+        }
+
         Log::info('[AssetMetadataController] Metadata edited', [
             'asset_id' => $asset->id,
             'metadata_field_id' => $fieldId,
@@ -2422,6 +2441,12 @@ class AssetMetadataController extends Controller
                 ]);
             }
         });
+
+        // Sync sort-relevant fields to assets.metadata so grid sort sees them
+        $fieldKey = $field->key ?? null;
+        if ($fieldKey && in_array($fieldKey, ['starred', 'quality_rating'], true) && !empty($normalizedValues)) {
+            $this->syncSortFieldToAsset($asset, $fieldKey, $normalizedValues[0]);
+        }
 
         // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
         $this->triggerAiSuggestionsIfReady($asset);
@@ -3934,5 +3959,22 @@ class AssetMetadataController extends Controller
         
         // All metadata approved and AI suggestions not yet completed - trigger AI
         \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id);
+    }
+
+    /**
+     * Sync a sort-relevant metadata field (starred, quality_rating) to assets.metadata
+     * so grid sort by starred/quality sees the value. Display reads from asset_metadata;
+     * sort reads from assets.metadata JSON.
+     */
+    protected function syncSortFieldToAsset(Asset $asset, string $fieldKey, $value): void
+    {
+        if (!in_array($fieldKey, ['starred', 'quality_rating'], true)) {
+            return;
+        }
+        $asset->refresh();
+        $meta = $asset->metadata ?? [];
+        $meta[$fieldKey] = $value;
+        $asset->metadata = $meta;
+        $asset->save();
     }
 }

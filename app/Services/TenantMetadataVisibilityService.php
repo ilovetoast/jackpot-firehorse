@@ -389,4 +389,483 @@ class TenantMetadataVisibilityService
 
         return $result;
     }
+
+    /**
+     * Copy all category-level visibility overrides from source category to target category.
+     * Source and target must belong to the same tenant; they may be same or different brands.
+     *
+     * @param Tenant $tenant
+     * @param Category $sourceCategory
+     * @param Category $targetCategory
+     * @return int Number of rows copied (upserted for target)
+     */
+    public function copyCategoryVisibility(Tenant $tenant, Category $sourceCategory, Category $targetCategory): int
+    {
+        if ($sourceCategory->tenant_id !== $tenant->id || $targetCategory->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Source and target categories must belong to the tenant.');
+        }
+
+        $sourceRows = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $sourceCategory->brand_id)
+            ->where('category_id', $sourceCategory->id)
+            ->get();
+
+        $targetBrandId = $targetCategory->brand_id;
+        $targetCategoryId = $targetCategory->id;
+        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
+        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+        $count = 0;
+
+        foreach ($sourceRows as $row) {
+            $existing = DB::table('metadata_field_visibility')
+                ->where('metadata_field_id', $row->metadata_field_id)
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $targetBrandId)
+                ->where('category_id', $targetCategoryId)
+                ->first();
+
+            $data = [
+                'is_hidden' => (bool) $row->is_hidden,
+                'is_upload_hidden' => (bool) $row->is_upload_hidden,
+                'is_filter_hidden' => (bool) $row->is_filter_hidden,
+                'updated_at' => now(),
+            ];
+            if ($hasPrimary && isset($row->is_primary)) {
+                $data['is_primary'] = $row->is_primary;
+            }
+            if ($hasEditHidden && isset($row->is_edit_hidden)) {
+                $data['is_edit_hidden'] = $row->is_edit_hidden;
+            }
+
+            if ($existing) {
+                DB::table('metadata_field_visibility')->where('id', $existing->id)->update($data);
+            } else {
+                $data['metadata_field_id'] = $row->metadata_field_id;
+                $data['tenant_id'] = $tenant->id;
+                $data['brand_id'] = $targetBrandId;
+                $data['category_id'] = $targetCategoryId;
+                $data['created_at'] = now();
+                DB::table('metadata_field_visibility')->insert($data);
+            }
+            $count++;
+        }
+
+        Log::info('Tenant metadata visibility copied between categories', [
+            'tenant_id' => $tenant->id,
+            'source_category_id' => $sourceCategory->id,
+            'target_category_id' => $targetCategory->id,
+            'rows_copied' => $count,
+        ]);
+
+        return $count;
+    }
+
+    /**
+     * Reset a category to default: delete all category-level visibility overrides for that category.
+     * Behavior then falls back to tenant-level overrides and metadata_fields defaults.
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @return int Number of rows deleted
+     */
+    public function resetCategoryVisibility(Tenant $tenant, Category $category): int
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $query = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->where('category_id', $category->id);
+
+        if ($category->brand_id) {
+            $query->where('brand_id', $category->brand_id);
+        } else {
+            $query->whereNull('brand_id');
+        }
+
+        $count = $query->count();
+        $query->delete();
+
+        Log::info('Tenant metadata visibility reset for category', [
+            'tenant_id' => $tenant->id,
+            'category_id' => $category->id,
+            'rows_deleted' => $count,
+        ]);
+
+        return $count;
+    }
+
+    /**
+     * Apply seeded default visibility for one category (from config/metadata_category_defaults.php).
+     * Used by "Reset to default" and by SystemCategoryService when adding a new category (Phase 3b).
+     * Deletes existing category-level visibility, then inserts rows matching the seeder defaults.
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @return int Number of rows written (inserted)
+     */
+    public function applySeededDefaultsForCategory(Tenant $tenant, Category $category): int
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $config = config('metadata_category_defaults', []);
+        $categoryConfig = $config['category_config'] ?? [];
+        $restrictFields = $config['restrict_fields'] ?? [];
+        $tagsAndCollectionOnlySlugs = $config['tags_and_collection_only_slugs'] ?? ['video'];
+        $dominantColorsVisibility = $config['dominant_colors_visibility'] ?? [];
+
+        $slug = $category->slug;
+        $assetTypeValue = $category->asset_type?->value ?? 'asset';
+        $isImageCategory = ($assetTypeValue === 'asset');
+        $brandId = $category->brand_id;
+        $categoryId = $category->id;
+
+        // All metadata fields for this tenant (system + tenant-scoped)
+        $fields = DB::table('metadata_fields')
+            ->where(function ($q) use ($tenant) {
+                $q->where('scope', 'system')
+                    ->orWhere(function ($q2) use ($tenant) {
+                        $q2->where('scope', 'tenant')->where('tenant_id', $tenant->id);
+                    });
+            })
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->get(['id', 'key']);
+
+        $rows = [];
+        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
+        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+
+        foreach ($fields as $field) {
+            $key = $field->key;
+            $visibility = $this->computeSeededDefaultForField(
+                $key,
+                $slug,
+                $isImageCategory,
+                $categoryConfig,
+                $restrictFields,
+                $tagsAndCollectionOnlySlugs,
+                $dominantColorsVisibility
+            );
+            if ($visibility === null) {
+                continue; // Skip (no row = fall back to field/tenant defaults)
+            }
+
+            $row = [
+                'metadata_field_id' => $field->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brandId,
+                'category_id' => $categoryId,
+                'is_hidden' => $visibility['is_hidden'],
+                'is_upload_hidden' => $visibility['is_upload_hidden'],
+                'is_filter_hidden' => $visibility['is_filter_hidden'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+            if ($hasPrimary && array_key_exists('is_primary', $visibility)) {
+                $row['is_primary'] = $visibility['is_primary'];
+            }
+            if ($hasEditHidden && array_key_exists('is_edit_hidden', $visibility)) {
+                $row['is_edit_hidden'] = $visibility['is_edit_hidden'];
+            }
+            $rows[] = $row;
+        }
+
+        // Delete existing category-level visibility, then insert defaults
+        $this->resetCategoryVisibility($tenant, $category);
+
+        if (empty($rows)) {
+            Log::info('Tenant metadata visibility applied seeded defaults (no rows)', [
+                'tenant_id' => $tenant->id,
+                'category_id' => $category->id,
+            ]);
+            return 0;
+        }
+
+        DB::table('metadata_field_visibility')->insert($rows);
+
+        Log::info('Tenant metadata visibility applied seeded defaults for category', [
+            'tenant_id' => $tenant->id,
+            'category_id' => $category->id,
+            'rows_written' => count($rows),
+        ]);
+
+        return count($rows);
+    }
+
+    /**
+     * Compute default visibility for one field in one category from config.
+     * Returns array with is_hidden, is_upload_hidden, is_filter_hidden, is_primary (optional), or null to skip row.
+     *
+     * @param string $fieldKey
+     * @param string $categorySlug
+     * @param bool $isImageCategory
+     * @param array $categoryConfig
+     * @param array $restrictFields
+     * @param array $tagsAndCollectionOnlySlugs
+     * @param array $dominantColorsVisibility
+     * @return array<string, mixed>|null
+     */
+    private function computeSeededDefaultForField(
+        string $fieldKey,
+        string $categorySlug,
+        bool $isImageCategory,
+        array $categoryConfig,
+        array $restrictFields,
+        array $tagsAndCollectionOnlySlugs,
+        array $dominantColorsVisibility
+    ): ?array {
+        // Video (and any tags_and_collection_only): only tags and collection enabled
+        if (in_array($categorySlug, $tagsAndCollectionOnlySlugs, true)) {
+            $enabled = in_array($fieldKey, ['tags', 'collection'], true);
+            return [
+                'is_hidden' => !$enabled,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'is_primary' => null,
+            ];
+        }
+
+        // Restrict fields: only enabled for slugs listed in category_config for that field
+        if (in_array($fieldKey, $restrictFields, true)) {
+            $enabledSlugs = array_keys($categoryConfig[$fieldKey] ?? []);
+            $enabled = in_array($categorySlug, $enabledSlugs, true);
+            $settings = $categoryConfig[$fieldKey][$categorySlug] ?? [];
+            return [
+                'is_hidden' => !$enabled,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'is_primary' => $settings['is_primary'] ?? null,
+            ];
+        }
+
+        // Dominant color fields: special visibility for image categories
+        if ($isImageCategory && isset($dominantColorsVisibility[$fieldKey])) {
+            $v = $dominantColorsVisibility[$fieldKey];
+            return [
+                'is_hidden' => $v['is_hidden'] ?? false,
+                'is_upload_hidden' => $v['is_upload_hidden'] ?? true,
+                'is_filter_hidden' => $v['is_filter_hidden'] ?? true,
+                'is_primary' => $v['is_primary'] ?? null,
+            ];
+        }
+
+        // Explicit per-slug config for this field
+        if (isset($categoryConfig[$fieldKey][$categorySlug])) {
+            $settings = $categoryConfig[$fieldKey][$categorySlug];
+            $enabled = $settings['enabled'] ?? true;
+            return [
+                'is_hidden' => !$enabled,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'is_primary' => $settings['is_primary'] ?? null,
+            ];
+        }
+
+        // Default: enabled, no overrides (we still insert a row so category has explicit default)
+        return [
+            'is_hidden' => false,
+            'is_upload_hidden' => false,
+            'is_filter_hidden' => false,
+            'is_primary' => null,
+        ];
+    }
+
+    /**
+     * Get sibling categories in other brands (same slug + asset_type) for "Apply to other brands".
+     *
+     * @param Tenant $tenant
+     * @param Category $sourceCategory
+     * @return array<array{brand_id: int, brand_name: string, category_id: int, category_name: string}>
+     */
+    public function getApplyToOtherBrandsTargets(Tenant $tenant, Category $sourceCategory): array
+    {
+        if ($sourceCategory->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $slug = $sourceCategory->slug;
+        $assetTypeValue = $sourceCategory->asset_type?->value ?? 'asset';
+        $sourceBrandId = $sourceCategory->brand_id;
+
+        $siblings = \App\Models\Category::query()
+            ->active()
+            ->where('tenant_id', $tenant->id)
+            ->where('slug', $slug)
+            ->where('asset_type', $assetTypeValue)
+            ->where('brand_id', '!=', $sourceBrandId)
+            ->whereHas('brand')
+            ->with('brand:id,name')
+            ->get();
+
+        $targets = [];
+        foreach ($siblings as $cat) {
+            $targets[] = [
+                'brand_id' => $cat->brand_id,
+                'brand_name' => $cat->brand->name ?? '',
+                'category_id' => $cat->id,
+                'category_name' => $cat->name,
+            ];
+        }
+
+        return $targets;
+    }
+
+    /**
+     * Apply current category's visibility settings to the same category type in all other brands.
+     * For each sibling category (same slug + asset_type, different brand), copies visibility from source.
+     *
+     * @param Tenant $tenant
+     * @param Category $sourceCategory
+     * @return array<array{category_id: int, brand_name: string, category_name: string, rows_copied: int}>
+     */
+    public function applyCategoryVisibilityToOtherBrands(Tenant $tenant, Category $sourceCategory): array
+    {
+        $targets = $this->getApplyToOtherBrandsTargets($tenant, $sourceCategory);
+        $results = [];
+
+        foreach ($targets as $target) {
+            $targetCategory = Category::where('id', $target['category_id'])
+                ->where('tenant_id', $tenant->id)
+                ->first();
+            if (!$targetCategory) {
+                continue;
+            }
+            $count = $this->copyCategoryVisibility($tenant, $sourceCategory, $targetCategory);
+            $results[] = [
+                'category_id' => $targetCategory->id,
+                'brand_name' => $target['brand_name'],
+                'category_name' => $target['category_name'],
+                'rows_copied' => $count,
+            ];
+        }
+
+        Log::info('Tenant metadata visibility applied to other brands', [
+            'tenant_id' => $tenant->id,
+            'source_category_id' => $sourceCategory->id,
+            'targets_count' => count($results),
+        ]);
+
+        return $results;
+    }
+
+    /**
+     * Phase 3a: Build a snapshot of category visibility for saving as a named profile.
+     * Returns array of { metadata_field_id, is_hidden, is_upload_hidden, is_filter_hidden, is_primary, is_edit_hidden }.
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @return array<int, array<string, mixed>>
+     */
+    public function snapshotFromCategory(Tenant $tenant, Category $category): array
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $selectColumns = ['metadata_field_id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary'];
+        if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+            $selectColumns[] = 'is_edit_hidden';
+        }
+
+        $rows = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $category->brand_id)
+            ->where('category_id', $category->id)
+            ->get($selectColumns);
+
+        $snapshot = [];
+        foreach ($rows as $row) {
+            $entry = [
+                'metadata_field_id' => (int) $row->metadata_field_id,
+                'is_hidden' => (bool) $row->is_hidden,
+                'is_upload_hidden' => (bool) $row->is_upload_hidden,
+                'is_filter_hidden' => (bool) $row->is_filter_hidden,
+                'is_primary' => isset($row->is_primary) ? (bool) $row->is_primary : null,
+            ];
+            if (isset($row->is_edit_hidden)) {
+                $entry['is_edit_hidden'] = (bool) $row->is_edit_hidden;
+            }
+            $snapshot[] = $entry;
+        }
+
+        return $snapshot;
+    }
+
+    /**
+     * Phase 3a: Apply a saved profile snapshot to a category.
+     * Deletes existing category-level visibility, then inserts rows from snapshot (only for field_ids that exist for tenant).
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @param array<int, array<string, mixed>> $snapshot Array of { metadata_field_id, is_hidden, is_upload_hidden, is_filter_hidden, is_primary, is_edit_hidden }
+     * @return int Number of rows written
+     */
+    public function applySnapshotToCategory(Tenant $tenant, Category $category, array $snapshot): int
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $validFieldIds = DB::table('metadata_fields')
+            ->where(function ($q) use ($tenant) {
+                $q->where('scope', 'system')
+                    ->orWhere(function ($q2) use ($tenant) {
+                        $q2->where('scope', 'tenant')->where('tenant_id', $tenant->id);
+                    });
+            })
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->pluck('id')
+            ->flip()
+            ->all();
+
+        $this->resetCategoryVisibility($tenant, $category);
+
+        $brandId = $category->brand_id;
+        $categoryId = $category->id;
+        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
+        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+        $count = 0;
+
+        foreach ($snapshot as $entry) {
+            $fieldId = (int) ($entry['metadata_field_id'] ?? 0);
+            if ($fieldId <= 0 || !isset($validFieldIds[$fieldId])) {
+                continue;
+            }
+
+            $row = [
+                'metadata_field_id' => $fieldId,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brandId,
+                'category_id' => $categoryId,
+                'is_hidden' => (bool) ($entry['is_hidden'] ?? false),
+                'is_upload_hidden' => (bool) ($entry['is_upload_hidden'] ?? false),
+                'is_filter_hidden' => (bool) ($entry['is_filter_hidden'] ?? false),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+            if ($hasPrimary && array_key_exists('is_primary', $entry)) {
+                $row['is_primary'] = $entry['is_primary'] === null ? null : (bool) $entry['is_primary'];
+            }
+            if ($hasEditHidden && array_key_exists('is_edit_hidden', $entry)) {
+                $row['is_edit_hidden'] = (bool) $entry['is_edit_hidden'];
+            }
+
+            DB::table('metadata_field_visibility')->insert($row);
+            $count++;
+        }
+
+        Log::info('Tenant metadata visibility profile applied to category', [
+            'tenant_id' => $tenant->id,
+            'category_id' => $category->id,
+            'rows_written' => $count,
+        ]);
+
+        return $count;
+    }
 }
