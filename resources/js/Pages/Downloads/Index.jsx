@@ -47,10 +47,14 @@ function stateBadge(state) {
   return map[state] || { label: 'Pending', className: 'bg-gray-100 text-gray-700', title: '' }
 }
 
-// Access mode badge: public | brand | company | specific users
-function accessBadge(accessMode) {
+// Access mode badge: public | brand | company | specific users. When public + password, label clarifies password is required.
+function accessBadge(accessMode, passwordProtected = false) {
   const map = {
-    public: { label: 'Public', className: 'bg-sky-100 text-sky-800', title: 'Anyone with the link can download.' },
+    public: {
+      label: passwordProtected ? 'Public (password required)' : 'Public',
+      className: 'bg-sky-100 text-sky-800',
+      title: passwordProtected ? 'Anyone with the link can open the page; a password is required to download.' : 'Anyone with the link can download.',
+    },
     brand: { label: 'Brand', className: 'bg-violet-100 text-violet-800', title: 'Only brand members can access.' },
     company: { label: 'Company', className: 'bg-indigo-100 text-indigo-800', title: 'Only company members can access.' },
     team: { label: 'Company', className: 'bg-indigo-100 text-indigo-800', title: 'Only company members can access.' },
@@ -121,10 +125,10 @@ export default function DownloadsIndex({
 
   const applyFilters = (next, page = 1) => {
     setFilters(next)
-    router.get('/app/downloads', { ...next, page }, { preserveState: true })
+    router.get(route('downloads.index'), { scope: next.scope, status: next.status, access: next.access, user_id: next.user_id, sort: next.sort, page }, { preserveState: true })
   }
   const goToPage = (page) => {
-    router.get('/app/downloads', { ...filters, page }, { preserveState: true })
+    router.get(route('downloads.index'), { scope: filters.scope, status: filters.status, access: filters.access, user_id: filters.user_id, sort: filters.sort, page }, { preserveState: true })
   }
 
   const brandAccent = auth?.activeBrand?.primary_color || '#6366f1'
@@ -536,7 +540,8 @@ export default function DownloadsIndex({
                 const isFailed = state === 'failed'
 
                 const thumbnails = d.thumbnails || []
-                const coverThumb = thumbnails.find((t) => t.thumbnail_url) || thumbnails[0]
+                const thumbsWithUrl = thumbnails.filter((t) => t.thumbnail_url).slice(0, 4)
+                const thumbCount = thumbsWithUrl.length
                 const displayTitle = d.title || `Download ${d.id}`
 
                 return (
@@ -544,30 +549,49 @@ export default function DownloadsIndex({
                     key={d.id}
                     className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-wrap"
                   >
-                    {/* Left: thumb with strong brand gradient overlay (multiply) + white file/size counter */}
-                    <div className="relative w-48 h-48 flex-shrink-0 overflow-hidden bg-slate-100">
-                      {coverThumb?.thumbnail_url ? (
-                        <>
-                          <img
-                            src={coverThumb.thumbnail_url}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover"
-                          />
-                          <div
-                            className="absolute inset-0"
-                            style={{
-                              background: `linear-gradient(135deg, ${brandAccent} 0%, ${brandAccent}99 50%, ${brandAccent}cc 100%)`,
-                            }}
-                            aria-hidden
-                          />
-                        </>
-                      ) : (
+                    {/* Left: 1–4 thumbnails in a grid (1 fill, 2 split, 3 split, 4 in 2x2) */}
+                    <div
+                      className={`relative w-48 h-48 flex-shrink-0 overflow-hidden bg-slate-100 ${
+                        thumbCount === 1
+                          ? ''
+                          : thumbCount === 2
+                            ? 'grid grid-cols-2'
+                            : thumbCount === 3
+                              ? 'grid grid-cols-2 grid-rows-2'
+                              : thumbCount === 4
+                                ? 'grid grid-cols-2 grid-rows-2'
+                                : ''
+                      }`}
+                    >
+                      {thumbCount === 0 ? (
                         <div
                           className="absolute inset-0"
                           style={{ background: `linear-gradient(135deg, ${brandAccent}, ${brandAccent}cc)` }}
                         />
+                      ) : (
+                        thumbsWithUrl.map((t, idx) => (
+                          <div
+                            key={t.id || idx}
+                            className={`relative overflow-hidden ${
+                              thumbCount === 1 ? 'absolute inset-0 w-full h-full' : ''
+                            } ${thumbCount === 3 && idx === 0 ? 'row-span-2' : ''}`}
+                          >
+                            <img
+                              src={t.thumbnail_url}
+                              alt=""
+                              className={`block w-full h-full object-cover ${thumbCount === 1 ? 'object-center absolute inset-0' : ''}`}
+                            />
+                            <div
+                              className="absolute inset-0"
+                              style={{
+                                background: `linear-gradient(135deg, ${brandAccent}99 0%, ${brandAccent}cc 50%, ${brandAccent}cc 100%)`,
+                              }}
+                              aria-hidden
+                            />
+                          </div>
+                        ))
                       )}
-                      <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center">
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center pointer-events-none">
                         <span className="text-base font-semibold text-white drop-shadow-md leading-tight">
                           {d.asset_count} file{d.asset_count !== 1 ? 's' : ''}
                         </span>
@@ -589,7 +613,7 @@ export default function DownloadsIndex({
                             {badge.label}
                           </span>
                           {(() => {
-                            const access = accessBadge(d.access_mode || 'public')
+                            const access = accessBadge(d.access_mode || 'public', d.password_protected)
                             return (
                               <span
                                 className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${access.className}`}
@@ -815,7 +839,7 @@ export default function DownloadsIndex({
                               </div>
                               <div>
                                 <dt className="font-medium text-slate-500">Access</dt>
-                                <dd>{accessBadge(d.access_mode || 'public').label}</dd>
+                                <dd>{accessBadge(d.access_mode || 'public', d.password_protected).label}</dd>
                               </div>
                               <div>
                                 <dt className="font-medium text-slate-500">Expires</dt>

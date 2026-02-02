@@ -33,6 +33,9 @@ import PlanLimitIndicator from '../../../Components/PlanLimitIndicator'
  */
 export default function ByCategoryView({ 
     registry, 
+    brands = [],
+    selectedBrandId,
+    onBrandChange,
     categories, 
     canManageVisibility,
     canManageFields = false,
@@ -81,14 +84,27 @@ export default function ByCategoryView({
         return { manageableFields: manageable, automatedFields: automated }
     }, [allFields])
 
-    // Group categories by asset_type
+    // Scope to one brand at a time so the list has no duplicate category names
+    const categoriesForBrand = useMemo(() => {
+        if (!selectedBrandId) return categories
+        return categories.filter(c => c.brand_id === selectedBrandId)
+    }, [categories, selectedBrandId])
+
+    // Clear selected category if it no longer belongs to the selected brand
+    useEffect(() => {
+        if (!selectedCategoryId) return
+        const stillInList = categoriesForBrand.some(c => c.id === selectedCategoryId)
+        if (!stillInList) setSelectedCategoryId(null)
+    }, [selectedBrandId, categoriesForBrand, selectedCategoryId])
+
+    // Group categories by asset_type (within the selected brand)
     const groupedCategories = useMemo(() => {
         const groups = {
             asset: [],
             deliverable: []
         }
 
-        categories.forEach(category => {
+        categoriesForBrand.forEach(category => {
             const assetType = category.asset_type || 'asset'
             if (!groups[assetType]) {
                 groups[assetType] = []
@@ -97,7 +113,7 @@ export default function ByCategoryView({
         })
 
         return groups
-    }, [categories])
+    }, [categoriesForBrand])
 
     // Load category data for a field (forceRefetch = true to skip cache after saving visibility)
     const loadFieldCategoryData = async (field, forceRefetch = false) => {
@@ -679,6 +695,27 @@ export default function ByCategoryView({
             {/* Category List (Left Sidebar) */}
             <div className="lg:col-span-1">
                 <div className="bg-white rounded-lg border border-gray-200 p-4">
+                    {/* Brand selector: one brand at a time so category list has no duplicates */}
+                    {brands.length > 1 && (
+                        <div className="mb-4">
+                            <label htmlFor="by-category-brand" className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+                                Brand
+                            </label>
+                            <select
+                                id="by-category-brand"
+                                value={selectedBrandId ?? ''}
+                                onChange={(e) => onBrandChange(e.target.value ? parseInt(e.target.value, 10) : null)}
+                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            >
+                                {brands.map(b => (
+                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                    {brands.length === 1 && (
+                        <p className="text-xs text-gray-500 mb-3">{brands[0].name}</p>
+                    )}
                     <h3 className="text-sm font-semibold text-gray-900 mb-4">Categories</h3>
                     <div className="space-y-2">
                         {/* Asset Categories */}
@@ -698,11 +735,6 @@ export default function ByCategoryView({
                                         }`}
                                     >
                                         {category.name}
-                                        {category.brand_name && (
-                                            <div className="text-xs text-gray-500 mt-0.5">
-                                                {category.brand_name}
-                                            </div>
-                                        )}
                                     </button>
                                 ))}
                             </div>
@@ -725,18 +757,15 @@ export default function ByCategoryView({
                                         }`}
                                     >
                                         {category.name}
-                                        {category.brand_name && (
-                                            <div className="text-xs text-gray-500 mt-0.5">
-                                                {category.brand_name}
-                                            </div>
-                                        )}
                                     </button>
                                 ))}
                             </div>
                         )}
 
-                        {categories.length === 0 && (
-                            <p className="text-sm text-gray-500 italic">No categories available</p>
+                        {categoriesForBrand.length === 0 && (
+                            <p className="text-sm text-gray-500 italic">
+                                {selectedBrandId ? 'No categories for this brand' : 'No categories available'}
+                            </p>
                         )}
                     </div>
                 </div>
@@ -937,7 +966,7 @@ export default function ByCategoryView({
                 }}
                 field={editingField}
                 preselectedCategoryId={selectedCategoryId}
-                categories={categories}
+                categories={categoriesForBrand}
                 canManageFields={canManageFields}
                 customFieldsLimit={customFieldsLimit}
                 onSuccess={handleModalSuccess}

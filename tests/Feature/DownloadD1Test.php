@@ -88,6 +88,7 @@ class DownloadD1Test extends TestCase
             'original_filename' => 'file.jpg',
             'size_bytes' => 100,
             'metadata' => ['file_size' => 100],
+            'published_at' => now(),
         ]);
     }
 
@@ -256,6 +257,40 @@ class DownloadD1Test extends TestCase
             ->component('Downloads/Index')
             ->has('downloads')
             ->has('bucket_count')
+        );
+    }
+
+    /** Create a download as the current user; GET downloads index; assert the download is in the list (creator can see it). */
+    public function test_created_download_is_queryable_by_creator_on_downloads_page(): void
+    {
+        $download = Download::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'created_by_user_id' => $this->user->id,
+            'download_type' => 'snapshot',
+            'source' => 'grid',
+            'slug' => 'slug-' . uniqid(),
+            'version' => 1,
+            'status' => DownloadStatus::READY,
+            'zip_status' => ZipStatus::NONE,
+            'expires_at' => now()->addDays(30),
+            'hard_delete_at' => now()->addDays(37),
+            'access_mode' => DownloadAccessMode::PUBLIC,
+            'allow_reshare' => true,
+        ]);
+        $download->assets()->attach($this->asset->id, ['is_primary' => true]);
+
+        Session::put('tenant_id', $this->tenant->id);
+        Session::put('brand_id', $this->brand->id);
+        $this->actingAs($this->user);
+
+        $response = $this->get(route('downloads.index'));
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Downloads/Index')
+            ->has('downloads')
+            ->where('downloads.0.id', $download->id)
+            ->where('downloads.0.created_by.id', $this->user->id)
         );
     }
 }

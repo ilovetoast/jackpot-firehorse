@@ -32,8 +32,9 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [assetCollections, setAssetCollections] = useState([])
     const [assetCollectionsLoading, setAssetCollectionsLoading] = useState(false)
     
-    // Permission checks
+    // Permission checks and brand primary for tag/UI branding
     const { auth } = usePage().props
+    const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
     const { hasPermission: canRegenerateAiMetadata } = usePermission('assets.ai_metadata.regenerate')
     const { hasPermission: canRegenerateThumbnailsAdmin } = usePermission('assets.regenerate_thumbnails_admin')
     const { hasPermission: canPublish } = usePermission('asset.publish')
@@ -1481,6 +1482,7 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                         showInput={false}
                                         detailed={true}
                                         className="mb-4"
+                                        primaryColor={brandPrimary}
                                     />
                                 </div>
                             </div>

@@ -352,6 +352,7 @@ class MetadataFieldsSeeder extends Seeder
             ]);
 
         // Starred Asset (boolean, user-editable, applied to all categories)
+        // is_filterable => true so the field appears in grid filters when "Filter" is enabled per category
         $this->getOrCreateField([
             'key' => 'starred',
             'system_label' => 'Starred',
@@ -359,7 +360,7 @@ class MetadataFieldsSeeder extends Seeder
             'applies_to' => 'all',
             'scope' => 'system',
             'group_key' => 'internal',
-            'is_filterable' => false,
+            'is_filterable' => true,
             'is_user_editable' => true,
             'is_ai_trainable' => false,
             'is_upload_visible' => false, // Starred is set post-upload
@@ -371,6 +372,7 @@ class MetadataFieldsSeeder extends Seeder
             ->where('key', 'starred')
             ->update([
                 'type' => 'boolean',
+                'is_filterable' => true,
                 'is_user_editable' => true,
                 'is_internal_only' => false,
                 'updated_at' => now(),

@@ -1,8 +1,9 @@
 /**
  * Phase D4 — Public download page (trust signals).
  * D7: Password-protected view + branded skinning (logo, accent, headline, subtext).
- * D10.1: When uses_landing_page — full-screen background (random image or solid), overlay, content stack (logo 64–96px, headline, subtext, CTA).
- * When uses_landing_page is true, the same branded layout is used for ALL states: landing, 404, 403, password entry, waiting for ZIP.
+ * D10.1: When show_landing_layout is true, the SAME branded wrapper is used for ALL states:
+ * active, password prompt, 403, 404, expired, revoked, failed, processing. No silent fallback to unbranded.
+ * Branding resolution is shared server-side (DownloadPublicPageBrandingResolver); this component uses only show_landing_layout + branding_options.
  */
 import { useForm } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
@@ -13,7 +14,6 @@ export default function DownloadsPublic({
   password_required = false,
   download_id = null,
   unlock_url = '',
-  uses_landing_page = false,
   show_landing_layout = false,
   branding_options = {},
 }) {
@@ -27,7 +27,8 @@ export default function DownloadsPublic({
   const headline = branding_options?.headline || null
   const subtext = branding_options?.subtext || null
   const backgroundImageUrl = branding_options?.background_image_url || null
-  const hasBranding = logoUrl || headline || subtext || accentColor
+  // When branded layout is used, we always have at least accent; avoid falling back to unbranded styling when show_landing_layout is true
+  const hasBranding = show_landing_layout || logoUrl || headline || subtext || accentColor
 
   const { data, setData, post, processing, error: formError } = useForm({
     password: '',
@@ -38,8 +39,7 @@ export default function DownloadsPublic({
     post(unlock_url)
   }
 
-  // D10.1: Landing page layout — full-screen background, 60–75% overlay, centered content stack.
-  // show_landing_layout is true when download has "Use landing page" OR brand has landing settings (so 404/revoked/etc. stay on-brand).
+  // Single source of truth: show_landing_layout from server. When true, ALL states use the same full-screen branded wrapper (no silent fallback).
   const isLandingLayout = show_landing_layout
   const containerClass = isLandingLayout
     ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12 relative'

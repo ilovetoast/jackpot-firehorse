@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { router } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -37,11 +37,20 @@ import {
  * - Configure primary/secondary placement (is_primary)
  * - Add filter-related toggles or controls
  */
-export default function TenantMetadataRegistryIndex({ registry, categories, canManageVisibility, canManageFields, customFieldsLimit = null }) {
+export default function TenantMetadataRegistryIndex({ registry, brands = [], active_brand_id = null, categories, canManageVisibility, canManageFields, customFieldsLimit = null }) {
     const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY
     const [expandedField, setExpandedField] = useState(null)
     const [categoryModal, setCategoryModal] = useState({ open: false, field: null, suppressedCategories: [] })
     const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null) // Category Lens filter
+    // By Category: initial brand = active brand (session/context) when in list, else first brand
+    const brandIds = useMemo(() => brands.map(b => b.id), [brands])
+    const initialBrandId = active_brand_id != null && brandIds.includes(active_brand_id) ? active_brand_id : (brands[0]?.id ?? null)
+    const [selectedBrandId, setSelectedBrandId] = useState(initialBrandId)
+    useEffect(() => {
+        if (brands.length === 0) return
+        const ids = brands.map(b => b.id)
+        if (selectedBrandId !== null && !ids.includes(selectedBrandId)) setSelectedBrandId(initialBrandId != null && ids.includes(initialBrandId) ? initialBrandId : brands[0].id)
+    }, [brands, selectedBrandId, initialBrandId])
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
     const [modalOpen, setModalOpen] = useState(false)
@@ -555,6 +564,9 @@ export default function TenantMetadataRegistryIndex({ registry, categories, canM
                         <div className="px-6 py-4">
                             <ByCategoryView
                                 registry={registry}
+                                brands={brands}
+                                selectedBrandId={selectedBrandId}
+                                onBrandChange={setSelectedBrandId}
                                 categories={categories}
                                 canManageVisibility={canManageVisibility}
                                 canManageFields={canManageFields}

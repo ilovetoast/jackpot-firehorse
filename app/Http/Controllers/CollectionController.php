@@ -91,6 +91,18 @@ class CollectionController extends Controller
             if ($collection && Gate::forUser($user)->allows('view', $collection)) {
                 try {
                     $query = $this->collectionAssetQueryService->query($user, $collection);
+                    $sort = $request->input('sort', 'created');
+                    $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+                    if ($sort === 'starred') {
+                        // Robust starred check: JSON true, unquoted 'true', or '1' (MySQL JSON boolean handling varies)
+                        $query->orderByRaw("CASE WHEN JSON_EXTRACT(metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1') THEN 1 ELSE 0 END " . $sortDirection);
+                        $query->orderBy('created_at', $sortDirection);
+                    } elseif ($sort === 'quality') {
+                        $query->orderByRaw('COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.quality_rating\')), 0) ' . $sortDirection);
+                        $query->orderBy('created_at', $sortDirection);
+                    } else {
+                        $query->orderBy('created_at', $sortDirection);
+                    }
                     $assetModels = $query->get();
                     $assets = $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
                     $brand = $collection->brand;
@@ -138,6 +150,9 @@ class CollectionController extends Controller
         // C10: Public Collections feature (plan-gated); when disabled, public toggle is hidden/disabled
         $publicCollectionsEnabled = $this->featureGate->publicCollectionsEnabled($tenant);
 
+        $sort = $request->input('sort', 'created');
+        $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+
         return Inertia::render('Collections/Index', [
             'collections' => $collections,
             'assets' => $assets,
@@ -147,6 +162,8 @@ class CollectionController extends Controller
             'can_add_to_collection' => $canAddToCollection,
             'can_remove_from_collection' => $canRemoveFromCollection,
             'public_collections_enabled' => $publicCollectionsEnabled,
+            'sort' => $sort,
+            'sort_direction' => $sortDirection,
         ]);
     }
 

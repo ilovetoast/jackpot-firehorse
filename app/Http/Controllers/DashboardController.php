@@ -542,32 +542,35 @@ class DashboardController extends Controller
                 \App\Models\Category::class,
             ];
             
+            // Do not eager load 'actor': actor_type can be 'system'/'api'/'guest' (no model class).
+            // Use getActorModel() in the map for user actors to avoid MorphTo "Class system not found".
             $activityEvents = ActivityEvent::where('tenant_id', $tenant->id)
                 ->where('event_type', '!=', EventType::AI_SYSTEM_INSIGHT) // Exclude system-level AI insights
                 ->whereNotNull('subject_type')
                 ->whereIn('subject_type', $validSubjectTypes)
                 ->orderBy('created_at', 'desc')
                 ->limit(5)
-                ->with(['brand', 'subject', 'actor'])
+                ->with(['brand', 'subject'])
                 ->get();
             
             $recentActivity = $activityEvents->map(function ($event) use ($tenant) {
                 // Format event type display name
                 $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
                 
-                // Get actor name and avatar/company for display
+                // Get actor name and avatar/company for display (use getActorModel() for user; string types have no model)
                 $actorName = 'System';
                 $actorAvatarUrl = null;
                 $actorFirstName = null;
                 $actorLastName = null;
                 $actorEmail = null;
                 $companyName = null;
-                if ($event->actor_type === 'user' && $event->actor) {
-                    $actorName = $event->actor->name;
-                    $actorAvatarUrl = $event->actor->avatar_url ?? null;
-                    $actorFirstName = $event->actor->first_name ?? null;
-                    $actorLastName = $event->actor->last_name ?? null;
-                    $actorEmail = $event->actor->email ?? null;
+                $actor = $event->getActorModel();
+                if ($actor) {
+                    $actorName = $actor->name;
+                    $actorAvatarUrl = $actor->avatar_url ?? null;
+                    $actorFirstName = $actor->first_name ?? null;
+                    $actorLastName = $actor->last_name ?? null;
+                    $actorEmail = $actor->email ?? null;
                 } elseif (!empty($event->metadata['actor_name'])) {
                     $actorName = $event->metadata['actor_name'];
                 }

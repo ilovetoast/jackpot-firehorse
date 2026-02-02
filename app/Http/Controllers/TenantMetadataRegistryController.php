@@ -67,6 +67,17 @@ class TenantMetadataRegistryController extends Controller
         // Get registry data
         $registry = $this->registryService->getRegistry($tenant);
 
+        // Brands list for By Category brand selector (one brand at a time to avoid duplicate category names)
+        $brands = $tenant->brands()
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn ($b) => ['id' => $b->id, 'name' => $b->name])
+            ->values();
+
+        // Active brand id for initial By Category brand dropdown selection (session/context brand)
+        $activeBrand = app()->bound('brand') ? app('brand') : null;
+        $active_brand_id = $activeBrand ? $activeBrand->id : null;
+
         // Get all active categories for suppression UI
         // Include both system and non-system categories (use active() scope)
         $categories = $tenant->brands()
@@ -108,6 +119,8 @@ class TenantMetadataRegistryController extends Controller
         
         return Inertia::render('Tenant/MetadataRegistry/Index', [
             'registry' => $registry,
+            'brands' => $brands,
+            'active_brand_id' => $active_brand_id,
             'categories' => $categories,
             'canManageVisibility' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage'),
             'canManageFields' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage'),

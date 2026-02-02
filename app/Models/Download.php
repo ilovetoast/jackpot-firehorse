@@ -168,6 +168,82 @@ class Download extends Model
     }
 
     /**
+     * Canonical rule: whether this download requires a password to access.
+     * True when password_hash is set (non-null, non-empty).
+     */
+    public function requiresPassword(): bool
+    {
+        return ! empty($this->password_hash);
+    }
+
+    /**
+     * Canonical rule: landing page is required IF AND ONLY IF the download requires a password.
+     * Password protection implicitly requires a landing page for entry. No other conditions may force a landing page.
+     * Single source of truth for backend logic that depends on "must show landing page".
+     *
+     * Why landing pages are not policy-controlled: Landing pages are a UX/presentation concern (where to collect
+     * password, show copy), not a delivery policy. We do not allow company-level or per-download toggles to "force"
+     * a landing page—that would duplicate policy surface and create ambiguity. Only password requirement forces
+     * a landing page. This is intentional design, not a shortcut.
+     */
+    public function isLandingPageRequired(): bool
+    {
+        return $this->requiresPassword();
+    }
+
+    /**
+     * Whether brand-based access restriction is allowed for this download.
+     * Hard constraint: only when all assets are from a single brand (getDistinctAssetBrandCount() === 1).
+     *
+     * Why multi-brand downloads cannot be brand-restricted: Restricting access "by brand" only makes sense when
+     * there is exactly one brand in the download. With multiple brands we would have to guess which brand to
+     * enforce (heuristic) or expose ambiguous UI. We disallow brand-based access for multi-brand downloads
+     * everywhere (create, change access, settings). No heuristic brand selection; intentional design.
+     */
+    public function canRestrictToBrand(): bool
+    {
+        return $this->getDistinctAssetBrandCount() === 1;
+    }
+
+    /**
+     * Number of distinct brands among this download's assets.
+     * Used for landing page template selection: brand template only when count === 1 and brand has it enabled.
+     */
+    public function getDistinctAssetBrandCount(): int
+    {
+        return (int) $this->assets()->selectRaw('count(distinct assets.brand_id) as c')->value('c');
+    }
+
+    /**
+     * Brand to use for the download landing page template, or null for default Jackpot template.
+     * Only applies when a landing page is required (e.g. password-protected). No brand guessing; no fallbacks beyond default.
+     * Rules: if landing page required and asset_brand_count === 1 and that brand has download_landing_page enabled → that brand; else null.
+     *
+     * Why multi-brand downloads cannot be branded: With assets from more than one brand we cannot pick a single
+     * template without heuristics (e.g. "majority brand" or "primary asset brand"). We never guess—multi-brand
+     * downloads always use the default Jackpot template. Intentional design; ensures deterministic, consistent behavior.
+     */
+    public function getLandingPageTemplateBrand(): ?Brand
+    {
+        if (! $this->isLandingPageRequired()) {
+            return null;
+        }
+        if ($this->getDistinctAssetBrandCount() !== 1) {
+            return null;
+        }
+        $brandId = $this->assets()->select('assets.brand_id')->distinct()->value('brand_id');
+        if ($brandId === null) {
+            return null;
+        }
+        $brand = Brand::find($brandId);
+        if ($brand === null || ! $brand->isDownloadLandingPageEnabled()) {
+            return null;
+        }
+
+        return $brand;
+    }
+
+    /**
      * Phase D4: Check if ZIP build failed (derived from zip_status, no new column).
      */
     public function hasFailed(): bool

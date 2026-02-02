@@ -28,7 +28,7 @@
 import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
-import { InformationCircleIcon, ClockIcon, TagIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 
 export default function AssetGridToolbar({
@@ -49,6 +49,9 @@ export default function AssetGridToolbar({
     available_values = {}, // Available filter values
     moreFiltersContent = null, // More filters section content
     showMoreFilters = false, // Whether to show more filters section
+    sortBy = 'created', // used when showMoreFilters is false (e.g. Collections)
+    sortDirection = 'desc',
+    onSortChange = null,
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
@@ -270,8 +273,36 @@ export default function AssetGridToolbar({
                                 compact={true}
                             />
                             
-                            {/* Lifecycle filters moved to "More filters" section */}
+                            {/* When no More filters bar: show Sort in toolbar (e.g. Collections) */}
                         </div>
+                        {onSortChange && !showMoreFilters && (
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                                <span className="text-xs font-medium text-gray-500">Sort</span>
+                                <select
+                                    value={sortBy}
+                                    onChange={(e) => onSortChange(e.target.value, sortDirection)}
+                                    className="rounded border border-gray-300 bg-white py-1.5 pl-2 pr-6 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    aria-label="Sort by"
+                                >
+                                    <option value="starred">Starred</option>
+                                    <option value="created">Created</option>
+                                    <option value="quality">Quality</option>
+                                </select>
+                                <button
+                                    type="button"
+                                    onClick={() => onSortChange(sortBy, sortDirection === 'asc' ? 'desc' : 'asc')}
+                                    className="p-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    title={sortDirection === 'asc' ? 'Descending' : 'Ascending'}
+                                    aria-label={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
+                                >
+                                    {sortDirection === 'asc' ? (
+                                        <BarsArrowUpIcon className="h-4 w-4" />
+                                    ) : (
+                                        <BarsArrowDownIcon className="h-4 w-4" />
+                                    )}
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     {/* Controls - Right Side on Desktop */}

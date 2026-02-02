@@ -26,7 +26,8 @@ export default function AssetTagManager({
     maxDisplayTags = null,
     compact = false,
     inline = false,
-    detailed = false
+    detailed = false,
+    primaryColor = null
 }) {
     const [refreshTrigger, setRefreshTrigger] = useState(0)
     const [tagCount, setTagCount] = useState(0)
@@ -97,6 +98,7 @@ export default function AssetTagManager({
                         maxTags={maxDisplayTags}
                         compact={compact}
                         detailed={detailed}
+                        primaryColor={primaryColor}
                     />
 
                     {/* Permission message if can't add tags */}
@@ -136,6 +138,7 @@ export default function AssetTagManager({
                         maxTags={maxDisplayTags}
                         compact={compact}
                         detailed={detailed}
+                        primaryColor={primaryColor}
                     />
 
                     {/* Add new tag input */}

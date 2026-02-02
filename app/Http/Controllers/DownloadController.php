@@ -2,1023 +2,457 @@
 
 namespace App\Http\Controllers;
 
-use Carbon\Carbon;
 use App\Enums\DownloadAccessMode;
-use App\Enums\EventType;
-use App\Enums\DownloadSource;
 use App\Enums\DownloadStatus;
+use App\Enums\DownloadSource;
 use App\Enums\DownloadType;
 use App\Enums\ZipStatus;
 use App\Jobs\BuildDownloadZipJob;
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\Download;
 use App\Models\User;
-use App\Models\Collection;
-use App\Services\AssetEligibilityService;
-use App\Services\CollectionAssetQueryService;
 use App\Services\DownloadBucketService;
-use App\Services\ActivityRecorder;
 use App\Services\DownloadEventEmitter;
 use App\Services\DownloadExpirationPolicy;
-use App\Services\DownloadManagementService;
-use App\Services\DownloadNameResolver;
+use App\Services\DownloadPublicPageBrandingResolver;
 use App\Services\EnterpriseDownloadPolicy;
-use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
-use Aws\S3\S3Client;
 
 /**
  * 🔒 Phase 3.1 — Downloader System (LOCKED)
- * Phase D1 — Secure Asset Downloader (Foundation): index, store, public download route.
+ * 
+ * Do not refactor or change behavior.
+ * Future phases may consume outputs only.
  */
 class DownloadController extends Controller
 {
-    public function __construct(
-        protected DownloadBucketService $bucket,
-        protected PlanService $planService,
-        protected DownloadExpirationPolicy $expirationPolicy,
-        protected DownloadManagementService $managementService,
-        protected CollectionAssetQueryService $collectionAssetQueryService,
-        protected FeatureGate $featureGate,
-        protected AssetEligibilityService $assetEligibilityService,
-        protected DownloadNameResolver $downloadNameResolver,
-        protected EnterpriseDownloadPolicy $downloadPolicy
-    ) {}
-
     /**
-     * Show the downloads page (My Downloads / All Downloads). Phase D1 + D2.
-     * D12.2: Enforce visibility by role — tenant admin all, brand manager by brand, contributor/viewer own only; collection-only denied.
+     * Show the downloads page.
+     * Returns downloads for the current tenant with scope (mine/all), status, access, user, sort filters.
      */
     public function index(Request $request): Response
     {
         $user = Auth::user();
         $tenant = app('tenant');
 
-        if (! $tenant) {
-            return Inertia::render('Downloads/Index', [
-                'downloads' => [],
-                'bucket_count' => 0,
-                'can_manage' => false,
-                'pagination' => null,
-                'download_users' => [],
-                'filters' => [
-                    'scope' => 'mine',
-                    'status' => '',
-                    'access' => '',
-                    'user_id' => '',
-                    'sort' => 'date_desc',
-                ],
-                'download_features' => [],
-                'brands' => [],
-                'active_brand_id' => null,
-            ]);
-        }
+        $bucketService = app(DownloadBucketService::class);
+        $bucketCount = $user && $tenant ? $bucketService->count() : 0;
 
-        // D12.2: Collection-only users must not access downloads index
-        if (app()->bound('collection_only') && app('collection_only')) {
-            $collection = app()->bound('collection') ? app('collection') : null;
-            if ($collection) {
-                return redirect()->route('collection-invite.landing', ['collection' => $collection->id]);
-            }
-            abort(403, 'Downloads are not available in this context.');
-        }
+        // Same role source as ResolveTenant: tenant admin/owner can see "All Downloads" (all tenant downloads).
+        $tenantRole = $user && $tenant ? $user->getRoleForTenant($tenant) : null;
+        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
 
-        $scope = $request->input('scope', 'mine');
-        $canManage = $this->canManageDownload($user, $tenant);
+        $scope = strtolower((string) ($request->input('scope', 'mine'))) === 'all' ? 'all' : 'mine';
+        $statusFilter = $request->input('status', '');
+        $accessFilter = $request->input('access', '');
+        $userIdFilterRaw = $request->input('user_id', '');
+        $userIdFilter = ($userIdFilterRaw !== null && $userIdFilterRaw !== '' && trim((string) $userIdFilterRaw) !== '')
+            ? trim((string) $userIdFilterRaw)
+            : '';
         $sort = $request->input('sort', 'date_desc');
-        $perPage = 15;
+        $page = (int) $request->input('page', 1);
 
-        $query = Download::query()
-            ->where('tenant_id', $tenant->id)
-            ->with(['assets' => fn ($q) => $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status', 'assets.brand_id'), 'createdBy', 'allowedUsers', 'brand']);
+        $filters = [
+            'scope' => $scope,
+            'status' => $statusFilter,
+            'access' => $accessFilter,
+            'user_id' => $userIdFilter,
+            'sort' => $sort,
+        ];
 
-        // D12.2: Enforce visibility by role (server-side)
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantAdmin = $tenantRole && in_array(strtolower($tenantRole), ['owner', 'admin'], true);
+        $downloads = [];
+        $paginationMeta = null;
+        $downloadUsers = [];
 
-        if ($isTenantAdmin) {
-            // Tenant Admin / Owner: all downloads for tenant
-            // no extra scope
-        } else {
-            $userBrandIds = DB::table('brand_user')
-                ->join('brands', 'brands.id', '=', 'brand_user.brand_id')
-                ->where('brand_user.user_id', $user->id)
-                ->whereNull('brand_user.removed_at')
-                ->where('brands.tenant_id', $tenant->id)
-                ->pluck('brands.id')
-                ->all();
+        if ($tenant && $user) {
+            $query = Download::query()
+                ->where('tenant_id', $tenant->id)
+                ->whereNull('deleted_at');
 
-            $hasManagerOrAdminRole = DB::table('brand_user')
-                ->join('brands', 'brands.id', '=', 'brand_user.brand_id')
-                ->where('brand_user.user_id', $user->id)
-                ->whereNull('brand_user.removed_at')
-                ->where('brands.tenant_id', $tenant->id)
-                ->whereIn('brand_user.role', ['brand_manager', 'admin'])
-                ->exists();
-
-            if ($hasManagerOrAdminRole && ! empty($userBrandIds)) {
-                // Brand Manager (or brand admin): downloads for brands they are assigned to
-                $query->whereIn('brand_id', $userBrandIds);
-            } else {
-                // Contributor / Viewer: only downloads they created
+            if ($scope === 'mine') {
                 $query->where('created_by_user_id', $user->id);
+            } else {
+                if (! $canManage) {
+                    $brandIds = $user->brands()->pluck('brands.id')->all();
+                    $query->whereIn('brand_id', $brandIds);
+                }
+                // Only filter by creator when a specific user_id was chosen (empty = "All users").
+                if ($userIdFilter !== '' && $userIdFilter !== '0') {
+                    $query->where('created_by_user_id', $userIdFilter);
+                }
             }
-        }
 
-        if ($scope === 'mine' || ! $canManage) {
-            $query->where('created_by_user_id', $user->id);
-        }
-
-        if ($canManage && $request->filled('user_id')) {
-            $query->where('created_by_user_id', $request->input('user_id'));
-        }
-
-        if ($status = $request->input('status')) {
-            if ($status === 'active') {
+            if ($statusFilter === 'active') {
                 $query->where(function ($q) {
                     $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
                 })->whereNull('revoked_at');
-            } elseif ($status === 'expired') {
-                $query->where(function ($q) {
-                    $q->whereNotNull('expires_at')->where('expires_at', '<=', now());
-                });
-            } elseif ($status === 'revoked') {
+            } elseif ($statusFilter === 'expired') {
+                $query->whereNotNull('expires_at')->where('expires_at', '<=', now());
+            } elseif ($statusFilter === 'revoked') {
                 $query->whereNotNull('revoked_at');
             }
-        }
 
-        if ($access = $request->input('access')) {
-            if ($access === 'public') {
-                $query->where('access_mode', DownloadAccessMode::PUBLIC);
-            } elseif ($access === 'restricted') {
-                $query->where('access_mode', '!=', DownloadAccessMode::PUBLIC);
+            if ($accessFilter === 'public') {
+                $query->where('access_mode', DownloadAccessMode::PUBLIC->value);
+            } elseif ($accessFilter === 'restricted') {
+                $query->where('access_mode', '!=', DownloadAccessMode::PUBLIC->value);
             }
-        }
 
-        if ($sort === 'date_asc') {
-            $query->orderBy('created_at');
-        } elseif ($sort === 'size_desc') {
-            $query->orderByRaw('COALESCE(zip_size_bytes, 0) DESC')->orderByDesc('created_at');
-        } elseif ($sort === 'size_asc') {
-            $query->orderByRaw('COALESCE(zip_size_bytes, 0) ASC')->orderByDesc('created_at');
-        } else {
-            $query->orderByDesc('created_at');
-        }
+            $sortColumn = match ($sort) {
+                'date_asc' => ['created_at', 'asc'],
+                'size_desc' => ['zip_size_bytes', 'desc'],
+                'size_asc' => ['zip_size_bytes', 'asc'],
+                default => ['created_at', 'desc'],
+            };
+            $query->orderBy($sortColumn[0], $sortColumn[1]);
 
-        $paginator = $query->paginate($perPage)->withQueryString();
-        $features = $this->planService->getDownloadManagementFeatures($tenant);
-        $downloads = $paginator->getCollection()->map(fn (Download $d) => $this->mapDownloadForHistory($d, $canManage, $user, $features))->values()->all();
+            $perPage = 15;
+            $paginator = $query->with(['assets' => function ($q) {
+                $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status')
+                    ->orderBy('download_asset.is_primary', 'desc');
+            }, 'createdBy:id,first_name,last_name,email', 'brand:id,name,slug,primary_color,logo_path,icon_path,icon'])
+                ->paginate($perPage, ['*'], 'page', $page);
 
-        $bucketCount = $this->bucket->count();
+            $planService = app(PlanService::class);
+            $features = $planService->getDownloadManagementFeatures($tenant);
 
-        // D12.2: Brand filter data (no UI styling yet) — Admin: all tenant brands; Brand manager: only their brands
-        $brandsForFilter = $isTenantAdmin
-            ? $tenant->brands()->orderBy('name')->get(['id', 'name', 'slug'])->map(fn ($b) => ['id' => $b->id, 'name' => $b->name, 'slug' => $b->slug])->values()->all()
-            : $user->brands()->where('brands.tenant_id', $tenant->id)->wherePivotNull('removed_at')->orderBy('brands.name')->get(['brands.id', 'brands.name', 'brands.slug'])->map(fn ($b) => ['id' => $b->id, 'name' => $b->name, 'slug' => $b->slug])->values()->all();
+            foreach ($paginator->items() as $download) {
+                $downloads[] = $this->buildDownloadPayload($download, $features, $canManage);
+            }
 
-        $downloadUsers = [];
-        if ($canManage) {
-            $downloadUsers = $tenant->users()
-                ->orderBy('users.first_name')
-                ->orderBy('users.last_name')
-                ->get(['users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.avatar_url'])
-                ->map(fn ($u) => [
-                    'id' => $u->id,
-                    'name' => trim($u->first_name . ' ' . $u->last_name) ?: $u->email,
-                    'first_name' => $u->first_name,
-                    'last_name' => $u->last_name,
-                    'email' => $u->email,
-                    'avatar_url' => $u->avatar_url,
-                ])
-                ->values()
-                ->all();
+            $paginationMeta = [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ];
+
+            if ($scope === 'all' && $canManage) {
+                $creatorIds = Download::query()
+                    ->where('tenant_id', $tenant->id)
+                    ->whereNull('deleted_at')
+                    ->distinct()
+                    ->pluck('created_by_user_id')
+                    ->filter()
+                    ->all();
+                if (! empty($creatorIds)) {
+                    $downloadUsers = User::query()
+                        ->whereIn('id', $creatorIds)
+                        ->get(['id', 'first_name', 'last_name', 'email'])
+                        ->map(fn (User $u) => [
+                            'id' => $u->id,
+                            'first_name' => $u->first_name,
+                            'last_name' => $u->last_name,
+                            'name' => trim($u->first_name . ' ' . $u->last_name) ?: $u->email,
+                            'email' => $u->email,
+                            'avatar_url' => $u->avatar_url ?? null,
+                        ])
+                        ->values()
+                        ->all();
+                }
+            }
         }
 
         return Inertia::render('Downloads/Index', [
             'downloads' => $downloads,
             'bucket_count' => $bucketCount,
             'can_manage' => $canManage,
-            'pagination' => [
-                'current_page' => $paginator->currentPage(),
-                'last_page' => $paginator->lastPage(),
-                'per_page' => $paginator->perPage(),
-                'total' => $paginator->total(),
-            ],
+            'filters' => $filters,
+            'pagination' => $paginationMeta,
             'download_users' => $downloadUsers,
-            'filters' => [
-                'scope' => $scope,
-                'status' => $request->input('status', ''),
-                'access' => $request->input('access', ''),
-                'user_id' => $request->input('user_id', ''),
-                'sort' => $sort,
-            ],
-            'brands' => $brandsForFilter,
-            'active_brand_id' => $request->input('active_brand_id') ? (int) $request->input('active_brand_id') : null,
-            'download_features' => [
-                'extend_expiration' => $features['extend_expiration'] ?? false,
-                'revoke' => $features['revoke'] ?? false,
-                'restrict_access_brand' => $features['restrict_access_brand'] ?? false,
-                'restrict_access_company' => $features['restrict_access_company'] ?? false,
-                'password_protection' => $features['password_protection'] ?? false, // D7
-                'branding' => $features['branding'] ?? false, // D7
-                'restrict_access_users' => $features['restrict_access_users'] ?? false,
-                'non_expiring' => $features['non_expiring'] ?? false,
-                'regenerate' => $features['regenerate'] ?? false,
-                'rename' => $features['rename'] ?? false,
-                'max_expiration_days' => $features['max_expiration_days'] ?? 30,
-            ],
         ]);
     }
 
     /**
-     * Create a download from the current bucket. Phase D1.
-     * Validates plan limits, creates Download record, attaches assets, dispatches job, clears bucket.
+     * Build a single download payload for the index list.
      */
-    public function store(Request $request): JsonResponse|RedirectResponse
+    protected function buildDownloadPayload(Download $download, array $planFeatures, bool $canManage = false): array
     {
-        $user = Auth::user();
-        $tenant = app('tenant');
-        $brand = app('brand');
-
-        if (! $tenant) {
-            return response()->json(['message' => 'No company selected.'], 422);
-        }
-
-        $source = $request->input('source', DownloadSource::GRID->value);
-        $isPublicCollection = $source === DownloadSource::PUBLIC_COLLECTION->value;
-
-        if ($isPublicCollection) {
-            $collectionId = $request->input('collection_id');
-            if (! $collectionId) {
-                return response()->json(['message' => 'Collection is required for public collection download.'], 422);
-            }
-            $collection = Collection::query()
-                ->where('id', $collectionId)
-                ->where('tenant_id', $tenant->id)
-                ->where('is_public', true)
-                ->first();
-            if (! $collection || ! $this->featureGate->publicCollectionDownloadsEnabled($tenant)) {
-                return response()->json(['message' => 'Collection not found or public collection downloads are not enabled.'], 422);
-            }
-            $query = $this->collectionAssetQueryService->queryPublic($collection);
-            $visibleIds = $query->pluck('id')->all();
-            if (empty($visibleIds)) {
-                return response()->json(['message' => 'This collection has no assets to download.'], 422);
-            }
-        } else {
-            if (! in_array($source, ['grid', 'drawer', 'collection'], true)) {
-                $source = DownloadSource::GRID->value;
-            }
-            $visibleIds = $this->bucket->visibleItems();
-            if (empty($visibleIds)) {
-                return response()->json(['message' => 'Add at least one asset to the download bucket.'], 422);
-            }
-        }
-
-        // D6.1: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
-        $eligibleQuery = $this->assetEligibilityService->eligibleForDownloads()->where('tenant_id', $tenant->id);
-        $visibleIds = $this->assetEligibilityService->filterIdsToEligible(
-            $visibleIds,
-            $eligibleQuery,
-            $isPublicCollection ? 'public_collection' : 'download',
-            $tenant->id
-        );
-        if (empty($visibleIds)) {
-            if ($isPublicCollection) {
-                return response()->json(['message' => 'This collection has no assets to download.'], 422);
-            }
-            return response()->json(['message' => 'Add at least one asset to the download bucket.'], 422);
-        }
-
-        $maxAssets = $this->planService->getMaxDownloadAssets($tenant);
-        if (count($visibleIds) > $maxAssets) {
-            return response()->json([
-                'message' => "This plan allows up to {$maxAssets} assets per download.",
-            ], 422);
-        }
-
-        $assets = Asset::query()->whereIn('id', $visibleIds)->get();
-        $estimatedBytes = $assets->sum(fn (Asset $a) => (int) ($a->metadata['file_size'] ?? $a->metadata['size'] ?? 0));
-        $maxZipBytes = $this->planService->getMaxDownloadZipBytes($tenant);
-        if ($estimatedBytes > $maxZipBytes) {
-            return response()->json([
-                'message' => 'Estimated ZIP size exceeds your plan limit.',
-            ], 422);
-        }
-
-        $context = $isPublicCollection ? 'public_collection' : ($brand ? 'brand' : 'collection');
-
-        // Phase D3: Optional name (Enterprise only). D6: Public collection default name. Company template fallback.
-        $title = null;
-        if ($isPublicCollection && isset($collection)) {
-            $title = $this->downloadNameResolver->sanitizeFilename(
-                $collection->name . '-download-' . now()->format('Y-m-d')
-            );
-        }
-        $requestName = $request->input('name');
-        if ($requestName !== null && $requestName !== '') {
-            if (! $this->planService->canRenameDownload($tenant)) {
-                return response()->json(['message' => 'Upgrade to rename downloads.'], 422);
-            }
-            $title = $this->downloadNameResolver->sanitizeFilename(trim((string) $requestName));
-        }
-        if ($title === null) {
-            $template = $tenant->settings['download_name_template'] ?? null;
-            if ($template !== null && $template !== '') {
-                $title = $this->downloadNameResolver->resolve(
-                    $template,
-                    $tenant,
-                    $brand ?? $tenant->defaultBrand,
-                    null
-                );
+        $state = $download->getState();
+        $thumbnails = [];
+        foreach ($download->assets as $asset) {
+            $metadata = $asset->metadata ?? [];
+            $thumbStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                ? $asset->thumbnail_status->value
+                : ($asset->thumbnail_status ?? 'pending');
+            $thumbUrl = null;
+            if ($thumbStatus === 'completed' && $asset->thumbnailPathForStyle('thumb')) {
+                $thumbUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => 'thumb']);
             } else {
-                $title = $this->downloadNameResolver->resolve(
-                    \App\Services\DownloadNameResolver::DEFAULT_TEMPLATE,
-                    $tenant,
-                    $brand ?? $tenant->defaultBrand,
-                    null
-                );
-            }
-        }
-
-        // Phase D3: Optional expires_at (ISO string, "never", or omit for default 30 days)
-        $expiresAt = $this->expirationPolicy->calculateExpiresAt($tenant, DownloadType::SNAPSHOT);
-        $requestExpiresAt = $request->input('expires_at');
-        $maxDays = $this->planService->getMaxDownloadExpirationDays($tenant);
-        if ($requestExpiresAt === 'never' || $requestExpiresAt === null) {
-            if ($requestExpiresAt === 'never' && $this->planService->canCreateNonExpiringDownload($tenant)) {
-                $expiresAt = null;
-            } elseif ($requestExpiresAt === 'never') {
-                return $this->downloadCreateError($request, 'expires_at', 'Upgrade to create non-expiring downloads.');
-            }
-            // omit or null without "never" → keep default (already set)
-        } else {
-            $expiresAt = Carbon::parse($requestExpiresAt);
-            if ($expiresAt->isPast()) {
-                return $this->downloadCreateError($request, 'expires_at', 'Expiration date must be in the future.');
-            }
-            $daysFromNow = (int) now()->diffInDays($expiresAt, false);
-            if ($daysFromNow > $maxDays && ! $this->planService->canCreateNonExpiringDownload($tenant)) {
-                return $this->downloadCreateError(
-                    $request,
-                    'expires_at',
-                    "This plan allows up to {$maxDays} days. Upgrade for longer or non-expiring downloads."
-                );
-            }
-        }
-
-        // D11: Enterprise Download Policy — enforce organizational rules (Enterprise only)
-        if ($this->downloadPolicy->disallowNonExpiring($tenant) && $requestExpiresAt === 'never') {
-            return $this->downloadCreateError($request, 'expires_at', 'Your organization requires an expiration date.');
-        }
-        $forcedDays = $this->downloadPolicy->forceExpirationDays($tenant);
-        if ($forcedDays !== null) {
-            $expiresAt = now()->addDays($forcedDays);
-        }
-
-        $hardDeleteAt = $expiresAt ? $this->expirationPolicy->calculateHardDeleteAt(
-            (new Download)->setRelation('tenant', $tenant),
-            $expiresAt
-        ) : null;
-
-        // Phase D3: Optional access_mode (plan-gated). D6: Public collection downloads are always public.
-        $accessMode = $isPublicCollection ? DownloadAccessMode::PUBLIC : DownloadAccessMode::PUBLIC;
-        $requestAccessMode = $isPublicCollection ? null : $request->input('access_mode');
-        if (is_string($requestAccessMode) && $requestAccessMode !== '') {
-            $mode = strtolower($requestAccessMode);
-            if ($mode === 'brand' && $this->planService->canRestrictDownloadToBrand($tenant)) {
-                $accessMode = DownloadAccessMode::BRAND;
-            } elseif (($mode === 'company' || $mode === 'team') && $this->planService->canRestrictDownloadToCompany($tenant)) {
-                $accessMode = DownloadAccessMode::COMPANY;
-            } elseif (($mode === 'users' || $mode === 'restricted') && $this->planService->canRestrictDownloadToUsers($tenant)) {
-                $accessMode = DownloadAccessMode::USERS;
-            } elseif ($mode !== 'public') {
-                return $this->downloadCreateError($request, 'access_mode', 'Your plan does not allow this access scope. Upgrade to unlock.');
-            }
-        }
-
-        $allowedUserIds = [];
-        if ($accessMode === DownloadAccessMode::USERS) {
-            $raw = $request->input('allowed_users');
-            if (is_array($raw)) {
-                $allowedUserIds = array_values(array_filter(array_map('intval', $raw)));
-            }
-            $allowedUserIds = User::query()
-                ->where('id', $allowedUserIds)
-                ->whereHas('tenants', fn ($q) => $q->where('tenants.id', $tenant->id))
-                ->pluck('id')
-                ->all();
-        }
-
-        $slug = $this->uniqueSlug($tenant->id);
-
-        // D7: Optional password protection (Enterprise only). Plain text → bcrypt.
-        $passwordHash = null;
-        $requestPassword = $request->input('password');
-        if ($requestPassword !== null && $requestPassword !== '') {
-            if (! $this->planService->canPasswordProtectDownload($tenant)) {
-                return response()->json(['message' => 'Password protection requires Enterprise plan.'], 422);
-            }
-            $passwordHash = bcrypt($requestPassword);
-        }
-
-        // D11: Enterprise Download Policy — public downloads may require password
-        if ($accessMode === DownloadAccessMode::PUBLIC && $this->downloadPolicy->requirePasswordForPublic($tenant) && ! $passwordHash) {
-            return $this->downloadCreateError($request, 'password', 'Your organization requires a password for public downloads.');
-        }
-
-        // D7/R3.1: Landing page is controlled by brand only (Brand → Downloads → Landing Page). Per-download only landing_copy (headline/subtext).
-        $landingCopy = null;
-        if ($this->planService->canBrandDownload($tenant)) {
-            $requestLandingCopy = $request->input('landing_copy');
-            if (is_array($requestLandingCopy) && ! empty($requestLandingCopy)) {
-                $landingCopy = $this->sanitizeLandingCopy($requestLandingCopy);
-            }
-        }
-        // D11: Enterprise Download Policy — when required, prefer a brand that has "Enable landing pages" for download.brand_id (landing page is enforced at delivery, not at create)
-        if ($accessMode === DownloadAccessMode::PUBLIC && $this->downloadPolicy->requireLandingPageForPublic($tenant)) {
-            $assetBrandIds = $assets->pluck('brand_id')->filter()->unique()->values()->all();
-            $brandsInDownload = empty($assetBrandIds) ? collect() : \App\Models\Brand::query()
-                ->whereIn('id', $assetBrandIds)
-                ->where('tenant_id', $tenant->id)
-                ->get();
-            $brandWithLanding = $brandsInDownload->first(fn ($b) => ($b->download_landing_settings ?? [])['enabled'] ?? false);
-            if ($brandWithLanding) {
-                $brand = $brandWithLanding;
-            }
-            // Do not block creation: delivery will block if no brand has landing enabled (deliverFile checks requireLandingPageForPublic)
-        }
-        // Legacy: still accept branding_options but ignore logo_url and accent_color (R3.1)
-        $brandingOptions = null;
-        $requestBranding = $request->input('branding_options');
-        if (is_array($requestBranding) && ! empty($requestBranding)) {
-            if (! $this->planService->canBrandDownload($tenant)) {
-                return $this->downloadCreateError($request, 'branding_options', 'Branded download pages require Pro or Enterprise plan.');
-            }
-            $brandingOptions = $this->sanitizeBrandingOptions($requestBranding);
-        }
-
-        DB::beginTransaction();
-        try {
-            $downloadOptions = ['context' => $context];
-            if ($isPublicCollection && isset($collection)) {
-                $downloadOptions['collection_id'] = $collection->id;
-            }
-
-            $download = Download::create([
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand?->id,
-                'created_by_user_id' => $user->id,
-                'download_type' => DownloadType::SNAPSHOT,
-                'source' => $isPublicCollection ? DownloadSource::PUBLIC_COLLECTION->value : $source,
-                'title' => $title,
-                'slug' => $slug,
-                'version' => 1,
-                'status' => DownloadStatus::READY,
-                'zip_status' => ZipStatus::NONE,
-                'expires_at' => $expiresAt,
-                'hard_delete_at' => $hardDeleteAt,
-                'download_options' => $downloadOptions,
-                'access_mode' => $accessMode,
-                'allow_reshare' => true,
-                'password_hash' => $passwordHash,
-                'branding_options' => $brandingOptions,
-                'landing_copy' => $landingCopy,
-            ]);
-
-            foreach ($visibleIds as $i => $assetId) {
-                $download->assets()->attach($assetId, ['is_primary' => $i === 0]);
-            }
-
-            if ($accessMode === DownloadAccessMode::USERS && ! empty($allowedUserIds)) {
-                $download->allowedUsers()->sync($allowedUserIds);
-            }
-
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('[DownloadController] Failed to create download', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return $this->downloadCreateError($request, 'message', 'Failed to create download.', 500);
-        }
-
-        if (! $isPublicCollection) {
-            $this->bucket->clear();
-        }
-
-        BuildDownloadZipJob::dispatch($download->id);
-
-        // Inertia requests (e.g. from Create Download panel) receive redirect. Phase D3: flash for toast.
-        if ($request->header('X-Inertia')) {
-            return redirect()->route('downloads.index')->with('success', 'Download created');
-        }
-
-        $publicUrl = route('downloads.public', ['download' => $download->id]);
-
-        return response()->json([
-            'download_id' => $download->id,
-            'public_url' => $publicUrl,
-            'expires_at' => $expiresAt?->toIso8601String(),
-            'asset_count' => count($visibleIds),
-        ]);
-    }
-
-    /**
-     * UX-R2: Single-asset download. POST /app/assets/{asset}/download.
-     * Authorize view, enforce eligibility, create Download (source SINGLE_ASSET), stream/redirect file, log access.
-     */
-    public function downloadSingleAsset(Request $request, Asset $asset): JsonResponse|RedirectResponse
-    {
-        Gate::authorize('view', $asset);
-
-        $user = Auth::user();
-        $tenant = app('tenant');
-        if (! $tenant || $asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found.'], 404);
-        }
-
-        // D11: Enterprise Download Policy — single-asset download may be disabled
-        if ($this->downloadPolicy->disableSingleAssetDownloads($tenant)) {
-            Log::info('download.policy.enforced', [
-                'tenant_id' => $tenant->id,
-                'policy' => 'disable_single_asset_downloads',
-                'action' => 'blocked_creation',
-            ]);
-
-            return response()->json(['message' => 'Your organization requires downloads to be packaged.'], 403);
-        }
-
-        if (! $this->assetEligibilityService->isEligibleForDownloads($asset)) {
-            return response()->json(['message' => 'This asset is not available for download.'], 403);
-        }
-
-        if (! $asset->storage_root_path) {
-            return response()->json(['message' => 'File not available.'], 404);
-        }
-
-        $expiresAt = $this->expirationPolicy->calculateExpiresAt($tenant, DownloadType::SNAPSHOT);
-        $hardDeleteAt = $expiresAt ? $this->expirationPolicy->calculateHardDeleteAt(
-            (new Download)->setRelation('tenant', $tenant),
-            $expiresAt
-        ) : null;
-
-        $slug = $this->uniqueSlug($tenant->id);
-        $brand = app('brand');
-
-        DB::beginTransaction();
-        try {
-            $download = Download::create([
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand?->id,
-                'created_by_user_id' => $user->id,
-                'download_type' => DownloadType::SNAPSHOT,
-                'source' => DownloadSource::SINGLE_ASSET->value,
-                'title' => null,
-                'slug' => $slug,
-                'version' => 1,
-                'status' => DownloadStatus::READY,
-                'zip_status' => ZipStatus::NONE,
-                'zip_path' => null,
-                'direct_asset_path' => $asset->storage_root_path,
-                'zip_size_bytes' => $asset->size_bytes ?? 0,
-                'expires_at' => $expiresAt,
-                'hard_delete_at' => $hardDeleteAt,
-                'download_options' => ['asset_id' => $asset->id],
-                'access_mode' => DownloadAccessMode::PUBLIC,
-                'allow_reshare' => true,
-            ]);
-
-            $download->assets()->attach($asset->id, ['is_primary' => true]);
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('[DownloadController] Single-asset download create failed', [
-                'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            $message = 'Failed to create download.';
-            if (config('app.debug')) {
-                $message .= ' ' . $e->getMessage();
-            }
-            return response()->json(['message' => $message], 500);
-        }
-
-        DownloadEventEmitter::emitDownloadGroupCreated($download);
-        $this->logDownloadAccess($download, 'download.access.granted', 'single_asset');
-        app(\App\Services\AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
-        $download->increment('access_count');
-
-        try {
-            $filename = $asset->original_filename ?: basename($asset->storage_root_path) ?: 'download';
-            $filename = preg_replace('/[\r\n"\\\\]/', '', $filename) ?: 'download';
-            $signedUrl = $this->createPresignedDownloadUrl($asset->storage_root_path, $filename, 15);
-
-            if ($request->wantsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json([
-                    'download_url' => $signedUrl,
-                    'filename' => $filename,
-                ]);
-            }
-
-            return redirect($signedUrl);
-        } catch (\Throwable $e) {
-            report($e);
-            return response()->json(['message' => 'Failed to generate download link.'], 500);
-        }
-    }
-
-    /**
-     * Create a presigned S3 URL that forces download (Content-Disposition: attachment).
-     */
-    private function createPresignedDownloadUrl(string $key, string $filename, int $minutes = 15): string
-    {
-        $bucket = config('filesystems.disks.s3.bucket');
-        $client = new S3Client([
-            'version' => 'latest',
-            'region' => config('filesystems.disks.s3.region'),
-            'credentials' => [
-                'key' => config('filesystems.disks.s3.key'),
-                'secret' => config('filesystems.disks.s3.secret'),
-            ],
-            'endpoint' => config('filesystems.disks.s3.endpoint'),
-            'use_path_style_endpoint' => config('filesystems.disks.s3.use_path_style_endpoint', false),
-        ]);
-
-        $cmd = $client->getCommand('GetObject', [
-            'Bucket' => $bucket,
-            'Key' => $key,
-            'ResponseContentDisposition' => 'attachment; filename="' . str_replace('"', '\\"', $filename) . '"',
-        ]);
-        $request = $client->createPresignedRequest($cmd, '+' . $minutes . ' minutes');
-
-        return (string) $request->getUri();
-    }
-
-    /**
-     * Phase D3: Return current tenant users for "Specific users" picker (Enterprise).
-     */
-    public function companyUsers(Request $request): JsonResponse
-    {
-        $tenant = app('tenant');
-        if (! $tenant) {
-            return response()->json(['users' => []], 200);
-        }
-        $users = $tenant->users()
-            ->orderBy('first_name')
-            ->orderBy('last_name')
-            ->get(['id', 'first_name', 'last_name', 'email'])
-            ->map(fn ($u) => [
-                'id' => $u->id,
-                'first_name' => $u->first_name,
-                'last_name' => $u->last_name,
-                'email' => $u->email,
-            ])
-            ->values()
-            ->all();
-
-        return response()->json(['users' => $users]);
-    }
-
-    private function uniqueSlug(int $tenantId): string
-    {
-        do {
-            $slug = Str::lower(Str::random(12));
-        } while (Download::where('tenant_id', $tenantId)->where('slug', $slug)->exists());
-
-        return $slug;
-    }
-
-    // IMPORTANT (Download mutation errors — Inertia-safe, phase locked):
-    // Download actions must never return raw JSON to Inertia requests.
-    // Use downloadCreateError() for store(); use downloadActionError() for revoke, regenerate, updateSettings, extend, changeAccess.
-
-    /**
-     * Return download create validation/error response. Inertia requests get redirect back with errors
-     * so the Create Download panel can show them inline; non-Inertia gets JSON.
-     */
-    private function downloadCreateError(Request $request, string $key, string $message, int $status = 422): JsonResponse|RedirectResponse
-    {
-        if ($request->header('X-Inertia')) {
-            return redirect()->back()
-                ->withErrors([$key => $message])
-                ->withInput($request->only([
-                    'name', 'expires_at', 'access_mode', 'allowed_users', 'password',
-                    'landing_copy', 'landing_headline', 'landing_subtext', 'branding_options',
-                ]));
-        }
-
-        return response()->json(['message' => $message], $status);
-    }
-
-    /**
-     * Return download action error (revoke, regenerate, updateSettings, extend, changeAccess).
-     * Inertia requests get redirect back with errors + input; optional flash so frontend can reopen the dialog.
-     *
-     * @param  array<int, string>  $inputKeys  Keys to preserve in session for Inertia (e.g. access_mode, password).
-     * @param  string|null  $action  Action name for flash (revoke, regenerate, settings, extend) so frontend reopens the right dialog.
-     * @param  string|null  $downloadId  Download id for flash so frontend can reopen dialog for that download.
-     */
-    private function downloadActionError(Request $request, string $key, string $message, int $status = 422, array $inputKeys = [], ?string $action = null, ?string $downloadId = null): JsonResponse|RedirectResponse
-    {
-        if ($request->header('X-Inertia')) {
-            $redirect = redirect()->back()
-                ->withErrors([$key => $message])
-                ->withInput($inputKeys ? $request->only($inputKeys) : []);
-            if ($action !== null && $downloadId !== null) {
-                $redirect->with('download_action', $action)->with('download_action_id', $downloadId);
-            }
-
-            return $redirect;
-        }
-
-        return response()->json(['message' => $message], $status);
-    }
-
-    /**
-     * Phase D4: Map download for index with derived state, can_regenerate, can_extend, can_revoke, password_protected.
-     */
-    private function mapDownloadForHistory(Download $d, bool $canManage = false, $user = null, array $features = []): array
-    {
-        $thumbnails = $d->assets->take(12)->map(function (Asset $a) {
-            $metadata = $a->metadata ?? [];
-            $thumbnailStatus = $a->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                ? $a->thumbnail_status->value
-                : ($a->thumbnail_status ?? 'pending');
-
-            // Match AssetController / DownloadBucketController: preview when preview exists, final when completed
-            $previewThumbnailUrl = null;
-            $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-            if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
-                $previewThumbnailUrl = route('assets.thumbnail.preview', [
-                    'asset' => $a->id,
-                    'style' => 'preview',
-                ]);
-            }
-
-            $finalThumbnailUrl = null;
-            if ($thumbnailStatus === 'completed') {
-                $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                // Download asset grids use medium thumbnail; fall back to thumb if medium missing
-                $thumbnailStyle = $a->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                $finalThumbnailUrl = route('assets.thumbnail.final', [
-                    'asset' => $a->id,
-                    'style' => $thumbnailStyle,
-                ]);
-                if ($thumbnailVersion) {
-                    $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
+                if (! empty($previewThumbnails) && isset($previewThumbnails['preview'])) {
+                    $thumbUrl = route('assets.thumbnail.preview', ['asset' => $asset->id, 'style' => 'preview']);
                 }
             }
-
-            $thumbnailUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
-
-            return [
-                'id' => $a->id,
-                'thumbnail_url' => $thumbnailUrl,
-                'original_filename' => $a->original_filename,
+            $thumbnails[] = [
+                'id' => $asset->id,
+                'original_filename' => $asset->original_filename,
+                'thumbnail_url' => $thumbUrl,
             ];
-        })->all();
+        }
 
-        $isSingleAsset = $d->source === DownloadSource::SINGLE_ASSET;
-        $landingCopy = $d->landing_copy ?? [];
-        $planRevoke = ($features['revoke'] ?? false) === true;
-        $isCreator = $user && $d->created_by_user_id !== null && (int) $d->created_by_user_id === (int) $user->id;
-        $canRevoke = $planRevoke && ($canManage || $isCreator);
-        $brand = $d->relationLoaded('brand') ? $d->brand : null;
-        $assetBrandIds = $d->assets->pluck('brand_id')->filter()->unique()->values()->all();
-        $brandsFromAssets = empty($assetBrandIds) ? [] : \App\Models\Brand::query()
-            ->whereIn('id', $assetBrandIds)
-            ->where('tenant_id', $d->tenant_id)
-            ->get()
-            ->map(fn ($b) => [
+        $accessMode = $download->access_mode instanceof DownloadAccessMode
+            ? $download->access_mode->value
+            : (string) $download->access_mode;
+
+        $createdBy = $download->createdBy
+            ? [
+                'id' => $download->createdBy->id,
+                'name' => trim($download->createdBy->first_name . ' ' . $download->createdBy->last_name) ?: $download->createdBy->email,
+            ]
+            : null;
+
+        $brandPayload = null;
+        if ($download->brand) {
+            $b = $download->brand;
+            $brandPayload = [
                 'id' => $b->id,
-                'name' => $b->name ?? '',
-                'slug' => $b->slug ?? '',
-                'logo_path' => $b->logo_path,
-                'icon_path' => $b->icon_path,
-                'icon' => $b->icon,
-                'icon_bg_color' => $b->icon_bg_color,
-                'primary_color' => $b->primary_color,
-            ])
-            ->values()
-            ->all();
+                'name' => $b->name,
+                'slug' => $b->slug,
+                'primary_color' => $b->primary_color ?? null,
+                'logo_path' => $b->logo_path ?? null,
+                'icon_path' => $b->icon_path ?? null,
+                'icon' => $b->icon ?? null,
+            ];
+        }
+
+        $source = $download->source instanceof DownloadSource
+            ? $download->source->value
+            : (string) $download->source;
 
         return [
-            'id' => $d->id,
-            'slug' => $d->slug,
-            'title' => $d->title,
-            'source' => $d->source->value,
-            'status' => $d->status->value,
-            'zip_status' => $d->zip_status->value,
-            'state' => $d->getState(),
-            'can_regenerate' => ! $isSingleAsset && $canManage && ($features['regenerate'] ?? false),
-            'can_extend' => $canManage && ($features['extend_expiration'] ?? false),
-            'can_revoke' => $canRevoke,
-            'access_mode' => $d->access_mode?->value ?? $d->access_mode,
-            'allowed_user_ids' => $d->relationLoaded('allowedUsers') ? $d->allowedUsers->pluck('id')->all() : [],
-            'uses_landing_page' => (bool) ($d->uses_landing_page ?? false),
-            'password_protected' => ! empty($d->password_hash),
-            'brand_id' => $d->brand_id,
-            'brand' => $brand ? [
-                'id' => $brand->id,
-                'name' => $brand->name ?? '',
-                'slug' => $brand->slug ?? '',
-                'logo_path' => $brand->logo_path,
-                'icon_path' => $brand->icon_path,
-                'icon' => $brand->icon,
-                'icon_bg_color' => $brand->icon_bg_color,
-                'primary_color' => $brand->primary_color,
-            ] : null,
-            'brands' => $brandsFromAssets,
-            'landing_copy' => [
-                'headline' => $landingCopy['headline'] ?? '',
-                'subtext' => $landingCopy['subtext'] ?? '',
-            ],
-            'expires_at' => $d->expires_at?->toIso8601String(),
-            'revoked_at' => $d->revoked_at?->toIso8601String(),
-            'asset_count' => $d->assets->count(),
-            'access_count' => (int) ($d->access_count ?? 0),
-            'zip_size_bytes' => $d->zip_size_bytes,
-            'public_url' => $isSingleAsset ? null : route('downloads.public', ['download' => $d->id]),
-            'created_at' => $d->created_at->toIso8601String(),
-            'created_by' => $d->createdBy ? [
-                'id' => $d->createdBy->id,
-                'name' => $d->createdBy->name ?? $d->createdBy->email,
-                'avatar_url' => $d->createdBy->avatar_url ?? null,
-            ] : null,
+            'id' => $download->id,
+            'title' => $download->title,
+            'state' => $state,
             'thumbnails' => $thumbnails,
+            'expires_at' => $download->expires_at?->toIso8601String(),
+            'asset_count' => $download->assets->count(),
+            'zip_size_bytes' => $download->zip_size_bytes,
+            'can_revoke' => (bool) ($planFeatures['revoke'] ?? false) && ($canManage || ($createdBy && $createdBy['id'] === auth()->id())),
+            'can_regenerate' => (bool) ($planFeatures['regenerate'] ?? false),
+            'can_extend' => (bool) ($planFeatures['extend_expiration'] ?? false),
+            'public_url' => route('downloads.public', ['download' => $download->id]),
+            'access_mode' => $accessMode,
+            'password_protected' => $download->requiresPassword(),
+            'brand' => $brandPayload,
+            'brands' => $brandPayload ? [$brandPayload] : [],
+            'source' => $source,
+            'access_count' => (int) ($download->access_count ?? 0),
+            'created_by' => $createdBy,
         ];
     }
 
     /**
-     * Public download page or ZIP redirect. GET /d/{download}.
-     * D7: If password_hash is set, require session unlock before serving ZIP.
+     * Create a download from the session bucket (POST /app/downloads).
+     * Validates bucket not empty, plan/policy (password, expiration, access), then creates Download and dispatches BuildDownloadZipJob.
      */
-    public function download(Request $request, Download $download): RedirectResponse|JsonResponse|Response|\Illuminate\Http\Response
+    public function store(Request $request): \Illuminate\Http\RedirectResponse
     {
-        // Verify download exists and is accessible — HTML-facing error page for browsers
-        if ($download->trashed()) {
-            return $this->downloadPublicErrorResponse($request, $download, 'not_found', 'This link is invalid or has been removed.', 404);
+        $request->validate([
+            'source' => 'required|string|in:grid,drawer,collection,admin',
+            'name' => 'nullable|string|max:255',
+            'expires_at' => 'nullable|string',
+            'access_mode' => 'nullable|string|in:public,brand,company,team,users,restricted',
+            'allowed_users' => 'nullable|array',
+            'allowed_users.*' => 'uuid',
+            'password' => 'nullable|string|max:255',
+            'landing_copy' => 'nullable|array',
+            'landing_copy.headline' => 'nullable|string',
+            'landing_copy.subtext' => 'nullable|string',
+        ]);
+
+        $tenant = app('tenant');
+        $user = Auth::user();
+        if (! $tenant || ! $user) {
+            throw ValidationException::withMessages(['message' => ['Unauthorized.']]);
         }
 
-        // Phase D2: Revoked downloads are inaccessible
-        if ($download->isRevoked()) {
-            return $this->downloadPublicErrorResponse($request, $download, 'revoked', 'This download has been revoked.', 410);
+        $bucketService = app(DownloadBucketService::class);
+        $visibleIds = $bucketService->visibleItems();
+        if (empty($visibleIds)) {
+            throw ValidationException::withMessages(['message' => 'Add at least one asset to the download bucket.']);
         }
 
-        // For non-public downloads, verify tenant scope (Phase D1: only resolve tenant when needed)
-        if ($download->access_mode !== DownloadAccessMode::PUBLIC) {
-            $tenant = app()->bound('tenant') ? app('tenant') : null;
-            if (! $tenant || $download->tenant_id !== $tenant->id) {
-                return $this->downloadPublicErrorResponse($request, $download, 'not_found', 'This link is invalid or has been removed.', 404);
+        $accessModeInput = $request->input('access_mode', 'public');
+        $accessMode = $this->normalizeAccessMode($accessModeInput);
+        if ($accessMode === DownloadAccessMode::BRAND) {
+            $bucketService->assertCanRestrictToBrand();
+        }
+
+        $planService = app(PlanService::class);
+        $enterprisePolicy = app(EnterpriseDownloadPolicy::class);
+
+        if ($accessMode === DownloadAccessMode::PUBLIC && $enterprisePolicy->requirePasswordForPublic($tenant)) {
+            if (! $request->filled('password') || ! trim((string) $request->input('password'))) {
+                throw ValidationException::withMessages(['message' => 'Your organization requires a password for public downloads.']);
             }
         }
 
-        // D7: Password-protected public downloads — require session unlock before ZIP or processing view
-        if ($download->password_hash && $download->access_mode === DownloadAccessMode::PUBLIC) {
-            $unlocked = session('download_unlocked.' . $download->id, false);
-            if (! $unlocked) {
-                $this->logDownloadAccess($download, 'download.access.attempt');
-                if (! $request->expectsJson()) {
-                    return Inertia::render('Downloads/Public', $this->publicPageProps($download, 'password_required', 'This download is protected.', [
-                        'password_required' => true,
-                        'download_id' => $download->id,
-                        'unlock_url' => route('downloads.public.unlock', ['download' => $download->id]),
-                    ]));
+        $expiresAt = null;
+        $expiresAtInput = $request->input('expires_at');
+        if ($expiresAtInput === 'never' || $expiresAtInput === null) {
+            if ($expiresAtInput === 'never') {
+                if (! $planService->canCreateNonExpiringDownload($tenant)) {
+                    throw ValidationException::withMessages(['message' => 'Upgrade to create non-expiring downloads.']);
                 }
-                return response()->json(['message' => 'This download is password protected.'], 403);
+                if ($enterprisePolicy->disallowNonExpiring($tenant)) {
+                    throw ValidationException::withMessages(['message' => 'Your organization requires an expiration date.']);
+                }
+            }
+            $expiresAt = $planService->canCreateNonExpiringDownload($tenant) && $expiresAtInput === 'never'
+                ? null
+                : now()->addDays($planService->getMaxDownloadExpirationDays($tenant));
+        } else {
+            $expiresAt = \Carbon\Carbon::parse($expiresAtInput);
+            $maxDays = $planService->getMaxDownloadExpirationDays($tenant);
+            if ($expiresAt->gt(now()->addDays($maxDays))) {
+                $expiresAt = now()->addDays($maxDays);
             }
         }
 
-        // Phase D4: When download is not ready, show HTML page for browsers (trust signals) with correct HTTP status
-        $state = $download->getState();
-        if ($state !== 'ready') {
-            $message = $this->getPublicStateMessage($state);
-            $httpStatus = in_array($state, ['revoked', 'expired'], true) ? 410 : 422;
-            return $this->downloadPublicErrorResponse($request, $download, $state, $message, $httpStatus, ['password_required' => false]);
+        $forceDays = $enterprisePolicy->forceExpirationDays($tenant);
+        if ($forceDays !== null) {
+            $expiresAt = now()->addDays($forceDays);
         }
 
-        // Validate download status
-        if ($download->status !== DownloadStatus::READY) {
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', $this->getStatusErrorMessage($download->status), 422);
+        $firstAsset = Asset::query()->whereIn('id', $visibleIds)->first();
+        $brandId = $firstAsset?->brand_id;
+
+        $expirationPolicy = app(DownloadExpirationPolicy::class);
+        $download = new Download();
+        $download->tenant_id = $tenant->id;
+        $download->brand_id = $brandId;
+        $download->created_by_user_id = $user->id;
+        $download->download_type = DownloadType::SNAPSHOT;
+        $download->source = DownloadSource::tryFrom($request->input('source')) ?? DownloadSource::GRID;
+        $download->title = $planService->canRenameDownload($tenant) && $request->filled('name')
+            ? trim((string) $request->input('name'))
+            : null;
+        $download->slug = Str::random(12);
+        $download->version = 1;
+        $download->status = DownloadStatus::READY;
+        $download->zip_status = ZipStatus::NONE;
+        $download->expires_at = $expiresAt;
+        $download->hard_delete_at = null;
+        $download->access_mode = $accessMode;
+        $download->allow_reshare = true;
+        $download->landing_copy = is_array($request->input('landing_copy')) ? $request->input('landing_copy') : null;
+        if ($request->filled('password') && trim((string) $request->input('password')) !== '') {
+            $download->password_hash = Hash::make(trim((string) $request->input('password')));
+        }
+        $download->save();
+
+        $download->update([
+            'hard_delete_at' => $expirationPolicy->calculateHardDeleteAt($download, $expiresAt),
+        ]);
+
+        foreach ($visibleIds as $index => $assetId) {
+            $download->assets()->attach($assetId, ['is_primary' => $index === 0]);
         }
 
-        // Validate ZIP status
-        if ($download->zip_status !== ZipStatus::READY) {
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', $this->getZipStatusErrorMessage($download->zip_status), 422);
+        if ($accessMode === DownloadAccessMode::USERS && is_array($request->input('allowed_users'))) {
+            $download->allowedUsers()->sync($request->input('allowed_users'));
         }
 
-        // Validate ZIP path exists
-        if (! $download->zip_path) {
-            Log::error('[DownloadController] Download ZIP path is missing', [
+        BuildDownloadZipJob::dispatch($download->id);
+
+        $bucketService->clear();
+
+        // Inertia expects a 303 redirect for POST (not raw JSON). Send user to downloads page after creation.
+        return redirect()->route('downloads.index')
+            ->with('download_created', [
                 'download_id' => $download->id,
-            ]);
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', 'ZIP file not available.', 404);
-        }
-
-        // Validate access
-        $accessAllowed = $this->validateAccess($download);
-        if (! $accessAllowed) {
-            return $this->downloadPublicErrorResponse($request, $download, 'access_denied', 'Access denied.', 403);
-        }
-
-        // Check if download is expired (Phase 2.8: also check if assets are archived)
-        if ($download->isExpired()) {
-            return $this->downloadPublicErrorResponse($request, $download, 'expired', 'This download has expired.', 410);
-        }
-
-        // Redirect to rate-limited delivery route; actual file delivery happens there (throttle:20,10)
-        return redirect()->route('downloads.public.file', ['download' => $download->id]);
+                'public_url' => route('downloads.public', ['download' => $download->id]),
+                'expires_at' => $expiresAt?->toIso8601String(),
+                'asset_count' => count($visibleIds),
+            ])
+            ->setStatusCode(303);
     }
 
     /**
-     * Public file delivery. GET /d/{download}/file.
-     * Rate-limited (throttle:20,10). Validates and redirects to signed S3 URL; logs and metrics on success.
+     * Map request access_mode string to enum (team/company → COMPANY, restricted → USERS).
      */
-    public function deliverFile(Request $request, Download $download): RedirectResponse|JsonResponse|\Illuminate\Http\Response
+    protected function normalizeAccessMode(string $value): DownloadAccessMode
+    {
+        return match (strtolower($value)) {
+            'brand' => DownloadAccessMode::BRAND,
+            'company', 'team' => DownloadAccessMode::COMPANY,
+            'users', 'restricted' => DownloadAccessMode::USERS,
+            default => DownloadAccessMode::PUBLIC,
+        };
+    }
+
+    /**
+     * Public download page (GET /d/{download}).
+     * When password-protected: show landing page with password form; download only after unlock.
+     * When not password-protected: redirect to S3 signed URL.
+     */
+    public function download(Download $download): Response|RedirectResponse
     {
         if ($download->trashed()) {
-            return $this->downloadPublicErrorResponse($request, $download, 'not_found', 'This link is invalid or has been removed.', 404);
+            return $this->publicPage($download, 'not_found', 'Download not found');
         }
-        if ($download->isRevoked()) {
-            return $this->downloadPublicErrorResponse($request, $download, 'revoked', 'This download has been revoked.', 410);
-        }
+
+        $tenant = app('tenant');
         if ($download->access_mode !== DownloadAccessMode::PUBLIC) {
-            $tenant = app()->bound('tenant') ? app('tenant') : null;
             if (! $tenant || $download->tenant_id !== $tenant->id) {
-                return $this->downloadPublicErrorResponse($request, $download, 'not_found', 'This link is invalid or has been removed.', 404);
+                return $this->publicPage($download, 'not_found', 'Download not found');
             }
         }
-        if ($download->password_hash && $download->access_mode === DownloadAccessMode::PUBLIC) {
-            $unlocked = session('download_unlocked.' . $download->id, false);
-            if (! $unlocked) {
-                return $this->downloadPublicErrorResponse($request, $download, 'access_denied', 'Session expired. Please open the link again and enter the password.', 403);
-            }
-        }
-        $state = $download->getState();
-        if ($state !== 'ready') {
-            $message = $this->getPublicStateMessage($state);
-            $httpStatus = in_array($state, ['revoked', 'expired'], true) ? 410 : 422;
-            return $this->downloadPublicErrorResponse($request, $download, $state, $message, $httpStatus, ['password_required' => false]);
-        }
+
         if ($download->status !== DownloadStatus::READY) {
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', $this->getStatusErrorMessage($download->status), 422);
+            return $this->publicPage($download, 'failed', $this->getStatusErrorMessage($download->status));
         }
+
         if ($download->zip_status !== ZipStatus::READY) {
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', $this->getZipStatusErrorMessage($download->zip_status), 422);
+            $message = $download->zip_status === ZipStatus::BUILDING || $download->zip_status === ZipStatus::NONE
+                ? 'We\'re preparing your download. Please try again in a moment.'
+                : $this->getZipStatusErrorMessage($download->zip_status);
+            return $this->publicPage($download, $download->zip_status === ZipStatus::BUILDING ? 'processing' : 'failed', $message);
         }
+
         if (! $download->zip_path) {
             Log::error('[DownloadController] Download ZIP path is missing', ['download_id' => $download->id]);
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', 'ZIP file not available.', 404);
+            return $this->publicPage($download, 'failed', 'ZIP file not available');
         }
+
         if (! $this->validateAccess($download)) {
-            return $this->downloadPublicErrorResponse($request, $download, 'access_denied', 'Access denied.', 403);
+            return $this->publicPage($download, 'access_denied', 'Access denied');
         }
+
         if ($download->isExpired()) {
-            return $this->downloadPublicErrorResponse($request, $download, 'expired', 'This download has expired.', 410);
+            return $this->publicPage($download, 'expired', 'This download has expired');
         }
 
-        // D11: Enterprise Download Policy — block delivery only for password requirement (landing page is advisory; we no longer block delivery for it).
-        if ($download->access_mode === DownloadAccessMode::PUBLIC) {
-            $tenant = $download->tenant;
-            if ($tenant && $this->downloadPolicy->requirePasswordForPublic($tenant) && ! $download->password_hash) {
-                Log::info('download.policy.enforced', [
-                    'tenant_id' => $tenant->id,
-                    'download_id' => $download->id,
-                    'policy' => 'require_password_for_public',
-                    'action' => 'blocked_delivery',
-                ]);
-                $message = 'Your organization requires a password for public downloads. Set a password in Download settings (open the download, click Settings).';
+        if ($download->isRevoked()) {
+            return $this->publicPage($download, 'revoked', 'This download has been revoked');
+        }
 
-                return $this->downloadPublicErrorResponse($request, $download, 'access_denied', $message, 403);
-            }
+        // Password-protected: show landing page (HTML) until session is unlocked; never redirect to ZIP until then.
+        $requiresPassword = $download->requiresPassword();
+        $isUnlocked = session('download_unlocked.' . $download->id) === true;
+        if ($requiresPassword && ! $isUnlocked) {
+            return $this->publicPage($download, 'password_required', 'Enter the password to continue.', true);
         }
 
         try {
-            $base = $this->downloadNameResolver->sanitizeFilename($download->title ?? 'download');
-            $filename = preg_replace('/[\r\n"\\\\]/', '', $base . '.zip') ?: 'download.zip';
-            $signedUrl = $this->createPresignedDownloadUrl($download->zip_path, $filename, 10);
+            $disk = Storage::disk('s3');
+            $signedUrl = $disk->temporaryUrl($download->zip_path, now()->addMinutes(10));
 
             DownloadEventEmitter::emitDownloadZipRequested($download);
             DownloadEventEmitter::emitDownloadZipCompleted($download);
-            $this->logDownloadAccess($download, 'download.access.granted', 'zip');
-            app(\App\Services\AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
-            $download->increment('access_count');
 
             return redirect($signedUrl);
         } catch (\Exception $e) {
@@ -1027,50 +461,58 @@ class DownloadController extends Controller
                 'zip_path' => $download->zip_path,
                 'error' => $e->getMessage(),
             ]);
-            return $this->downloadPublicErrorResponse($request, $download, 'failed', 'Failed to generate download URL. Please try again later.', 500);
+
+            return $this->publicPage($download, 'failed', 'Failed to generate download URL');
         }
     }
 
     /**
-     * D7: Unlock password-protected public download. POST /d/{download}/unlock.
-     * On success: session flag set, redirect to GET /d/{download}. On failure: log denied, redirect back with error.
+     * Render the public download landing page (password form, expired, revoked, etc.).
      */
-    public function unlock(Request $request, Download $download): RedirectResponse|JsonResponse
+    protected function publicPage(Download $download, string $state, string $message = '', bool $passwordRequired = false): Response
     {
-        if ($download->trashed() || $download->isRevoked()) {
-            return response()->json(['message' => 'Download not found.'], 404);
-        }
-        if ($download->access_mode !== DownloadAccessMode::PUBLIC || ! $download->password_hash) {
-            return response()->json(['message' => 'This download does not require a password.'], 400);
+        $resolver = app(DownloadPublicPageBrandingResolver::class);
+        $branding = $resolver->resolve($download, $message);
+
+        return Inertia::render('Downloads/Public', [
+            'state' => $state,
+            'message' => $message,
+            'password_required' => $passwordRequired,
+            'download_id' => $download->id,
+            'unlock_url' => $passwordRequired ? route('downloads.public.unlock', ['download' => $download->id]) : '',
+            'show_landing_layout' => $branding['show_landing_layout'],
+            'branding_options' => $branding['branding_options'],
+        ]);
+    }
+
+    /**
+     * Verify password and unlock download (POST /d/{download}/unlock).
+     * On success: set session and redirect to public page; next GET will redirect to S3.
+     */
+    public function unlock(Request $request, Download $download): RedirectResponse
+    {
+        $request->validate(['password' => 'required|string']);
+
+        if ($download->trashed() || ! $download->requiresPassword()) {
+            return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
-        $password = $request->input('password');
-        if (! is_string($password) || $password === '') {
-            if ($request->expectsJson()) {
-                return response()->json(['message' => 'Password is required.'], 422);
-            }
+        if (! Hash::check($request->input('password'), $download->password_hash)) {
             return redirect()->route('downloads.public', ['download' => $download->id])
-                ->withInput($request->only('password'))
-                ->withErrors(['password' => 'Password is required.']);
+                ->withErrors(['password' => 'The password is incorrect.']);
         }
 
-        if (! Hash::check($password, $download->password_hash)) {
-            $this->logDownloadAccess($download, 'download.access.denied');
-            if ($request->expectsJson()) {
-                return response()->json(['message' => 'Incorrect password.'], 403);
-            }
-            return redirect()->route('downloads.public', ['download' => $download->id])
-                ->withInput($request->only('password'))
-                ->withErrors(['password' => 'Incorrect password.']);
-        }
+        session()->put('download_unlocked.' . $download->id, true);
 
-        session(['download_unlocked.' . $download->id => true]);
-        $this->logDownloadAccess($download, 'download.access.granted', 'zip');
-
-        if ($request->expectsJson()) {
-            return response()->json(['unlocked' => true, 'redirect' => route('downloads.public', ['download' => $download->id])]);
-        }
         return redirect()->route('downloads.public', ['download' => $download->id]);
+    }
+
+    /**
+     * Deliver file (GET /d/{download}/file). Same logic as download(); used as alternate entry for direct file link.
+     */
+    public function deliverFile(Download $download): Response|RedirectResponse
+    {
+        return $this->download($download);
     }
 
     /**
@@ -1083,45 +525,30 @@ class DownloadController extends Controller
     {
         $user = auth()->user();
 
-        // Map legacy TEAM/RESTRICTED to COMPANY/USERS
-        $mode = $download->access_mode;
-        if ($mode === DownloadAccessMode::TEAM) {
-            $mode = DownloadAccessMode::COMPANY;
-        }
-        if ($mode === DownloadAccessMode::RESTRICTED) {
-            $mode = DownloadAccessMode::USERS;
-        }
-
-        switch ($mode) {
+        switch ($download->access_mode) {
             case DownloadAccessMode::PUBLIC:
+                // Public access - anyone with the link can access
                 return true;
 
-            case DownloadAccessMode::BRAND:
-                // Orphan: multibrand download with "brand only" but no single brand_id — allow (treat as public)
-                if (! $download->brand_id) {
-                    return true;
-                }
-                if (! $user) {
+            case DownloadAccessMode::TEAM:
+                // Team access - only authenticated users who are members of the tenant
+                if (!$user) {
                     return false;
                 }
-                return $user->brands()
-                    ->where('brands.id', $download->brand_id)
-                    ->wherePivotNull('removed_at')
-                    ->exists();
 
-            case DownloadAccessMode::COMPANY:
-                if (! $user) {
-                    return false;
-                }
-                return $user->tenants()
-                    ->where('tenants.id', $download->tenant_id)
-                    ->exists();
+                // Verify user belongs to the download's tenant
+                $tenant = app('tenant');
+                return $tenant && $download->tenant_id === $tenant->id;
 
-            case DownloadAccessMode::USERS:
-                if (! $user) {
+            case DownloadAccessMode::RESTRICTED:
+                // Restricted access - only specific users (future implementation)
+                // For now, treat as team access
+                if (!$user) {
                     return false;
                 }
-                return $download->allowedUsers()->where('users.id', $user->id)->exists();
+
+                $tenant = app('tenant');
+                return $tenant && $download->tenant_id === $tenant->id;
 
             default:
                 Log::warning('[DownloadController] Unknown access mode', [
@@ -1163,429 +590,5 @@ class DownloadController extends Controller
             ZipStatus::FAILED => 'ZIP file generation failed',
             ZipStatus::READY => 'ZIP file is ready', // Should not reach here
         };
-    }
-
-    /**
-     * Return HTML (Inertia Public page) or JSON for public download errors. Browser gets branded or default Jackpot page.
-     *
-     * @param  array<string, mixed>  $extra
-     */
-    private function downloadPublicErrorResponse(Request $request, Download $download, string $state, string $message, int $status, array $extra = []): JsonResponse|\Illuminate\Http\Response
-    {
-        if ($request->expectsJson()) {
-            return response()->json(['message' => $message], $status);
-        }
-        $response = Inertia::render('Downloads/Public', $this->publicPageProps($download, $state, $message, $extra))
-            ->toResponse($request)
-            ->setStatusCode($status);
-
-        return $response;
-    }
-
-    /**
-     * D10: Build props for public download page. Copy from landing_copy then brand defaults; visuals from brand (logo_asset_id, color_role, background_asset_ids).
-     * Legacy: if brand settings empty and download has branding_options.logo_url or accent_color, use those read-only (do not write back).
-     *
-     * @param  array<string, mixed>  $extra
-     * @return array<string, mixed>
-     */
-    private function publicPageProps(Download $download, string $state, string $message, array $extra = []): array
-    {
-        $download->loadMissing('brand');
-        $landingCopy = $download->landing_copy ?? [];
-        $legacy = $download->branding_options ?? [];
-        $brand = $download->brand_id ? $download->brand : null;
-        // Ensure we have latest brand settings (e.g. background_asset_ids) from DB
-        if ($brand) {
-            $brand->refresh();
-        }
-        $brandSettings = $brand ? ($brand->download_landing_settings ?? []) : [];
-
-        // Copy: download landing_copy > legacy > brand default_headline/default_subtext
-        $brandingOptions = [
-            'headline' => $landingCopy['headline'] ?? $legacy['headline'] ?? $brandSettings['default_headline'] ?? null,
-            'subtext' => $landingCopy['subtext'] ?? $legacy['subtext'] ?? $brandSettings['default_subtext'] ?? null,
-        ];
-
-        // D10: Logo — brand logo_asset_id → thumbnail URL; legacy fallback (read-only) when brand has no logo_asset_id
-        if (! empty($brandSettings['logo_asset_id']) && $brand) {
-            $logoAsset = Asset::where('id', $brandSettings['logo_asset_id'])->where('brand_id', $brand->id)->first();
-            if ($logoAsset) {
-                $brandingOptions['logo_url'] = route('assets.thumbnail.final', ['asset' => $logoAsset->id, 'style' => 'thumb']);
-            }
-        }
-        if (empty($brandingOptions['logo_url']) && ! empty($legacy['logo_url'])) {
-            // Backward compatibility: existing download with legacy logo_url; brand settings empty. Do NOT write back.
-            $brandingOptions['logo_url'] = $legacy['logo_url'];
-        }
-
-        // D10: Accent — resolve from brand palette via color_role; no raw hex in DB. Legacy fallback when brand has no color_role.
-        $colorRole = $brandSettings['color_role'] ?? null;
-        if ($colorRole && $brand) {
-            $resolved = match ($colorRole) {
-                'primary' => $brand->primary_color,
-                'secondary' => $brand->secondary_color,
-                'accent' => $brand->accent_color,
-                default => $brand->primary_color,
-            };
-            if (! empty($resolved)) {
-                $brandingOptions['accent_color'] = $resolved;
-            }
-        }
-        if (empty($brandingOptions['accent_color']) && ! empty($legacy['accent_color'])) {
-            // Backward compatibility: existing download with legacy accent_color. Do NOT write back.
-            $brandingOptions['accent_color'] = $legacy['accent_color'];
-        }
-        if (empty($brandingOptions['accent_color'])) {
-            $brandingOptions['accent_color'] = '#4F46E5';
-        }
-        $brandingOptions['overlay_color'] = $brandingOptions['accent_color'];
-
-        // D10.1: Background image — use public URL so it loads for unauthenticated visitors (no auth required).
-        // The route /d/{download}/background picks a random brand background asset and streams it.
-        $backgroundImageUrl = null;
-        if (! empty($brandSettings['background_asset_ids']) && is_array($brandSettings['background_asset_ids']) && $brand) {
-            $backgroundImageUrl = route('downloads.public.background', ['download' => $download->id]);
-        }
-        $brandingOptions['background_image_url'] = $backgroundImageUrl;
-
-        // Landing layout is controlled by brand only: when "Enable landing pages" is on in brand settings,
-        // use branded layout for ALL public states (landing, 404, 403, password, processing). No per-download toggle.
-        $showLandingLayout = $brand && ($brandSettings['enabled'] ?? false);
-
-        return array_merge([
-            'state' => $state,
-            'message' => $message,
-            'show_landing_layout' => $showLandingLayout,
-            'landing_copy' => $landingCopy,
-            'branding_options' => $brandingOptions,
-        ], $extra);
-    }
-
-    /**
-     * D7: Sanitize branding options — no arbitrary HTML. R3.1: Ignore logo_url and accent_color (from brand).
-     *
-     * @param array<string, mixed> $input
-     * @return array{headline?: string, subtext?: string}
-     */
-    private function sanitizeBrandingOptions(array $input): array
-    {
-        $out = [];
-        if (isset($input['headline']) && is_string($input['headline'])) {
-            $out['headline'] = substr(trim(strip_tags($input['headline'])), 0, 200);
-        }
-        if (isset($input['subtext']) && is_string($input['subtext'])) {
-            $out['subtext'] = substr(trim(strip_tags($input['subtext'])), 0, 500);
-        }
-        return $out;
-    }
-
-    /**
-     * R3.1: Sanitize landing copy (headline, subtext only).
-     *
-     * @param array<string, mixed> $input
-     * @return array{headline?: string, subtext?: string}
-     */
-    private function sanitizeLandingCopy(array $input): array
-    {
-        $out = [];
-        if (isset($input['headline']) && is_string($input['headline'])) {
-            $out['headline'] = substr(trim(strip_tags($input['headline'])), 0, 200);
-        }
-        if (isset($input['subtext']) && is_string($input['subtext'])) {
-            $out['subtext'] = substr(trim(strip_tags($input['subtext'])), 0, 500);
-        }
-        return $out;
-    }
-
-    /**
-     * D7: Audit log for download access (attempt, granted, denied). Read-only; no UI.
-     * D9: When access is granted, also record to ActivityEvent for internal analytics.
-     */
-    private function logDownloadAccess(Download $download, string $event, ?string $context = null): void
-    {
-        $request = request();
-        $ipHash = hash('sha256', $request->ip() . config('app.key'));
-        Log::info($event, [
-            'download_id' => $download->id,
-            'tenant_id' => $download->tenant_id,
-            'ip_hash' => $ipHash,
-            'user_agent' => $request->userAgent(),
-        ]);
-        if ($event === 'download.access.granted' && $context !== null) {
-            try {
-                ActivityRecorder::record(
-                    $download->tenant_id,
-                    EventType::DOWNLOAD_ACCESS_GRANTED,
-                    $download,
-                    Auth::user(),
-                    $download->brand_id,
-                    ['ip_hash' => $ipHash, 'context' => $context]
-                );
-            } catch (\Throwable $e) {
-                Log::warning('[DownloadController] Failed to record download.access.granted to ActivityEvent', [
-                    'download_id' => $download->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-    }
-
-    protected function getPublicStateMessage(string $state): string
-    {
-        return match ($state) {
-            'processing' => "We're preparing this download. Please check back shortly.",
-            'expired' => 'This download has expired.',
-            'revoked' => 'This download is no longer available.',
-            'failed' => "This download couldn't be prepared. Please contact the owner.",
-            default => 'This download is not available.',
-        };
-    }
-
-    /**
-     * Phase D2: Revoke a download (plan-gated).
-     */
-    public function revoke(Request $request, Download $download): JsonResponse|RedirectResponse
-    {
-        $user = Auth::user();
-        $tenant = app('tenant');
-
-        if (! $tenant) {
-            return $this->downloadActionError($request, 'message', 'You cannot manage downloads.', 403, [], 'revoke', $download->id);
-        }
-
-        if ($download->tenant_id !== $tenant->id) {
-            return $this->downloadActionError($request, 'message', 'Download not found.', 404, [], 'revoke', $download->id);
-        }
-
-        if (! $this->planService->canRevokeDownload($tenant)) {
-            return $this->downloadActionError($request, 'message', 'Your plan does not allow revoking downloads.', 403, [], 'revoke', $download->id);
-        }
-
-        if ($download->isRevoked()) {
-            return $this->downloadActionError($request, 'message', 'Download is already revoked.', 422, [], 'revoke', $download->id);
-        }
-
-        // Allow tenant/brand managers or the creator to revoke
-        $isCreator = $download->created_by_user_id !== null && (int) $download->created_by_user_id === (int) $user->id;
-        if (! $this->canManageDownload($user, $tenant) && ! $isCreator) {
-            return $this->downloadActionError($request, 'message', 'You cannot manage this download.', 403, [], 'revoke', $download->id);
-        }
-
-        $this->managementService->revoke($download, $user);
-
-        if ($request->header('X-Inertia')) {
-            return redirect()->route('downloads.index');
-        }
-
-        return response()->json(['message' => 'Download revoked.']);
-    }
-
-    /**
-     * Phase D2: Extend expiration (plan-gated).
-     */
-    public function extend(Request $request, Download $download): JsonResponse|RedirectResponse
-    {
-        $user = Auth::user();
-        $tenant = app('tenant');
-
-        if (! $tenant || ! $this->canManageDownload($user, $tenant)) {
-            return $this->downloadActionError($request, 'message', 'You cannot manage downloads.', 403, [], 'extend', $download->id);
-        }
-
-        if ($download->tenant_id !== $tenant->id) {
-            return $this->downloadActionError($request, 'message', 'Download not found.', 404, [], 'extend', $download->id);
-        }
-
-        if (! $this->planService->canExtendDownloadExpiration($tenant)) {
-            return $this->downloadActionError($request, 'message', 'Your plan does not allow extending download expiration.', 403, [], 'extend', $download->id);
-        }
-
-        $request->validate([
-            'expires_at' => 'required|date|after:now',
-        ]);
-
-        $newExpiresAt = \Carbon\Carbon::parse($request->input('expires_at'));
-        $this->managementService->extend($download, $newExpiresAt, $user);
-
-        if ($request->header('X-Inertia')) {
-            return redirect()->route('downloads.index');
-        }
-
-        return response()->json([
-            'message' => 'Expiration extended.',
-            'expires_at' => $download->fresh()->expires_at?->toIso8601String(),
-        ]);
-    }
-
-    /**
-     * Phase D2: Change access scope (plan-gated).
-     */
-    public function changeAccess(Request $request, Download $download): JsonResponse|RedirectResponse
-    {
-        $user = Auth::user();
-        $tenant = app('tenant');
-
-        if (! $tenant || ! $this->canManageDownload($user, $tenant)) {
-            return $this->downloadActionError($request, 'message', 'You cannot manage downloads.', 403, [], 'settings', $download->id);
-        }
-
-        if ($download->tenant_id !== $tenant->id) {
-            return $this->downloadActionError($request, 'message', 'Download not found.', 404, [], 'settings', $download->id);
-        }
-
-        $accessMode = $request->input('access_mode');
-        $validModes = [DownloadAccessMode::PUBLIC->value];
-        if ($this->planService->canRestrictDownloadToBrand($tenant)) {
-            $validModes[] = DownloadAccessMode::BRAND->value;
-        }
-        if ($this->planService->canRestrictDownloadToCompany($tenant)) {
-            $validModes[] = DownloadAccessMode::COMPANY->value;
-        }
-        if ($this->planService->canRestrictDownloadToUsers($tenant)) {
-            $validModes[] = DownloadAccessMode::USERS->value;
-        }
-
-        if (! in_array($accessMode, $validModes, true)) {
-            return $this->downloadActionError($request, 'message', 'Invalid access mode or not allowed by your plan.', 422, ['access_mode', 'user_ids'], 'settings', $download->id);
-        }
-
-        $userIds = $accessMode === DownloadAccessMode::USERS->value
-            ? $request->input('user_ids', [])
-            : null;
-
-        $this->managementService->changeAccess($download, $accessMode, $userIds, $user);
-
-        if ($request->header('X-Inertia')) {
-            return redirect()->route('downloads.index');
-        }
-
-        return response()->json(['message' => 'Access updated.']);
-    }
-
-    /**
-     * Update download settings (access, landing page, password). Plan-gated. Not for single-asset downloads.
-     */
-    public function updateSettings(Request $request, Download $download): JsonResponse|RedirectResponse
-    {
-        $user = Auth::user();
-        $tenant = app('tenant');
-        $settingsInputKeys = ['access_mode', 'user_ids', 'landing_copy', 'password'];
-
-        if (! $tenant || ! $this->canManageDownload($user, $tenant)) {
-            return $this->downloadActionError($request, 'message', 'You cannot manage downloads.', 403, [], 'settings', $download->id);
-        }
-
-        if ($download->tenant_id !== $tenant->id) {
-            return $this->downloadActionError($request, 'message', 'Download not found.', 404, [], 'settings', $download->id);
-        }
-
-        if ($download->source === DownloadSource::SINGLE_ASSET) {
-            return $this->downloadActionError($request, 'message', 'Settings cannot be changed for individual asset downloads.', 422, $settingsInputKeys, 'settings', $download->id);
-        }
-
-        $updates = [];
-
-        if ($request->has('access_mode')) {
-            $accessMode = $request->input('access_mode');
-            $validModes = [DownloadAccessMode::PUBLIC->value];
-            if ($this->planService->canRestrictDownloadToBrand($tenant)) {
-                $validModes[] = DownloadAccessMode::BRAND->value;
-            }
-            if ($this->planService->canRestrictDownloadToCompany($tenant)) {
-                $validModes[] = DownloadAccessMode::COMPANY->value;
-            }
-            if ($this->planService->canRestrictDownloadToUsers($tenant)) {
-                $validModes[] = DownloadAccessMode::USERS->value;
-            }
-            if (! in_array($accessMode, $validModes, true)) {
-                return $this->downloadActionError($request, 'message', 'Invalid access mode or not allowed by your plan.', 422, $settingsInputKeys, 'settings', $download->id);
-            }
-            $updates['access_mode'] = $accessMode;
-            $updates['user_ids'] = $accessMode === DownloadAccessMode::USERS->value
-                ? $request->input('user_ids', [])
-                : null;
-        }
-
-        if ($this->planService->canBrandDownload($tenant)) {
-            $landingCopy = $request->input('landing_copy');
-            if (is_array($landingCopy)) {
-                $updates['landing_copy'] = $this->sanitizeLandingCopy($landingCopy);
-            }
-        }
-
-        if ($this->planService->canPasswordProtectDownload($tenant) && $request->has('password')) {
-            $password = $request->input('password');
-            $updates['password_hash'] = is_string($password) && $password !== '' ? Hash::make($password) : null;
-        }
-
-        if (empty($updates)) {
-            return $this->downloadActionError($request, 'message', 'No settings to update.', 422, $settingsInputKeys, 'settings', $download->id);
-        }
-
-        $this->managementService->updateSettings($download, $updates, $user);
-
-        if ($request->header('X-Inertia')) {
-            return redirect()->route('downloads.index');
-        }
-
-        return response()->json(['message' => 'Settings updated.']);
-    }
-
-    /**
-     * Phase D2: Regenerate download (Enterprise only).
-     */
-    public function regenerate(Download $download): JsonResponse|RedirectResponse
-    {
-        $user = Auth::user();
-        $tenant = app('tenant');
-        $request = request();
-
-        if (! $tenant || ! $this->canManageDownload($user, $tenant)) {
-            return $this->downloadActionError($request, 'message', 'You cannot manage downloads.', 403, [], 'regenerate', $download->id);
-        }
-
-        if ($download->tenant_id !== $tenant->id) {
-            return $this->downloadActionError($request, 'message', 'Download not found.', 404, [], 'regenerate', $download->id);
-        }
-
-        if (! $this->planService->canRegenerateDownload($tenant)) {
-            return $this->downloadActionError($request, 'message', 'Regenerating downloads requires Enterprise plan.', 403, [], 'regenerate', $download->id);
-        }
-
-        $this->managementService->regenerate($download, $user);
-
-        if ($request->header('X-Inertia')) {
-            return redirect()->route('downloads.index');
-        }
-
-        return response()->json(['message' => 'Download regeneration started.']);
-    }
-
-    /**
-     * Phase D2: Check if user can manage downloads (not collection-only, manager/admin).
-     */
-    protected function canManageDownload($user, $tenant): bool
-    {
-        if (! $user) {
-            return false;
-        }
-
-        if (app()->bound('collection_only') && app('collection_only')) {
-            return false;
-        }
-
-        $tenantRole = $user->getRoleForTenant($tenant);
-        if (in_array(strtolower($tenantRole ?? ''), ['owner', 'admin'])) {
-            return true;
-        }
-
-        $brand = app('brand');
-        if (! $brand) {
-            return false;
-        }
-
-        $brandRole = $user->getRoleForBrand($brand);
-        return in_array(strtolower($brandRole ?? ''), ['brand_manager', 'admin']);
     }
 }

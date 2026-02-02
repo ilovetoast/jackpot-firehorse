@@ -19,19 +19,31 @@
 import { useState, useEffect } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 
-// Source styling configuration
-const getTagStyle = (source) => {
+// Source styling configuration. When primaryColor is set, manual/default tags use brand primary.
+const getTagStyle = (source, primaryColor = null) => {
+    const useBrand = primaryColor && (source === 'manual' || source == null || source === '')
+    const manualStyle = useBrand
+        ? {
+            container: 'border',
+            inlineStyle: { backgroundColor: primaryColor, borderColor: primaryColor, color: '#fff' },
+            text: '',
+            button: 'text-white/90 hover:text-white hover:bg-white/20',
+            tooltip: 'Manually added'
+        }
+        : {
+            container: 'bg-gray-100 border-gray-300 text-gray-900',
+            inlineStyle: null,
+            text: 'text-gray-900',
+            button: 'text-gray-600 hover:text-gray-800 hover:bg-gray-200',
+            tooltip: 'Manually added'
+        }
     switch (source) {
         case 'manual':
-            return {
-                container: 'bg-gray-100 border-gray-300 text-gray-900',
-                text: 'text-gray-900',
-                button: 'text-gray-600 hover:text-gray-800 hover:bg-gray-200',
-                tooltip: 'Manually added'
-            }
+            return manualStyle
         case 'ai':
             return {
                 container: 'bg-indigo-50 border-indigo-200 text-indigo-900',
+                inlineStyle: null,
                 text: 'text-indigo-900',
                 button: 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100',
                 tooltip: 'AI suggested and accepted'
@@ -39,17 +51,13 @@ const getTagStyle = (source) => {
         case 'ai:auto':
             return {
                 container: 'bg-purple-50 border-purple-200 text-purple-900',
+                inlineStyle: null,
                 text: 'text-purple-900',
                 button: 'text-purple-600 hover:text-purple-800 hover:bg-purple-100',
                 tooltip: 'Auto-applied by AI'
             }
         default:
-            return {
-                container: 'bg-gray-100 border-gray-300 text-gray-900',
-                text: 'text-gray-900',
-                button: 'text-gray-600 hover:text-gray-800 hover:bg-gray-200',
-                tooltip: 'Unknown source'
-            }
+            return manualStyle
     }
 }
 
@@ -76,7 +84,10 @@ export default function TagListUnified({
     inline = false,
     
     // Detailed mode options
-    detailed = false
+    detailed = false,
+    
+    // Brand primary for tag badge styling (manual tags)
+    primaryColor = null
 }) {
     const [loadedTags, setLoadedTags] = useState([])
     const [loading, setLoading] = useState(mode === 'full')
@@ -215,16 +226,17 @@ export default function TagListUnified({
                 /* Detailed view - each tag on its own line with full metadata */
                 <div className="space-y-2">
                     {finalTags.map((tag) => {
-                        const style = getTagStyle(tag.source)
+                        const style = getTagStyle(tag.source, primaryColor)
                         const isRemoving = removing.has(tag.id)
                         const tagKey = tag.id || `${tag.tag}-${tag.source}`
 
                         return (
                             <div
                                 key={tagKey}
-                                className={`flex items-center justify-between py-2 px-3 rounded-lg border ${
+                                className={`flex items-center justify-between py-2 px-3 rounded-lg ${
                                     style.container
                                 } ${isRemoving ? 'opacity-50 pointer-events-none' : ''}`}
+                                style={style.inlineStyle || undefined}
                             >
                                 <div className="flex-1">
                                     <div className="flex items-center gap-3">
@@ -281,18 +293,19 @@ export default function TagListUnified({
                 /* Standard compact view - tags in a row */
                 <div className={`flex flex-wrap gap-2 ${inline ? 'inline-flex' : ''}`}>
                     {finalTags.map((tag) => {
-                        const style = getTagStyle(tag.source)
+                        const style = getTagStyle(tag.source, primaryColor)
                         const isRemoving = removing.has(tag.id)
                         const tagKey = tag.id || `${tag.tag}-${tag.source}`
 
                         return (
                             <div
                                 key={tagKey}
-                                className={`inline-flex items-center gap-1 rounded-md border ${
+                                className={`inline-flex items-center gap-1 rounded-md ${
                                     compact ? 'px-1.5 py-0.5 text-xs' : 'px-1.5 py-0.5 text-xs'
                                 } ${style.container} ${
                                     isRemoving ? 'opacity-50 pointer-events-none' : ''
                                 }`}
+                                style={style.inlineStyle || undefined}
                                 title={style.tooltip}
                             >
                                 <span className={`font-medium ${style.text}`}>

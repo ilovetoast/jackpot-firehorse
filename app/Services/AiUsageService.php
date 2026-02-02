@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Tenant;
 use App\Services\PlanService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -346,13 +347,83 @@ class AiUsageService
      */
     public function getUsageBreakdown(Tenant $tenant, string $feature): array
     {
-        $monthStart = now()->startOfMonth()->toDateString();
-        $monthEnd = now()->endOfMonth()->toDateString();
+        return $this->getUsageBreakdownForPeriod($tenant, $feature, (int) now()->format('Y'), (int) now()->format('n'));
+    }
+
+    /**
+     * Get usage for a specific month (for historical paging).
+     *
+     * @param Tenant $tenant
+     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param int $year Year (e.g. 2026)
+     * @param int $month Month 1-12
+     * @return int Total calls in that month
+     */
+    public function getMonthlyUsageForPeriod(Tenant $tenant, string $feature, int $year, int $month): int
+    {
+        $start = Carbon::createFromDate($year, $month, 1)->startOfMonth()->toDateString();
+        $end = Carbon::createFromDate($year, $month, 1)->endOfMonth()->toDateString();
+
+        return (int) DB::table('ai_usage')
+            ->where('tenant_id', $tenant->id)
+            ->where('feature', $feature)
+            ->whereBetween('usage_date', [$start, $end])
+            ->sum('call_count');
+    }
+
+    /**
+     * Get usage status for a specific month (for historical paging).
+     * Uses current plan caps for display; usage is for the requested period.
+     *
+     * @param Tenant $tenant
+     * @param int $year Year (e.g. 2026)
+     * @param int $month Month 1-12
+     * @return array Same shape as getUsageStatus()
+     */
+    public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
+    {
+        $features = ['tagging', 'suggestions'];
+        $status = [];
+
+        foreach ($features as $feature) {
+            $usage = $this->getMonthlyUsageForPeriod($tenant, $feature, $year, $month);
+            $cap = $this->getMonthlyCap($tenant, $feature);
+
+            $remaining = $cap > 0 ? max(0, $cap - $usage) : null;
+            $percentage = $cap > 0 ? min(100, ($usage / $cap) * 100) : 0;
+
+            $status[$feature] = [
+                'usage' => $usage,
+                'cap' => $cap,
+                'remaining' => $remaining,
+                'percentage' => round($percentage, 2),
+                'is_unlimited' => $cap === 0,
+                'is_disabled' => $cap === -1,
+                'is_exceeded' => $cap > 0 && $usage >= $cap,
+            ];
+        }
+
+        return $status;
+    }
+
+    /**
+     * Get usage breakdown by date for a specific month.
+     *
+     * @param Tenant $tenant
+     * @param string $feature Feature name ('tagging', 'suggestions')
+     * @param int $year Year (e.g. 2026)
+     * @param int $month Month 1-12
+     * @return array Array of ['date' => string, 'calls' => int]
+     */
+    public function getUsageBreakdownForPeriod(Tenant $tenant, string $feature, int $year, int $month): array
+    {
+        $start = Carbon::createFromDate($year, $month, 1)->startOfMonth()->toDateString();
+        $end = Carbon::createFromDate($year, $month, 1)->endOfMonth()->toDateString();
 
         $usage = DB::table('ai_usage')
             ->where('tenant_id', $tenant->id)
             ->where('feature', $feature)
-            ->whereBetween('usage_date', [$monthStart, $monthEnd])
+            ->whereBetween('usage_date', [$start, $end])
             ->orderBy('usage_date')
             ->get(['usage_date', 'call_count']);
 

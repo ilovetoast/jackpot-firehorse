@@ -54,7 +54,7 @@ export default function MetadataGroups({
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-3">
             {/* UX-1: Helper message for contributors when metadata approval is enabled */}
             {showApprovalMessage && (
                 <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2">

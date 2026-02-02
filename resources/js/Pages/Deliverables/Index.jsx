@@ -19,7 +19,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [], filterable_schema = [], available_values = {} }) {
+export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [], filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { hasPermission: canUpload } = usePermission('asset.upload')
@@ -703,6 +703,15 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                         available_values={available_values}
                                         canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
                                         assetType="image"
+                                        primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                        sortBy={sort}
+                                        sortDirection={sort_direction}
+                                        onSortChange={(newSort, newDir) => {
+                                            const urlParams = new URLSearchParams(window.location.search)
+                                            urlParams.set('sort', newSort)
+                                            urlParams.set('sort_direction', newDir)
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
+                                        }}
                                     />
                                 }
                             />
@@ -755,6 +764,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
+                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
                             />
                         </div>
                     )}
@@ -764,6 +774,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                         onCountChange={() => setBucketAssetIds([])}
                         onRemove={bucketRemove}
                         onClear={bucketClear}
+                        primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
                     />
                 </div>
 
@@ -783,6 +794,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}
+                            primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
                         />
                     </div>
                 )}

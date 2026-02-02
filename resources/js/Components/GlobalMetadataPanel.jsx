@@ -27,7 +27,8 @@ export default function GlobalMetadataPanel({
     categories = [],
     onCategoryChange = null,
     className = '',
-    disabled = false
+    disabled = false,
+    inline = false
 }) {
     const { 
         hasItems, 
@@ -94,6 +95,48 @@ export default function GlobalMetadataPanel({
             validateMetadata();
         }, 100);
     };
+
+    if (inline) {
+        return (
+            <div className={className}>
+                <div className="flex items-center gap-2 min-w-0">
+                    <label htmlFor="category-select" className="flex-shrink-0 w-24 text-sm font-medium text-gray-700 whitespace-nowrap">
+                        Category: <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                        id="category-select"
+                        value={context.categoryId || ''}
+                        onChange={(e) => handleCategoryChange(e.target.value)}
+                        disabled={disabled}
+                        className={`flex-1 min-w-0 rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
+                        }`}
+                    >
+                        <option value="">Select</option>
+                        {filteredCategories.map((category) => (
+                            <option key={category.id} value={category.id}>
+                                {category.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                {categoryWarnings.length > 0 && (
+                    <div className="rounded bg-yellow-50 border border-yellow-200 px-2 py-1 mt-1">
+                        {categoryWarnings.map((warning, index) => (
+                            <p key={index} className="text-xs text-yellow-800">{warning.message}</p>
+                        ))}
+                    </div>
+                )}
+                {validationWarnings.length > 0 && (
+                    <div className="rounded bg-red-50 border border-red-200 px-2 py-1 mt-1">
+                        {validationWarnings.map((warning, index) => (
+                            <p key={index} className="text-xs text-red-700">{warning.message}</p>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className={`bg-white border border-gray-200 rounded-lg shadow-sm ${className}`}>

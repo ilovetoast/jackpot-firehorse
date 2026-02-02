@@ -33,7 +33,7 @@ use Tests\TestCase;
  * - Non-expiring download rejected for enterprise
  * - Expiration overridden to forced days (Enterprise)
  * - Non-enterprise tenants unaffected
- * - Delivery blocked when public download lacks landing page or password (Enterprise)
+ * - Delivery blocked when public download lacks password (Enterprise)
  */
 class EnterpriseDownloadPolicyD11Test extends TestCase
 {
@@ -190,41 +190,6 @@ class EnterpriseDownloadPolicyD11Test extends TestCase
         $storeResponse = $this->postJson(route('downloads.store'), ['source' => 'grid']);
         $storeResponse->assertOk();
         $this->assertNotNull(Download::find($storeResponse->json('download_id')));
-    }
-
-    public function test_delivery_blocked_when_public_download_lacks_landing_page_for_enterprise(): void
-    {
-        $this->tenant->update(['manual_plan_override' => 'enterprise']);
-        $download = Download::create([
-            'tenant_id' => $this->tenant->id,
-            'brand_id' => $this->brand->id,
-            'created_by_user_id' => $this->user->id,
-            'download_type' => 'snapshot',
-            'source' => 'grid',
-            'slug' => 'test-slug-' . uniqid(),
-            'version' => 1,
-            'status' => DownloadStatus::READY,
-            'zip_status' => ZipStatus::READY,
-            'zip_path' => 'downloads/test/download.zip',
-            'expires_at' => now()->addDays(30),
-            'hard_delete_at' => now()->addDays(37),
-            'access_mode' => DownloadAccessMode::PUBLIC,
-            'allow_reshare' => true,
-            'uses_landing_page' => false,
-            'password_hash' => Hash::make('secret123'),
-        ]);
-        $download->assets()->attach($this->asset->id, ['is_primary' => true]);
-
-        // Unlock so we pass the password check and hit the D11 landing-page policy
-        $this->post(route('downloads.public.unlock', ['download' => $download->id]), [
-            'password' => 'secret123',
-            '_token' => csrf_token(),
-        ]);
-
-        $response = $this->get(route('downloads.public.file', ['download' => $download->id]));
-
-        $response->assertStatus(403);
-        $response->assertSee('delivery requirements', false);
     }
 
     public function test_delivery_blocked_when_public_download_lacks_password_for_enterprise(): void

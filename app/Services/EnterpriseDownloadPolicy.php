@@ -52,16 +52,6 @@ class EnterpriseDownloadPolicy
     }
 
     /**
-     * Whether public downloads must use a landing page.
-     */
-    public function requireLandingPageForPublic(Tenant $tenant): bool
-    {
-        $policy = $this->getPolicy($tenant);
-
-        return ($policy['require_landing_page_for_public'] ?? false) === true;
-    }
-
-    /**
      * Forced expiration days (overrides user input). Null if not forced.
      */
     public function forceExpirationDays(Tenant $tenant): ?int

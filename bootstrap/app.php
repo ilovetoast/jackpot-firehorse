@@ -35,22 +35,21 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        // Graceful degradation: /d/* 404 (download not found) → HTML "Jackpot access denied" page, not JSON
+        // /d/* 404 (download not found): use shared branding resolver so error pages never silently fall back to unbranded layouts.
+        // Same resolver as active/expired/revoked/403—intentional design for consistent branding across all download states.
         $exceptions->render(function (ModelNotFoundException $e, Request $request) {
             if (! $request->is('d/*') || $request->expectsJson()) {
                 return null;
             }
-            $appName = config('app.name', 'Jackpot');
-            return Inertia::render('Downloads/Public', [
+            $resolver = app(\App\Services\DownloadPublicPageBrandingResolver::class);
+            $branding = $resolver->resolve(null, 'This link is invalid or has been removed.');
+
+            return Inertia::render('Downloads/Public', array_merge([
                 'state' => 'not_found',
                 'message' => 'This link is invalid or has been removed.',
                 'password_required' => false,
                 'download_id' => null,
                 'unlock_url' => '',
-                'branding_options' => [
-                    'headline' => $appName,
-                    'subtext' => 'This link is invalid or has been removed.',
-                ],
-            ])->toResponse($request)->setStatusCode(404);
+            ], $branding))->toResponse($request)->setStatusCode(404);
         });
     })->create();

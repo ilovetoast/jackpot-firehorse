@@ -62,6 +62,22 @@ class Brand extends Model
     }
 
     /**
+     * Whether the brand's download landing page template is enabled (branding only).
+     * Controls use of this brand's template when a landing page is shown; does NOT force a landing page.
+     * Single source of truth for download_landing_settings.enabled.
+     *
+     * Why landing pages are not policy-controlled here: This setting controls branding (which template to use),
+     * not whether a landing page is shown. Landing page requirement is determined only by password (see
+     * Download::isLandingPageRequired()). We do not add a "force landing page" flag here—intentional design.
+     */
+    public function isDownloadLandingPageEnabled(): bool
+    {
+        $settings = $this->download_landing_settings ?? [];
+
+        return ($settings['enabled'] ?? false) === true;
+    }
+
+    /**
      * Scope a query to only include default brands.
      */
     public function scopeDefault(Builder $query): Builder

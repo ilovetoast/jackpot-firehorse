@@ -11,6 +11,7 @@ use App\Models\StorageBucket;
 use App\Models\User;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Phase D2 — Download Management & Access Control
@@ -70,9 +71,17 @@ class DownloadManagementService
 
     /**
      * Change access scope (plan-gated).
+     * Multi-brand safety: brand-based access is only allowed when all assets are from a single brand (hard constraint).
+     * Intentional design—no heuristic brand selection; UI and backend both enforce this.
      */
     public function changeAccess(Download $download, string $accessMode, ?array $userIds, User $actor): void
     {
+        if ($accessMode === DownloadAccessMode::BRAND->value && ! $download->canRestrictToBrand()) {
+            throw ValidationException::withMessages([
+                'access_mode' => ['Brand-based access is only available when all assets in the download are from a single brand. This download contains assets from multiple brands.'],
+            ]);
+        }
+
         $previousState = $this->captureState($download);
 
         $download->update(['access_mode' => $accessMode]);
@@ -118,9 +127,17 @@ class DownloadManagementService
     /**
      * Update download settings (access, landing page, password). Caller must gate by plan.
      * $updates can contain: access_mode, user_ids, uses_landing_page, landing_copy (array), password_hash (string|null to clear).
+     * Multi-brand safety: brand-based access is only allowed when all assets are from a single brand (hard constraint).
+     * Intentional design—no heuristic brand selection; consistent with changeAccess and bucket assertion.
      */
     public function updateSettings(Download $download, array $updates, User $actor): void
     {
+        if (array_key_exists('access_mode', $updates) && $updates['access_mode'] === DownloadAccessMode::BRAND->value && ! $download->canRestrictToBrand()) {
+            throw ValidationException::withMessages([
+                'access_mode' => ['Brand-based access is only available when all assets in the download are from a single brand. This download contains assets from multiple brands.'],
+            ]);
+        }
+
         $previousState = $this->captureState($download);
 
         if (array_key_exists('access_mode', $updates)) {

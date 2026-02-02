@@ -25,8 +25,10 @@ export default function DownloadBucketBar({
   onCountChange = null,
   onRemove = null,
   onClear = null,
+  primaryColor,
 }) {
-  const { errors: pageErrors = {} } = usePage().props
+  const { errors: pageErrors = {}, auth } = usePage().props
+  const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
   const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -188,7 +190,8 @@ export default function DownloadBucketBar({
                       <button
                         type="button"
                         onClick={() => handlePreviewAsset(item.id)}
-                        className="flex min-w-0 flex-shrink items-center gap-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="flex min-w-0 flex-shrink items-center gap-2 rounded focus:outline-none focus:ring-2"
+                        style={{ ['--tw-ring-color']: brandPrimary }}
                       >
                         <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-gray-100">
                           {thumbUrl ? (
@@ -275,14 +278,16 @@ export default function DownloadBucketBar({
           )}
           <Link
             href={route('downloads.index')}
-            className="text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded px-2 py-1"
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus:ring-2 rounded px-2 py-1"
+            style={{ ['--tw-ring-color']: brandPrimary }}
           >
             View downloads
           </Link>
           <button
             type="button"
             onClick={handleOpenCreatePanel}
-            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+            className="inline-flex items-center rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ backgroundColor: brandPrimary, ['--tw-ring-color']: brandPrimary }}
           >
             Create Download
           </button>

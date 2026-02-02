@@ -240,7 +240,6 @@ return [
         // D11: Enterprise Download Policy — organizational delivery rules (Enterprise only). Non-enterprise: no key / null.
         'download_policy' => [
             'disable_single_asset_downloads' => true,
-            'require_landing_page_for_public' => true,
             'force_expiration_days' => 30,
             'disallow_non_expiring' => true,
             'require_password_for_public' => false, // default: not required; set true per-tenant if needed

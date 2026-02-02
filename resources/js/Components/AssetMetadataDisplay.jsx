@@ -12,8 +12,10 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { usePermission } from '../hooks/usePermission'
 
-export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null }) {
+export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null, primaryColor }) {
     const { auth } = usePage().props
+    const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const badgeBg = brandPrimary.startsWith('#') ? `${brandPrimary}18` : `#${brandPrimary}18`
     const [fields, setFields] = useState([])
     const [loading, setLoading] = useState(true)
     const [editingFieldId, setEditingFieldId] = useState(null)
@@ -330,7 +332,8 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                     setEditingFieldId(field.metadata_field_id)
                                                     setEditingField(field)
                                                 }}
-                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
+                                                style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
                                             >
                                                 <PencilIcon className="h-3 w-3" />
                                                 {fieldHasValue ? 'Edit' : 'Add'}
@@ -363,7 +366,8 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                     {collectionDisplay.collections.map((c) => (
                                                         <span
                                                             key={c.id}
-                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium"
+                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium"
+                                                            style={{ backgroundColor: badgeBg, color: brandPrimary }}
                                                             title={c.is_public ? 'Public collection' : undefined}
                                                         >
                                                             <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
@@ -383,7 +387,8 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                         <button
                                             type="button"
                                             onClick={collectionDisplay.onEdit}
-                                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
+                                            style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
                                         >
                                             <PencilIcon className="h-3 w-3" />
                                             {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}

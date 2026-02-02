@@ -84,6 +84,7 @@ class DownloadD3Test extends TestCase
             'original_filename' => 'file.jpg',
             'size_bytes' => 100,
             'metadata' => ['file_size' => 100],
+            'published_at' => now(),
         ]);
     }
 

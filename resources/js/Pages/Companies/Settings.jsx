@@ -11,13 +11,12 @@ import { debounce } from 'lodash-es'
 
 const DEFAULT_DOWNLOAD_POLICY = {
     disable_single_asset_downloads: false,
-    require_landing_page_for_public: false,
     require_password_for_public: false,
     force_expiration_days: null,
     disallow_non_expiring: false,
 }
 
-export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null, brands_without_landing_page: brandsWithoutLandingPage = [] }) {
+export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
     const { auth } = usePage().props
     const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
     const { hasPermission: canEditViaPermission } = usePermission('companies.settings.edit')
@@ -230,7 +229,6 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         setDownloadPolicySaving(true)
         router.put(route('companies.settings.download-policy'), {
             disable_single_asset_downloads: next.disable_single_asset_downloads ?? false,
-            require_landing_page_for_public: next.require_landing_page_for_public ?? false,
             require_password_for_public: next.require_password_for_public ?? false,
             force_expiration_days: next.force_expiration_days ?? null,
             disallow_non_expiring: next.disallow_non_expiring ?? false,
@@ -839,40 +837,6 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                                             Require assets to be delivered as packaged downloads instead of individual files. This helps ensure assets are shared intentionally and with context.
                                                         </p>
                                                         {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-start gap-3">
-                                                    <input
-                                                        type="checkbox"
-                                                        id="policy-landing-page"
-                                                        checked={downloadPolicy.require_landing_page_for_public ?? false}
-                                                        disabled={!isEnterprise}
-                                                        onChange={(e) => isEnterprise && persistDownloadPolicy({ ...downloadPolicy, require_landing_page_for_public: e.target.checked })}
-                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
-                                                    />
-                                                    <div>
-                                                        <label htmlFor="policy-landing-page" className="text-sm font-medium text-gray-900">
-                                                            Require landing page for public downloads
-                                                        </label>
-                                                        <p className="mt-0.5 text-sm text-gray-500">
-                                                            Force public downloads to use a branded landing page instead of direct file links. Landing pages provide clearer context and usage intent.
-                                                        </p>
-                                                        {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
-                                                        {isEnterprise && (downloadPolicy.require_landing_page_for_public ?? false) && brandsWithoutLandingPage?.length > 0 && (
-                                                            <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200/60">
-                                                                <p className="font-medium">The following brands will not show public downloads until a landing page is enabled:</p>
-                                                                <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-amber-900">
-                                                                    {brandsWithoutLandingPage.map((b) => (
-                                                                        <li key={b.id}>
-                                                                            <Link href={b.edit_url} className="font-medium underline hover:no-underline">
-                                                                                {b.name}
-                                                                            </Link>
-                                                                            {' — enable in Brand → Downloads → Landing Page'}
-                                                                        </li>
-                                                                    ))}
-                                                                </ul>
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 </div>
                                             </div>

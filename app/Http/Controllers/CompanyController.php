@@ -203,28 +203,14 @@ class CompanyController extends Controller
 
         // Enterprise Download Policy (read-only UX surface; Enterprise plan only)
         $enterpriseDownloadPolicy = null;
-        $brandsWithoutLandingPage = [];
         if ($currentPlan === 'enterprise') {
             $policy = app(EnterpriseDownloadPolicy::class);
             $enterpriseDownloadPolicy = [
                 'disable_single_asset_downloads' => $policy->disableSingleAssetDownloads($tenant),
-                'require_landing_page_for_public' => $policy->requireLandingPageForPublic($tenant),
                 'require_password_for_public' => $policy->requirePasswordForPublic($tenant),
                 'force_expiration_days' => $policy->forceExpirationDays($tenant),
                 'disallow_non_expiring' => $policy->disallowNonExpiring($tenant),
             ];
-            // Brands that don't have landing page enabled — for validation message when "Require landing page" is on
-            $brandsWithoutLandingPage = $tenant->brands()
-                ->orderBy('name')
-                ->get()
-                ->filter(fn ($b) => ! (($b->download_landing_settings ?? [])['enabled'] ?? false))
-                ->map(fn ($b) => [
-                    'id' => $b->id,
-                    'name' => $b->name ?? $b->slug ?? 'Brand',
-                    'edit_url' => route('brands.edit', ['brand' => $b->id]) . '#downloads-landing',
-                ])
-                ->values()
-                ->all();
         }
 
         // Phase M-2: Include tenant settings
@@ -247,7 +233,6 @@ class CompanyController extends Controller
             'tenant_users' => $tenantUsers,
             'pending_transfer' => $pendingTransferData,
             'enterprise_download_policy' => $enterpriseDownloadPolicy,
-            'brands_without_landing_page' => $brandsWithoutLandingPage,
         ]);
     }
 
@@ -385,7 +370,6 @@ class CompanyController extends Controller
 
         $validated = $request->validate([
             'disable_single_asset_downloads' => 'nullable|boolean',
-            'require_landing_page_for_public' => 'nullable|boolean',
             'require_password_for_public' => 'nullable|boolean',
             'force_expiration_days' => 'nullable|integer|min:1|max:365',
             'disallow_non_expiring' => 'nullable|boolean',
@@ -1129,40 +1113,61 @@ class CompanyController extends Controller
      * Get AI usage status for the current tenant.
      *
      * GET /api/companies/ai-usage
+     * Optional query: year (e.g. 2026), month (1-12) to view a specific month (for paging back).
      *
      * Admin-only endpoint to view AI usage and caps.
      *
      * @return JsonResponse
      */
-    public function getAiUsage(): JsonResponse
+    public function getAiUsage(Request $request): JsonResponse
     {
         try {
             $user = Auth::user();
             $tenant = app('tenant');
 
-            if (!$tenant) {
+            if (! $tenant) {
                 return response()->json(['error' => 'Tenant not found'], 404);
             }
 
             // Check permission (admin only)
-            if (!$user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
+            if (! $user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
                 return response()->json(['error' => 'You do not have permission to view AI usage.'], 403);
             }
 
-            $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
+            $year = $request->has('year') ? (int) $request->input('year') : null;
+            $month = $request->has('month') ? (int) $request->input('month') : null;
 
-            // Get breakdown for each feature
-            $breakdown = [];
-            foreach (['tagging', 'suggestions'] as $feature) {
-                $breakdown[$feature] = $this->aiUsageService->getUsageBreakdown($tenant, $feature);
+            if ($year !== null && $month !== null) {
+                // Validate: year 2020-2030, month 1-12
+                if ($year < 2020 || $year > 2030 || $month < 1 || $month > 12) {
+                    return response()->json(['error' => 'Invalid year or month.'], 400);
+                }
+                $usageStatus = $this->aiUsageService->getUsageStatusForPeriod($tenant, $year, $month);
+                $breakdown = [];
+                foreach (['tagging', 'suggestions'] as $feature) {
+                    $breakdown[$feature] = $this->aiUsageService->getUsageBreakdownForPeriod($tenant, $feature, $year, $month);
+                }
+                $dt = \Carbon\Carbon::createFromDate($year, $month, 1);
+                $currentMonth = $dt->format('Y-m');
+                $monthStart = $dt->copy()->startOfMonth()->toDateString();
+                $monthEnd = $dt->copy()->endOfMonth()->toDateString();
+            } else {
+                $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
+                $breakdown = [];
+                foreach (['tagging', 'suggestions'] as $feature) {
+                    $breakdown[$feature] = $this->aiUsageService->getUsageBreakdown($tenant, $feature);
+                }
+                $currentMonth = now()->format('Y-m');
+                $monthStart = now()->startOfMonth()->toDateString();
+                $monthEnd = now()->endOfMonth()->toDateString();
             }
 
             return response()->json([
                 'status' => $usageStatus,
                 'breakdown' => $breakdown,
-                'current_month' => now()->format('Y-m'),
-                'month_start' => now()->startOfMonth()->toDateString(),
-                'month_end' => now()->endOfMonth()->toDateString(),
+                'current_month' => $currentMonth,
+                'month_start' => $monthStart,
+                'month_end' => $monthEnd,
             ]);
         } catch (\Exception $e) {
             \Log::error('Error fetching AI usage data', [

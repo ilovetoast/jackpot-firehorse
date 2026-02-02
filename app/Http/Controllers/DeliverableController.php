@@ -45,6 +45,8 @@ class DeliverableController extends Controller
                 'categories' => [],
                 'selected_category' => null,
                 'assets' => [], // Top-level prop must always be present for frontend
+                'sort' => 'created',
+                'sort_direction' => 'desc',
             ]);
         }
 
@@ -218,6 +220,19 @@ class DeliverableController extends Controller
             $brand
         );
 
+        // Order by user-selected sort (starred | created | quality) and direction (asc | desc) — match AssetController
+        $sort = $request->input('sort', 'created');
+        $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+        if ($sort === 'starred') {
+            // Robust starred check: JSON true, unquoted 'true', or '1' (MySQL JSON boolean handling varies)
+            $assetsQuery->orderByRaw("CASE WHEN JSON_EXTRACT(metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1') THEN 1 ELSE 0 END " . $sortDirection);
+            $assetsQuery->orderBy('created_at', $sortDirection);
+        } elseif ($sort === 'quality') {
+            $assetsQuery->orderByRaw('COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.quality_rating\')), 0) ' . $sortDirection);
+            $assetsQuery->orderBy('created_at', $sortDirection);
+        } else {
+            $assetsQuery->orderBy('created_at', $sortDirection);
+        }
         $assets = $assetsQuery->get();
         
         // HARD TERMINAL STATE: Check for stuck assets and repair them
@@ -756,6 +771,8 @@ class DeliverableController extends Controller
             'assets' => $assets, // Top-level prop for frontend AssetGrid component
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
+            'sort' => $sort,
+            'sort_direction' => $sortDirection,
         ]);
     }
 }

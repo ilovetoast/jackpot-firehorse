@@ -46,32 +46,31 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
     }
 
     return (
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-            {/* Group Header - Collapsible */}
+        <div>
+            {/* Flat collapsible header — chevron only, small text, no card */}
             <button
                 type="button"
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                className="w-full flex items-center justify-between text-left py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900"
                 aria-expanded={isExpanded}
                 aria-controls={`metadata-group-${group.key}`}
             >
-                <h3 className="text-sm font-medium text-gray-900">
-                    {group.label}
-                </h3>
+                <span>{group.label}</span>
                 {isExpanded ? (
-                    <ChevronUpIcon className="h-5 w-5 text-gray-400" />
+                    <ChevronUpIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
                 ) : (
-                    <ChevronDownIcon className="h-5 w-5 text-gray-400" />
+                    <ChevronDownIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
                 )}
             </button>
+            <div className="border-b border-gray-200 mb-2" aria-hidden />
 
             {/* Group Fields */}
             {isExpanded && (
                 <div
                     id={`metadata-group-${group.key}`}
-                    className="px-4 py-4 border-t border-gray-200"
+                    className="pb-3"
                 >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                         {fieldsToRender.map((field) => (
                             <MetadataFieldInput
                                 key={field.key}

@@ -30,6 +30,11 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   const { download_features: features = {} } = usePage().props
   const { bannerMessage: pageBannerError, getFieldError } = useDownloadErrors(SETTINGS_ERROR_KEYS)
   const canBrand = !!features.restrict_access_brand
+  // Multi-brand safety: brand-based access only when all assets are from a single brand (hard constraint)
+  const canRestrictToBrand = download
+    ? (download.can_restrict_to_brand ?? !(download.brands && download.brands.length > 1))
+    : true
+  const isMultiBrand = canBrand && !canRestrictToBrand
   const canCompany = !!features.restrict_access_company
   const canUsers = !!features.restrict_access_users
   const canPasswordProtect = !!features.password_protection
@@ -49,7 +54,9 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   useEffect(() => {
     if (!open || !download) return
     setActiveTab('settings')
-    setAccessMode(download.access_mode || 'public')
+    const canRestrict = download.can_restrict_to_brand ?? !(download.brands && download.brands.length > 1)
+    const mode = download.access_mode || 'public'
+    setAccessMode(mode === 'brand' && !canRestrict ? 'public' : mode)
     setAllowedUserIds(Array.isArray(download.allowed_user_ids) ? [...download.allowed_user_ids] : [])
     setPassword('')
     setError(null)
@@ -165,17 +172,25 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                     <span className="text-sm text-gray-700">Public (anyone with the link)</span>
                   </label>
                   {canBrand && (
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="edit_access_mode"
-                        value="brand"
-                        checked={accessMode === 'brand'}
-                        onChange={() => setAccessMode('brand')}
-                        className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="text-sm text-gray-700">Brand members</span>
-                    </label>
+                    <>
+                      <label className={`flex items-center gap-2 ${isMultiBrand ? 'cursor-not-allowed opacity-75' : ''}`}>
+                        <input
+                          type="radio"
+                          name="edit_access_mode"
+                          value="brand"
+                          checked={accessMode === 'brand'}
+                          onChange={() => !isMultiBrand && setAccessMode('brand')}
+                          disabled={isMultiBrand}
+                          className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                        />
+                        <span className="text-sm text-gray-700">Brand members</span>
+                      </label>
+                      {isMultiBrand && (
+                        <p className="ml-6 text-xs text-amber-700" role="status">
+                          Brand-based access is only available when all assets are from a single brand. This download contains assets from multiple brands.
+                        </p>
+                      )}
+                    </>
                   )}
                   {canCompany && (
                     <label className="flex items-center gap-2">

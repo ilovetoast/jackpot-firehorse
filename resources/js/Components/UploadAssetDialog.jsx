@@ -67,7 +67,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Phase 2 invariant: This component assumes it is mounted only when visible.
     // Lifecycle (mount/unmount) controls visibility — not internal state.
     const { auth } = usePage().props
-    
+    const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
+
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
     const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
     const isContributor = !canApproveMetadata
@@ -4082,15 +4083,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {/* Phase 3 Components - show when files exist */}
-                                {/* Global Metadata Panel */}
-                                <GlobalMetadataPanel
-                                    uploadManager={phase3Manager}
-                                    categories={filteredCategories}
-                                    onCategoryChange={handleCategoryChange}
-                                    disabled={batchStatus === 'finalizing'}
-                                />
-
                                 {/* Compact Drop Zone - above uploads list, always visible */}
                                 <div className="mb-4">
                                 <div
@@ -4124,38 +4116,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 </div>
                                             </div>
 
-                                {/* CLEAN UPLOADER V2 — Category Selector (Finalize Prerequisite) */}
-                                <GlobalMetadataPanel
-                                    uploadManager={v2UploadManager}
-                                    categories={filteredCategories}
-                                    onCategoryChange={handleCategoryChangeV2}
-                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                />
-
-                                {/* C9.2: Collections — custom selector, attach to all files on finalize (category-driven visibility) */}
-                                {collectionFieldVisible && (
-                                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-                                        <div className="px-4 py-3 border-b border-gray-200">
-                                            <h3 className="text-sm font-medium text-gray-900">Collections</h3>
-                                            <p className="text-xs text-gray-500 mt-1">Add uploaded files to collections (optional)</p>
-                                        </div>
-                                        <div className="px-4 py-3">
+                                {/* Category + Collections: half width each on sm+ (col-sm-6 equivalent) */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+                                    <GlobalMetadataPanel
+                                        uploadManager={v2UploadManager}
+                                        categories={filteredCategories}
+                                        onCategoryChange={handleCategoryChangeV2}
+                                        disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                        inline
+                                    />
+                                    {collectionFieldVisible && (
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <label className="flex-shrink-0 w-24 text-sm font-medium text-gray-700 whitespace-nowrap">
+                                                Collections:
+                                            </label>
                                             {collectionsListLoading ? (
-                                                <p className="text-sm text-gray-500">Loading…</p>
+                                                <span className="text-sm text-gray-500">Loading…</span>
                                             ) : (
-                                                <CollectionSelector
-                                                    collections={collectionsList}
-                                                    selectedIds={selectedCollectionIds}
-                                                    onChange={setSelectedCollectionIds}
-                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                    placeholder="Select collections…"
-                                                    showCreateButton={true}
-                                                    onCreateClick={() => setShowCreateCollectionModal(true)}
-                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <CollectionSelector
+                                                        collections={collectionsList}
+                                                        selectedIds={selectedCollectionIds}
+                                                        onChange={setSelectedCollectionIds}
+                                                        disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                        placeholder="Select"
+                                                        showCreateButton={true}
+                                                        onCreateClick={() => setShowCreateCollectionModal(true)}
+                                                    />
+                                                </div>
                                             )}
                                         </div>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
 
                                 <CreateCollectionModal
                                     open={showCreateCollectionModal}
@@ -4167,18 +4159,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     }}
                                 />
 
-                                {/* Phase 2 – Step 2: Dynamic Metadata Fields */}
+                                {/* Dynamic Metadata Fields (no header — flows into field groups) */}
                                 {selectedCategoryId && (
-                                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-                                        <div className="px-4 py-3 border-b border-gray-200">
-                                            <h3 className="text-sm font-medium text-gray-900">
-                                                Metadata Fields
-                                            </h3>
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Configure metadata for all files in this batch
-                                            </p>
-                                        </div>
-                                        <div className="px-4 py-4">
+                                    <div>
                                             {isLoadingMetadataSchema ? (
                                                 <div className="text-center py-4">
                                                     <ArrowPathIcon className="h-5 w-5 text-gray-400 animate-spin mx-auto" />
@@ -4203,7 +4186,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                     </p>
                                                 </div>
                                             )}
-                                        </div>
                                     </div>
                                 )}
 
@@ -4268,7 +4250,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 checked={applyAiTagging}
                                                 onChange={(e) => setApplyAiTagging(e.target.checked)}
                                                 disabled={aiTaggingDisabled || batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                                className="mt-0.5 h-4 w-4 border-gray-300 rounded focus:ring-2 focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                style={{ accentColor: brandPrimary, ['--tw-ring-color']: brandPrimary }}
                                             />
                                             <div className="ml-3 flex-1">
                                                 <span className={`text-sm font-medium ${aiTaggingDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
@@ -4287,7 +4270,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 checked={applyAiMetadata}
                                                 onChange={(e) => setApplyAiMetadata(e.target.checked)}
                                                 disabled={aiMetadataDisabled || batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                className="mt-0.5 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                                className="mt-0.5 h-4 w-4 border-gray-300 rounded focus:ring-2 focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                style={{ accentColor: brandPrimary, ['--tw-ring-color']: brandPrimary }}
                                             />
                                             <div className="ml-3 flex-1">
                                                 <span className={`text-sm font-medium ${aiMetadataDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
@@ -4402,9 +4386,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         disabled={!canFinalizeV2 || batchStatus === 'finalizing' || isFinalizeSuccess}
                                         className={`rounded-md px-4 py-2 text-sm font-medium flex items-center gap-2 ${
                                             canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess
-                                                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                ? 'text-white hover:opacity-90'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
+                                        style={canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess ? { backgroundColor: brandPrimary } : undefined}
                                         title={!selectedCategoryId ? 'Select a category to finalize uploads' : undefined}
                                     >
                                         {batchStatus === 'finalizing' && (

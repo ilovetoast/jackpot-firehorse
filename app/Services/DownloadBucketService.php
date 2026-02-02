@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\User;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Phase D1 — Secure Asset Downloader (Foundation)
@@ -153,6 +154,38 @@ class DownloadBucketService
     public function count(): int
     {
         return count($this->ids());
+    }
+
+    /**
+     * Number of distinct brands among the bucket's visible (eligible) assets.
+     * Used for multi-brand safety: brand-based access is only allowed when this is 1 (hard constraint).
+     */
+    public function getDistinctBrandCount(): int
+    {
+        $ids = $this->visibleItems();
+        if (empty($ids)) {
+            return 0;
+        }
+
+        return (int) Asset::query()
+            ->whereIn('id', $ids)
+            ->selectRaw('count(distinct assets.brand_id) as c')
+            ->value('c');
+    }
+
+    /**
+     * Assert that the bucket has at most one brand (required for brand-based access on link creation).
+     * Call before creating a download with access_mode=brand. Throws ValidationException if multi-brand (hard constraint).
+     * Intentional design—same rule as Download::canRestrictToBrand(); no heuristic; UI disables brand option when multi-brand.
+     */
+    public function assertCanRestrictToBrand(): void
+    {
+        $count = $this->getDistinctBrandCount();
+        if ($count > 1) {
+            throw ValidationException::withMessages([
+                'access_mode' => ['Brand-based access is only available when all assets are from a single brand. This selection contains assets from multiple brands.'],
+            ]);
+        }
     }
 
     private function ids(): array

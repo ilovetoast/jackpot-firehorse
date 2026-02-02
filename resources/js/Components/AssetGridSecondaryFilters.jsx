@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { usePage, router, Link } from '@inertiajs/react'
-import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ChevronUpIcon, FunnelIcon, XMarkIcon, PlusIcon, ClockIcon, ArchiveBoxIcon, UserIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
@@ -48,6 +48,9 @@ import UserSelect from './UserSelect'
  * @param {Object} props.available_values - Map of field_key to available values
  * @param {boolean} props.canManageFields - Whether user has permission to manage metadata fields
  * @param {string} props.assetType - Current asset type (defaults to 'asset')
+ * @param {string} [props.sortBy] - Current sort field (starred | created | quality)
+ * @param {string} [props.sortDirection] - asc | desc
+ * @param {Function} [props.onSortChange] - (sortBy, sortDirection) => void
  */
 export default function AssetGridSecondaryFilters({
     filterable_schema = [],
@@ -55,9 +58,14 @@ export default function AssetGridSecondaryFilters({
     available_values = {},
     canManageFields = false,
     assetType = 'asset',
+    primaryColor,
+    sortBy = 'created',
+    sortDirection = 'desc',
+    onSortChange = null,
 }) {
     const pageProps = usePage().props
     const { auth, available_file_types = [] } = pageProps
+    const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     
     // Phase L.5.1: Check permissions for lifecycle filters
     // Pending Publication (pending_publication) requires asset.publish
@@ -470,41 +478,79 @@ export default function AssetGridSecondaryFilters({
     // Show empty state if no filters available for current category
     return (
         <div>
-            {/* Toggle Button - Always visible */}
-            <button
-                type="button"
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full px-4 py-3 sm:px-6 flex items-center justify-between text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-inset border-b-2 border-indigo-500"
+            {/* Bar: More filters (left) + Sort (right, compact) */}
+            <div
+                className="px-4 py-2 sm:px-6 flex items-center justify-between gap-3 text-left border-b border-gray-200"
+                style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
-                <div className="flex items-center gap-2">
-                    <FunnelIcon className="h-5 w-5 text-gray-400" />
-                    <span className="text-sm font-medium text-gray-700">
+                <button
+                    type="button"
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="flex items-center gap-2 min-w-0 flex-1 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-inset py-1.5 -my-1.5 px-1 text-left"
+                    style={{ ['--tw-ring-color']: brandPrimary }}
+                >
+                    <FunnelIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                    <span className="text-sm font-medium text-gray-700 truncate">
                         More filters
                     </span>
                     {activeFilterCount > 0 && (
-                        <span className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium text-white bg-indigo-600 rounded-full">
+                        <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium text-white rounded-full flex-shrink-0" style={{ backgroundColor: brandPrimary }}>
                             {activeFilterCount}
                         </span>
                     )}
                     {visibleSecondaryFilters.length === 0 && selectedCategoryId && (
-                        <span className="text-xs text-gray-500 italic">
+                        <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
                             (No filters available for this category)
                         </span>
                     )}
                     {visibleSecondaryFilters.length === 0 && !selectedCategoryId && (
-                        <span className="text-xs text-gray-500 italic">
-                            (Select a category to see filters)
+                        <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
+                            (No metadata filters for All)
                         </span>
                     )}
-                </div>
-                {visibleSecondaryFilters.length > 0 && (
-                    isExpanded ? (
-                        <ChevronUpIcon className="h-5 w-5 text-gray-400" />
-                    ) : (
-                        <ChevronDownIcon className="h-5 w-5 text-gray-400" />
-                    )
+                    {visibleSecondaryFilters.length > 0 && (
+                        <span className="flex-shrink-0 text-gray-400 ml-auto">
+                            {isExpanded ? (
+                                <ChevronUpIcon className="h-4 w-4" aria-hidden />
+                            ) : (
+                                <ChevronDownIcon className="h-4 w-4" aria-hidden />
+                            )}
+                        </span>
+                    )}
+                </button>
+
+                {/* Sort: compact dropdown + direction (in filter bar) */}
+                {onSortChange && (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-xs font-medium text-gray-500 hidden sm:inline">Sort</span>
+                        <label htmlFor="more-filters-sort-by" className="sr-only">Sort by</label>
+                        <select
+                            id="more-filters-sort-by"
+                            value={sortBy}
+                            onChange={(e) => onSortChange(e.target.value, sortDirection)}
+                            className="rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            aria-label="Sort by"
+                        >
+                            <option value="starred">Starred</option>
+                            <option value="created">Created</option>
+                            <option value="quality">Quality</option>
+                        </select>
+                        <button
+                            type="button"
+                            onClick={() => onSortChange(sortBy, sortDirection === 'asc' ? 'desc' : 'asc')}
+                            className="p-1 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                            title={sortDirection === 'asc' ? 'Descending' : 'Ascending'}
+                            aria-label={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
+                        >
+                            {sortDirection === 'asc' ? (
+                                <BarsArrowUpIcon className="h-4 w-4" />
+                            ) : (
+                                <BarsArrowDownIcon className="h-4 w-4" />
+                            )}
+                        </button>
+                    </div>
                 )}
-            </button>
+            </div>
             
             {/* Expandable Container (inline expansion - pushes content down) */}
             {isExpanded && (

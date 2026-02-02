@@ -67,8 +67,9 @@ import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/sol
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 
-export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null }) {
+export default function AssetDrawer({ asset, onClose, assets = [], currentAssetIndex = null, onAssetUpdate = null, collectionContext = null, bucketAssetIds = [], onBucketToggle = null, primaryColor }) {
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = usePage().props
+    const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
     const [showZoomModal, setShowZoomModal] = useState(false)
@@ -1567,13 +1568,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                     type="button"
                                                     disabled={!isEligibleForDownload}
                                                     onClick={() => onBucketToggle(displayAsset.id)}
-                                                    className={`inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                                    className={`inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                                                         isInBucket
-                                                            ? 'bg-indigo-100 text-indigo-800 ring-indigo-500'
+                                                            ? 'text-white'
                                                             : isEligibleForDownload
-                                                                ? 'bg-white border border-gray-300 text-gray-700 shadow-sm hover:bg-gray-50 ring-gray-500'
-                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed ring-gray-300'
+                                                                ? 'bg-white shadow-sm hover:opacity-90'
+                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-300'
                                                     }`}
+                                                    style={isEligibleForDownload ? {
+                                                        borderColor: isInBucket ? brandPrimary : brandPrimary,
+                                                        color: isInBucket ? '#fff' : brandPrimary,
+                                                        backgroundColor: isInBucket ? brandPrimary : undefined,
+                                                        ['--tw-ring-color']: brandPrimary,
+                                                    } : {}}
                                                     title={!isEligibleForDownload ? 'Publish this asset to add to download' : isInBucket ? 'Remove from download' : 'Add to download'}
                                                 >
                                                     {isInBucket ? (
@@ -1637,11 +1644,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 }
                                                 setTimeout(() => setToastMessage(null), 3000)
                                             }}
-                                            className={`w-full inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                                            className={`w-full inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                                                 canSingleAssetDownload
-                                                    ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+                                                    ? 'hover:opacity-90'
                                                     : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                             }`}
+                                            style={canSingleAssetDownload ? { backgroundColor: brandPrimary, ['--tw-ring-color']: brandPrimary } : {}}
                                             title={!isEligibleForDownload ? 'Publish this asset to download' : singleAssetDisabledByPolicy ? 'Your organization requires downloads to be packaged.' : 'Download this asset (tracked)'}
                                         >
                                             <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
@@ -1716,6 +1724,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             <AssetMetadataDisplay 
                                 assetId={displayAsset.id} 
                                 onPendingCountChange={setPendingMetadataCount}
+                                primaryColor={brandPrimary}
                                 collectionDisplay={collectionFieldVisible ? {
                                     collections: assetCollections,
                                     loading: assetCollectionsLoading,
@@ -1734,6 +1743,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     showInput={true}
                                     compact={true}
                                     inline={true}
+                                    primaryColor={brandPrimary}
                                 />
                             </div>
                         </CollapsibleSection>

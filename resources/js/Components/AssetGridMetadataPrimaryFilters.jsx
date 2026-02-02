@@ -255,7 +255,7 @@ export default function AssetGridMetadataPrimaryFilters({
         
         return (
             <div className="flex items-center">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                     {visiblePrimaryFilters.map((field) => {
                         const fieldKey = field.field_key || field.key
                         const currentFilter = filters[fieldKey] || {}
@@ -271,6 +271,7 @@ export default function AssetGridMetadataPrimaryFilters({
                                 availableValues={available_values[fieldKey] || []}
                                 onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
                                 compact={true}
+                                labelInDropdown={true}
                             />
                         )
                     })}
@@ -318,7 +319,7 @@ export default function AssetGridMetadataPrimaryFilters({
  * 
  * This is the same component used by AssetGridSecondaryFilters to ensure consistency.
  */
-function FilterFieldInput({ field, value, operator, onChange, availableValues = [], compact = false }) {
+function FilterFieldInput({ field, value, operator, onChange, availableValues = [], compact = false, labelInDropdown = false }) {
     const fieldKey = field.field_key || field.key
     const fieldType = field.type || 'text'
     
@@ -413,19 +414,17 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         ? (Array.isArray(value) ? value : (value != null ? [value] : null))
         : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : value)
     
+    const displayLabel = field.display_label || field.label || fieldKey
+
     return (
         <div className="flex-shrink-0">
-            {/* Always show label for primary filters */}
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-                {field.display_label || field.label || fieldKey}
-            </label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
                 {/* STEP 3: Hide operator dropdown for color filters; C9.2: hide for collection (single select only) */}
                 {!isColorFilter && !isCollectionFilter && field.operators && field.operators.length > 1 && (
                     <select
                         value={effectiveOperator}
                         onChange={handleOperatorChange}
-                        className="flex-shrink-0 px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                        className="flex-shrink-0 px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
                     >
                         {field.operators.map((op) => (
                             <option key={op.value} value={op.value}>
@@ -441,6 +440,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                     filteredOptions={filteredOptions}
                     onChange={handleValueChange}
                     compact={compact}
+                    labelInDropdown={labelInDropdown}
+                    placeholderLabel={displayLabel}
                 />
             </div>
         </div>
@@ -455,7 +456,7 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
  * 
  * This is the same component used by AssetGridSecondaryFilters to ensure consistency.
  */
-function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, compact = false }) {
+function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, compact = false, labelInDropdown = false, placeholderLabel = null }) {
     const fieldType = field.type || 'text'
     const fieldKey = field.field_key || field.key
     
@@ -482,6 +483,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
             ? filteredOptions
             : (field.options || [])
         const label = (opt) => opt.display_label ?? opt.label ?? opt.value
+        const placeholder = (labelInDropdown && placeholderLabel) ? placeholderLabel : 'Any'
         return (
             <select
                 value={Array.isArray(value) ? value[0] ?? '' : (value ?? '')}
@@ -489,11 +491,11 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     const v = e.target.value
                     onChange(v ? [v] : null)
                 }}
-                className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                    compact ? 'min-w-[100px]' : 'min-w-[140px]'
+                className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                    compact ? 'min-w-[80px]' : 'min-w-[100px]'
                 }`}
             >
-                <option value="">Any</option>
+                <option value="">{placeholder}</option>
                 {opts.map((option) => (
                     <option key={option.value} value={option.value}>
                         {label(option)}
@@ -546,6 +548,8 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         ? filteredOptions 
         : (field.options || [])
     
+    const inputClass = `px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${compact ? 'min-w-[80px]' : 'min-w-[100px]'}`
+
     switch (fieldType) {
         case 'text':
             return (
@@ -553,10 +557,8 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="text"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value)}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
-                    }`}
-                    placeholder="Enter value..."
+                    className={inputClass}
+                    placeholder={placeholderLabel || 'Enter value...'}
                 />
             )
         
@@ -568,7 +570,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                             type="number"
                             value={Array.isArray(value) ? value[0] : ''}
                             onChange={(e) => onChange([e.target.value || null, Array.isArray(value) ? value[1] : null])}
-                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20 transition-colors"
+                            className="px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 w-16 transition-colors"
                             placeholder="Min"
                         />
                         <span className="text-xs text-gray-500">-</span>
@@ -576,7 +578,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                             type="number"
                             value={Array.isArray(value) ? value[1] : ''}
                             onChange={(e) => onChange([Array.isArray(value) ? value[0] : null, e.target.value || null])}
-                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20 transition-colors"
+                            className="px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 w-16 transition-colors"
                             placeholder="Max"
                         />
                     </div>
@@ -587,38 +589,39 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="number"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
-                    }`}
+                    className={inputClass}
                     placeholder="Enter number..."
                 />
             )
         
-        case 'boolean':
+        case 'boolean': {
+            const boolPlaceholder = (labelInDropdown && placeholderLabel) ? placeholderLabel : 'Any'
             return (
                 <select
                     value={value === null ? '' : String(value)}
                     onChange={(e) => onChange(e.target.value === 'true' ? true : e.target.value === 'false' ? false : null)}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[80px]' : 'min-w-[100px]'
                     }`}
                 >
-                    <option value="">Any</option>
+                    <option value="">{boolPlaceholder}</option>
                     <option value="true">Yes</option>
                     <option value="false">No</option>
                 </select>
             )
+        }
         
-        case 'select':
+        case 'select': {
+            const selectPlaceholder = (labelInDropdown && placeholderLabel) ? placeholderLabel : 'Any'
             return (
                 <select
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value || null)}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[80px]' : 'min-w-[100px]'
                     }`}
                 >
-                    <option value="">Any</option>
+                    <option value="">{selectPlaceholder}</option>
                     {options.map((option) => (
                         <option key={option.value} value={option.value}>
                             {option.display_label ?? option.label ?? option.value}
@@ -626,6 +629,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     ))}
                 </select>
             )
+        }
 
         case 'multiselect':
             return (
@@ -636,8 +640,8 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                         const selected = Array.from(e.target.selectedOptions, (opt) => opt.value)
                         onChange(selected.length > 0 ? selected : null)
                     }}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
+                    className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
+                        compact ? 'min-w-[80px]' : 'min-w-[100px]'
                     }`}
                     size={Math.min((options?.length || 0) + 1, 5)}
                 >
@@ -657,14 +661,14 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                             type="date"
                             value={Array.isArray(value) ? value[0] : ''}
                             onChange={(e) => onChange([e.target.value || null, Array.isArray(value) ? value[1] : null])}
-                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                            className="px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                         />
                         <span className="text-xs text-gray-500">-</span>
                         <input
                             type="date"
                             value={Array.isArray(value) ? value[1] : ''}
                             onChange={(e) => onChange([Array.isArray(value) ? value[0] : null, e.target.value || null])}
-                            className="px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                            className="px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                         />
                     </div>
                 )
@@ -674,9 +678,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="date"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value || null)}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
-                    }`}
+                    className={inputClass}
                 />
             )
         
@@ -686,10 +688,8 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     type="text"
                     value={value || ''}
                     onChange={(e) => onChange(e.target.value)}
-                    className={`px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
-                        compact ? 'min-w-[100px]' : 'min-w-[120px]'
-                    }`}
-                    placeholder="Enter value..."
+                    className={inputClass}
+                    placeholder={placeholderLabel || 'Enter value...'}
                 />
             )
     }

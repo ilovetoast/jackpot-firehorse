@@ -91,8 +91,10 @@ export function isGlobalFilter(filter) {
  * 
  * Compatibility rules:
  * - If category_id is null ("All Categories" context):
- *   → Only global filters (is_global === true) are compatible
- *   → Category-specific filters are incompatible (no category context)
+ *   → Global filters (is_global === true) are compatible
+ *   → Filters that apply to all categories (category_ids null/undefined/missing) are compatible
+ *     so users can use metadata filters (e.g. system-level) when viewing "All"
+ *   → Category-specific filters (category_ids array) are incompatible (no single category context)
  * 
  * - If category_id is a number:
  *   → If filter.category_ids is null → compatible (filter applies to all categories)
@@ -126,12 +128,18 @@ export function isGlobalFilter(filter) {
  * )
  * // Returns: false
  * 
- * // "All Categories" context - only global filters compatible
+ * // "All Categories" context - global and "applies to all" filters compatible
  * isCategoryCompatible(
  *   { is_global: true, category_ids: null },
  *   null
  * )
  * // Returns: true
+ * 
+ * isCategoryCompatible(
+ *   { is_global: false, category_ids: null },
+ *   null
+ * )
+ * // Returns: true (metadata filter applies to all categories – show in "All" view)
  * 
  * isCategoryCompatible(
  *   { is_global: false, category_ids: [1, 2] },
@@ -146,9 +154,16 @@ export function isCategoryCompatible(filter, category_id) {
     }
     
     // "All Categories" context (category_id === null)
-    // Only global filters are compatible - category-specific filters have no context
+    // Global filters and filters that apply to all categories are compatible so users can
+    // customize/use metadata filters (e.g. system-level) when viewing "All"
     if (category_id === null) {
-        return isGlobalFilter(filter);
+        if (isGlobalFilter(filter)) return true;
+        // Filter applies to all categories (category_ids null/undefined/missing) → show in "All"
+        if (filter.category_ids === null || filter.category_ids === undefined || !('category_ids' in filter)) {
+            return true;
+        }
+        // Category-specific (category_ids array) → hide in "All" (no single category context)
+        return false;
     }
     
     // Specific category context (category_id is a number)

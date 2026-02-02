@@ -43,26 +43,28 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         const tenantId = tenant?.id
         
         return (
-            <div>
-                <TagInputUnified
-                    mode="upload"
-                    value={Array.isArray(value) ? value : []}
-                    onChange={handleChange}
-                    tenantId={tenantId}
-                    placeholder="Add tags for this upload..."
-                    showTitle={true}
-                    title={field.display_label}
-                    showCounter={true}
-                    maxTags={10}
-                    compact={false}
-                    className="w-full"
-                    ariaLabel={`${field.display_label} input`}
-                />
-                {hasError && (
-                    <p className="mt-1 text-sm text-red-600">
-                        This field is required.
-                    </p>
-                )}
+            <div className="flex items-start gap-2 min-w-0">
+                <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700 pt-0.5">
+                    {field.display_label}
+                    {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                </label>
+                <div className="flex-1 min-w-0">
+                    <TagInputUnified
+                        mode="upload"
+                        value={Array.isArray(value) ? value : []}
+                        onChange={handleChange}
+                        tenantId={tenantId}
+                        placeholder="Add tags..."
+                        showTitle={false}
+                        title={field.display_label}
+                        showCounter={true}
+                        maxTags={10}
+                        compact={false}
+                        className="w-full"
+                        ariaLabel={`${field.display_label} input`}
+                    />
+                </div>
+                {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
             </div>
         )
     }
@@ -71,13 +73,10 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
     switch (field.type) {
         case 'text':
             return (
-                <div>
-                    <label htmlFor={field.key} className="block text-sm font-medium text-gray-700 mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
                         {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
-                        {isRequired && !hasError && (
-                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                        )}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
                     <input
                         type="text"
@@ -87,29 +86,24 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                         onChange={(e) => handleChange(e.target.value)}
                         disabled={isDisabled}
                         title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                        className={`block w-full rounded-md shadow-sm focus:ring-indigo-500 sm:text-sm ${
+                        className={`flex-1 min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm ${
                             hasError
                                 ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
                                 : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
-                        } ${
-                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
-                        }`}
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     />
                     {hasError && (
-                        <p className="mt-1 text-xs text-red-600">This field is required.</p>
+                        <span className="flex-shrink-0 text-xs text-red-600">Required</span>
                     )}
                 </div>
             )
 
         case 'number':
             return (
-                <div>
-                    <label htmlFor={field.key} className="block text-sm font-medium text-gray-700 mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
                         {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
-                        {isRequired && !hasError && (
-                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                        )}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
                     <input
                         type="number"
@@ -119,59 +113,39 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                         onChange={(e) => handleChange(e.target.value === '' ? null : Number(e.target.value))}
                         disabled={isDisabled}
                         title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                        className={`block w-full rounded-md shadow-sm focus:ring-indigo-500 sm:text-sm ${
-                            hasError
-                                ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-                                : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
-                        } ${
-                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
-                        }`}
+                        className={`flex-1 min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm ${
+                            hasError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     />
-                    {hasError && (
-                        <p className="mt-1 text-xs text-red-600">This field is required.</p>
-                    )}
+                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 
         case 'boolean':
             return (
-                <div>
-                    <label className="flex items-center">
-                        <input
-                            type="checkbox"
-                            checked={value === true || value === 'true'}
-                            onChange={(e) => handleChange(e.target.checked)}
-                            disabled={isDisabled}
-                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                            className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${
-                                hasError ? 'border-red-300' : ''
-                            } ${
-                                isDisabled ? 'cursor-not-allowed opacity-60' : ''
-                            }`}
-                        />
-                        <span className="ml-2 text-sm font-medium text-gray-700">
-                            {field.display_label}
-                            {isRequired && <span className="text-red-500 ml-1">*</span>}
-                            {isRequired && !hasError && (
-                                <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                            )}
-                        </span>
+                <div className="flex items-center gap-2 min-w-0">
+                    <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                        {field.display_label}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
-                    {hasError && (
-                        <p className="mt-1 text-xs text-red-600 ml-6">This field is required.</p>
-                    )}
+                    <input
+                        type="checkbox"
+                        checked={value === true || value === 'true'}
+                        onChange={(e) => handleChange(e.target.checked)}
+                        disabled={isDisabled}
+                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                        className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${hasError ? 'border-red-300' : ''} ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                    />
+                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 
         case 'date':
             return (
-                <div>
-                    <label htmlFor={field.key} className="block text-sm font-medium text-gray-700 mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
                         {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
-                        {isRequired && !hasError && (
-                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                        )}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
                     <input
                         type="date"
@@ -181,17 +155,11 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                         onChange={(e) => handleChange(e.target.value)}
                         disabled={isDisabled}
                         title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                        className={`block w-full rounded-md shadow-sm focus:ring-indigo-500 sm:text-sm ${
-                            hasError
-                                ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-                                : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
-                        } ${
-                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
-                        }`}
+                        className={`flex-1 min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm ${
+                            hasError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                        } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     />
-                    {hasError && (
-                        <p className="mt-1 text-xs text-red-600">This field is required.</p>
-                    )}
+                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 
@@ -219,13 +187,10 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             }
 
             return (
-                <div>
-                    <label htmlFor={field.key} className="block text-sm font-medium text-gray-700 mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                    <label htmlFor={field.key} className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
                         {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
-                        {isRequired && !hasError && (
-                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                        )}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
                     <select
                         id={field.key}
@@ -234,64 +199,42 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                         onChange={(e) => handleChange(e.target.value)}
                         disabled={isDisabled}
                         title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                        className={`block w-full rounded-md shadow-sm focus:ring-indigo-500 sm:text-sm text-gray-900 bg-white ${
-                            hasError
-                                ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-                                : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
-                        } ${
-                            isDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
-                        }`}
+                        className={`flex-1 min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm text-gray-900 bg-white ${
+                            hasError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                        } ${isDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
                     >
-                        <option value="">Select {field.display_label.toLowerCase()}</option>
+                        <option value="">Select</option>
                         {field.options.map((option) => (
                             <option key={option.value} value={option.value}>
                                 {option.display_label}
                             </option>
                         ))}
                     </select>
-                    {hasError && (
-                        <p className="mt-1 text-xs text-red-600">This field is required.</p>
-                    )}
+                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 
         case 'multiselect':
-            // Handle empty options
             if (!field.options || field.options.length === 0) {
                 return (
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            {field.display_label}
-                        </label>
-                        <div className="rounded-md border border-gray-300 bg-gray-50 p-3">
-                            <p className="text-xs text-gray-500">
-                                No options are available for this field.
-                            </p>
-                        </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">{field.display_label}</label>
+                        <span className="text-xs text-gray-500">No options</span>
                     </div>
                 )
             }
-
-            // Ensure value is an array
             const currentValues = Array.isArray(value) ? value : []
-
             return (
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                <div className="flex items-start gap-2 min-w-0">
+                    <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700 pt-0.5">
                         {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
-                        {isRequired && !hasError && (
-                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                        )}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
-                    <div className="space-y-2">
+                    <div className="flex-1 min-w-0 flex flex-wrap gap-x-3 gap-y-1">
                         {field.options.map((option) => {
                             const isSelected = currentValues.includes(option.value)
                             return (
-                                <label
-                                    key={option.value}
-                                    className="flex items-center"
-                                >
+                                <label key={option.value} className="flex items-center">
                                     <input
                                         type="checkbox"
                                         checked={isSelected}
@@ -302,36 +245,26 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                                             handleChange(newValues)
                                         }}
                                         disabled={isDisabled}
-                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                                        className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${
-                                            hasError ? 'border-red-300' : ''
-                                        } ${
-                                            isDisabled ? 'cursor-not-allowed opacity-60' : ''
-                                        }`}
+                                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                        className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${hasError ? 'border-red-300' : ''} ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
                                     />
-                                    <span className="ml-2 text-sm text-gray-700">
-                                        {option.display_label}
-                                    </span>
+                                    <span className="ml-1.5 text-sm text-gray-700">{option.display_label}</span>
                                 </label>
                             )
                         })}
                     </div>
-                    {hasError && (
-                        <p className="mt-1 text-xs text-red-600">At least one option must be selected.</p>
-                    )}
+                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 
         case 'rating':
             return (
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                    <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
                         {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-1">*</span>}
-                        {isRequired && !hasError && (
-                            <span className="ml-2 text-xs text-gray-500 font-normal">Required</span>
-                        )}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
+                    <div className="flex-1 min-w-0">
                     <StarRating
                         value={value || 0}
                         onChange={handleChange}
@@ -339,9 +272,8 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
                         maxStars={5}
                         size="md"
                     />
-                    {hasError && (
-                        <p className="mt-1 text-xs text-red-600">This field is required.</p>
-                    )}
+                    </div>
+                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 

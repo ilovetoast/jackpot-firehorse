@@ -24,6 +24,8 @@ export default function CollectionsIndex({
     can_add_to_collection = false,
     can_remove_from_collection = false,
     public_collections_enabled = false,
+    sort = 'created',
+    sort_direction = 'desc',
 }) {
     const { auth, download_bucket_count } = usePage().props
     const selectedCollectionId = selected_collection?.id ?? null
@@ -246,6 +248,14 @@ export default function CollectionsIndex({
                                             filterable_schema={[]}
                                             selectedCategoryId={null}
                                             available_values={{}}
+                                            sortBy={sort}
+                                            sortDirection={sort_direction}
+                                            onSortChange={(newSort, newDir) => {
+                                                const urlParams = new URLSearchParams(window.location.search)
+                                                urlParams.set('sort', newSort)
+                                                urlParams.set('sort_direction', newDir)
+                                                router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
+                                            }}
                                             showMoreFilters={false}
                                         />
                                     </div>
