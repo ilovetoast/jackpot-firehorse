@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -28,6 +29,16 @@ class Tenant extends Model
         'billing_status_expires_at', // Optional expiration for trial/comped accounts
         'equivalent_plan_value', // Sales insight only - NOT real revenue
         'settings', // Phase M-2: Company settings (JSON)
+        'is_agency', // Phase AG-1: Agency identification
+        'agency_tier_id', // Phase AG-1: Agency tier
+        'agency_approved_at', // Phase AG-1: Agency approval timestamp
+        'agency_approved_by', // Phase AG-1: Agency approval user ID
+        'incubated_at', // Phase AG-2: Incubation start timestamp
+        'incubation_expires_at', // Phase AG-2: Incubation expiration timestamp
+        'incubated_by_agency_id', // Phase AG-2: Agency that incubated this tenant
+        'activated_client_count', // Phase AG-4: Tier progress tracking
+        'referred_by_agency_id', // Phase AG-10: Referral attribution
+        'referral_source', // Phase AG-10: Referral source tracking
     ];
 
     /**
@@ -41,6 +52,10 @@ class Tenant extends Model
             'billing_status_expires_at' => 'date',
             'equivalent_plan_value' => 'decimal:2',
             'settings' => 'array', // Phase M-2: Company settings (JSON)
+            'is_agency' => 'boolean', // Phase AG-1: Agency identification
+            'agency_approved_at' => 'datetime', // Phase AG-1: Agency approval timestamp
+            'incubated_at' => 'datetime', // Phase AG-2: Incubation start timestamp
+            'incubation_expires_at' => 'datetime', // Phase AG-2: Incubation expiration timestamp
         ];
     }
 
@@ -127,6 +142,61 @@ class Tenant extends Model
     public function downloads(): HasMany
     {
         return $this->hasMany(\App\Models\Download::class);
+    }
+
+    /**
+     * Get the agency tier for this tenant.
+     * 
+     * Phase AG-1 — Agency Core Data Model
+     */
+    public function agencyTier(): BelongsTo
+    {
+        return $this->belongsTo(AgencyTier::class);
+    }
+
+    /**
+     * Get the agency that incubated this tenant.
+     * 
+     * Phase AG-2 — Incubation State & Tracking
+     */
+    public function incubatedByAgency(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class, 'incubated_by_agency_id');
+    }
+
+    /**
+     * Get the partner rewards received by this agency.
+     * 
+     * Phase AG-4 — Partner Reward Attribution
+     */
+    public function agencyPartnerRewards(): HasMany
+    {
+        return $this->hasMany(AgencyPartnerReward::class, 'agency_tenant_id');
+    }
+
+    /**
+     * Get the agency that referred this tenant.
+     * 
+     * Phase AG-10 — Partner Marketing & Referral Attribution
+     * 
+     * NOTE: This is SEPARATE from incubation. A tenant can be:
+     * - Incubated only (built by agency, transferred)
+     * - Referred only (signed up via referral, not built by agency)
+     * - Both (incubated AND referred)
+     */
+    public function referredByAgency(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class, 'referred_by_agency_id');
+    }
+
+    /**
+     * Get the partner referrals made by this agency.
+     * 
+     * Phase AG-10 — Partner Marketing & Referral Attribution
+     */
+    public function agencyPartnerReferrals(): HasMany
+    {
+        return $this->hasMany(AgencyPartnerReferral::class, 'agency_tenant_id');
     }
 
     /**

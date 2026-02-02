@@ -29,6 +29,7 @@ class Brand extends Model
      */
     protected $fillable = [
         'tenant_id',
+        'owning_tenant_id', // Phase AG-2: Brand ownership tracking
         'name',
         'slug',
         'logo_path',
@@ -124,6 +125,16 @@ class Brand extends Model
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    /**
+     * Get the owning tenant for this brand (for future brand transfers).
+     * 
+     * Phase AG-2 — Incubation State & Tracking
+     */
+    public function owningTenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class, 'owning_tenant_id');
     }
 
     /**

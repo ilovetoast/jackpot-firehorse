@@ -143,6 +143,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
     const canViewMetadataRegistry = permissionsArray.includes('metadata.registry.view')
 
     const adminTools = [
+        { name: 'Agencies', icon: BuildingOfficeIcon, description: 'Manage agency partners and approvals', href: '/app/admin/agencies' },
         { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
         { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },
         { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
@@ -592,6 +593,12 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                                                                             )}
                                                                             {company.plan || (company.plan_name ? company.plan_name.charAt(0).toUpperCase() + company.plan_name.slice(1) : 'Free')}
                                                                         </span>
+                                                                        {/* Agency Badge */}
+                                                                        {company.is_agency && (
+                                                                            <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800">
+                                                                                Agency{company.agency_tier ? `: ${company.agency_tier}` : ''}
+                                                                            </span>
+                                                                        )}
                                                                         {/* Plan Selector Dropdown */}
                                                                         {company.plan_management && !company.plan_management.is_externally_managed && company.can_manage_plan && (
                                                                             <select
@@ -721,6 +728,42 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                                                             >
                                                                 Manage Subscription
                                                             </Link>
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    const action = company.is_agency ? 'revoke agency status from' : 'grant agency status to'
+                                                                    if (confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} ${company.name}?`)) {
+                                                                        try {
+                                                                            const response = await fetch(`/app/admin/agencies/${company.id}/toggle-status`, {
+                                                                                method: 'POST',
+                                                                                headers: {
+                                                                                    'Content-Type': 'application/json',
+                                                                                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content'),
+                                                                                },
+                                                                            })
+                                                                            const data = await response.json()
+                                                                            if (data.success) {
+                                                                                // Update local state
+                                                                                setCompanies(prev => prev.map(c => 
+                                                                                    c.id === company.id 
+                                                                                        ? { ...c, is_agency: data.is_agency }
+                                                                                        : c
+                                                                                ))
+                                                                                alert(data.is_agency ? 'Agency status granted!' : 'Agency status removed!')
+                                                                            }
+                                                                        } catch (error) {
+                                                                            alert('Failed to update agency status')
+                                                                        }
+                                                                    }
+                                                                }}
+                                                                className={`rounded-md px-3 py-2 text-sm font-semibold shadow-sm ${
+                                                                    company.is_agency
+                                                                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                                        : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                                                                }`}
+                                                            >
+                                                                {company.is_agency ? 'Remove Agency' : 'Make Agency'}
+                                                            </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {

@@ -32,8 +32,22 @@ class EventType
     public const TENANT_OWNER_TRANSFER_INITIATED = 'tenant.owner_transfer.initiated';
     public const TENANT_OWNER_TRANSFER_CONFIRMED = 'tenant.owner_transfer.confirmed';
     public const TENANT_OWNER_TRANSFER_ACCEPTED = 'tenant.owner_transfer.accepted';
+    public const TENANT_OWNER_TRANSFER_PENDING_BILLING = 'tenant.owner_transfer.pending_billing'; // Phase AG-3: Awaiting billing
+    public const TENANT_OWNER_TRANSFER_BILLING_CONFIRMED = 'tenant.owner_transfer.billing_confirmed'; // Phase AG-3: Billing activated
     public const TENANT_OWNER_TRANSFER_COMPLETED = 'tenant.owner_transfer.completed';
     public const TENANT_OWNER_TRANSFER_CANCELLED = 'tenant.owner_transfer.cancelled';
+
+    // Agency partner program events (Phase AG-4)
+    public const AGENCY_PARTNER_REWARD_GRANTED = 'agency.partner_reward.granted';
+    public const AGENCY_TIER_ADVANCED = 'agency.tier.advanced';
+
+    // Agency partner access events (Phase AG-5)
+    public const AGENCY_PARTNER_ACCESS_GRANTED = 'agency.partner_access.granted';
+    public const AGENCY_PARTNER_ACCESS_REVOKED = 'agency.partner_access.revoked';
+
+    // Agency partner referral events (Phase AG-10)
+    public const AGENCY_PARTNER_REFERRAL_CREATED = 'agency.partner_referral.created';
+    public const AGENCY_PARTNER_REFERRAL_ACTIVATED = 'agency.partner_referral.activated';
 
     // User events
     public const USER_CREATED = 'user.created';

@@ -7,6 +7,7 @@ enum OwnershipTransferStatus: string
     case PENDING = 'pending';
     case CONFIRMED = 'confirmed';
     case ACCEPTED = 'accepted';
+    case PENDING_BILLING = 'pending_billing'; // Phase AG-3: Awaiting billing confirmation
     case COMPLETED = 'completed';
     case CANCELLED = 'cancelled';
 

@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             SystemCategoryTemplateSeeder::class, // Seed system category templates first
             NotificationTemplateSeeder::class, // Seed notification templates
+            AgencyTierSeeder::class, // Phase AG-1: Seed agency tiers (Silver, Gold, Platinum)
             CompanyBrandSeeder::class, // This creates the site owner and companies/brands
             EnsureDefaultBrandsSeeder::class, // Ensure all tenants have default brands
             TenantAiTagSettingsSeeder::class, // Initialize AI tagging settings for all tenants

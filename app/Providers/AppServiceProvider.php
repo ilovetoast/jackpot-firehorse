@@ -4,6 +4,9 @@ namespace App\Providers;
 
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
+use App\Events\CompanyTransferCompleted;
+use App\Listeners\ActivateAgencyReferral;
+use App\Listeners\GrantAgencyPartnerReward;
 use App\Listeners\ProcessAssetOnUpload;
 use App\Listeners\SendAssetPendingApprovalNotification;
 use App\Services\AI\Contracts\AIProviderInterface;
@@ -47,5 +50,11 @@ class AppServiceProvider extends ServiceProvider
         // Register event listeners
         Event::listen(AssetUploaded::class, ProcessAssetOnUpload::class);
         Event::listen(AssetPendingApproval::class, SendAssetPendingApprovalNotification::class);
+        
+        // Phase AG-4: Agency partner reward attribution
+        Event::listen(CompanyTransferCompleted::class, GrantAgencyPartnerReward::class);
+        
+        // Phase AG-10: Agency referral activation (attribution only, no rewards)
+        Event::listen(CompanyTransferCompleted::class, ActivateAgencyReferral::class);
     }
 }

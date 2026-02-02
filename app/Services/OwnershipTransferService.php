@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\EventType;
 use App\Enums\OwnershipTransferStatus;
+use App\Events\CompanyTransferCompleted;
 use App\Mail\OwnershipTransferConfirmation;
 use App\Mail\OwnershipTransferRequest;
 use App\Mail\OwnershipTransferAcceptance;
@@ -57,12 +58,13 @@ class OwnershipTransferService
             throw new InvalidArgumentException('The new owner must be an active member of the tenant.');
         }
 
-        // Prevent multiple active transfers per tenant
+        // Phase AG-3: Prevent multiple active transfers per tenant (including PENDING_BILLING)
         $activeTransfer = OwnershipTransfer::where('tenant_id', $tenant->id)
             ->whereIn('status', [
                 OwnershipTransferStatus::PENDING,
                 OwnershipTransferStatus::CONFIRMED,
                 OwnershipTransferStatus::ACCEPTED,
+                OwnershipTransferStatus::PENDING_BILLING,
             ])
             ->first();
 
@@ -165,6 +167,9 @@ class OwnershipTransferService
     /**
      * Accept the transfer (new owner accepts via email link).
      * 
+     * Phase AG-3: Now checks billing status before completing.
+     * If billing is not active, transfer enters PENDING_BILLING status.
+     * 
      * @param OwnershipTransfer $transfer
      * @param User $user The user accepting (must be to_user)
      * @return OwnershipTransfer
@@ -207,12 +212,20 @@ class OwnershipTransferService
             ]
         );
 
-        // Complete the transfer automatically
-        return $this->completeTransfer($transfer);
+        // Phase AG-3: Check billing status before completing
+        // If billing is active, complete immediately
+        // If not, enter PENDING_BILLING status
+        if ($this->hasBillingActive($transfer->tenant)) {
+            return $this->completeTransfer($transfer);
+        } else {
+            return $this->setPendingBilling($transfer);
+        }
     }
 
     /**
      * Complete the transfer (perform the actual role change).
+     * 
+     * Phase AG-3: Now also accepts PENDING_BILLING status.
      * 
      * @param OwnershipTransfer $transfer
      * @return OwnershipTransfer
@@ -220,8 +233,8 @@ class OwnershipTransferService
      */
     public function completeTransfer(OwnershipTransfer $transfer): OwnershipTransfer
     {
-        // Validate transfer is in accepted status
-        if ($transfer->status !== OwnershipTransferStatus::ACCEPTED) {
+        // Phase AG-3: Validate transfer is in accepted or pending_billing status
+        if (!in_array($transfer->status, [OwnershipTransferStatus::ACCEPTED, OwnershipTransferStatus::PENDING_BILLING])) {
             throw new InvalidArgumentException('Transfer must be accepted before it can be completed.');
         }
 
@@ -258,6 +271,9 @@ class OwnershipTransferService
         Mail::to($transfer->fromUser->email)->send(new OwnershipTransferCompleted($transfer->tenant, $transfer->fromUser, $transfer->toUser, false));
         Mail::to($transfer->toUser->email)->send(new OwnershipTransferCompleted($transfer->tenant, $transfer->fromUser, $transfer->toUser, true));
 
+        // Phase AG-4: Fire event for partner reward attribution
+        CompanyTransferCompleted::dispatch($transfer->fresh());
+
         return $transfer->fresh();
     }
 
@@ -276,11 +292,12 @@ class OwnershipTransferService
             throw new InvalidArgumentException('Only the current or new owner can cancel the transfer.');
         }
 
-        // Validate transfer is in a cancellable state
+        // Phase AG-3: Validate transfer is in a cancellable state (including PENDING_BILLING)
         if (!in_array($transfer->status, [
             OwnershipTransferStatus::PENDING,
             OwnershipTransferStatus::CONFIRMED,
             OwnershipTransferStatus::ACCEPTED,
+            OwnershipTransferStatus::PENDING_BILLING,
         ])) {
             throw new InvalidArgumentException('Transfer cannot be cancelled in its current state.');
         }
@@ -336,5 +353,107 @@ class OwnershipTransferService
             now()->addDays(7),
             ['transfer' => $transfer->id]
         );
+    }
+
+    /**
+     * Set transfer to pending billing status.
+     * 
+     * Phase AG-3: Called when transfer is accepted but billing is not active.
+     * 
+     * @param OwnershipTransfer $transfer
+     * @return OwnershipTransfer
+     */
+    protected function setPendingBilling(OwnershipTransfer $transfer): OwnershipTransfer
+    {
+        $transfer->update([
+            'status' => OwnershipTransferStatus::PENDING_BILLING,
+        ]);
+
+        // Log activity
+        ActivityRecorder::record(
+            $transfer->tenant,
+            EventType::TENANT_OWNER_TRANSFER_PENDING_BILLING,
+            $transfer,
+            'system',
+            null,
+            [
+                'from_user_id' => $transfer->from_user_id,
+                'to_user_id' => $transfer->to_user_id,
+                'transfer_id' => $transfer->id,
+            ]
+        );
+
+        return $transfer->fresh();
+    }
+
+    /**
+     * Complete a pending transfer when billing is confirmed.
+     * 
+     * Phase AG-3: Called when billing is activated for a tenant with pending transfer.
+     * 
+     * @param OwnershipTransfer $transfer
+     * @return OwnershipTransfer
+     * @throws InvalidArgumentException
+     */
+    public function completePendingTransfer(OwnershipTransfer $transfer): OwnershipTransfer
+    {
+        // Validate transfer is in pending_billing status
+        if ($transfer->status !== OwnershipTransferStatus::PENDING_BILLING) {
+            throw new InvalidArgumentException('Transfer must be in pending_billing status to complete via billing confirmation.');
+        }
+
+        // Verify billing is now active
+        if (!$this->hasBillingActive($transfer->tenant)) {
+            throw new InvalidArgumentException('Billing must be active to complete the transfer.');
+        }
+
+        // Log billing confirmation event
+        ActivityRecorder::record(
+            $transfer->tenant,
+            EventType::TENANT_OWNER_TRANSFER_BILLING_CONFIRMED,
+            $transfer,
+            'system',
+            null,
+            [
+                'from_user_id' => $transfer->from_user_id,
+                'to_user_id' => $transfer->to_user_id,
+                'transfer_id' => $transfer->id,
+            ]
+        );
+
+        // Complete the transfer
+        return $this->completeTransfer($transfer);
+    }
+
+    /**
+     * Check if tenant has active billing.
+     * 
+     * Phase AG-3: Determines if transfer can complete.
+     * 
+     * @param Tenant $tenant
+     * @return bool
+     */
+    protected function hasBillingActive(Tenant $tenant): bool
+    {
+        // Check if tenant has an active subscription via Cashier
+        if ($tenant->subscribed('default')) {
+            return true;
+        }
+
+        // Check if tenant has a valid payment method attached
+        if ($tenant->hasDefaultPaymentMethod()) {
+            return true;
+        }
+
+        // Check manual billing status overrides
+        // billing_status can be: null (Stripe), 'paid' (Stripe), 'trial', 'comped'
+        if (in_array($tenant->billing_status, ['paid', 'comped'])) {
+            // Check if it hasn't expired
+            if (!$tenant->billing_status_expires_at || $tenant->billing_status_expires_at->isFuture()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

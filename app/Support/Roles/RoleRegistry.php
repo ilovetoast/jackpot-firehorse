@@ -23,18 +23,20 @@ class RoleRegistry
      */
     public static function tenantRoles(): array
     {
-        return ['owner', 'admin', 'member'];
+        return ['owner', 'admin', 'member', 'agency_partner'];
     }
 
     /**
      * Get assignable tenant roles (excludes owner).
      * Owner can only be assigned via ownership transfer flow.
      * 
+     * Phase AG-5: Added agency_partner (assigned via transfer, revocable by client)
+     * 
      * @return array<string> Assignable tenant role names
      */
     public static function assignableTenantRoles(): array
     {
-        return ['admin', 'member'];
+        return ['admin', 'member', 'agency_partner'];
     }
 
     /**

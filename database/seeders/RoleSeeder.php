@@ -41,7 +41,7 @@ class RoleSeeder extends Seeder
     public function run(): void
     {
         // Tenant/Company-level roles (Spatie roles)
-        // Note: Only Owner, Admin, and Member are tenant-level roles. All other roles are brand-scoped.
+        // Note: Only Owner, Admin, Member, and Agency Partner are tenant-level roles. All other roles are brand-scoped.
         $tenantRoles = [
             [
                 'name' => 'owner',
@@ -53,6 +53,10 @@ class RoleSeeder extends Seeder
             ],
             [
                 'name' => 'member',
+                'guard_name' => 'web',
+            ],
+            [
+                'name' => 'agency_partner', // Phase AG-5: Retained agency access after transfer
                 'guard_name' => 'web',
             ],
         ];

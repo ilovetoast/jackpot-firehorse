@@ -93,6 +93,8 @@ class OwnershipTransfer extends Model
 
     /**
      * Check if the transfer is in an active state.
+     * 
+     * Phase AG-3: Added PENDING_BILLING to active states.
      */
     public function isActive(): bool
     {
@@ -100,6 +102,7 @@ class OwnershipTransfer extends Model
             OwnershipTransferStatus::PENDING,
             OwnershipTransferStatus::CONFIRMED,
             OwnershipTransferStatus::ACCEPTED,
+            OwnershipTransferStatus::PENDING_BILLING,
         ]);
     }
 

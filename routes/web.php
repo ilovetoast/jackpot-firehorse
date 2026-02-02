@@ -102,6 +102,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::delete('/companies/{tenant}/team/{user}/delete-from-company', [\App\Http\Controllers\TeamController::class, 'deleteFromCompany'])->name('companies.team.delete-from-company');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
         
+        // Phase AG-7: Agency Partner Dashboard (read-only)
+        Route::get('/agency/dashboard', [\App\Http\Controllers\AgencyDashboardController::class, 'index'])->name('agency.dashboard');
+        
         // Phase C3: Tenant metadata field management
         Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');
         Route::get('/tenant/metadata/fields/create', [\App\Http\Controllers\TenantMetadataFieldController::class, 'create'])->name('tenant.metadata.fields.create');
@@ -224,6 +227,15 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/users/{user}/suspend', [\App\Http\Controllers\SiteAdminController::class, 'suspendAccount'])->name('admin.users.suspend');
     Route::post('/admin/users/{user}/unsuspend', [\App\Http\Controllers\SiteAdminController::class, 'unsuspendAccount'])->name('admin.users.unsuspend');
     Route::put('/admin/companies/{tenant}/plan', [\App\Http\Controllers\SiteAdminController::class, 'updatePlan'])->name('admin.companies.update-plan');
+    
+    // Phase AG-11: Admin Agency Management
+    Route::get('/admin/agencies', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'index'])->name('admin.agencies.index');
+    Route::get('/admin/agencies/api/stats', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'stats'])->name('admin.agencies.api.stats');
+    Route::get('/admin/agencies/{tenant}', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'show'])->name('admin.agencies.show');
+    Route::post('/admin/agencies/{tenant}/approve', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'approve'])->name('admin.agencies.approve');
+    Route::post('/admin/agencies/{tenant}/revoke-approval', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'revokeApproval'])->name('admin.agencies.revoke-approval');
+    Route::put('/admin/agencies/{tenant}/tier', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'updateTier'])->name('admin.agencies.update-tier');
+    Route::post('/admin/agencies/{tenant}/toggle-status', [\App\Http\Controllers\Admin\AdminAgencyController::class, 'toggleAgencyStatus'])->name('admin.agencies.toggle-status');
     
     // Admin ticket routes (no tenant middleware - staff can see all tickets)
     Route::get('/admin/support/tickets', [\App\Http\Controllers\AdminTicketController::class, 'index'])->name('admin.support.tickets.index');

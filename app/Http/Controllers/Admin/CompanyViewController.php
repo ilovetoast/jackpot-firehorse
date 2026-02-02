@@ -268,6 +268,46 @@ class CompanyViewController extends Controller
             ];
         }
 
+        // Phase AG-11: Load agency information
+        $agencyInfo = null;
+        if ($tenant->is_agency) {
+            $agencyTier = $tenant->agencyTier;
+            $agencyInfo = [
+                'is_agency' => true,
+                'tier' => $agencyTier?->name ?? 'None',
+                'tier_id' => $tenant->agency_tier_id,
+                'activated_client_count' => $tenant->activated_client_count ?? 0,
+                'is_approved' => $tenant->agency_approved_at !== null,
+                'approved_at' => $tenant->agency_approved_at?->toIso8601String(),
+            ];
+        }
+        
+        // Phase AG-11: Load incubation/referral information
+        $incubationInfo = null;
+        if ($tenant->incubated_by_agency_id) {
+            $incubatingAgency = Tenant::find($tenant->incubated_by_agency_id);
+            $incubationInfo = [
+                'incubated_by' => $incubatingAgency ? [
+                    'id' => $incubatingAgency->id,
+                    'name' => $incubatingAgency->name,
+                ] : null,
+                'incubated_at' => $tenant->incubated_at?->toIso8601String(),
+                'incubation_expires_at' => $tenant->incubation_expires_at?->toIso8601String(),
+            ];
+        }
+        
+        $referralInfo = null;
+        if ($tenant->referred_by_agency_id) {
+            $referringAgency = Tenant::find($tenant->referred_by_agency_id);
+            $referralInfo = [
+                'referred_by' => $referringAgency ? [
+                    'id' => $referringAgency->id,
+                    'name' => $referringAgency->name,
+                ] : null,
+                'referral_source' => $tenant->referral_source,
+            ];
+        }
+
         return Inertia::render('Admin/CompanyView', [
             'company' => [
                 'id' => $tenant->id,
@@ -292,6 +332,10 @@ class CompanyViewController extends Controller
                     'name' => trim(($owner->first_name ?? '') . ' ' . ($owner->last_name ?? '')),
                     'email' => $owner->email,
                 ] : null,
+                // Phase AG-11: Agency information
+                'agency' => $agencyInfo,
+                'incubation' => $incubationInfo,
+                'referral' => $referralInfo,
             ],
             'monthlyData' => $monthlyData,
             'currentCosts' => $currentCosts,

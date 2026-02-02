@@ -143,6 +143,22 @@ class PermissionMap
                 ],
                 $ticketPermissions
             ),
+
+            // Agency Partner: Retained access after company transfer
+            // Phase AG-5: Can view/upload/download assets, cannot manage billing/team/settings
+            'agency_partner' => array_merge(
+                $assetPermissions,
+                $tagPermissions,
+                [
+                    'metadata.set_on_upload',
+                    'metadata.edit_post_upload',
+                    'metadata.review_candidates',
+                    'metadata.suggestions.view',
+                    'metadata.suggestions.apply',
+                    'metadata.suggestions.dismiss',
+                ],
+                $ticketPermissions
+            ),
         ];
     }
 

@@ -47,7 +47,8 @@ class SiteAdminController extends Controller
         $perPage = (int) $request->get('per_page', 10);
         $searchQuery = $request->get('search', '');
         
-        $companiesQuery = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override']);
+        $companiesQuery = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override', 'is_agency', 'agency_tier_id'])
+            ->with('agencyTier:id,name');
         
         // Apply search filter if provided
         if (!empty($searchQuery)) {
@@ -85,6 +86,9 @@ class SiteAdminController extends Controller
                     // Allow non-Stripe plans to be managed in all environments
                     // Stripe-connected companies must use Stripe billing portal
                     'can_manage_plan' => !$stripeConnected,
+                    // Phase AG-11: Agency info
+                    'is_agency' => (bool) $company->is_agency,
+                    'agency_tier' => $company->agencyTier?->name,
                     // All other data loaded via API on demand
                     'details_loaded' => false,
                 ];
@@ -123,6 +127,9 @@ class SiteAdminController extends Controller
                     TicketStatus::OPEN->value,
                     TicketStatus::WAITING_ON_SUPPORT->value,
                 ])->count(),
+                // Phase AG-11: Agency stats
+                'total_agencies' => Tenant::where('is_agency', true)->count(),
+                'total_incubated_clients' => Tenant::whereNotNull('incubated_by_agency_id')->count(),
             ];
         });
 
