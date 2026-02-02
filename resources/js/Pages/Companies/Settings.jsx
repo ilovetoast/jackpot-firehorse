@@ -17,7 +17,7 @@ const DEFAULT_DOWNLOAD_POLICY = {
     disallow_non_expiring: false,
 }
 
-export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
+export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null, brands_without_landing_page: brandsWithoutLandingPage = [] }) {
     const { auth } = usePage().props
     const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
     const { hasPermission: canEditViaPermission } = usePermission('companies.settings.edit')
@@ -858,6 +858,21 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                                             Force public downloads to use a branded landing page instead of direct file links. Landing pages provide clearer context and usage intent.
                                                         </p>
                                                         {!isEnterprise && <p className="mt-1 text-xs text-gray-400">Included with Enterprise plan.</p>}
+                                                        {isEnterprise && (downloadPolicy.require_landing_page_for_public ?? false) && brandsWithoutLandingPage?.length > 0 && (
+                                                            <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200/60">
+                                                                <p className="font-medium">The following brands will not show public downloads until a landing page is enabled:</p>
+                                                                <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-amber-900">
+                                                                    {brandsWithoutLandingPage.map((b) => (
+                                                                        <li key={b.id}>
+                                                                            <Link href={b.edit_url} className="font-medium underline hover:no-underline">
+                                                                                {b.name}
+                                                                            </Link>
+                                                                            {' — enable in Brand → Downloads → Landing Page'}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>

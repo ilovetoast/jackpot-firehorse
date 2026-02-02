@@ -67,6 +67,7 @@ class Download extends Model
         'zip_build_completed_at',  // D9.2: observability only
         'zip_build_failed_at',     // D9.2: observability only
         'zip_path',
+        'access_count',        // Number of times this download was delivered (ZIP or single-asset)
         'direct_asset_path',   // UX-R2: S3 key for single-asset download (no ZIP)
         'zip_deleted_at',      // Phase D5: when artifact was deleted from storage
         'cleanup_verified_at',  // Phase D5: when we confirmed file absence
@@ -114,6 +115,7 @@ class Download extends Model
             'landing_copy' => 'array',       // R3.1: headline, subtext
             'version' => 'integer',
             'zip_size_bytes' => 'integer',
+            'access_count' => 'integer',
         ];
     }
 

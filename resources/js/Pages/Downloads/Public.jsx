@@ -2,6 +2,7 @@
  * Phase D4 — Public download page (trust signals).
  * D7: Password-protected view + branded skinning (logo, accent, headline, subtext).
  * D10.1: When uses_landing_page — full-screen background (random image or solid), overlay, content stack (logo 64–96px, headline, subtext, CTA).
+ * When uses_landing_page is true, the same branded layout is used for ALL states: landing, 404, 403, password entry, waiting for ZIP.
  */
 import { useForm } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
@@ -13,6 +14,7 @@ export default function DownloadsPublic({
   download_id = null,
   unlock_url = '',
   uses_landing_page = false,
+  show_landing_layout = false,
   branding_options = {},
 }) {
   const { errors: pageErrors = {} } = usePage().props
@@ -36,8 +38,9 @@ export default function DownloadsPublic({
     post(unlock_url)
   }
 
-  // D10.1: Landing page layout — full-screen background, 60–75% overlay, centered content stack
-  const isLandingLayout = uses_landing_page && hasBranding
+  // D10.1: Landing page layout — full-screen background, 60–75% overlay, centered content stack.
+  // show_landing_layout is true when download has "Use landing page" OR brand has landing settings (so 404/revoked/etc. stay on-brand).
+  const isLandingLayout = show_landing_layout
   const containerClass = isLandingLayout
     ? 'min-h-screen flex flex-col items-center justify-center px-4 py-12 relative'
     : hasBranding
@@ -46,15 +49,16 @@ export default function DownloadsPublic({
 
   const accentStyle = hasBranding ? { '--accent': accentColor } : {}
 
+  // Full-page background: fixed viewport layer when image is selected, so it stays full-screen behind content
   const backgroundSection = isLandingLayout && (
     <>
       <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        className={backgroundImageUrl ? 'fixed inset-0 bg-cover bg-center bg-no-repeat' : 'absolute inset-0'}
         style={backgroundImageUrl ? { backgroundImage: `url(${backgroundImageUrl})` } : { backgroundColor: overlayColor }}
         aria-hidden
       />
       <div
-        className="absolute inset-0"
+        className={backgroundImageUrl ? 'fixed inset-0' : 'absolute inset-0'}
         style={{
           backgroundColor: overlayColor,
           opacity: backgroundImageUrl ? 0.65 : 1,

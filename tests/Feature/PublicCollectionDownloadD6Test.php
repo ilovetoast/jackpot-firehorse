@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
-use App\Enums\DownloadAccessMode;
 use App\Enums\DownloadSource;
 use App\Enums\StorageBucketStatus;
 use App\Enums\UploadStatus;
@@ -16,18 +15,19 @@ use App\Models\Download;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
+use Aws\S3\S3Client;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\URL;
+use Mockery;
 use Tests\TestCase;
 
 /**
- * Phase D6 — Public Collection Downloads
+ * Phase D6 — Public Collection Downloads (on-the-fly ZIP; no Download record)
  *
  * Tests:
- * - Public collection can create download
- * - Private collection cannot
- * - Download contains only collection assets
- * - Download expires and is cleaned up (D5 applies)
+ * - Public collection POST redirects to signed zip URL; no Download stored
+ * - Private collection cannot create download (404)
+ * - GET signed zip URL streams ZIP (only collection assets)
  * - Non-Enterprise plan cannot create public collection downloads (gated)
  */
 class PublicCollectionDownloadD6Test extends TestCase
@@ -81,7 +81,7 @@ class PublicCollectionDownloadD6Test extends TestCase
         ], $overrides));
     }
 
-    public function test_public_collection_can_create_download(): void
+    public function test_public_collection_redirects_to_signed_zip_url_and_creates_no_download(): void
     {
         $this->tenant->update(['manual_plan_override' => 'enterprise']);
 
@@ -96,27 +96,18 @@ class PublicCollectionDownloadD6Test extends TestCase
         $asset = $this->createAsset();
         $collection->assets()->attach($asset->id);
 
-        Queue::fake();
-
         $response = $this->post(route('public.collections.download', [
             'brand_slug' => $this->brand->slug,
             'collection_slug' => $collection->slug,
-        ]), [
-            'name' => 'Press Kit Download',
-            'expires_at' => now()->addDays(30)->format('Y-m-d'),
-            '_token' => csrf_token(),
-        ]);
+        ]), ['_token' => csrf_token()]);
 
         $response->assertRedirect();
-        $this->assertStringContainsString('/d/', $response->headers->get('Location'));
+        $location = $response->headers->get('Location');
+        $this->assertStringContainsString('/b/' . $this->brand->slug . '/collections/' . $collection->slug . '/zip', $location);
+        $this->assertStringContainsString('signature=', $location);
+        $this->assertStringContainsString('expires=', $location);
 
-        $download = Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->latest()->first();
-        $this->assertNotNull($download);
-        $this->assertSame($this->tenant->id, $download->tenant_id);
-        $this->assertSame($this->brand->id, $download->brand_id);
-        $this->assertSame(DownloadAccessMode::PUBLIC, $download->access_mode);
-        $this->assertSame('Press Kit Download', $download->title);
-        $this->assertSame($collection->id, $download->download_options['collection_id'] ?? null);
+        $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
     }
 
     public function test_private_collection_cannot_create_download(): void
@@ -143,7 +134,7 @@ class PublicCollectionDownloadD6Test extends TestCase
         $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
     }
 
-    public function test_download_contains_only_collection_assets(): void
+    public function test_signed_zip_url_streams_collection_zip(): void
     {
         $this->tenant->update(['manual_plan_override' => 'enterprise']);
 
@@ -159,48 +150,24 @@ class PublicCollectionDownloadD6Test extends TestCase
         $a2 = $this->createAsset(['title' => 'A2']);
         $collection->assets()->attach([$a1->id, $a2->id]);
 
-        Queue::fake();
+        $mockS3 = Mockery::mock(S3Client::class);
+        $mockS3->shouldReceive('doesObjectExist')->andReturn(true);
+        $mockS3->shouldReceive('getObject')->andReturnUsing(function (array $args) {
+            return ['Body' => \GuzzleHttp\Psr7\Utils::streamFor('fake-asset-content')];
+        });
+        $this->app->instance(S3Client::class, $mockS3);
 
-        $response = $this->post(route('public.collections.download', [
-            'brand_slug' => $this->brand->slug,
-            'collection_slug' => $collection->slug,
-        ]), ['_token' => csrf_token()]);
+        $zipUrl = URL::temporarySignedRoute(
+            'public.collections.zip',
+            now()->addMinutes(15),
+            ['brand_slug' => $this->brand->slug, 'collection_slug' => $collection->slug]
+        );
 
-        $response->assertRedirect();
-        $download = Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->latest()->first();
-        $this->assertNotNull($download);
-        $ids = $download->assets()->pluck('assets.id')->all();
-        $this->assertCount(2, $ids);
-        $this->assertContains($a1->id, $ids);
-        $this->assertContains($a2->id, $ids);
-    }
+        $response = $this->get($zipUrl);
 
-    public function test_download_expires_and_is_cleaned_up(): void
-    {
-        $this->tenant->update(['manual_plan_override' => 'enterprise']);
-
-        $collection = Collection::create([
-            'tenant_id' => $this->tenant->id,
-            'brand_id' => $this->brand->id,
-            'name' => 'Kit',
-            'slug' => 'kit',
-            'visibility' => 'brand',
-            'is_public' => true,
-        ]);
-        $asset = $this->createAsset();
-        $collection->assets()->attach($asset->id);
-
-        Queue::fake();
-
-        $this->post(route('public.collections.download', [
-            'brand_slug' => $this->brand->slug,
-            'collection_slug' => $collection->slug,
-        ]), ['_token' => csrf_token()]);
-
-        $download = Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->latest()->first();
-        $this->assertNotNull($download);
-        $this->assertNotNull($download->expires_at);
-        $this->assertNotNull($download->hard_delete_at);
+        $response->assertOk();
+        $response->assertHeader('content-type', 'application/zip');
+        $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
     }
 
     public function test_non_enterprise_plan_cannot_create_public_collection_downloads(): void

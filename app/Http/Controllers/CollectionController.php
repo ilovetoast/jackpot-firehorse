@@ -586,7 +586,8 @@ class CollectionController extends Controller
         $thumbnailVersion = null;
         if ($thumbnailStatus === 'completed') {
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            $finalThumbnailUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => 'thumb']);
+            $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
+            $finalThumbnailUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => $thumbnailStyle]);
             if ($thumbnailVersion) {
                 $finalThumbnailUrl .= '?v='.urlencode($thumbnailVersion);
             }

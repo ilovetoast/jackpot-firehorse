@@ -74,8 +74,7 @@ export default function CreateDownloadPanel({
   const [error, setError] = useState(null)
   // D7: Optional password protection
   const [password, setPassword] = useState('')
-  // R3.1: Landing page — checkbox + copy overrides only (visuals from brand settings)
-  const [usesLandingPage, setUsesLandingPage] = useState(false)
+  // R3.1: Per-download landing copy only (headline/subtext). Layout/visuals from brand "Enable landing pages"; no per-download toggle.
   const [landingHeadline, setLandingHeadline] = useState('')
   const [landingSubtext, setLandingSubtext] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -129,7 +128,6 @@ export default function CreateDownloadPanel({
     setAllowedUserIds([])
     setError(null)
     setPassword('')
-    setUsesLandingPage(false)
     setLandingHeadline('')
     setLandingSubtext('')
     setAdvancedOpen(false)
@@ -176,14 +174,11 @@ export default function CreateDownloadPanel({
     if (canPasswordProtect && password.trim()) {
       payload.password = password.trim()
     }
-    // R3.1: Landing page — opt-in + copy overrides only (logo/color from brand settings)
-    if (canBrandDownload) {
-      payload.uses_landing_page = !!usesLandingPage
-      if (usesLandingPage && (landingHeadline.trim() || landingSubtext.trim())) {
-        payload.landing_copy = {}
-        if (landingHeadline.trim()) payload.landing_copy.headline = landingHeadline.trim()
-        if (landingSubtext.trim()) payload.landing_copy.subtext = landingSubtext.trim()
-      }
+    // R3.1: Per-download landing copy only. Layout/visuals come from brand "Enable landing pages".
+    if (canBrandDownload && (landingHeadline.trim() || landingSubtext.trim())) {
+      payload.landing_copy = {}
+      if (landingHeadline.trim()) payload.landing_copy.headline = landingHeadline.trim()
+      if (landingSubtext.trim()) payload.landing_copy.subtext = landingSubtext.trim()
     }
 
     router.post(route('downloads.store'), payload, {
@@ -492,22 +487,11 @@ export default function CreateDownloadPanel({
                     </div>
                   )}
 
-                  {/* Enable landing page */}
+                  {/* Per-download landing copy. Layout from brand "Enable landing pages". */}
                   {canBrandDownload && (
                     <div className="space-y-3 rounded border border-gray-200 bg-white p-3">
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={usesLandingPage}
-                          onChange={(e) => setUsesLandingPage(e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-sm font-medium text-gray-700">Enable landing page for this download</span>
-                      </label>
-                      <p className="text-xs text-gray-500">When unchecked, the link goes straight to the ZIP. When checked, recipients see a branded landing page (using your brand’s logo and colors).</p>
-                      <p className="text-xs text-slate-500 mt-0.5">Visual styling comes from brand settings.</p>
-                      {usesLandingPage && (
-                        <div className="space-y-3 border-t border-gray-200 pt-2">
+                      <p className="text-xs text-gray-500">Optional headline and subtext for this download. Visual layout and styling come from Brand → Downloads → Landing Page. Use the fields below.</p>
+                      <div className="space-y-3">
                           <div>
                             <label htmlFor="create-download-headline" className="block text-xs font-medium text-gray-600">Headline (optional)</label>
                             <input
@@ -531,7 +515,6 @@ export default function CreateDownloadPanel({
                             />
                           </div>
                         </div>
-                      )}
                     </div>
                   )}
                 </div>

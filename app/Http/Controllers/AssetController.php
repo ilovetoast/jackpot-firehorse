@@ -465,16 +465,14 @@ class AssetController extends Controller
                 $thumbnailVersion = null;
                 
                 // Final thumbnail URL only provided when thumbnail_status === COMPLETED
-                // Includes version query param (thumbnails_generated_at) for cache busting
+                // Asset grids use medium size; fall back to thumb if medium not available
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    
+                    $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
                     $finalThumbnailUrl = route('assets.thumbnail.final', [
                         'asset' => $asset->id,
-                        'style' => 'thumb',
+                        'style' => $thumbnailStyle,
                     ]);
-                    
-                    // Add version query param if available (ensures browser refetches when version changes)
                     if ($thumbnailVersion) {
                         $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
                     }

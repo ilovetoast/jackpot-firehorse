@@ -203,6 +203,7 @@ class CompanyController extends Controller
 
         // Enterprise Download Policy (read-only UX surface; Enterprise plan only)
         $enterpriseDownloadPolicy = null;
+        $brandsWithoutLandingPage = [];
         if ($currentPlan === 'enterprise') {
             $policy = app(EnterpriseDownloadPolicy::class);
             $enterpriseDownloadPolicy = [
@@ -212,6 +213,18 @@ class CompanyController extends Controller
                 'force_expiration_days' => $policy->forceExpirationDays($tenant),
                 'disallow_non_expiring' => $policy->disallowNonExpiring($tenant),
             ];
+            // Brands that don't have landing page enabled — for validation message when "Require landing page" is on
+            $brandsWithoutLandingPage = $tenant->brands()
+                ->orderBy('name')
+                ->get()
+                ->filter(fn ($b) => ! (($b->download_landing_settings ?? [])['enabled'] ?? false))
+                ->map(fn ($b) => [
+                    'id' => $b->id,
+                    'name' => $b->name ?? $b->slug ?? 'Brand',
+                    'edit_url' => route('brands.edit', ['brand' => $b->id]) . '#downloads-landing',
+                ])
+                ->values()
+                ->all();
         }
 
         // Phase M-2: Include tenant settings
@@ -234,6 +247,7 @@ class CompanyController extends Controller
             'tenant_users' => $tenantUsers,
             'pending_transfer' => $pendingTransferData,
             'enterprise_download_policy' => $enterpriseDownloadPolicy,
+            'brands_without_landing_page' => $brandsWithoutLandingPage,
         ]);
     }
 

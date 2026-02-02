@@ -402,19 +402,15 @@ class DeliverableController extends Controller
                 // AND thumbnail path exists in metadata (defensive check)
                 // Includes version query param (thumbnails_generated_at) for cache busting
                 if ($thumbnailStatus === 'completed') {
-                    // Verify thumbnail path exists in metadata before generating URL
-                    // This prevents showing broken thumbnail URLs
-                    $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
-                    
+                    // Prefer medium for grid; fallback to thumb if medium missing
+                    $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
+                    $thumbnailPath = $asset->thumbnailPathForStyle($thumbnailStyle);
                     if ($thumbnailPath) {
                         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                        
                         $finalThumbnailUrl = route('assets.thumbnail.final', [
                             'asset' => $asset->id,
-                            'style' => 'thumb',
+                            'style' => $thumbnailStyle,
                         ]);
-                        
-                        // Add version query param if available (ensures browser refetches when version changes)
                         if ($thumbnailVersion) {
                             $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
                         }

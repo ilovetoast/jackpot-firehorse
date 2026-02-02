@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
+use App\Models\Download;
 use Aws\S3\S3Client;
+use Illuminate\Support\Arr;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -258,6 +260,65 @@ class AssetThumbnailController extends Controller
 
             // CRITICAL: Return 404, not placeholder - prevents cached fake images
             abort(404, 'Final thumbnail unavailable');
+        }
+    }
+
+    /**
+     * Public background image for download landing page. No auth — so guests can load the image.
+     *
+     * GET /d/{download}/background
+     *
+     * Resolves the download's brand background asset (random one of background_asset_ids),
+     * then streams that asset's medium thumbnail from S3. Used for public download/error pages.
+     *
+     * @param Request $request
+     * @param Download $download
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
+    public function streamThumbnailForPublicDownload(Request $request, Download $download): \Symfony\Component\HttpFoundation\Response
+    {
+        $download->loadMissing('brand');
+        $brand = $download->brand_id ? $download->brand : null;
+        if (! $brand) {
+            abort(404, 'Background not available.');
+        }
+        $brand->refresh();
+        $brandSettings = $brand->download_landing_settings ?? [];
+        $backgroundIds = $brandSettings['background_asset_ids'] ?? [];
+        if (! is_array($backgroundIds) || empty($backgroundIds)) {
+            abort(404, 'Background not available.');
+        }
+        $backgroundIds = array_values($backgroundIds);
+        $chosenId = Arr::random($backgroundIds);
+        $asset = Asset::where('brand_id', $brand->id)->where('id', $chosenId)->first();
+        if (! $asset && count($backgroundIds) > 1) {
+            foreach ($backgroundIds as $id) {
+                if ((string) $id === (string) $chosenId) {
+                    continue;
+                }
+                $asset = Asset::where('brand_id', $brand->id)->where('id', $id)->first();
+                if ($asset) {
+                    break;
+                }
+            }
+        }
+        if (! $asset || $asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            abort(404, 'Background not available.');
+        }
+        $this->validateStyle('medium');
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+        if (! $thumbnailPath) {
+            abort(404, 'Background not available.');
+        }
+        try {
+            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
+        } catch (\Throwable $e) {
+            Log::warning('Public download background thumbnail stream failed', [
+                'download_id' => $download->id,
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404, 'Background not available.');
         }
     }
 

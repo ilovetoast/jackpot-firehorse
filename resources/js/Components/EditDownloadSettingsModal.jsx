@@ -1,6 +1,6 @@
 /**
  * Modal to edit an existing download's settings: access (public/brand/company/specific people),
- * landing page (enable + headline/subtext), password. Plan-gated; only for ZIP downloads.
+ * password. Plan-gated; only for ZIP downloads. Layout/copy for landing come from Brand → Downloads.
  * D9: Activity & Analytics tab — read-only, fetch on tab open.
  */
 import { useState, useEffect, useRef } from 'react'
@@ -15,6 +15,7 @@ import {
   UserGroupIcon,
   CalendarIcon,
   GlobeAltIcon,
+  LockClosedIcon,
 } from '@heroicons/react/24/outline'
 
 function formatAnalyticsDate(iso) {
@@ -23,7 +24,7 @@ function formatAnalyticsDate(iso) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-const SETTINGS_ERROR_KEYS = ['message', 'password', 'access_mode', 'user_ids', 'uses_landing_page', 'landing_copy']
+const SETTINGS_ERROR_KEYS = ['message', 'password', 'access_mode', 'user_ids', 'landing_copy']
 
 export default function EditDownloadSettingsModal({ open, download, onClose, onSaved }) {
   const { download_features: features = {} } = usePage().props
@@ -32,16 +33,12 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   const canCompany = !!features.restrict_access_company
   const canUsers = !!features.restrict_access_users
   const canPasswordProtect = !!features.password_protection
-  const canBrandDownload = !!features.branding
 
   const [activeTab, setActiveTab] = useState('settings')
   const [accessMode, setAccessMode] = useState('public')
   const [allowedUserIds, setAllowedUserIds] = useState([])
   const [companyUsers, setCompanyUsers] = useState([])
   const [loadingUsers, setLoadingUsers] = useState(false)
-  const [usesLandingPage, setUsesLandingPage] = useState(false)
-  const [landingHeadline, setLandingHeadline] = useState('')
-  const [landingSubtext, setLandingSubtext] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -54,10 +51,6 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
     setActiveTab('settings')
     setAccessMode(download.access_mode || 'public')
     setAllowedUserIds(Array.isArray(download.allowed_user_ids) ? [...download.allowed_user_ids] : [])
-    setUsesLandingPage(!!download.uses_landing_page)
-    const lc = download.landing_copy || {}
-    setLandingHeadline(lc.headline || '')
-    setLandingSubtext(lc.subtext || '')
     setPassword('')
     setError(null)
     setAnalytics({ loading: false, error: null, data: null })
@@ -110,8 +103,6 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
 
     const payload = {
       access_mode: accessMode,
-      uses_landing_page: usesLandingPage,
-      landing_copy: { headline: landingHeadline.trim(), subtext: landingSubtext.trim() },
     }
     if (accessMode === 'users') payload.user_ids = allowedUserIds
     if (canPasswordProtect && typeof password === 'string' && password.trim() !== '') payload.password = password.trim()
@@ -134,7 +125,6 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   if (!open) return null
 
   const hasAccessOptions = canBrand || canCompany || canUsers
-  const showLanding = canBrandDownload
   const showPassword = canPasswordProtect
 
   return (
@@ -242,52 +232,17 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               </div>
             )}
 
-            {showLanding && (
-              <div className="mb-4 space-y-3 rounded border border-gray-200 bg-gray-50/50 p-3">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={usesLandingPage}
-                    onChange={(e) => setUsesLandingPage(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Enable landing page</span>
-                </label>
-                <p className="text-xs text-gray-500">When unchecked, the link goes straight to the download. When checked, recipients see a branded landing page first.</p>
-                {usesLandingPage && (
-                  <div className="space-y-3 border-t border-gray-200 pt-2">
-                    <div>
-                      <label htmlFor="edit-download-headline" className="block text-xs font-medium text-gray-600">Headline (optional)</label>
-                      <input
-                        id="edit-download-headline"
-                        type="text"
-                        value={landingHeadline}
-                        onChange={(e) => setLandingHeadline(e.target.value)}
-                        placeholder="e.g. Press Kit"
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="edit-download-subtext" className="block text-xs font-medium text-gray-600">Subtext (optional)</label>
-                      <input
-                        id="edit-download-subtext"
-                        type="text"
-                        value={landingSubtext}
-                        onChange={(e) => setLandingSubtext(e.target.value)}
-                        placeholder="e.g. Approved brand assets"
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
             {showPassword && (
               <div className="mb-4">
                 <label htmlFor="edit-download-password" className="block text-sm font-medium text-gray-700">
                   Password (optional)
                 </label>
+                {download.password_protected && (
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700" role="status">
+                    <LockClosedIcon className="h-4 w-4 shrink-0" aria-hidden />
+                    Password is set — enter a new one to change, or leave blank to keep it.
+                  </p>
+                )}
                 <input
                   id="edit-download-password"
                   type="password"
@@ -304,8 +259,8 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               </div>
             )}
 
-            {!hasAccessOptions && !showLanding && !showPassword && (
-              <p className="mb-4 text-sm text-gray-500">No settings available for your plan. Upgrade to configure access, landing page, or password.</p>
+            {!hasAccessOptions && !showPassword && (
+              <p className="mb-4 text-sm text-gray-500">No settings available for your plan. Upgrade to configure access or password.</p>
             )}
 
             <div className="flex justify-end gap-3">
@@ -318,14 +273,13 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               </button>
               <button
                 type="submit"
-                disabled={submitting || (!hasAccessOptions && !showLanding && !showPassword)}
+                disabled={submitting || (!hasAccessOptions && !showPassword)}
                 className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
               >
                 {submitting ? 'Saving…' : 'Save settings'}
               </button>
             </div>
           </form>
-          )}
         </div>
       </div>
     </div>

@@ -548,23 +548,37 @@ class DashboardController extends Controller
                 ->whereIn('subject_type', $validSubjectTypes)
                 ->orderBy('created_at', 'desc')
                 ->limit(5)
-                ->with(['brand', 'subject']) // Load relationships (excluding actor for polymorphic issues)
+                ->with(['brand', 'subject', 'actor'])
                 ->get();
             
-            $recentActivity = $activityEvents->map(function ($event) {
+            $recentActivity = $activityEvents->map(function ($event) use ($tenant) {
                 // Format event type display name
                 $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
                 
-                // Get actor name
+                // Get actor name and avatar/company for display
                 $actorName = 'System';
+                $actorAvatarUrl = null;
+                $actorFirstName = null;
+                $actorLastName = null;
+                $actorEmail = null;
+                $companyName = null;
                 if ($event->actor_type === 'user' && $event->actor) {
                     $actorName = $event->actor->name;
+                    $actorAvatarUrl = $event->actor->avatar_url ?? null;
+                    $actorFirstName = $event->actor->first_name ?? null;
+                    $actorLastName = $event->actor->last_name ?? null;
+                    $actorEmail = $event->actor->email ?? null;
                 } elseif (!empty($event->metadata['actor_name'])) {
                     $actorName = $event->metadata['actor_name'];
                 }
+                // When actor is system/api/guest, show company (tenant) name
+                if (in_array($event->actor_type, ['system', 'api', 'guest'], true)) {
+                    $companyName = $tenant->name ?? 'System';
+                }
                 
-                // Get subject name with better fallbacks
+                // Get subject name and optional asset thumbnail URL
                 $subjectName = 'Unknown';
+                $subjectThumbnailUrl = null;
                 if ($event->subject) {
                     if (method_exists($event->subject, 'title') && !empty($event->subject->title)) {
                         $subjectName = $event->subject->title;
@@ -573,11 +587,28 @@ class DashboardController extends Controller
                     } elseif (method_exists($event->subject, 'name') && !empty($event->subject->name)) {
                         $subjectName = $event->subject->name;
                     } elseif (method_exists($event->subject, 'id')) {
-                        // For assets, create a generic name with ID
-                        if ($event->subject_type === 'App\\Models\\Asset') {
-                            $subjectName = 'Asset #' . substr($event->subject->id, 0, 8);
+                        if ($event->subject_type === \App\Models\Asset::class) {
+                            $subjectName = 'Asset #' . substr((string) $event->subject->id, 0, 8);
                         } else {
-                            $subjectName = 'Item #' . substr($event->subject->id, 0, 8);
+                            $subjectName = 'Item #' . substr((string) $event->subject->id, 0, 8);
+                        }
+                    }
+                    // Asset subject: build thumbnail URL (thumb style for small activity icon)
+                    if ($event->subject_type === \App\Models\Asset::class) {
+                        $asset = $event->subject;
+                        $meta = $asset->metadata ?? [];
+                        $thumbStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                            ? $asset->thumbnail_status->value
+                            : ($asset->thumbnail_status ?? 'pending');
+                        if ($thumbStatus === 'completed') {
+                            $version = $meta['thumbnails_generated_at'] ?? null;
+                            $subjectThumbnailUrl = route('assets.thumbnail.final', [
+                                'asset' => $asset->id,
+                                'style' => 'thumb',
+                            ]);
+                            if ($version) {
+                                $subjectThumbnailUrl .= '?v=' . urlencode($version);
+                            }
                         }
                     }
                 } elseif (!empty($event->metadata['subject_name'])) {
@@ -588,6 +619,21 @@ class DashboardController extends Controller
                     $subjectName = $event->metadata['asset_filename'];
                 }
                 
+                // Brand: include avatar fields for BrandAvatar
+                $brandPayload = null;
+                if ($event->brand) {
+                    $b = $event->brand;
+                    $brandPayload = [
+                        'id' => $b->id,
+                        'name' => $b->name,
+                        'logo_path' => $b->logo_path,
+                        'icon_path' => $b->icon_path,
+                        'icon' => $b->icon,
+                        'icon_bg_color' => $b->icon_bg_color,
+                        'primary_color' => $b->primary_color ?? '#4f46e5',
+                    ];
+                }
+                
                 return [
                     'id' => $event->id,
                     'event_type' => $event->event_type,
@@ -596,16 +642,19 @@ class DashboardController extends Controller
                     'actor' => [
                         'type' => $event->actor_type,
                         'name' => $actorName,
+                        'avatar_url' => $actorAvatarUrl,
+                        'first_name' => $actorFirstName,
+                        'last_name' => $actorLastName,
+                        'email' => $actorEmail,
                     ],
+                    'company_name' => $companyName,
                     'subject' => [
                         'type' => $event->subject_type,
                         'name' => $subjectName,
                         'id' => $event->subject_id,
+                        'thumbnail_url' => $subjectThumbnailUrl,
                     ],
-                    'brand' => $event->brand ? [
-                        'id' => $event->brand->id,
-                        'name' => $event->brand->name,
-                    ] : null,
+                    'brand' => $brandPayload,
                     'metadata' => $event->metadata,
                     'created_at' => $event->created_at->toISOString(),
                     'created_at_human' => $event->created_at->diffForHumans(),

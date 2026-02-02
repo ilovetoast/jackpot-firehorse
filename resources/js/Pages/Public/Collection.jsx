@@ -4,20 +4,8 @@
  * D6: Download collection affordance (secondary CTA) — opens panel to create ZIP of all collection assets.
  */
 import { useState } from 'react'
-import { router } from '@inertiajs/react'
 import { DocumentIcon, ArrowDownTrayIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import AssetGrid from '../../Components/AssetGrid'
-
-function defaultDownloadName(collectionName) {
-    const date = new Date().toISOString().slice(0, 10)
-    return `${collectionName || 'collection'}-download-${date}`
-}
-
-function defaultExpiresAt() {
-    const d = new Date()
-    d.setDate(d.getDate() + 30)
-    return d.toISOString().slice(0, 10)
-}
 
 export default function PublicCollection({
     collection = {},
@@ -26,35 +14,22 @@ export default function PublicCollection({
 }) {
     const { name, description, brand_name, brand_slug, slug } = collection
     const [downloadPanelOpen, setDownloadPanelOpen] = useState(false)
-    const [downloadName, setDownloadName] = useState('')
-    const [downloadExpiresAt, setDownloadExpiresAt] = useState(defaultExpiresAt())
     const [downloadSubmitting, setDownloadSubmitting] = useState(false)
     const [downloadError, setDownloadError] = useState(null)
 
     const openDownloadPanel = () => {
-        setDownloadName(defaultDownloadName(name))
-        setDownloadExpiresAt(defaultExpiresAt())
         setDownloadError(null)
         setDownloadPanelOpen(true)
     }
 
+    // On-the-fly collection ZIP: form submits in new tab so redirect to zip URL triggers file download there; this tab stays on collection.
     const handleDownloadCollectionSubmit = (e) => {
         e.preventDefault()
         setDownloadError(null)
         setDownloadSubmitting(true)
-        router.post(
-            route('public.collections.download', { brand_slug: brand_slug, collection_slug: slug }),
-            { name: downloadName.trim() || defaultDownloadName(name), expires_at: downloadExpiresAt },
-            {
-                preserveScroll: true,
-                onFinish: () => setDownloadSubmitting(false),
-                onError: (errors) => {
-                    const msg = typeof errors === 'object' ? (errors.message || Object.values(errors).flat().join(' ')) : String(errors)
-                    setDownloadError(msg)
-                },
-                onSuccess: () => setDownloadPanelOpen(false),
-            }
-        )
+        e.target.submit()
+        setDownloadSubmitting(false)
+        setDownloadPanelOpen(false)
     }
 
     // Handle asset click - for public collections, clicking downloads the asset (tracked server-side, opens in new window)
@@ -151,37 +126,19 @@ export default function PublicCollection({
                                         Download collection
                                     </h3>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Download all assets in this collection as a ZIP
+                                        Download all assets in this collection as a ZIP (generated on the fly; no link is stored).
                                     </p>
-                                    <form onSubmit={handleDownloadCollectionSubmit} className="mt-4 space-y-4">
+                                    <form
+                                        onSubmit={handleDownloadCollectionSubmit}
+                                        method="post"
+                                        action={route('public.collections.download', { brand_slug: brand_slug, collection_slug: slug })}
+                                        target="_blank"
+                                        className="mt-4 space-y-4"
+                                    >
+                                        <input type="hidden" name="_token" value={typeof document !== 'undefined' ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '') : ''} />
                                         <p className="text-sm text-gray-600">
                                             {assets.length} asset{assets.length !== 1 ? 's' : ''} will be included.
                                         </p>
-                                        <div>
-                                            <label htmlFor="download-name" className="block text-sm font-medium text-gray-700">
-                                                Name
-                                            </label>
-                                            <input
-                                                id="download-name"
-                                                type="text"
-                                                value={downloadName}
-                                                onChange={(e) => setDownloadName(e.target.value)}
-                                                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                                placeholder={defaultDownloadName(name)}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label htmlFor="download-expires" className="block text-sm font-medium text-gray-700">
-                                                Expires (optional)
-                                            </label>
-                                            <input
-                                                id="download-expires"
-                                                type="date"
-                                                value={downloadExpiresAt}
-                                                onChange={(e) => setDownloadExpiresAt(e.target.value)}
-                                                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                                            />
-                                        </div>
                                         {downloadError && (
                                             <p className="text-sm text-red-600">{downloadError}</p>
                                         )}
@@ -191,7 +148,7 @@ export default function PublicCollection({
                                                 disabled={downloadSubmitting}
                                                 className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 sm:col-start-2"
                                             >
-                                                {downloadSubmitting ? 'Creating…' : 'Create Download'}
+                                                {downloadSubmitting ? 'Preparing…' : 'Download collection'}
                                             </button>
                                             <button
                                                 type="button"

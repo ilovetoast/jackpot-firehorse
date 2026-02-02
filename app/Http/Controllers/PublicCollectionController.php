@@ -2,27 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DownloadAccessMode;
-use App\Enums\DownloadSource;
-use App\Enums\DownloadStatus;
-use App\Enums\DownloadType;
 use App\Enums\ThumbnailStatus;
-use App\Enums\ZipStatus;
-use App\Jobs\BuildDownloadZipJob;
 use App\Models\Asset;
 use App\Models\Collection;
-use App\Models\Download;
 use App\Services\CollectionAssetQueryService;
-use App\Services\DownloadExpirationPolicy;
+use App\Services\CollectionZipBuilderService;
+use App\Services\DownloadNameResolver;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
-use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -35,9 +29,10 @@ class PublicCollectionController extends Controller
 {
     public function __construct(
         protected CollectionAssetQueryService $collectionAssetQueryService,
+        protected CollectionZipBuilderService $zipBuilder,
         protected FeatureGate $featureGate,
         protected PlanService $planService,
-        protected DownloadExpirationPolicy $expirationPolicy
+        protected DownloadNameResolver $downloadNameResolver
     ) {
     }
 
@@ -154,110 +149,80 @@ class PublicCollectionController extends Controller
             return redirect()->back()->with('error', 'Estimated ZIP size exceeds plan limit.');
         }
 
-        $expiresAt = $this->expirationPolicy->calculateExpiresAt($tenant, DownloadType::SNAPSHOT);
-        $requestExpiresAt = $request->input('expires_at');
-        $maxDays = $this->planService->getMaxDownloadExpirationDays($tenant);
-        if (is_string($requestExpiresAt) && $requestExpiresAt !== '') {
-            try {
-                $parsed = Carbon::parse($requestExpiresAt);
-                if ($parsed->isFuture()) {
-                    $daysFromNow = (int) now()->diffInDays($parsed, false);
-                    if ($daysFromNow <= $maxDays) {
-                        $expiresAt = $parsed;
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Keep default expiresAt
-            }
-        }
-
-        $hardDeleteAt = $expiresAt ? $this->expirationPolicy->calculateHardDeleteAt(
-            (new Download)->setRelation('tenant', $tenant),
-            $expiresAt
-        ) : null;
-
-        $title = $request->input('name');
-        if (! is_string($title) || trim($title) === '') {
-            $title = $collection->name . '-download-' . now()->format('Y-m-d');
-        } else {
-            $title = trim($title);
-        }
-
-        $slug = $this->uniqueSlugForTenant($tenant->id);
-
-        DB::beginTransaction();
-        try {
-            $download = Download::create([
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'created_by_user_id' => null,
-                'download_type' => DownloadType::SNAPSHOT,
-                'source' => DownloadSource::PUBLIC_COLLECTION,
-                'title' => $title,
-                'slug' => $slug,
-                'version' => 1,
-                'status' => DownloadStatus::READY,
-                'zip_status' => ZipStatus::NONE,
-                'expires_at' => $expiresAt,
-                'hard_delete_at' => $hardDeleteAt,
-                'download_options' => [
-                    'context' => 'public_collection',
-                    'collection_id' => $collection->id,
-                ],
-                'access_mode' => DownloadAccessMode::PUBLIC,
-                'allow_reshare' => true,
-            ]);
-
-            foreach ($visibleIds as $i => $assetId) {
-                $download->assets()->attach($assetId, ['is_primary' => $i === 0]);
-            }
-
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('[PublicCollectionController] Failed to create download', [
-                'source' => 'public_collection',
-                'collection_id' => $collection->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            if ($request->expectsJson()) {
-                return response()->json(['message' => 'Failed to create download.'], 500);
-            }
-            return redirect()->back()->with('error', 'Failed to create download.');
-        }
-
-        Log::info('download.created', [
-            'source' => 'public_collection',
-            'collection_id' => $collection->id,
-            'download_id' => $download->id,
-            'tenant_id' => $tenant->id,
-            'asset_count' => count($visibleIds),
-        ]);
-
-        BuildDownloadZipJob::dispatch($download->id);
-
-        $publicUrl = route('downloads.public', ['download' => $download->id]);
+        $zipUrl = URL::temporarySignedRoute(
+            'public.collections.zip',
+            now()->addMinutes(15),
+            ['brand_slug' => $brand_slug, 'collection_slug' => $collection_slug]
+        );
 
         if ($request->expectsJson()) {
             return response()->json([
-                'download_id' => $download->id,
-                'public_url' => $publicUrl,
-                'expires_at' => $expiresAt?->toIso8601String(),
+                'zip_url' => $zipUrl,
                 'asset_count' => count($visibleIds),
-            ], 201);
+            ], 200);
         }
 
-        return redirect($publicUrl);
+        return redirect()->away($zipUrl);
     }
 
-    private function uniqueSlugForTenant(int $tenantId): string
+    /**
+     * D6: Stream collection ZIP on-the-fly. Signed URL required; no Download record.
+     * Builds ZIP from current collection assets and streams it; temp file deleted after send.
+     */
+    public function streamZip(string $brand_slug, string $collection_slug, Request $request): \Symfony\Component\HttpFoundation\BinaryFileResponse|RedirectResponse
     {
-        do {
-            $slug = Str::lower(Str::random(12));
-        } while (Download::where('tenant_id', $tenantId)->where('slug', $slug)->exists());
+        $collection = Collection::query()
+            ->where('slug', $collection_slug)
+            ->where('is_public', true)
+            ->with(['brand', 'tenant'])
+            ->whereHas('brand', fn ($q) => $q->where('slug', $brand_slug))
+            ->first();
 
-        return $slug;
+        if (! $collection) {
+            abort(404, 'Collection not found.');
+        }
+
+        $tenant = $collection->tenant;
+        if (! $tenant || ! $this->featureGate->publicCollectionDownloadsEnabled($tenant)) {
+            abort(404, 'Collection not found.');
+        }
+
+        $query = $this->collectionAssetQueryService->queryPublic($collection);
+        $assets = $query->with('storageBucket')->get();
+
+        if ($assets->isEmpty()) {
+            abort(422, 'This collection has no assets to download.');
+        }
+
+        $bucket = $assets->first()->storageBucket;
+        if (! $bucket) {
+            Log::error('[PublicCollectionController] Collection assets have no storage bucket', [
+                'collection_id' => $collection->id,
+            ]);
+            abort(500, 'Unable to build download.');
+        }
+
+        $tempPath = null;
+        try {
+            $s3Client = $this->zipBuilder->createS3Client();
+            $tempPath = $this->zipBuilder->buildZipFromAssets($assets, $bucket, $s3Client);
+        } catch (\Throwable $e) {
+            Log::error('[PublicCollectionController] Failed to build collection ZIP', [
+                'collection_id' => $collection->id,
+                'error' => $e->getMessage(),
+            ]);
+            if ($tempPath && file_exists($tempPath)) {
+                @unlink($tempPath);
+            }
+            abort(500, 'Failed to build download. Please try again.');
+        }
+
+        $baseName = $this->downloadNameResolver->sanitizeFilename($collection->name);
+        $filename = preg_replace('/[\r\n"\\\\]/', '', $baseName . '-download-' . now()->format('Y-m-d') . '.zip') ?: 'collection-download.zip';
+
+        return response()->download($tempPath, $filename, [
+            'Content-Type' => 'application/zip',
+        ])->deleteFileAfterSend(true);
     }
 
     /**
@@ -360,7 +325,7 @@ class PublicCollectionController extends Controller
         $asset->load('storageBucket');
         $path = null;
         if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
-            $path = $asset->thumbnailPathForStyle('thumb');
+            $path = $asset->thumbnailPathForStyle('medium') ?: $asset->thumbnailPathForStyle('thumb');
         }
         if (! $path && $asset->metadata) {
             $preview = $asset->metadata['preview_thumbnails']['preview']['path'] ?? null;

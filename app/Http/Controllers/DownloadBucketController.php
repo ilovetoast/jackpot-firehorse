@@ -135,13 +135,14 @@ class DownloadBucketController extends Controller
                 ]);
             }
 
-            // Final URL only when thumbnail_status === completed (same as asset grid)
+            // Final URL only when thumbnail_status === completed; use medium for grid, fallback thumb
             $finalThumbnailUrl = null;
             if ($thumbnailStatus === 'completed') {
                 $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                $thumbnailStyle = $a->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
                 $finalThumbnailUrl = route('assets.thumbnail.final', [
                     'asset' => $a->id,
-                    'style' => 'thumb',
+                    'style' => $thumbnailStyle,
                 ]);
                 if ($thumbnailVersion) {
                     $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);

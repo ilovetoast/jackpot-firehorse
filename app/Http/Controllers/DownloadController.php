@@ -103,7 +103,7 @@ class DownloadController extends Controller
 
         $query = Download::query()
             ->where('tenant_id', $tenant->id)
-            ->with(['assets' => fn ($q) => $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status'), 'createdBy', 'allowedUsers']);
+            ->with(['assets' => fn ($q) => $q->select('assets.id', 'assets.original_filename', 'assets.metadata', 'assets.thumbnail_status', 'assets.brand_id'), 'createdBy', 'allowedUsers', 'brand']);
 
         // D12.2: Enforce visibility by role (server-side)
         $tenantRole = $user->getRoleForTenant($tenant);
@@ -440,19 +440,26 @@ class DownloadController extends Controller
             return $this->downloadCreateError($request, 'password', 'Your organization requires a password for public downloads.');
         }
 
-        // D7/R3.1: Landing page — opt-in + copy overrides only. Logo/accent from brand (R3.2).
-        $usesLandingPage = false;
+        // D7/R3.1: Landing page is controlled by brand only (Brand → Downloads → Landing Page). Per-download only landing_copy (headline/subtext).
         $landingCopy = null;
         if ($this->planService->canBrandDownload($tenant)) {
-            $usesLandingPage = $request->boolean('uses_landing_page');
             $requestLandingCopy = $request->input('landing_copy');
             if (is_array($requestLandingCopy) && ! empty($requestLandingCopy)) {
                 $landingCopy = $this->sanitizeLandingCopy($requestLandingCopy);
             }
         }
-        // D11: Enterprise Download Policy — public downloads may require landing page
+        // D11: Enterprise Download Policy — when required, prefer a brand that has "Enable landing pages" for download.brand_id (landing page is enforced at delivery, not at create)
         if ($accessMode === DownloadAccessMode::PUBLIC && $this->downloadPolicy->requireLandingPageForPublic($tenant)) {
-            $usesLandingPage = true;
+            $assetBrandIds = $assets->pluck('brand_id')->filter()->unique()->values()->all();
+            $brandsInDownload = empty($assetBrandIds) ? collect() : \App\Models\Brand::query()
+                ->whereIn('id', $assetBrandIds)
+                ->where('tenant_id', $tenant->id)
+                ->get();
+            $brandWithLanding = $brandsInDownload->first(fn ($b) => ($b->download_landing_settings ?? [])['enabled'] ?? false);
+            if ($brandWithLanding) {
+                $brand = $brandWithLanding;
+            }
+            // Do not block creation: delivery will block if no brand has landing enabled (deliverFile checks requireLandingPageForPublic)
         }
         // Legacy: still accept branding_options but ignore logo_url and accent_color (R3.1)
         $brandingOptions = null;
@@ -489,7 +496,6 @@ class DownloadController extends Controller
                 'allow_reshare' => true,
                 'password_hash' => $passwordHash,
                 'branding_options' => $brandingOptions,
-                'uses_landing_page' => $usesLandingPage,
                 'landing_copy' => $landingCopy,
             ]);
 
@@ -616,6 +622,7 @@ class DownloadController extends Controller
         DownloadEventEmitter::emitDownloadGroupCreated($download);
         $this->logDownloadAccess($download, 'download.access.granted', 'single_asset');
         app(\App\Services\AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
+        $download->increment('access_count');
 
         try {
             $filename = $asset->original_filename ?: basename($asset->storage_root_path) ?: 'download';
@@ -712,7 +719,7 @@ class DownloadController extends Controller
                 ->withErrors([$key => $message])
                 ->withInput($request->only([
                     'name', 'expires_at', 'access_mode', 'allowed_users', 'password',
-                    'uses_landing_page', 'landing_copy', 'landing_headline', 'landing_subtext', 'branding_options',
+                    'landing_copy', 'landing_headline', 'landing_subtext', 'branding_options',
                 ]));
         }
 
@@ -767,9 +774,11 @@ class DownloadController extends Controller
             $finalThumbnailUrl = null;
             if ($thumbnailStatus === 'completed') {
                 $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
+                // Download asset grids use medium thumbnail; fall back to thumb if medium missing
+                $thumbnailStyle = $a->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
                 $finalThumbnailUrl = route('assets.thumbnail.final', [
                     'asset' => $a->id,
-                    'style' => 'thumb',
+                    'style' => $thumbnailStyle,
                 ]);
                 if ($thumbnailVersion) {
                     $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
@@ -790,6 +799,24 @@ class DownloadController extends Controller
         $planRevoke = ($features['revoke'] ?? false) === true;
         $isCreator = $user && $d->created_by_user_id !== null && (int) $d->created_by_user_id === (int) $user->id;
         $canRevoke = $planRevoke && ($canManage || $isCreator);
+        $brand = $d->relationLoaded('brand') ? $d->brand : null;
+        $assetBrandIds = $d->assets->pluck('brand_id')->filter()->unique()->values()->all();
+        $brandsFromAssets = empty($assetBrandIds) ? [] : \App\Models\Brand::query()
+            ->whereIn('id', $assetBrandIds)
+            ->where('tenant_id', $d->tenant_id)
+            ->get()
+            ->map(fn ($b) => [
+                'id' => $b->id,
+                'name' => $b->name ?? '',
+                'slug' => $b->slug ?? '',
+                'logo_path' => $b->logo_path,
+                'icon_path' => $b->icon_path,
+                'icon' => $b->icon,
+                'icon_bg_color' => $b->icon_bg_color,
+                'primary_color' => $b->primary_color,
+            ])
+            ->values()
+            ->all();
 
         return [
             'id' => $d->id,
@@ -806,6 +833,18 @@ class DownloadController extends Controller
             'allowed_user_ids' => $d->relationLoaded('allowedUsers') ? $d->allowedUsers->pluck('id')->all() : [],
             'uses_landing_page' => (bool) ($d->uses_landing_page ?? false),
             'password_protected' => ! empty($d->password_hash),
+            'brand_id' => $d->brand_id,
+            'brand' => $brand ? [
+                'id' => $brand->id,
+                'name' => $brand->name ?? '',
+                'slug' => $brand->slug ?? '',
+                'logo_path' => $brand->logo_path,
+                'icon_path' => $brand->icon_path,
+                'icon' => $brand->icon,
+                'icon_bg_color' => $brand->icon_bg_color,
+                'primary_color' => $brand->primary_color,
+            ] : null,
+            'brands' => $brandsFromAssets,
             'landing_copy' => [
                 'headline' => $landingCopy['headline'] ?? '',
                 'subtext' => $landingCopy['subtext'] ?? '',
@@ -813,6 +852,7 @@ class DownloadController extends Controller
             'expires_at' => $d->expires_at?->toIso8601String(),
             'revoked_at' => $d->revoked_at?->toIso8601String(),
             'asset_count' => $d->assets->count(),
+            'access_count' => (int) ($d->access_count ?? 0),
             'zip_size_bytes' => $d->zip_size_bytes,
             'public_url' => $isSingleAsset ? null : route('downloads.public', ['download' => $d->id]),
             'created_at' => $d->created_at->toIso8601String(),
@@ -953,19 +993,9 @@ class DownloadController extends Controller
             return $this->downloadPublicErrorResponse($request, $download, 'expired', 'This download has expired.', 410);
         }
 
-        // D11: Enterprise Download Policy — block delivery if public download does not meet organizational rules
+        // D11: Enterprise Download Policy — block delivery only for password requirement (landing page is advisory; we no longer block delivery for it).
         if ($download->access_mode === DownloadAccessMode::PUBLIC) {
             $tenant = $download->tenant;
-            if ($tenant && $this->downloadPolicy->requireLandingPageForPublic($tenant) && ! $download->uses_landing_page) {
-                Log::info('download.policy.enforced', [
-                    'tenant_id' => $tenant->id,
-                    'download_id' => $download->id,
-                    'policy' => 'require_landing_page_for_public',
-                    'action' => 'blocked_delivery',
-                ]);
-
-                return $this->downloadPublicErrorResponse($request, $download, 'access_denied', 'This download does not meet your organization\'s delivery requirements.', 403);
-            }
             if ($tenant && $this->downloadPolicy->requirePasswordForPublic($tenant) && ! $download->password_hash) {
                 Log::info('download.policy.enforced', [
                     'tenant_id' => $tenant->id,
@@ -973,8 +1003,9 @@ class DownloadController extends Controller
                     'policy' => 'require_password_for_public',
                     'action' => 'blocked_delivery',
                 ]);
+                $message = 'Your organization requires a password for public downloads. Set a password in Download settings (open the download, click Settings).';
 
-                return $this->downloadPublicErrorResponse($request, $download, 'access_denied', 'This download does not meet your organization\'s delivery requirements.', 403);
+                return $this->downloadPublicErrorResponse($request, $download, 'access_denied', $message, 403);
             }
         }
 
@@ -987,6 +1018,7 @@ class DownloadController extends Controller
             DownloadEventEmitter::emitDownloadZipCompleted($download);
             $this->logDownloadAccess($download, 'download.access.granted', 'zip');
             app(\App\Services\AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
+            $download->increment('access_count');
 
             return redirect($signedUrl);
         } catch (\Exception $e) {
@@ -1065,10 +1097,11 @@ class DownloadController extends Controller
                 return true;
 
             case DownloadAccessMode::BRAND:
-                if (! $user) {
-                    return false;
-                }
+                // Orphan: multibrand download with "brand only" but no single brand_id — allow (treat as public)
                 if (! $download->brand_id) {
+                    return true;
+                }
+                if (! $user) {
                     return false;
                 }
                 return $user->brands()
@@ -1162,6 +1195,10 @@ class DownloadController extends Controller
         $landingCopy = $download->landing_copy ?? [];
         $legacy = $download->branding_options ?? [];
         $brand = $download->brand_id ? $download->brand : null;
+        // Ensure we have latest brand settings (e.g. background_asset_ids) from DB
+        if ($brand) {
+            $brand->refresh();
+        }
         $brandSettings = $brand ? ($brand->download_landing_settings ?? []) : [];
 
         // Copy: download landing_copy > legacy > brand default_headline/default_subtext
@@ -1204,22 +1241,22 @@ class DownloadController extends Controller
         }
         $brandingOptions['overlay_color'] = $brandingOptions['accent_color'];
 
-        // D10.1: Random background — choose one image per request; use optimized thumbnail (medium for full-screen)
+        // D10.1: Background image — use public URL so it loads for unauthenticated visitors (no auth required).
+        // The route /d/{download}/background picks a random brand background asset and streams it.
         $backgroundImageUrl = null;
         if (! empty($brandSettings['background_asset_ids']) && is_array($brandSettings['background_asset_ids']) && $brand) {
-            $backgroundIds = $brandSettings['background_asset_ids'];
-            $chosenId = Arr::random($backgroundIds);
-            $backgroundAsset = Asset::where('brand_id', $brand->id)->where('id', $chosenId)->first();
-            if ($backgroundAsset) {
-                $backgroundImageUrl = route('assets.thumbnail.final', ['asset' => $backgroundAsset->id, 'style' => 'medium']);
-            }
+            $backgroundImageUrl = route('downloads.public.background', ['download' => $download->id]);
         }
         $brandingOptions['background_image_url'] = $backgroundImageUrl;
+
+        // Landing layout is controlled by brand only: when "Enable landing pages" is on in brand settings,
+        // use branded layout for ALL public states (landing, 404, 403, password, processing). No per-download toggle.
+        $showLandingLayout = $brand && ($brandSettings['enabled'] ?? false);
 
         return array_merge([
             'state' => $state,
             'message' => $message,
-            'uses_landing_page' => $download->uses_landing_page ?? false,
+            'show_landing_layout' => $showLandingLayout,
             'landing_copy' => $landingCopy,
             'branding_options' => $brandingOptions,
         ], $extra);
@@ -1433,7 +1470,7 @@ class DownloadController extends Controller
     {
         $user = Auth::user();
         $tenant = app('tenant');
-        $settingsInputKeys = ['access_mode', 'user_ids', 'uses_landing_page', 'landing_copy', 'password'];
+        $settingsInputKeys = ['access_mode', 'user_ids', 'landing_copy', 'password'];
 
         if (! $tenant || ! $this->canManageDownload($user, $tenant)) {
             return $this->downloadActionError($request, 'message', 'You cannot manage downloads.', 403, [], 'settings', $download->id);
@@ -1471,9 +1508,6 @@ class DownloadController extends Controller
         }
 
         if ($this->planService->canBrandDownload($tenant)) {
-            if ($request->has('uses_landing_page')) {
-                $updates['uses_landing_page'] = $request->boolean('uses_landing_page');
-            }
             $landingCopy = $request->input('landing_copy');
             if (is_array($landingCopy)) {
                 $updates['landing_copy'] = $this->sanitizeLandingCopy($landingCopy);

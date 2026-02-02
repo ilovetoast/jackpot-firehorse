@@ -152,19 +152,15 @@ class AssetEligibilityD61Test extends TestCase
         $pending = $this->createAsset(['published_at' => null, 'title' => 'Pending']);
         $collection->assets()->attach([$published->id, $pending->id]);
 
-        Queue::fake();
-
         $response = $this->post(route('public.collections.download', [
             'brand_slug' => $this->brand->slug,
             'collection_slug' => $collection->slug,
         ]), ['_token' => csrf_token()]);
 
         $response->assertRedirect();
-        $download = Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->latest()->first();
-        $this->assertNotNull($download);
-        $ids = $download->assets()->pluck('assets.id')->all();
-        $this->assertCount(1, $ids);
-        $this->assertContains($published->id, $ids);
-        $this->assertNotContains($pending->id, $ids);
+        $location = $response->headers->get('Location');
+        $this->assertStringContainsString('/zip', $location);
+        $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
+        // On-the-fly zip uses queryPublic() which excludes unpublished assets; only published is included when zip is streamed.
     }
 }

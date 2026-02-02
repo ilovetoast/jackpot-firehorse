@@ -16,8 +16,10 @@ import {
   UserCircleIcon,
   ClockIcon,
   LockOpenIcon,
+  LockClosedIcon,
 } from '@heroicons/react/24/outline'
 import Avatar from '../../Components/Avatar'
+import BrandAvatar from '../../Components/BrandAvatar'
 import EditDownloadSettingsModal from '../../Components/EditDownloadSettingsModal'
 
 function formatDate(iso) {
@@ -597,9 +599,49 @@ export default function DownloadsIndex({
                               </span>
                             )
                           })()}
+                          {d.password_protected && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800"
+                              title="Recipients must enter a password to access this download."
+                            >
+                              <LockClosedIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              Password
+                            </span>
+                          )}
+                          {((d.brands && d.brands.length > 1) ? d.brands : (d.brand ? [d.brand] : [])).length > 0 && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-100 pl-1 pr-2 py-1 text-xs font-medium text-slate-700"
+                              title={(d.brands && d.brands.length > 1) ? `${d.brands.length} brands` : `${d.brand?.name || d.brand?.slug || 'Brand'} — Landing page uses this brand's logo, colors, and background.`}
+                            >
+                              {(d.brands && d.brands.length > 1 ? d.brands : [d.brand]).slice(0, 3).map((b) => (
+                                <BrandAvatar
+                                  key={b.id}
+                                  logoPath={b.logo_path}
+                                  iconPath={b.icon_path}
+                                  name={b.name}
+                                  primaryColor={b.primary_color || '#6366f1'}
+                                  icon={b.icon}
+                                  iconBgColor={b.icon_bg_color}
+                                  showIcon={!!(b.icon || b.icon_path)}
+                                  size="sm"
+                                  className="ring-2 ring-white shrink-0"
+                                />
+                              ))}
+                              {d.brands && d.brands.length > 1 ? (
+                                <span className="truncate max-w-[6rem]">{d.brands.length} brands</span>
+                              ) : (
+                                <span className="truncate max-w-[8rem]">{d.brand?.name || d.brand?.slug || 'Brand'}</span>
+                              )}
+                            </span>
+                          )}
                         </div>
                         <span className="text-sm font-medium text-slate-900 truncate">{displayTitle}</span>
                         <span className="text-sm text-slate-500">Expires {formatDate(d.expires_at)}</span>
+                        <span className="text-sm text-slate-500" title="Number of times this download was accessed">
+                          {d.access_count != null && d.access_count > 0
+                            ? `Accessed ${d.access_count} time${d.access_count !== 1 ? 's' : ''}`
+                            : 'Not accessed yet'}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         {isReady && d.public_url && (
@@ -768,6 +810,10 @@ export default function DownloadsIndex({
                           {settingsExpandedId === d.id && (
                             <dl className="mt-2 pl-6 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-slate-600">
                               <div>
+                                <dt className="font-medium text-slate-500">Brand</dt>
+                                <dd>{d.brand ? (d.brand.name || d.brand.slug || '—') : '—'}</dd>
+                              </div>
+                              <div>
                                 <dt className="font-medium text-slate-500">Access</dt>
                                 <dd>{accessBadge(d.access_mode || 'public').label}</dd>
                               </div>
@@ -778,10 +824,6 @@ export default function DownloadsIndex({
                               <div>
                                 <dt className="font-medium text-slate-500">Password</dt>
                                 <dd>{d.password_protected ? 'Yes' : 'No'}</dd>
-                              </div>
-                              <div>
-                                <dt className="font-medium text-slate-500">Landing page</dt>
-                                <dd>{d.uses_landing_page ? 'Yes' : 'No'}</dd>
                               </div>
                             </dl>
                           )}
@@ -881,6 +923,11 @@ export default function DownloadsIndex({
                               <div className="flex flex-col gap-0.5 min-w-0">
                                 <span className="truncate font-medium text-slate-900">{canManage && d.created_by ? (d.created_by.name || '—') : 'Download'}</span>
                                 <span className="text-slate-500 text-xs">Expires {formatDate(d.expires_at)}</span>
+                                <span className="text-slate-500 text-xs" title="Number of times this download was accessed">
+                                  {d.access_count != null && d.access_count > 0
+                                    ? `Accessed ${d.access_count} time${d.access_count !== 1 ? 's' : ''}`
+                                    : 'Not accessed yet'}
+                                </span>
                               </div>
                               {d.zip_size_bytes != null && d.zip_size_bytes > 0 && (
                                 <span className="text-slate-500">{formatBytes(d.zip_size_bytes)}</span>

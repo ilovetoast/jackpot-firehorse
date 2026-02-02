@@ -134,9 +134,6 @@ class DownloadManagementService
         }
 
         $modelUpdates = [];
-        if (array_key_exists('uses_landing_page', $updates)) {
-            $modelUpdates['uses_landing_page'] = (bool) $updates['uses_landing_page'];
-        }
         if (array_key_exists('landing_copy', $updates)) {
             $modelUpdates['landing_copy'] = is_array($updates['landing_copy']) ? $updates['landing_copy'] : null;
         }

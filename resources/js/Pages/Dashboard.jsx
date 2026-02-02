@@ -20,6 +20,8 @@ import {
 } from '@heroicons/react/24/outline'
 import AppFooter from '../Components/AppFooter'
 import AppNav from '../Components/AppNav'
+import Avatar from '../Components/Avatar'
+import BrandAvatar from '../Components/BrandAvatar'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../Components/PendingMetadataTile'
@@ -109,7 +111,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
         )
     }
 
-    // Get appropriate icon and color for activity type
+    // Get appropriate icon and color for activity type (fallback when no entity avatar)
     const getActivityIcon = (eventType, actorType) => {
         const iconClass = "h-5 w-5"
         
@@ -128,6 +130,59 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
         } else {
             return <CogIcon className={`${iconClass} text-gray-400`} />
         }
+    }
+
+    // Recent activity left cell: asset thumbnail > user avatar > company name > brand avatar > icon
+    const getActivityLeftCell = (activity) => {
+        const subjectType = activity.subject?.type ?? ''
+        const isAssetSubject = subjectType.includes('Asset')
+        if (isAssetSubject && activity.subject?.thumbnail_url) {
+            return (
+                <img
+                    src={activity.subject.thumbnail_url}
+                    alt=""
+                    className="h-10 w-10 rounded-lg object-cover flex-shrink-0 bg-gray-100"
+                />
+            )
+        }
+        if (activity.actor?.type === 'user' && (activity.actor?.avatar_url || activity.actor?.name)) {
+            return (
+                <Avatar
+                    avatarUrl={activity.actor.avatar_url}
+                    firstName={activity.actor.first_name ?? activity.actor.name?.split(' ')[0] ?? ''}
+                    lastName={activity.actor.last_name ?? activity.actor.name?.split(' ').slice(1).join(' ') ?? ''}
+                    email={activity.actor.email}
+                    size="sm"
+                />
+            )
+        }
+        if (activity.company_name) {
+            return (
+                <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-medium text-slate-700 px-1.5 truncate max-w-[4rem]" title={activity.company_name}>
+                        {activity.company_name.charAt(0).toUpperCase()}
+                    </span>
+                </div>
+            )
+        }
+        if (activity.brand) {
+            return (
+                <BrandAvatar
+                    name={activity.brand.name}
+                    logoPath={activity.brand.logo_path}
+                    iconPath={activity.brand.icon_path}
+                    icon={activity.brand.icon}
+                    iconBgColor={activity.brand.icon_bg_color}
+                    primaryColor={activity.brand.primary_color}
+                    size="sm"
+                />
+            )
+        }
+        return (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 group-hover:bg-white transition-colors">
+                {getActivityIcon(activity.event_type, activity.actor?.type)}
+            </div>
+        )
     }
 
     // Format activity description to be more user-friendly
@@ -587,11 +642,9 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                                 key={activity.id}
                                                 className="group relative flex items-start gap-4 p-4 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50/50 transition-all duration-200"
                                             >
-                                                {/* Icon with background */}
+                                                {/* Avatar / thumbnail / company / brand or icon */}
                                                 <div className="flex-shrink-0">
-                                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 group-hover:bg-white transition-colors">
-                                                        {getActivityIcon(activity.event_type, activity.actor.type)}
-                                                    </div>
+                                                    {getActivityLeftCell(activity)}
                                                 </div>
                                                 
                                                 {/* Content */}
@@ -601,14 +654,14 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                                             <p className="text-sm font-medium text-gray-900 leading-5">
                                                                 {formatActivityDescription(activity)}
                                                             </p>
-                                                            <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
+                                                            <div className="mt-2 flex items-center gap-3 text-xs text-gray-500 flex-wrap">
                                                                 <span className="flex items-center gap-1">
-                                                                    {activity.actor.type === 'user' ? (
-                                                                        <UserIcon className="h-3 w-3" />
+                                                                    {activity.actor?.type === 'user' ? (
+                                                                        <UserIcon className="h-3 w-3 flex-shrink-0" />
                                                                     ) : (
-                                                                        <CogIcon className="h-3 w-3" />
+                                                                        <CogIcon className="h-3 w-3 flex-shrink-0" />
                                                                     )}
-                                                                    {activity.actor.name}
+                                                                    {activity.company_name || activity.actor?.name}
                                                                 </span>
                                                                 {activity.brand && (
                                                                     <>
