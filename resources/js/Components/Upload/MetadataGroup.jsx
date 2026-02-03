@@ -38,7 +38,8 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
     }, [autoExpand, hasErrors, isExpanded])
 
     // C9.2: In upload form, collection is shown in dedicated Collections section only — exclude from metadata groups
-    const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'collection')
+    // Starred is rendered as a toggle on the uploader section — exclude from metadata groups
+    const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'collection' && f.key !== 'starred')
 
     // Handle empty groups
     if (fieldsToRender.length === 0) {
@@ -72,15 +73,16 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
                 >
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                         {fieldsToRender.map((field) => (
-                            <MetadataFieldInput
-                                key={field.key}
-                                field={field}
-                                value={values[field.key]}
-                                onChange={(value) => onChange(field.key, value)}
-                                disabled={disabled}
-                                showError={showErrors && !!groupErrors[field.key]}
-                                isUploadContext={true}
-                            />
+                            <div key={field.key} className={field.key === 'tags' ? 'sm:col-span-2' : ''}>
+                                <MetadataFieldInput
+                                    field={field}
+                                    value={values[field.key]}
+                                    onChange={(value) => onChange(field.key, value)}
+                                    disabled={disabled}
+                                    showError={showErrors && !!groupErrors[field.key]}
+                                    isUploadContext={true}
+                                />
+                            </div>
                         ))}
                     </div>
                 </div>

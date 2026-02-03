@@ -462,6 +462,9 @@ class HandleInertiaRequests extends Middleware
                     'name' => $tenant->name,
                     'slug' => $tenant->slug,
                     'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
+                    // Phase AG-7.1: Agency info for user menu (tier only loaded when is_agency)
+                    'is_agency' => (bool) ($tenant->is_agency ?? false),
+                    'agency_tier' => ($tenant->is_agency ?? false) ? ($tenant->agencyTier?->name ?? null) : null,
                 ] : null,
                 'activeBrand' => $activeBrand ? [
                     'id' => $activeBrand->id,

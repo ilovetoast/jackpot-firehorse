@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\AgencyTier;
 use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
@@ -85,9 +86,14 @@ class CompanyBrandSeeder extends Seeder
             ['name' => 'Velve Hammer Branding']
         );
 
-        // Set tenant 1 to enterprise plan from the beginning
+        // Set tenant 1 to enterprise plan and mark as agency (approved)
+        $silverTier = AgencyTier::where('name', 'Silver')->first();
         $initialCompany->update([
             'manual_plan_override' => 'enterprise',
+            'is_agency' => true,
+            'agency_approved_at' => now(),
+            'agency_approved_by' => $initialUser->id,
+            'agency_tier_id' => $silverTier?->id,
         ]);
 
         // Attach user 1 to the initial company as owner

@@ -14,24 +14,25 @@ use Illuminate\Support\Facades\Route;
  * active download, password prompt, 403 (unauthorized/bad password), 404 (not found),
  * expired, revoked, failed, processing, and any future terminal state.
  *
- * Why error pages must share this branding logic: If 404, 403, expired, or revoked were rendered
- * with separate logic or unbranded layouts, users would see inconsistent presentation when a
- * branded download link fails. Every state must use resolve() so branding is consistent—brand
- * template when landing required + single-brand + branding enabled; default Jackpot otherwise.
- * No silent fallbacks to unbranded layouts. Intentional design, not a shortcut.
+ * D-SHARE: Plan-based branding logic:
+ * - FREE plan: Jackpot promotional copy, tagline, neutral styling
+ * - PAID plan: Brand logo/colors if set (single-brand + branding enabled); else neutral, NO Jackpot promo
  *
  * IMPORTANT: Every code path that renders Inertia('Downloads/Public', ...) MUST call
- * resolve($download, $message) and pass the returned show_landing_layout and branding_options
- * into the page props. Do not duplicate branding logic or silently fall back to unbranded layouts.
+ * resolve($download, $message) and pass the returned props into the page.
  */
 class DownloadPublicPageBrandingResolver
 {
+    public function __construct(
+        protected PlanService $planService
+    ) {}
+
     /**
      * Resolve branding for the public download page.
      *
      * @param  Download|null  $download  The download (null for 404 / not found)
      * @param  string  $message  Optional message (e.g. for 404, expired, revoked)
-     * @return array{show_landing_layout: bool, branding_options: array}
+     * @return array{show_landing_layout: bool, branding_options: array, show_jackpot_promo: bool, footer_promo: array}
      */
     public function resolve(?Download $download, string $message = ''): array
     {
@@ -39,29 +40,68 @@ class DownloadPublicPageBrandingResolver
             return $this->defaultJackpotBranding($message);
         }
 
-        $templateBrand = $download->getLandingPageTemplateBrand();
+        $tenant = $download->tenant;
+        $isFreePlan = $tenant ? $this->planService->getCurrentPlan($tenant) === 'free' : true;
+        $canBrand = $tenant && $this->planService->canBrandDownload($tenant);
 
-        if ($templateBrand !== null) {
-            return [
-                'show_landing_layout' => true,
-                'branding_options' => $this->buildBrandingFromTemplateBrand($download, $templateBrand),
-            ];
+        // Priority 1: Brand-level download branding (plans with branding enabled; single-brand + enabled)
+        if ($canBrand) {
+            $shareBrand = $this->getSharePageTemplateBrand($download);
+            if ($shareBrand !== null) {
+            $branding = $this->buildBrandingFromTemplateBrand($download, $shareBrand);
+
+                return [
+                    'show_landing_layout' => true,
+                    'branding_options' => $branding,
+                    'show_jackpot_promo' => false,
+                    'footer_promo' => [],
+                ];
+            }
         }
 
-        // Legacy: download has no template brand but may have stored branding_options
-        $legacy = $download->branding_options ?? [];
-        if ($this->hasMeaningfulLegacyBranding($legacy)) {
-            return [
-                'show_landing_layout' => true,
-                'branding_options' => $this->normalizeLegacyBranding($legacy, $download),
-            ];
+        // Legacy: download has stored branding_options (plans with branding only)
+        if ($canBrand) {
+            $legacy = $download->branding_options ?? [];
+            if ($this->hasMeaningfulLegacyBranding($legacy)) {
+                $branding = $this->normalizeLegacyBranding($legacy, $download);
+
+                return [
+                    'show_landing_layout' => true,
+                    'branding_options' => $branding,
+                    'show_jackpot_promo' => false,
+                    'footer_promo' => [],
+                ];
+            }
         }
 
-        return $this->defaultJackpotBranding($message);
+        // Free plan: Jackpot promo; Paid plan: neutral, no promo
+        if ($isFreePlan) {
+            return $this->defaultJackpotBranding($message);
+        }
+
+        return $this->neutralBranding($message);
     }
 
     /**
-     * Default Jackpot branding (no brand template). Used for 404 or when no brand template applies.
+     * Brand for share page template (single-brand + download_landing enabled).
+     * Used for both password and non-password share pages on PAID plans.
+     */
+    protected function getSharePageTemplateBrand(Download $download): ?Brand
+    {
+        if ($download->getDistinctAssetBrandCount() !== 1) {
+            return null;
+        }
+        $brandId = $download->assets()->select('assets.brand_id')->distinct()->value('brand_id');
+        if ($brandId === null) {
+            return null;
+        }
+        $brand = Brand::find($brandId);
+
+        return $brand && $brand->isDownloadLandingPageEnabled() ? $brand : null;
+    }
+
+    /**
+     * Default Jackpot branding (FREE plan). Used for 404 or when no brand template applies.
      */
     protected function defaultJackpotBranding(string $message = ''): array
     {
@@ -77,6 +117,32 @@ class DownloadPublicPageBrandingResolver
                 'subtext' => $message ?: 'Download',
                 'background_image_url' => null,
             ],
+            'show_jackpot_promo' => true,
+            'footer_promo' => [
+                'line1' => 'Provided by ' . $appName . ' — Free Digital Asset Management',
+                'line2' => 'Sign up today',
+                'signup_url' => config('app.url') . '/signup',
+            ],
+        ];
+    }
+
+    /**
+     * Neutral branding (PAID plan, no brand branding). No Jackpot promotional copy.
+     */
+    protected function neutralBranding(string $message = ''): array
+    {
+        return [
+            'show_landing_layout' => false,
+            'branding_options' => [
+                'logo_url' => null,
+                'accent_color' => '#4F46E5',
+                'overlay_color' => '#4F46E5',
+                'headline' => '',
+                'subtext' => $message ?: 'Download',
+                'background_image_url' => null,
+            ],
+            'show_jackpot_promo' => false,
+            'footer_promo' => [],
         ];
     }
 

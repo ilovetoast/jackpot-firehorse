@@ -6,6 +6,7 @@ use App\Enums\DownloadAccessMode;
 use App\Enums\DownloadSource;
 use App\Enums\DownloadStatus;
 use App\Enums\DownloadType;
+use App\Enums\DownloadZipFailureReason;
 use App\Enums\ZipStatus;
 use App\Services\DownloadEventEmitter;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -65,6 +66,7 @@ class Download extends Model
         'zip_status',
         'zip_build_started_at',    // D9.2: observability only
         'zip_build_completed_at',  // D9.2: observability only
+        'zip_build_duration_seconds', // D-UX: persisted for time estimate messaging
         'zip_build_failed_at',     // D9.2: observability only
         'zip_path',
         'access_count',        // Number of times this download was delivered (ZIP or single-asset)
@@ -84,6 +86,13 @@ class Download extends Model
         'branding_options', // D7: legacy; R3.1+ use landing_copy + brand settings
         'uses_landing_page', // R3.1: when true, show landing page; when false, go straight to ZIP
         'landing_copy',     // R3.1: JSON { headline?, subtext? } copy overrides
+        'failure_reason',   // ZIP build failure classification
+        'failure_count',    // Increment on each failure
+        'last_failed_at',   // Timestamp of last failure
+        'zip_build_chunk_index', // For resumable chunked ZIP creation
+        'zip_total_chunks',      // D-Progress: total chunks when build started (observability)
+        'zip_last_progress_at',  // D-Progress: last chunk completion timestamp (heartbeat)
+        'escalation_ticket_id',  // Ticket created for failure escalation
     ];
 
     /**
@@ -116,6 +125,12 @@ class Download extends Model
             'version' => 'integer',
             'zip_size_bytes' => 'integer',
             'access_count' => 'integer',
+            'failure_reason' => DownloadZipFailureReason::class,
+            'failure_count' => 'integer',
+            'last_failed_at' => 'datetime',
+            'zip_build_chunk_index' => 'integer',
+            'zip_total_chunks' => 'integer',
+            'zip_last_progress_at' => 'datetime',
         ];
     }
 
@@ -278,6 +293,63 @@ class Download extends Model
         $noZipYet = empty($this->zip_path) || $this->zip_status === ZipStatus::NONE || $this->zip_status === ZipStatus::BUILDING;
 
         return $noZipYet;
+    }
+
+    /**
+     * Phase D4: Detect if a "Preparing" download may have failed (stuck).
+     * True when processing and either: job started >20 min ago, or created >25 min ago with no start.
+     * Job timeout is 15 min; backoff can delay retries. Used for UX messaging only.
+     */
+    public function isPossiblyStuck(): bool
+    {
+        if (! $this->isProcessing()) {
+            return false;
+        }
+        $buildStarted = $this->zip_build_started_at;
+        $createdAt = $this->created_at ?? now();
+
+        if ($buildStarted && $buildStarted->diffInMinutes(now(), false) > 20) {
+            return true;
+        }
+        if (! $buildStarted && $createdAt->diffInMinutes(now(), false) > 25) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Phase D-Progress: Get ZIP build progress percentage (observability only).
+     * Returns null if zip_total_chunks is missing; else round((chunk_index / total_chunks) * 100).
+     */
+    public function getZipProgressPercentage(): ?int
+    {
+        $total = $this->zip_total_chunks;
+        if ($total === null || $total <= 0) {
+            return null;
+        }
+        $index = (int) ($this->zip_build_chunk_index ?? 0);
+
+        return (int) round(($index / $total) * 100);
+    }
+
+    /**
+     * Phase D-Progress: True if download is preparing and no chunk progress for longer than threshold (observability only).
+     * Used for UI messaging: "This download is taking longer than usual."
+     *
+     * @param int $seconds Threshold in seconds (default 180)
+     */
+    public function isZipStalled(int $seconds = 180): bool
+    {
+        if (! $this->isProcessing()) {
+            return false;
+        }
+        $lastProgress = $this->zip_last_progress_at;
+        if (! $lastProgress) {
+            return false;
+        }
+
+        return $lastProgress->diffInSeconds(now(), false) > $seconds;
     }
 
     /**
@@ -521,13 +593,18 @@ class Download extends Model
             return false;
         }
 
+        // Regenerate guardrail: max 3 failures, then escalated to support
+        if (($this->failure_count ?? 0) >= 3 || $this->escalation_ticket_id) {
+            return false;
+        }
+
         // Snapshot downloads with READY ZIP are immutable
         if ($this->isSnapshot() && $this->zip_status === \App\Enums\ZipStatus::READY) {
             return false;
         }
 
         // Can regenerate if ZIP is invalidated or failed
-        if ($this->zip_status === \App\Enums\ZipStatus::INVALIDATED 
+        if ($this->zip_status === \App\Enums\ZipStatus::INVALIDATED
             || $this->zip_status === \App\Enums\ZipStatus::FAILED) {
             return true;
         }
@@ -538,6 +615,34 @@ class Download extends Model
         }
 
         return false;
+    }
+
+    /**
+     * Whether this download has been escalated to support (regenerate disabled).
+     */
+    public function isEscalatedToSupport(): bool
+    {
+        return ($this->failure_count ?? 0) >= 3 || $this->escalation_ticket_id !== null;
+    }
+
+    /**
+     * Record ZIP build failure: increments failure_count, sets failure_reason, last_failed_at,
+     * stores exception trace in download_options['zip_failure_trace'].
+     */
+    public function recordFailure(\Throwable $e, DownloadZipFailureReason $reason): void
+    {
+        $options = array_merge($this->download_options ?? [], [
+            'zip_failure_trace' => substr($e->getTraceAsString(), 0, 5000),
+        ]);
+
+        $this->forceFill([
+            'zip_build_failed_at' => now(),
+            'failure_reason' => $reason,
+            'failure_count' => ($this->failure_count ?? 0) + 1,
+            'last_failed_at' => now(),
+            'zip_status' => ZipStatus::FAILED,
+            'download_options' => $options,
+        ])->saveQuietly();
     }
 
     /**

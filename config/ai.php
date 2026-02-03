@@ -134,6 +134,13 @@ return [
     |
     | All actions are auditable via agent runs stored in ai_agent_runs table.
     |
+    | AI Agent Result Contract (Phase D-1):
+    | All AI agent results MUST include:
+    | - severity: AIAgentSeverity enum value (info, warning, system, data)
+    | - confidence: float 0–1
+    | - summary: string
+    | - recommendation: string (optional)
+    |
     */
     'agents' => [
         'ticket_analyzer' => [
@@ -248,6 +255,66 @@ return [
                 // Phase AF-6: Tenant-scoped agent - runs automatically during approval actions
                 // No specific permissions required (system-triggered, read-only)
             ],
+        ],
+        'download_zip_failure_analyzer' => [
+            'name' => 'Download ZIP Failure Analyzer',
+            'description' => 'Analyzes download ZIP build failures and recommends escalation',
+            'scope' => 'system',
+            'default_model' => 'gpt-4-turbo',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // System-triggered on timeout or repeated failures
+            ],
+            'prompt' => <<<'PROMPT'
+You MUST:
+- Classify root cause of the ZIP build failure
+- Assign severity using AIAgentSeverity: info (benign), warning (recoverable, retry recommended), system (infrastructure-level, escalation-worthy), data (asset-level: permissions, missing files)
+- Output a JSON object with: severity, confidence (0–1), summary, recommendation (optional)
+
+You MUST NOT:
+- Decide enforcement (downstream systems decide)
+- Trigger tickets directly (downstream systems decide)
+PROMPT
+        ],
+        'upload_failure_analyzer' => [
+            'name' => 'Upload Failure Analyzer',
+            'description' => 'Analyzes upload failures and recommends escalation',
+            'scope' => 'system',
+            'default_model' => 'gpt-4-turbo',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Phase U-1: System-triggered on repeated or critical failures
+            ],
+            'prompt' => <<<'PROMPT'
+You MUST:
+- Classify root cause of the upload failure
+- Assign severity using AIAgentSeverity: info (benign), warning (recoverable), system (infrastructure-level, escalation-worthy), data (permissions, storage)
+- Output a JSON object with: severity, confidence (0–1), summary, recommendation (optional)
+
+You MUST NOT:
+- Decide enforcement (downstream systems decide)
+- Trigger tickets directly (downstream systems decide)
+PROMPT
+        ],
+        'asset_derivative_failure_analyzer' => [
+            'name' => 'Asset Derivative Failure Analyzer',
+            'description' => 'Analyzes derivative generation failures (thumbnails, previews, posters)',
+            'scope' => 'system',
+            'default_model' => 'gpt-4-turbo',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Phase T-1: System-triggered on repeated or critical failures
+            ],
+            'prompt' => <<<'PROMPT'
+You MUST:
+- Classify root cause of the derivative generation failure
+- Assign severity using AIAgentSeverity: info, warning, system (infra), data (corrupt file, codec)
+- Output a JSON object with: severity, confidence (0–1), summary, recommendation (optional)
+
+You MUST NOT:
+- Decide enforcement (downstream systems decide)
+- Trigger tickets directly (downstream systems decide)
+PROMPT
         ],
     ],
 

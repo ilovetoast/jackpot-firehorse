@@ -363,7 +363,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_filterable' => true,
             'is_user_editable' => true,
             'is_ai_trainable' => false,
-            'is_upload_visible' => false, // Starred is set post-upload
+            'is_upload_visible' => true, // Shown as toggle on uploader (UploadAssetDialog renders it above UploadTray)
             'is_internal_only' => false,
         ]);
         
@@ -375,6 +375,7 @@ class MetadataFieldsSeeder extends Seeder
                 'is_filterable' => true,
                 'is_user_editable' => true,
                 'is_internal_only' => false,
+                'is_upload_visible' => true,
                 'updated_at' => now(),
             ]);
 

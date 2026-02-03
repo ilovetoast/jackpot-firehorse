@@ -11,19 +11,27 @@ use App\Jobs\BuildDownloadZipJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Download;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Services\DownloadBucketService;
 use App\Services\DownloadEventEmitter;
 use App\Services\DownloadExpirationPolicy;
 use App\Services\DownloadPublicPageBrandingResolver;
 use App\Services\EnterpriseDownloadPolicy;
+use App\Services\DownloadManagementService;
+use App\Services\DownloadZipEstimateService;
+use App\Services\ActivityRecorder;
+use App\Services\DownloadNameResolver;
 use App\Services\PlanService;
+use App\Services\StreamingZipService;
+use App\Mail\DownloadShareEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -57,6 +65,10 @@ class DownloadController extends Controller
         $scope = strtolower((string) ($request->input('scope', 'mine'))) === 'all' ? 'all' : 'mine';
         $statusFilter = $request->input('status', '');
         $accessFilter = $request->input('access', '');
+        $brandIdFilter = $request->input('brand_id', '');
+        $brandIdFilter = ($brandIdFilter !== null && $brandIdFilter !== '' && trim((string) $brandIdFilter) !== '')
+            ? trim((string) $brandIdFilter)
+            : '';
         $userIdFilterRaw = $request->input('user_id', '');
         $userIdFilter = ($userIdFilterRaw !== null && $userIdFilterRaw !== '' && trim((string) $userIdFilterRaw) !== '')
             ? trim((string) $userIdFilterRaw)
@@ -68,6 +80,7 @@ class DownloadController extends Controller
             'scope' => $scope,
             'status' => $statusFilter,
             'access' => $accessFilter,
+            'brand_id' => $brandIdFilter,
             'user_id' => $userIdFilter,
             'sort' => $sort,
         ];
@@ -108,6 +121,10 @@ class DownloadController extends Controller
                 $query->where('access_mode', DownloadAccessMode::PUBLIC->value);
             } elseif ($accessFilter === 'restricted') {
                 $query->where('access_mode', '!=', DownloadAccessMode::PUBLIC->value);
+            }
+
+            if ($brandIdFilter !== '') {
+                $query->where('brand_id', $brandIdFilter);
             }
 
             $sortColumn = match ($sort) {
@@ -163,6 +180,39 @@ class DownloadController extends Controller
                         ->all();
                 }
             }
+
+            $downloadBrands = Brand::query()
+                ->where('tenant_id', $tenant->id)
+                ->whereExists(function ($q) {
+                    $q->selectRaw(1)
+                        ->from('downloads')
+                        ->whereColumn('downloads.brand_id', 'brands.id')
+                        ->whereNull('downloads.deleted_at');
+                })
+                ->orderBy('name')
+                ->get(['id', 'name', 'slug', 'logo_path', 'primary_color', 'icon', 'icon_path', 'icon_bg_color'])
+                ->map(fn (Brand $b) => [
+                    'id' => $b->id,
+                    'name' => $b->name,
+                    'slug' => $b->slug,
+                    'logo_path' => $b->logo_path ?? null,
+                    'primary_color' => $b->primary_color ?? null,
+                    'icon' => $b->icon ?? null,
+                    'icon_path' => $b->icon_path ?? null,
+                    'icon_bg_color' => $b->icon_bg_color ?? null,
+                ])
+                ->values()
+                ->all();
+        } else {
+            $downloadBrands = [];
+        }
+
+        // JSON poll: return only downloads + pagination so the frontend can refresh list without an Inertia visit (avoids full page reload).
+        if ($request->wantsJson()) {
+            return response()->json([
+                'downloads' => $downloads,
+                'pagination' => $paginationMeta,
+            ]);
         }
 
         return Inertia::render('Downloads/Index', [
@@ -172,6 +222,7 @@ class DownloadController extends Controller
             'filters' => $filters,
             'pagination' => $paginationMeta,
             'download_users' => $downloadUsers,
+            'download_brands' => $downloadBrands ?? [],
         ]);
     }
 
@@ -232,16 +283,43 @@ class DownloadController extends Controller
             ? $download->source->value
             : (string) $download->source;
 
+        $zipTimeEstimate = null;
+        $estimatedBytes = null;
+        $isPossiblyStuck = false;
+        $zipProgressPct = null;
+        $zipChunkIndex = null;
+        $zipTotalChunks = null;
+        $isZipStalled = false;
+        if ($state === 'processing') {
+            $estimatedBytes = (int) ($download->download_options['estimated_bytes'] ?? $download->zip_size_bytes ?? 0);
+            if ($estimatedBytes > 0) {
+                $zipTimeEstimate = app(DownloadZipEstimateService::class)->estimateZipBuildTimeRange($estimatedBytes);
+            }
+            $isPossiblyStuck = $download->isPossiblyStuck();
+            $zipProgressPct = $download->getZipProgressPercentage();
+            $zipChunkIndex = (int) ($download->zip_build_chunk_index ?? 0);
+            $zipTotalChunks = $download->zip_total_chunks !== null ? (int) $download->zip_total_chunks : null;
+            $isZipStalled = $download->isZipStalled(180);
+        }
+
         return [
             'id' => $download->id,
             'title' => $download->title,
             'state' => $state,
+            'zip_time_estimate' => $zipTimeEstimate,
+            'estimated_bytes' => $estimatedBytes,
+            'is_possibly_stuck' => $isPossiblyStuck,
+            'zip_progress_percentage' => $zipProgressPct,
+            'zip_chunk_index' => $zipChunkIndex,
+            'zip_total_chunks' => $zipTotalChunks,
+            'is_zip_stalled' => $isZipStalled,
             'thumbnails' => $thumbnails,
             'expires_at' => $download->expires_at?->toIso8601String(),
             'asset_count' => $download->assets->count(),
             'zip_size_bytes' => $download->zip_size_bytes,
             'can_revoke' => (bool) ($planFeatures['revoke'] ?? false) && ($canManage || ($createdBy && $createdBy['id'] === auth()->id())),
-            'can_regenerate' => (bool) ($planFeatures['regenerate'] ?? false),
+            'can_regenerate' => (bool) ($planFeatures['regenerate'] ?? false) && $download->canRegenerateZip(),
+            'is_escalated_to_support' => $download->isEscalatedToSupport(),
             'can_extend' => (bool) ($planFeatures['extend_expiration'] ?? false),
             'public_url' => route('downloads.public', ['download' => $download->id]),
             'access_mode' => $accessMode,
@@ -255,10 +333,74 @@ class DownloadController extends Controller
     }
 
     /**
+     * Poll endpoint: return only mutable fields for given download IDs.
+     * Used for patch-based polling (no Inertia). Same visibility as index (tenant + scope).
+     *
+     * GET /app/api/downloads/poll?ids=uuid1,uuid2
+     */
+    public function poll(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $tenant || ! $user) {
+            return response()->json(['downloads' => []], 200);
+        }
+
+        $ids = $request->input('ids', []);
+        if (is_string($ids)) {
+            $ids = array_filter(explode(',', $ids));
+        }
+        if (! is_array($ids) || empty($ids)) {
+            return response()->json(['downloads' => []], 200);
+        }
+
+        $ids = array_slice(array_unique($ids), 0, 50);
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
+        $query = Download::query()
+            ->where('tenant_id', $tenant->id)
+            ->whereIn('id', $ids)
+            ->whereNull('deleted_at');
+        if (! $canManage) {
+            $query->where('created_by_user_id', $user->id);
+        }
+        $downloads = $query->get();
+
+        $planService = app(PlanService::class);
+        $features = $planService->getDownloadManagementFeatures($tenant);
+        $payloads = [];
+        foreach ($downloads as $download) {
+            $state = $download->getState();
+            $patch = [
+                'id' => $download->id,
+                'state' => $state,
+                'zip_total_chunks' => $download->zip_total_chunks !== null ? (int) $download->zip_total_chunks : null,
+                'zip_chunk_index' => (int) ($download->zip_build_chunk_index ?? 0),
+                'zip_progress_percentage' => $download->getZipProgressPercentage(),
+                'is_zip_stalled' => $state === 'processing' ? $download->isZipStalled(180) : false,
+                'is_possibly_stuck' => $state === 'processing' ? $download->isPossiblyStuck() : false,
+                'estimated_bytes' => (int) ($download->download_options['estimated_bytes'] ?? $download->zip_size_bytes ?? 0),
+            ];
+            if ($state === 'processing' && $patch['estimated_bytes'] > 0) {
+                $patch['zip_time_estimate'] = app(DownloadZipEstimateService::class)->estimateZipBuildTimeRange($patch['estimated_bytes']);
+            } else {
+                $patch['zip_time_estimate'] = null;
+            }
+            if ($state === 'ready') {
+                $patch['zip_size_bytes'] = $download->zip_size_bytes;
+                $patch['public_url'] = route('downloads.public', ['download' => $download->id]);
+            }
+            $payloads[] = $patch;
+        }
+
+        return response()->json(['downloads' => $payloads], 200);
+    }
+
+    /**
      * Create a download from the session bucket (POST /app/downloads).
      * Validates bucket not empty, plan/policy (password, expiration, access), then creates Download and dispatches BuildDownloadZipJob.
      */
-    public function store(Request $request): \Illuminate\Http\RedirectResponse
+    public function store(Request $request): \Illuminate\Http\RedirectResponse|JsonResponse
     {
         $request->validate([
             'source' => 'required|string|in:grid,drawer,collection,admin',
@@ -366,19 +508,179 @@ class DownloadController extends Controller
             $download->allowedUsers()->sync($request->input('allowed_users'));
         }
 
-        BuildDownloadZipJob::dispatch($download->id);
+        // Phase D-4: Estimate total bytes and store; skip build job if streaming enabled and over threshold
+        $estimatedBytes = Asset::whereIn('id', $visibleIds)->sum('size_bytes');
+        $download->download_options = array_merge($download->download_options ?? [], ['estimated_bytes' => $estimatedBytes]);
+        $download->saveQuietly();
+
+        $streamingEnabled = config('features.streaming_downloads', false);
+        $streamingThreshold = config('features.streaming_threshold_bytes', 500 * 1024 * 1024);
+        $useStreaming = $streamingEnabled && $estimatedBytes > $streamingThreshold;
+
+        if (! $useStreaming) {
+            // D-Progress: Pre-set progress so UI shows "0 of N chunks" before job runs
+            $chunkSize = 100; // same as BuildDownloadZipJob::CHUNK_SIZE
+            $totalChunks = (int) ceil(count($visibleIds) / $chunkSize);
+            $download->forceFill([
+                'zip_total_chunks' => $totalChunks,
+                'zip_build_chunk_index' => 0,
+                'zip_last_progress_at' => now(),
+            ])->saveQuietly();
+            BuildDownloadZipJob::dispatch($download->id);
+        }
 
         $bucketService->clear();
 
+        $payload = [
+            'download_id' => $download->id,
+            'public_url' => route('downloads.public', ['download' => $download->id]),
+            'expires_at' => $expiresAt?->toIso8601String(),
+            'asset_count' => count($visibleIds),
+        ];
+
+        if ($request->expectsJson()) {
+            return response()->json($payload);
+        }
+
         // Inertia expects a 303 redirect for POST (not raw JSON). Send user to downloads page after creation.
         return redirect()->route('downloads.index')
-            ->with('download_created', [
-                'download_id' => $download->id,
-                'public_url' => route('downloads.public', ['download' => $download->id]),
-                'expires_at' => $expiresAt?->toIso8601String(),
-                'asset_count' => count($visibleIds),
-            ])
+            ->with('download_created', $payload)
             ->setStatusCode(303);
+    }
+
+    /**
+     * Regenerate download ZIP (Enterprise only). Dispatches BuildDownloadZipJob.
+     */
+    public function regenerate(Request $request, Download $download): RedirectResponse|JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $user || ! $tenant) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Unauthorized.'], 403);
+            }
+            return redirect()->route('downloads.index')->withErrors(['message' => 'Unauthorized.']);
+        }
+
+        if ($download->tenant_id !== $tenant->id) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Download not found.'], 404);
+            }
+            return redirect()->route('downloads.index')->withErrors(['message' => 'Download not found.']);
+        }
+
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
+        $isCreator = $download->created_by_user_id === $user->id;
+        if (! $canManage && ! $isCreator) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'You cannot manage downloads.'], 403);
+            }
+            return redirect()->route('downloads.index')
+                ->with('download_action', 'regenerate')
+                ->with('download_action_id', $download->id)
+                ->withErrors(['download' => 'You cannot manage downloads.']);
+        }
+
+        $planService = app(PlanService::class);
+        if (! $planService->canRegenerateDownload($tenant)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Regenerate is not available on your plan.'], 403);
+            }
+            return redirect()->route('downloads.index')
+                ->with('download_action', 'regenerate')
+                ->with('download_action_id', $download->id)
+                ->withErrors(['download' => 'Regenerate is not available on your plan.']);
+        }
+
+        try {
+            app(DownloadManagementService::class)->regenerate($download, $user);
+        } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+            return redirect()->route('downloads.index')
+                ->with('download_action', 'regenerate')
+                ->with('download_action_id', $download->id)
+                ->withErrors($e->errors());
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Download regeneration started.']);
+        }
+        return redirect()->route('downloads.index')
+            ->with('success', 'Download regeneration started.')
+            ->with('download_action', 'regenerate')
+            ->with('download_action_id', $download->id);
+    }
+
+    /**
+     * Revoke a download: invalidate link, delete artifact, mark revoked (plan-gated).
+     */
+    public function revoke(Request $request, Download $download): RedirectResponse|JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+        if (! $user || ! $tenant) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Unauthorized.'], 403);
+            }
+            return redirect()->route('downloads.index')->withErrors(['message' => 'Unauthorized.']);
+        }
+
+        if ($download->tenant_id !== $tenant->id) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Download not found.'], 404);
+            }
+            return redirect()->route('downloads.index')->withErrors(['message' => 'Download not found.']);
+        }
+
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $canManage = $tenantRole && in_array(strtolower((string) $tenantRole), ['admin', 'owner'], true);
+        $isCreator = $download->created_by_user_id === $user->id;
+        if (! $canManage && ! $isCreator) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'You cannot revoke this download.'], 403);
+            }
+            return redirect()->route('downloads.index')
+                ->with('download_action', 'revoke')
+                ->with('download_action_id', $download->id)
+                ->withErrors(['download' => 'You cannot revoke this download.']);
+        }
+
+        $planService = app(PlanService::class);
+        if (! $planService->canRevokeDownload($tenant)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Revoke is not available on your plan.'], 403);
+            }
+            return redirect()->route('downloads.index')
+                ->with('download_action', 'revoke')
+                ->with('download_action_id', $download->id)
+                ->withErrors(['download' => 'Revoke is not available on your plan.']);
+        }
+
+        if ($download->isRevoked()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Download is already revoked.'], 422);
+            }
+            return redirect()->route('downloads.index')
+                ->with('download_action', 'revoke')
+                ->with('download_action_id', $download->id)
+                ->withErrors(['download' => 'Download is already revoked.']);
+        }
+
+        app(DownloadManagementService::class)->revoke($download, $user);
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Download revoked.']);
+        }
+        return redirect()->route('downloads.index')
+            ->with('success', 'Download revoked.')
+            ->with('download_action', 'revoke')
+            ->with('download_action_id', $download->id);
     }
 
     /**
@@ -399,13 +701,26 @@ class DownloadController extends Controller
      * When password-protected: show landing page with password form; download only after unlock.
      * When not password-protected: redirect to S3 signed URL.
      */
-    public function download(Download $download): Response|RedirectResponse
+    public function download(Download $download): Response|RedirectResponse|\Symfony\Component\HttpFoundation\Response
     {
         if ($download->trashed()) {
             return $this->publicPage($download, 'not_found', 'Download not found');
         }
 
-        $tenant = app('tenant');
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+
+        // Public route /d/{download} has no ResolveTenant middleware, so tenant is often null when
+        // the user opens the link (e.g. from Downloads page). For company/team/restricted downloads,
+        // resolve tenant from the download's tenant when the user is authenticated and belongs to it,
+        // so the creator and other company members can access their own download.
+        if (! $tenant && $download->access_mode !== DownloadAccessMode::PUBLIC && Auth::check()) {
+            $downloadTenant = Tenant::find($download->tenant_id);
+            if ($downloadTenant && Auth::user()->tenants()->where('tenants.id', $downloadTenant->id)->exists()) {
+                $tenant = $downloadTenant;
+                app()->instance('tenant', $tenant);
+            }
+        }
+
         if ($download->access_mode !== DownloadAccessMode::PUBLIC) {
             if (! $tenant || $download->tenant_id !== $tenant->id) {
                 return $this->publicPage($download, 'not_found', 'Download not found');
@@ -416,28 +731,16 @@ class DownloadController extends Controller
             return $this->publicPage($download, 'failed', $this->getStatusErrorMessage($download->status));
         }
 
-        if ($download->zip_status !== ZipStatus::READY) {
-            $message = $download->zip_status === ZipStatus::BUILDING || $download->zip_status === ZipStatus::NONE
-                ? 'We\'re preparing your download. Please try again in a moment.'
-                : $this->getZipStatusErrorMessage($download->zip_status);
-            return $this->publicPage($download, $download->zip_status === ZipStatus::BUILDING ? 'processing' : 'failed', $message);
-        }
-
-        if (! $download->zip_path) {
-            Log::error('[DownloadController] Download ZIP path is missing', ['download_id' => $download->id]);
-            return $this->publicPage($download, 'failed', 'ZIP file not available');
-        }
-
         if (! $this->validateAccess($download)) {
             return $this->publicPage($download, 'access_denied', 'Access denied');
         }
 
         if ($download->isExpired()) {
-            return $this->publicPage($download, 'expired', 'This download has expired');
+            return $this->publicPage($download, 'expired', 'This download has expired.', false, null, 410);
         }
 
         if ($download->isRevoked()) {
-            return $this->publicPage($download, 'revoked', 'This download has been revoked');
+            return $this->publicPage($download, 'revoked', 'This download has been revoked', false, null, 410);
         }
 
         // Password-protected: show landing page (HTML) until session is unlocked; never redirect to ZIP until then.
@@ -447,34 +750,61 @@ class DownloadController extends Controller
             return $this->publicPage($download, 'password_required', 'Enter the password to continue.', true);
         }
 
-        try {
-            $disk = Storage::disk('s3');
-            $signedUrl = $disk->temporaryUrl($download->zip_path, now()->addMinutes(10));
+        if ($download->zip_status !== ZipStatus::READY) {
+            // Phase D-4: If streaming enabled and over threshold, stream instead of waiting for build
+            $estimatedBytes = (int) ($download->download_options['estimated_bytes'] ?? $download->assets()->sum('size_bytes'));
+            $streamingEnabled = config('features.streaming_downloads', false);
+            $streamingThreshold = config('features.streaming_threshold_bytes', 500 * 1024 * 1024);
+            if ($streamingEnabled && $estimatedBytes > $streamingThreshold && $download->zip_status === ZipStatus::NONE) {
+                return $this->streamZipResponse($download);
+            }
 
-            DownloadEventEmitter::emitDownloadZipRequested($download);
-            DownloadEventEmitter::emitDownloadZipCompleted($download);
+            $message = $download->zip_status === ZipStatus::BUILDING || $download->zip_status === ZipStatus::NONE
+                ? 'We\'re preparing your download. Please try again in a moment.'
+                : $this->getZipStatusErrorMessage($download->zip_status);
+            $zipTimeEstimate = $estimatedBytes > 0 ? app(DownloadZipEstimateService::class)->estimateZipBuildTimeRange($estimatedBytes) : null;
+            $zipProgress = $download->zip_status === ZipStatus::BUILDING ? [
+                'zip_progress_percentage' => $download->getZipProgressPercentage(),
+                'zip_chunk_index' => (int) ($download->zip_build_chunk_index ?? 0),
+                'zip_total_chunks' => $download->zip_total_chunks !== null ? (int) $download->zip_total_chunks : null,
+                'is_zip_stalled' => $download->isZipStalled(180),
+            ] : null;
 
-            return redirect($signedUrl);
-        } catch (\Exception $e) {
-            Log::error('[DownloadController] Failed to generate download URL', [
-                'download_id' => $download->id,
-                'zip_path' => $download->zip_path,
-                'error' => $e->getMessage(),
-            ]);
-
-            return $this->publicPage($download, 'failed', 'Failed to generate download URL');
+            return $this->publicPage($download, $download->zip_status === ZipStatus::BUILDING ? 'processing' : 'failed', $message, false, $zipTimeEstimate, 200, $zipProgress);
         }
+
+        if (! $download->zip_path) {
+            Log::error('[DownloadController] Download ZIP path is missing', ['download_id' => $download->id]);
+            return $this->publicPage($download, 'failed', 'ZIP file not available');
+        }
+
+        // D-SHARE: Show share page with download info and Download button (links to /file for actual delivery)
+        $branding = app(DownloadPublicPageBrandingResolver::class)->resolve($download, '');
+
+        return $this->publicPage($download, 'ready', '', false, null, 200, null, [
+            'download_title' => $download->title ?? $this->getDownloadZipFilename($download),
+            'asset_count' => $download->assets()->count(),
+            'zip_size_bytes' => $download->zip_size_bytes,
+            'expires_at' => $download->expires_at?->toIso8601String(),
+            'file_url' => route('downloads.public.file', ['download' => $download->id]),
+            'share_email_url' => route('downloads.public.share-email', ['download' => $download->id]),
+            'show_jackpot_promo' => $branding['show_jackpot_promo'] ?? false,
+            'footer_promo' => $branding['footer_promo'] ?? [],
+        ]);
     }
 
     /**
-     * Render the public download landing page (password form, expired, revoked, etc.).
+     * Render the public download landing page (password form, expired, revoked, share page, etc.).
+     *
+     * @param  array{zip_progress_percentage?: int|null, zip_chunk_index?: int, zip_total_chunks?: int|null, is_zip_stalled?: bool}|null  $zipProgress  D-Progress: optional when state is processing
+     * @param  array{download_title?: string, asset_count?: int, zip_size_bytes?: int|null, expires_at?: string|null, file_url?: string, share_email_url?: string, show_jackpot_promo?: bool, footer_promo?: array}|null  $shareProps  D-SHARE: when state is ready
      */
-    protected function publicPage(Download $download, string $state, string $message = '', bool $passwordRequired = false): Response
+    protected function publicPage(Download $download, string $state, string $message = '', bool $passwordRequired = false, ?array $zipTimeEstimate = null, int $statusCode = 200, ?array $zipProgress = null, ?array $shareProps = null): \Symfony\Component\HttpFoundation\Response
     {
         $resolver = app(DownloadPublicPageBrandingResolver::class);
         $branding = $resolver->resolve($download, $message);
 
-        return Inertia::render('Downloads/Public', [
+        $props = [
             'state' => $state,
             'message' => $message,
             'password_required' => $passwordRequired,
@@ -482,7 +812,21 @@ class DownloadController extends Controller
             'unlock_url' => $passwordRequired ? route('downloads.public.unlock', ['download' => $download->id]) : '',
             'show_landing_layout' => $branding['show_landing_layout'],
             'branding_options' => $branding['branding_options'],
-        ]);
+            'show_jackpot_promo' => $branding['show_jackpot_promo'] ?? false,
+            'footer_promo' => $branding['footer_promo'] ?? [],
+            'zip_time_estimate' => $zipTimeEstimate,
+        ];
+        if ($zipProgress !== null) {
+            $props['zip_progress_percentage'] = $zipProgress['zip_progress_percentage'] ?? null;
+            $props['zip_chunk_index'] = $zipProgress['zip_chunk_index'] ?? 0;
+            $props['zip_total_chunks'] = $zipProgress['zip_total_chunks'] ?? null;
+            $props['is_zip_stalled'] = $zipProgress['is_zip_stalled'] ?? false;
+        }
+        if ($shareProps !== null) {
+            $props = array_merge($props, $shareProps);
+        }
+
+        return Inertia::render('Downloads/Public', $props)->toResponse(request())->setStatusCode($statusCode);
     }
 
     /**
@@ -508,11 +852,160 @@ class DownloadController extends Controller
     }
 
     /**
-     * Deliver file (GET /d/{download}/file). Same logic as download(); used as alternate entry for direct file link.
+     * D-SHARE: Send download link via email (POST /d/{download}/share-email).
+     * Rate-limited. Logs event download.share_email_sent (no recipient in metadata).
      */
-    public function deliverFile(Download $download): Response|RedirectResponse
+    public function shareEmail(Request $request, Download $download): JsonResponse|RedirectResponse
     {
-        return $this->download($download);
+        $request->validate([
+            'to' => 'required|email',
+            'message' => 'nullable|string|max:1000',
+        ]);
+
+        if ($download->trashed()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Download not found.'], 404);
+            }
+
+            return redirect()->back()->withErrors(['message' => 'Download not found.']);
+        }
+
+        $tenant = $download->tenant;
+        if (! $tenant) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Download not found.'], 404);
+            }
+
+            return redirect()->back()->withErrors(['message' => 'Download not found.']);
+        }
+
+        if ($download->access_mode !== DownloadAccessMode::PUBLIC) {
+            $user = Auth::user();
+            $resolvedTenant = app()->bound('tenant') ? app('tenant') : null;
+            if (! $resolvedTenant || $download->tenant_id !== $resolvedTenant->id || ! $user) {
+                if ($request->expectsJson()) {
+                    return response()->json(['message' => 'Access denied.'], 403);
+                }
+
+                return redirect()->back()->withErrors(['message' => 'Access denied.']);
+            }
+            if (! $this->validateAccess($download)) {
+                if ($request->expectsJson()) {
+                    return response()->json(['message' => 'Access denied.'], 403);
+                }
+
+                return redirect()->back()->withErrors(['message' => 'Access denied.']);
+            }
+        }
+
+        if ($download->isExpired() || $download->isRevoked()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'This download is no longer available.'], 410);
+            }
+
+            return redirect()->back()->withErrors(['message' => 'This download is no longer available.']);
+        }
+
+        $shareUrl = route('downloads.public', ['download' => $download->id]);
+        $to = $request->input('to');
+        $personalMessage = $request->input('message', '');
+
+        try {
+            Mail::to($to)->send(new DownloadShareEmail($download, $tenant, $shareUrl, $personalMessage));
+        } catch (\Exception $e) {
+            Log::error('[DownloadController] Failed to send share email', [
+                'download_id' => $download->id,
+                'error' => $e->getMessage(),
+            ]);
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Failed to send email. Please try again.'], 500);
+            }
+
+            return redirect()->back()->withErrors(['message' => 'Failed to send email. Please try again.']);
+        }
+
+        ActivityRecorder::guest($tenant, \App\Enums\EventType::DOWNLOAD_SHARE_EMAIL_SENT, $download, [
+            'download_id' => $download->id,
+            'sent_at' => now()->toIso8601String(),
+        ]);
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => 'Email sent.']);
+        }
+
+        return redirect()->back()->with('share_email_sent', true);
+    }
+
+    /**
+     * Deliver file (GET /d/{download}/file). Runs same access checks as download(), then redirects to S3 or streams.
+     * Used by the Download button on the share page. Does NOT render the share page.
+     */
+    public function deliverFile(Download $download): Response|RedirectResponse|\Symfony\Component\HttpFoundation\Response
+    {
+        if ($download->trashed()) {
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+        if (! $tenant && $download->access_mode !== DownloadAccessMode::PUBLIC && Auth::check()) {
+            $downloadTenant = Tenant::find($download->tenant_id);
+            if ($downloadTenant && Auth::user()->tenants()->where('tenants.id', $downloadTenant->id)->exists()) {
+                $tenant = $downloadTenant;
+                app()->instance('tenant', $tenant);
+            }
+        }
+
+        if ($download->access_mode !== DownloadAccessMode::PUBLIC) {
+            if (! $tenant || $download->tenant_id !== $tenant->id) {
+                return redirect()->route('downloads.public', ['download' => $download->id]);
+            }
+        }
+
+        if ($download->status !== DownloadStatus::READY || ! $this->validateAccess($download)
+            || $download->isExpired() || $download->isRevoked()) {
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        $requiresPassword = $download->requiresPassword();
+        $isUnlocked = session('download_unlocked.' . $download->id) === true;
+        if ($requiresPassword && ! $isUnlocked) {
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        if ($download->zip_status !== ZipStatus::READY) {
+            $estimatedBytes = (int) ($download->download_options['estimated_bytes'] ?? $download->assets()->sum('size_bytes'));
+            $streamingEnabled = config('features.streaming_downloads', false);
+            $streamingThreshold = config('features.streaming_threshold_bytes', 500 * 1024 * 1024);
+            if ($streamingEnabled && $estimatedBytes > $streamingThreshold && $download->zip_status === ZipStatus::NONE) {
+                return $this->streamZipResponse($download);
+            }
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        if (! $download->zip_path) {
+            return redirect()->route('downloads.public', ['download' => $download->id]);
+        }
+
+        try {
+            $download->increment('access_count');
+            $filename = $this->getDownloadZipFilename($download);
+            $disk = Storage::disk('s3');
+            $signedUrl = $disk->temporaryUrl($download->zip_path, now()->addMinutes(10), [
+                'ResponseContentDisposition' => 'attachment; filename="' . addcslashes($filename, '"\\') . '"',
+            ]);
+            DownloadEventEmitter::emitDownloadZipRequested($download);
+            DownloadEventEmitter::emitDownloadZipCompleted($download);
+
+            return redirect($signedUrl);
+        } catch (\Exception $e) {
+            Log::error('[DownloadController] Failed to generate download URL', [
+                'download_id' => $download->id,
+                'zip_path' => $download->zip_path,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->publicPage($download, 'failed', 'Failed to generate download URL');
+        }
     }
 
     /**
@@ -530,25 +1023,50 @@ class DownloadController extends Controller
                 // Public access - anyone with the link can access
                 return true;
 
+            case DownloadAccessMode::COMPANY:
             case DownloadAccessMode::TEAM:
-                // Team access - only authenticated users who are members of the tenant
-                if (!$user) {
+                // Company/team access - only authenticated users who are members of the tenant
+                if (! $user) {
                     return false;
                 }
 
-                // Verify user belongs to the download's tenant
+                // Verify user belongs to the download's tenant (tenant is bound above or by ResolveTenant)
                 $tenant = app('tenant');
                 return $tenant && $download->tenant_id === $tenant->id;
 
+            case DownloadAccessMode::BRAND:
+                // Brand access - only authenticated users who are members of the download's brand
+                if (! $user) {
+                    return false;
+                }
+
+                $tenant = app('tenant');
+                if (! $tenant || $download->tenant_id !== $tenant->id) {
+                    return false;
+                }
+                if (! $download->brand_id) {
+                    return true;
+                }
+
+                return $user->brands()->where('brands.id', $download->brand_id)->exists();
+
+            case DownloadAccessMode::USERS:
             case DownloadAccessMode::RESTRICTED:
-                // Restricted access - only specific users (future implementation)
-                // For now, treat as team access
-                if (!$user) {
+                // Restricted access - only users in download_user pivot, or any tenant member if none set
+                if (! $user) {
                     return false;
                 }
 
                 $tenant = app('tenant');
-                return $tenant && $download->tenant_id === $tenant->id;
+                if (! $tenant || $download->tenant_id !== $tenant->id) {
+                    return false;
+                }
+                $allowedIds = $download->allowedUsers()->pluck('users.id')->all();
+                if (empty($allowedIds)) {
+                    return true;
+                }
+
+                return in_array($user->id, $allowedIds, true);
 
             default:
                 Log::warning('[DownloadController] Unknown access mode', [
@@ -576,8 +1094,45 @@ class DownloadController extends Controller
     }
 
     /**
+     * Phase D-4: Stream ZIP directly to response (no temp file, no build job).
+     */
+    protected function streamZipResponse(Download $download): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $download->increment('access_count');
+
+        $filename = $this->getDownloadZipFilename($download);
+        DownloadEventEmitter::emitDownloadZipRequested($download);
+        DownloadEventEmitter::emitDownloadZipCompleted($download);
+
+        $service = app(StreamingZipService::class);
+
+        return response()->stream(function () use ($service, $download, $filename) {
+            $service->stream($download, $filename);
+        }, 200, [
+            'Content-Type' => 'application/zip',
+            'Content-Disposition' => 'attachment; filename="' . addcslashes($filename, '"\\') . '"',
+        ]);
+    }
+
+    /**
+     * Build filename for download ZIP using tenant template (e.g. Brand-download-2026-02-02.zip).
+     */
+    protected function getDownloadZipFilename(Download $download): string
+    {
+        $resolver = app(DownloadNameResolver::class);
+        $tenant = $download->tenant;
+        $brand = $download->brand;
+        $template = ($tenant->settings['download_name_template'] ?? null)
+            ?: DownloadNameResolver::DEFAULT_TEMPLATE;
+        $base = $resolver->resolve($template, $tenant, $brand, now());
+        $safe = preg_replace('/[\r\n"\\\\]/', '', $base);
+
+        return (($safe !== null && $safe !== '') ? $safe : 'download') . '.zip';
+    }
+
+    /**
      * Get error message for ZIP status.
-     * 
+     *
      * @param ZipStatus $zipStatus
      * @return string
      */

@@ -1517,18 +1517,11 @@ class AssetController extends Controller
         }
 
         try {
-            // TODO: Generate signed URL from storage (S3 or local)
-            // For now, return null to indicate placeholder
-            // In production, this should use:
-            // - Storage::disk('s3')->temporaryUrl($asset->storage_root_path, now()->addMinutes(15))
-            // - Or similar signed URL generation
-            
             $previewUrl = null;
-            
-            // If asset has storage_root_path and storage bucket, generate signed URL
-            if ($asset->storage_root_path && $asset->storageBucket) {
-                // Placeholder for signed URL generation
-                // $previewUrl = Storage::disk('s3')->temporaryUrl($asset->storage_root_path, now()->addMinutes(15));
+
+            if ($asset->storage_root_path) {
+                $disk = Storage::disk('s3');
+                $previewUrl = $disk->temporaryUrl($asset->storage_root_path, now()->addMinutes(15));
             }
 
             return response()->json([

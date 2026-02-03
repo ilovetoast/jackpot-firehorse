@@ -6,6 +6,9 @@ use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Enums\DerivativeProcessor;
+use App\Enums\DerivativeType;
+use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetProcessingFailureService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -140,12 +143,30 @@ class GeneratePreviewJob implements ShouldQueue
 
         if ($asset) {
             // Use centralized failure recording service
+            // preserveVisibility=true: derivative failure must never hide the asset
             app(AssetProcessingFailureService::class)->recordFailure(
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true
             );
+
+            // Phase T-1: Record derivative failure for observability (never affects Asset.status)
+            try {
+                $processor = AssetDerivativeFailureService::inferProcessorFromException($exception);
+                app(AssetDerivativeFailureService::class)->recordFailure(
+                    $asset,
+                    DerivativeType::PREVIEW,
+                    $processor,
+                    $exception
+                );
+            } catch (\Throwable $t1Ex) {
+                \Illuminate\Support\Facades\Log::warning('[GeneratePreviewJob] AssetDerivativeFailureService recording failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $t1Ex->getMessage(),
+                ]);
+            }
         }
     }
 }

@@ -181,6 +181,9 @@ class EventType
     // D9 — Download access (internal analytics)
     public const DOWNLOAD_ACCESS_GRANTED = 'download.access.granted';
 
+    // D-SHARE — Share link email sent (audit only; no recipient in metadata)
+    public const DOWNLOAD_SHARE_EMAIL_SENT = 'download.share_email_sent';
+
     // Subscription/Billing events
     public const SUBSCRIPTION_CREATED = 'subscription.created';
     public const SUBSCRIPTION_UPDATED = 'subscription.updated';
@@ -322,6 +325,7 @@ class EventType
             self::DOWNLOAD_ZIP_FAILED,
             self::DOWNLOAD_GROUP_FAILED,
             self::DOWNLOAD_ACCESS_GRANTED,
+            self::DOWNLOAD_SHARE_EMAIL_SENT,
             self::SUBSCRIPTION_CREATED,
             self::SUBSCRIPTION_UPDATED,
             self::SUBSCRIPTION_CANCELED,

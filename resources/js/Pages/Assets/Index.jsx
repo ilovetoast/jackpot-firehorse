@@ -17,6 +17,8 @@ import { filterActiveCategories } from '../../utils/categoryUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { usePermission } from '../../hooks/usePermission'
+import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
+import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import {
     FolderIcon,
     TagIcon,
@@ -419,6 +421,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         selectedCategoryId,
     })
     
+    // Incremental load: show 24 initially, load more on scroll or button click
+    const infiniteResetDeps = [selectedCategoryId, typeof window !== 'undefined' ? window.location.search : '']
+    const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)
+
     // Track drawer animation state to freeze grid layout during animation
     // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
     // By delaying padding change until after animation (300ms), grid recalculates once cleanly
@@ -941,8 +947,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             
                             {/* Assets Grid or Empty State */}
                             {localAssets && localAssets.length > 0 ? (
+                                <>
                                 <AssetGrid 
-                                    assets={localAssets} 
+                                    assets={visibleItems} 
                                     onAssetClick={handleAssetClick}
                                     cardSize={cardSize}
                                     showInfo={showInfo}
@@ -965,6 +972,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         setLocalAssets((prev) => prev.filter(a => a.id !== assetId))
                                     }}
                                 />
+                                <LoadMoreFooter onLoadMore={loadMore} hasMore={hasMore} />
+                                </>
                             ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
                                 <div className="mb-8">

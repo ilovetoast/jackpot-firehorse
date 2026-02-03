@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\DerivativeProcessor;
+use App\Enums\DerivativeType;
 use App\Models\Asset;
-use App\Services\AssetProcessingFailureService;
+use App\Services\AssetDerivativeFailureService;
 use App\Services\VideoPreviewGenerationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -217,12 +219,28 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'error' => $errorMessage,
                     'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
                 ]);
-                // Don't throw - preview generation failure should not block upload completion
-                return;
+            // Phase T-1: Record derivative failure for observability
+            $asset = Asset::find($this->assetId);
+            if ($asset) {
+                try {
+                    app(AssetDerivativeFailureService::class)->recordFailure(
+                        $asset,
+                        DerivativeType::PREVIEW,
+                        DerivativeProcessor::FFMPEG,
+                        $e,
+                        'schema_error'
+                    );
+                } catch (\Throwable $t1Ex) {
+                    Log::warning('[GenerateVideoPreviewJob] AssetDerivativeFailureService recording failed', ['error' => $t1Ex->getMessage()]);
+                }
             }
 
-            // Other database errors
-            Log::error('[GenerateVideoPreviewJob] Job failed with database exception', [
+            // Don't throw - preview generation failure should not block upload completion
+            return;
+        }
+
+        // Other database errors
+        Log::error('[GenerateVideoPreviewJob] Job failed with database exception', [
                 'asset_id' => $this->assetId,
                 'exception' => get_class($e),
                 'message' => $errorMessage,
@@ -268,6 +286,25 @@ class GenerateVideoPreviewJob implements ShouldQueue
                         'error' => $logException->getMessage(),
                     ]);
                 }
+
+                // Phase T-1: Record derivative failure for observability (never affects Asset.status)
+                try {
+                    $mime = $asset->metadata['mime_type'] ?? $asset->mime_type ?? null;
+                    app(AssetDerivativeFailureService::class)->recordFailure(
+                        $asset,
+                        DerivativeType::PREVIEW,
+                        DerivativeProcessor::FFMPEG,
+                        $e,
+                        null,
+                        null,
+                        $mime
+                    );
+                } catch (\Throwable $t1Ex) {
+                    Log::warning('[GenerateVideoPreviewJob] AssetDerivativeFailureService recording failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $t1Ex->getMessage(),
+                    ]);
+                }
             }
 
             // Don't re-throw - allow job to complete silently
@@ -289,8 +326,24 @@ class GenerateVideoPreviewJob implements ShouldQueue
                 'exception_class' => get_class($exception),
             ]);
 
-            // Don't record as processing failure - preview is non-critical
-            // Asset upload and processing can complete successfully without preview
+            // Phase T-1: Record derivative failure for observability (never affects Asset.status)
+            try {
+                $mime = $asset->metadata['mime_type'] ?? $asset->mime_type ?? null;
+                app(AssetDerivativeFailureService::class)->recordFailure(
+                    $asset,
+                    DerivativeType::PREVIEW,
+                    DerivativeProcessor::FFMPEG,
+                    $exception,
+                    null,
+                    null,
+                    $mime
+                );
+            } catch (\Throwable $t1Ex) {
+                Log::warning('[GenerateVideoPreviewJob] AssetDerivativeFailureService recording failed in failed()', [
+                    'asset_id' => $asset->id,
+                    'error' => $t1Ex->getMessage(),
+                ]);
+            }
         }
     }
 

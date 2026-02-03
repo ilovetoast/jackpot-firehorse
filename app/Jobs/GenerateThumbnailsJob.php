@@ -6,6 +6,8 @@ use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Enums\DerivativeType;
+use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetProcessingFailureService;
 use App\Services\ThumbnailGenerationService;
 use Aws\S3\S3Client;
@@ -780,6 +782,26 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
                 $currentMetadata['thumbnail_generation_error'] = $errorMessage;
                 $asset->update(['metadata' => $currentMetadata]);
+
+                // Phase T-1: Record derivative failure for observability (never affects Asset.status)
+                try {
+                    $processor = AssetDerivativeFailureService::inferProcessorFromException($e);
+                    $mime = $asset->metadata['mime_type'] ?? $asset->mime_type ?? null;
+                    app(AssetDerivativeFailureService::class)->recordFailure(
+                        $asset,
+                        DerivativeType::THUMBNAIL,
+                        $processor,
+                        $e,
+                        null,
+                        null,
+                        $mime
+                    );
+                } catch (\Throwable $t1Ex) {
+                    Log::warning('[GenerateThumbnailsJob] AssetDerivativeFailureService recording failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $t1Ex->getMessage(),
+                    ]);
+                }
             } else {
                 // Asset not found - log error but can't update
                 // TASK 2: Even if asset not found, we've logged the failure
@@ -860,12 +882,29 @@ class GenerateThumbnailsJob implements ShouldQueue
             ]);
 
             // Use centralized failure recording service for observability
+            // CRITICAL: preserveVisibility=true - thumbnail failure must NEVER hide the asset from the grid.
+            // Asset remains visible; user can retry thumbnail generation or download the original file.
             app(AssetProcessingFailureService::class)->recordFailure(
                 $asset,
                 self::class,
                 $exception,
-                $this->attempts()
+                $this->attempts(),
+                true // preserveVisibility
             );
+
+            // Log thumbnail failed to activity timeline so users see it (catch block may not run on timeout/kill)
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
+                    [
+                        'error' => $this->sanitizeErrorMessage($exception->getMessage()),
+                        'attempts' => $this->attempts(),
+                    ]
+                );
+            } catch (\Throwable $e) {
+                Log::warning('[GenerateThumbnailsJob] Failed to log ASSET_THUMBNAIL_FAILED to activity', ['error' => $e->getMessage()]);
+            }
 
             Log::error('Thumbnail generation job failed after all retries', [
                 'asset_id' => $asset->id,

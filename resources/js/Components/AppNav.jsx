@@ -808,6 +808,23 @@ export default function AppNav({ brand, tenant }) {
                                             </Link>
                                         </div>
 
+                                        {/* Phase AG-7.1: Agency Section — show only when tenant is agency */}
+                                        {auth.activeCompany?.is_agency && (
+                                            <div className="px-4 py-2 border-b border-gray-200">
+                                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Agency</p>
+                                                <Link
+                                                    href="/app/agency/dashboard"
+                                                    className="flex items-center justify-between px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
+                                                    onClick={() => setUserMenuOpen(false)}
+                                                >
+                                                    <span>Agency Dashboard</span>
+                                                    {auth.activeCompany?.agency_tier && (
+                                                        <span className="text-xs text-gray-500">{auth.activeCompany.agency_tier}</span>
+                                                    )}
+                                                </Link>
+                                            </div>
+                                        )}
+
                                         {/* Admin Section */}
                                         {isSiteOwner && (
                                             <div className="px-4 py-2 border-b border-gray-200">

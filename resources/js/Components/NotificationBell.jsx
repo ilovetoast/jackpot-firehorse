@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { usePage, router } from '@inertiajs/react'
-import { BellIcon, SparklesIcon, CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
+import { BellIcon, SparklesIcon, CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 
 /**
@@ -93,6 +93,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
         const { type, data } = notification
         const assetName = data?.asset_name || 'an asset'
         const actorName = data?.actor_name || 'Someone'
+        const downloadTitle = data?.download_title || 'Your download'
         
         switch (type) {
             case 'asset.submitted':
@@ -103,6 +104,8 @@ export default function NotificationBell({ textColor = '#000000' }) {
                 return `"${assetName}" was rejected`
             case 'asset.resubmitted':
                 return `${actorName} resubmitted "${assetName}" for approval`
+            case 'download.ready':
+                return `"${downloadTitle}" is ready to download`
             default:
                 return 'New notification'
         }
@@ -113,8 +116,11 @@ export default function NotificationBell({ textColor = '#000000' }) {
             await handleMarkAsRead(notification.id)
         }
         
-        // Open asset drawer (would need to integrate with asset drawer system)
-        // For now, just navigate to assets page
+        if (notification.type === 'download.ready' && notification.data?.download_id) {
+            router.visit('/app/downloads')
+            setIsOpen(false)
+            return
+        }
         if (notification.data?.asset_id) {
             window.location.href = `/app/assets?asset=${notification.data.asset_id}`
         }
@@ -257,29 +263,56 @@ export default function NotificationBell({ textColor = '#000000' }) {
                             ) : notifications.length === 0 && (!pending_items || ((!canViewSuggestions || pending_items.ai_suggestions === 0) && metadataApprovalsCount === 0)) ? (
                                 <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
                             ) : (
-                                notifications.map((notification) => (
-                                    <button
-                                        key={notification.id}
-                                        onClick={() => handleNotificationClick(notification)}
-                                        className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 ${
-                                            notification.is_unread ? 'bg-blue-50' : ''
-                                        }`}
-                                    >
-                                        <div className="flex items-start justify-between">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm text-gray-900">
-                                                    {getNotificationMessage(notification)}
-                                                </p>
-                                                <p className="text-xs text-gray-500 mt-1">
-                                                    {new Date(notification.created_at).toLocaleString()}
-                                                </p>
+                                notifications.map((notification) => {
+                                    const isDownloadReady = notification.type === 'download.ready'
+                                    return (
+                                        <button
+                                            key={notification.id}
+                                            onClick={() => handleNotificationClick(notification)}
+                                            className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 ${
+                                                notification.is_unread ? 'bg-blue-50' : ''
+                                            }`}
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                {isDownloadReady ? (
+                                                    <>
+                                                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                            <ArrowDownTrayIcon className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-sm font-medium text-gray-900">
+                                                                    {getNotificationMessage(notification)}
+                                                                </p>
+                                                                <p className="text-xs text-gray-500 mt-0.5">
+                                                                    Ready to download
+                                                                </p>
+                                                                <p className="text-xs text-gray-400 mt-0.5">
+                                                                    {new Date(notification.created_at).toLocaleString()}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        {notification.is_unread && (
+                                                            <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm text-gray-900">
+                                                                {getNotificationMessage(notification)}
+                                                            </p>
+                                                            <p className="text-xs text-gray-500 mt-1">
+                                                                {new Date(notification.created_at).toLocaleString()}
+                                                            </p>
+                                                        </div>
+                                                        {notification.is_unread && (
+                                                            <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
+                                                        )}
+                                                    </>
+                                                )}
                                             </div>
-                                            {notification.is_unread && (
-                                                <span className="ml-2 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0 mt-1" />
-                                            )}
-                                        </div>
-                                    </button>
-                                ))
+                                        </button>
+                                    )
+                                })
                             )}
                         </div>
                     </div>

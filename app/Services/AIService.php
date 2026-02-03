@@ -200,18 +200,25 @@ class AIService
             }
         } catch (AIBudgetExceededException $e) {
             // Create agent run record with blocked status
+            // Phase A-1: Include agent_name, entity_type, entity_id, severity, summary
+            $entity = $this->extractEntityFromOptions($options);
             $agentRun = AIAgentRun::create([
                 'agent_id' => $agentId,
+                'agent_name' => $agentConfig['name'] ?? $agentId,
                 'triggering_context' => $triggeringContext,
                 'environment' => $environment,
                 'tenant_id' => $tenant?->id,
                 'user_id' => ($user ?? $systemUser)?->id,
                 'task_type' => $taskType,
+                'entity_type' => $entity['entity_type'],
+                'entity_id' => $entity['entity_id'],
                 'model_used' => $actualModelName,
                 'tokens_in' => 0,
                 'tokens_out' => 0,
                 'estimated_cost' => 0,
                 'status' => 'failed',
+                'severity' => 'warning',
+                'summary' => 'AI execution failed',
                 'blocked_reason' => $e->getMessage(),
                 'started_at' => now(),
                 'completed_at' => now(),
@@ -230,13 +237,18 @@ class AIService
         }
 
         // Create agent run record (started)
+        // Phase A-1: Include agent_name, entity_type, entity_id for observability
+        $entity = $this->extractEntityFromOptions($options);
         $agentRun = AIAgentRun::create([
             'agent_id' => $agentId,
+            'agent_name' => $agentConfig['name'] ?? $agentId,
             'triggering_context' => $triggeringContext,
-            'environment' => app()->environment(), // Set environment from APP_ENV
+            'environment' => $environment,
             'tenant_id' => $tenant?->id,
             'user_id' => ($user ?? $systemUser)?->id,
             'task_type' => $taskType,
+            'entity_type' => $entity['entity_type'],
+            'entity_id' => $entity['entity_id'],
             'model_used' => $actualModelName,
             'tokens_in' => 0,
             'tokens_out' => 0,
@@ -270,12 +282,18 @@ class AIService
                 $metadata['response_metadata'] = $response['metadata'] ?? [];
             }
 
+            // Phase A-1: Parse conclusion (severity, confidence, summary) from agent response
+            $conclusion = $this->parseAgentConclusion($response['text'] ?? '');
+
             // Mark agent run as successful
             $agentRun->markAsSuccessful(
                 $response['tokens_in'],
                 $response['tokens_out'],
                 $cost,
-                $metadata
+                $metadata,
+                $conclusion['severity'],
+                $conclusion['confidence'],
+                $conclusion['summary']
             );
 
             // Record usage against budgets
@@ -379,6 +397,55 @@ class AIService
         }
 
         return 'system';
+    }
+
+    /**
+     * Extract entity_type and entity_id from execution options.
+     * Phase A-1: Support download, upload, asset, job.
+     */
+    protected function extractEntityFromOptions(array $options): array
+    {
+        if (isset($options['download_id'])) {
+            return ['entity_type' => 'download', 'entity_id' => (string) $options['download_id']];
+        }
+        if (isset($options['upload_id'])) {
+            return ['entity_type' => 'upload', 'entity_id' => (string) $options['upload_id']];
+        }
+        if (isset($options['asset_id'])) {
+            return ['entity_type' => 'asset', 'entity_id' => (string) $options['asset_id']];
+        }
+        if (isset($options['derivative_failure_id'])) {
+            return ['entity_type' => 'asset', 'entity_id' => (string) ($options['asset_id'] ?? $options['derivative_failure_id'])];
+        }
+
+        return ['entity_type' => 'job', 'entity_id' => null];
+    }
+
+    /**
+     * Parse severity, confidence, summary from agent response text (JSON).
+     * Phase A-1: No prompt/token logging; extract conclusion only.
+     */
+    protected function parseAgentConclusion(string $text): array
+    {
+        $result = ['severity' => null, 'confidence' => null, 'summary' => null];
+        if ($text === '') {
+            return $result;
+        }
+        // Try to parse JSON object from response
+        if (preg_match('/\{[^{}]*"severity"[^{}]*\}/s', $text, $m)) {
+            $json = $m[0];
+            if (preg_match('/"severity"\s*:\s*"([^"]+)"/', $json, $s)) {
+                $result['severity'] = trim($s[1]);
+            }
+            if (preg_match('/"confidence"\s*:\s*([0-9.]+)/', $json, $c)) {
+                $result['confidence'] = min(1.0, max(0.0, (float) $c[1]));
+            }
+            if (preg_match('/"summary"\s*:\s*"((?:[^"\\\\]|\\\\.)*)"/', $json, $sum)) {
+                $result['summary'] = trim(stripslashes($sum[1]));
+            }
+        }
+
+        return $result;
     }
 
     /**

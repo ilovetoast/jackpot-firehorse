@@ -58,16 +58,22 @@ class AIAgentRun extends Model
      */
     protected $fillable = [
         'agent_id',
+        'agent_name',
         'triggering_context',
         'environment',
         'tenant_id',
         'user_id',
         'task_type',
+        'entity_type',
+        'entity_id',
         'model_used',
         'tokens_in',
         'tokens_out',
         'estimated_cost',
         'status',
+        'severity',
+        'confidence',
+        'summary',
         'error_message',
         'blocked_reason',
         'metadata',
@@ -89,6 +95,7 @@ class AIAgentRun extends Model
             'estimated_cost' => 'decimal:6',
             'tokens_in' => 'integer',
             'tokens_out' => 'integer',
+            'confidence' => 'decimal:2',
         ];
     }
 
@@ -291,27 +298,55 @@ class AIAgentRun extends Model
 
     /**
      * Mark the agent run as completed with success.
+     *
+     * @param int $tokensIn
+     * @param int $tokensOut
+     * @param float $estimatedCost
+     * @param array|null $metadata
+     * @param string|null $severity Parsed from agent response
+     * @param float|null $confidence Parsed from agent response (0-1)
+     * @param string|null $summary Parsed from agent response
      */
-    public function markAsSuccessful(int $tokensIn, int $tokensOut, float $estimatedCost, ?array $metadata = null): void
-    {
-        $this->update([
+    public function markAsSuccessful(
+        int $tokensIn,
+        int $tokensOut,
+        float $estimatedCost,
+        ?array $metadata = null,
+        ?string $severity = null,
+        ?float $confidence = null,
+        ?string $summary = null
+    ): void {
+        $update = [
             'status' => 'success',
             'tokens_in' => $tokensIn,
             'tokens_out' => $tokensOut,
             'estimated_cost' => $estimatedCost,
             'completed_at' => now(),
             'metadata' => $metadata ?? $this->metadata,
-        ]);
+        ];
+        if ($severity !== null) {
+            $update['severity'] = $severity;
+        }
+        if ($confidence !== null) {
+            $update['confidence'] = $confidence;
+        }
+        if ($summary !== null) {
+            $update['summary'] = substr((string) $summary, 0, 65535);
+        }
+        $this->update($update);
     }
 
     /**
      * Mark the agent run as failed.
+     * Phase A-1: Persist severity=warning, summary for observability.
      */
     public function markAsFailed(string $errorMessage, ?array $metadata = null): void
     {
         $this->update([
             'status' => 'failed',
             'error_message' => $errorMessage,
+            'severity' => 'warning',
+            'summary' => 'AI execution failed',
             'completed_at' => now(),
             'metadata' => $metadata ?? $this->metadata,
         ]);

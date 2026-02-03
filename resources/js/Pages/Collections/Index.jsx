@@ -14,6 +14,8 @@ import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
 import DownloadBucketBar from '../../Components/DownloadBucketBar'
 import { RectangleStackIcon, FolderIcon } from '@heroicons/react/24/outline'
+import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
+import LoadMoreFooter from '../../Components/LoadMoreFooter'
 
 export default function CollectionsIndex({
     collections = [],
@@ -46,6 +48,10 @@ export default function CollectionsIndex({
     useEffect(() => {
         setLocalAssets(assets)
     }, [assets])
+
+    // Incremental load: show 24 initially, load more on scroll or button click
+    const infiniteResetDeps = [selectedCollectionId, typeof window !== 'undefined' ? window.location.search : '']
+    const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)
 
     const [showCreateModal, setShowCreateModal] = useState(false)
     const [showEditModal, setShowEditModal] = useState(false)
@@ -261,8 +267,9 @@ export default function CollectionsIndex({
                                     </div>
 
                                     {hasAssets ? (
+                                        <>
                                         <AssetGrid
-                                            assets={localAssets}
+                                            assets={visibleItems}
                                             onAssetClick={(asset) => setActiveAssetId(asset?.id ?? null)}
                                             cardSize={cardSize}
                                             showInfo={showInfo}
@@ -273,6 +280,8 @@ export default function CollectionsIndex({
                                             bucketAssetIds={bucketAssetIds}
                                             onBucketToggle={handleBucketToggle}
                                         />
+                                        <LoadMoreFooter onLoadMore={loadMore} hasMore={hasMore} />
+                                        </>
                                     ) : (
                                         /* Empty state: collection selected but no assets */
                                         <div className="max-w-2xl mx-auto py-16 px-6 text-center">

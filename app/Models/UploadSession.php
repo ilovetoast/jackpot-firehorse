@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\UploadFailureReason;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -38,6 +39,11 @@ class UploadSession extends Model
         'total_parts', // Total number of parts for multipart uploads
         'last_activity_at', // Last activity timestamp for abandoned session detection
         'last_cleanup_attempt_at', // Optional: Track when cleanup was last attempted (for observability)
+        // Phase U-1: Upload failure observability
+        'failure_count',
+        'last_failed_at',
+        'escalation_ticket_id',
+        'upload_options',
     ];
 
     /**
@@ -58,6 +64,8 @@ class UploadSession extends Model
             'total_parts' => 'integer',
             'last_activity_at' => 'datetime',
             'last_cleanup_attempt_at' => 'datetime',
+            'last_failed_at' => 'datetime',
+            'upload_options' => 'array',
         ];
     }
 
@@ -185,5 +193,31 @@ class UploadSession extends Model
 
         return in_array($this->status, $terminalStates) ||
                ($this->expires_at && $this->expires_at->isPast());
+    }
+
+    /**
+     * Phase U-1: Record upload failure — increments failure_count, sets failure_reason, last_failed_at,
+     * stores exception trace in upload_options['upload_failure_trace'].
+     *
+     * OBSERVABILITY ONLY. Does not block or change upload behavior.
+     */
+    public function recordFailure(\Throwable $e, UploadFailureReason $reason, ?string $stage = null): void
+    {
+        $options = array_merge($this->upload_options ?? [], [
+            'upload_failure_trace' => substr($e->getTraceAsString(), 0, 5000),
+            'upload_failure_stage' => $stage,
+        ]);
+
+        $this->forceFill([
+            'failure_reason' => $reason,
+            'failure_count' => ($this->failure_count ?? 0) + 1,
+            'last_failed_at' => now(),
+            'upload_options' => $options,
+        ])->saveQuietly();
+
+        $this->refresh();
+        if (\App\Jobs\TriggerUploadFailureAgentJob::shouldTrigger($this)) {
+            \App\Jobs\TriggerUploadFailureAgentJob::dispatch($this->id);
+        }
     }
 }

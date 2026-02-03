@@ -97,9 +97,16 @@ class DownloadManagementService
 
     /**
      * Regenerate download (Enterprise only). Creates new artifact, deletes old.
+     * Regenerate guardrail: max 3 failures, then disabled (escalated to support).
      */
     public function regenerate(Download $download, User $actor): void
     {
+        if ($download->isEscalatedToSupport()) {
+            throw ValidationException::withMessages([
+                'download' => ['This download has been escalated to support. Regenerate is disabled.'],
+            ]);
+        }
+
         $previousState = $this->captureState($download);
 
         if ($download->zip_path) {

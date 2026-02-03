@@ -52,7 +52,7 @@ export default function AISuggestionBadge({ suggestion, onAccept, onReject, load
                         {suggestion.ai_agent_run && (
                             <p className="mt-1 text-xs text-gray-500">
                                 AI Agent: {suggestion.ai_agent_run.agent_id} • 
-                                Cost: ${(suggestion.ai_agent_run.estimated_cost || 0).toFixed(6)}
+                                Cost: ${Number(suggestion.ai_agent_run.estimated_cost || 0).toFixed(6)}
                             </p>
                         )}
                     </div>

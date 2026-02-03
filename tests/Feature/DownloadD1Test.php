@@ -16,9 +16,11 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Session;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -292,5 +294,42 @@ class DownloadD1Test extends TestCase
             ->where('downloads.0.id', $download->id)
             ->where('downloads.0.created_by.id', $this->user->id)
         );
+    }
+
+    /**
+     * Targeted test: create download via store (sync queue + fake S3), assert ZIP is built and download is ready.
+     * Catches "downloads stuck in preparing" when the build job never runs (e.g. wrong queue).
+     */
+    public function test_create_download_and_build_zip_sync_queue_zip_becomes_ready(): void
+    {
+        $this->bindFakeS3ForDownload();
+
+        Session::put('tenant_id', $this->tenant->id);
+        Session::put('brand_id', $this->brand->id);
+        $this->actingAs($this->user);
+        $this->postJson(route('download-bucket.add'), ['asset_id' => $this->asset->id]);
+
+        config(['queue.default' => 'sync']);
+
+        $response = $this->postJson(route('downloads.store'), ['source' => 'grid']);
+        $response->assertOk();
+
+        $downloadId = $response->json('download_id');
+        $download = Download::find($downloadId);
+        $this->assertNotNull($download);
+        $this->assertSame(ZipStatus::READY->value, $download->zip_status->value, 'Download ZIP should be ready after sync job run');
+        $this->assertNotNull($download->zip_path);
+        $this->assertGreaterThan(0, $download->zip_size_bytes);
+    }
+
+    protected function bindFakeS3ForDownload(): void
+    {
+        $mock = Mockery::mock(\Aws\S3\S3Client::class);
+        $mock->shouldReceive('doesObjectExist')->andReturn(true);
+        $mock->shouldReceive('getObject')
+            ->andReturn(['Body' => Utils::streamFor('fake-asset-content')]);
+        $mock->shouldReceive('putObject')->andReturn([]);
+
+        $this->app->instance(\Aws\S3\S3Client::class, $mock);
     }
 }

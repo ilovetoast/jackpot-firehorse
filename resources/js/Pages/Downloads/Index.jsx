@@ -1,6 +1,8 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
-import { Link, router, usePage } from '@inertiajs/react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { Link, router, usePage, useForm } from '@inertiajs/react'
 import { useDownloadErrors } from '../../hooks/useDownloadErrors'
+import { useProcessingDownloadsPolling } from '../../hooks/useProcessingDownloadsPolling'
+import { keyByDownloads, warnIfReplacingRootState } from '../../utils/downloadUtils'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import ConfirmDialog from '../../Components/ConfirmDialog'
@@ -10,9 +12,11 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   ClipboardDocumentIcon,
+  EnvelopeIcon,
   NoSymbolIcon,
   Cog6ToothIcon,
   MagnifyingGlassIcon,
+  Squares2X2Icon,
   UserCircleIcon,
   ClockIcon,
   LockOpenIcon,
@@ -36,15 +40,25 @@ function formatBytes(bytes) {
 }
 
 // Phase D4: Badge label and tooltip from backend state (processing|ready|expired|revoked|failed)
-function stateBadge(state) {
+function stateBadge(state, isPossiblyStuck = false) {
   const map = {
-    processing: { label: 'Preparing', className: 'bg-amber-100 text-amber-800', title: "We're building your download." },
+    processing: {
+      label: isPossiblyStuck ? 'Stuck?' : 'Preparing',
+      className: isPossiblyStuck ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800',
+      title: isPossiblyStuck ? 'This may have failed. Use Regenerate to retry.' : "We're building your download.",
+    },
     ready: { label: 'Ready', className: 'bg-green-100 text-green-800', title: 'Available to download.' },
     expired: { label: 'Expired', className: 'bg-gray-100 text-gray-600', title: 'This download has expired.' },
     revoked: { label: 'Revoked', className: 'bg-red-100 text-red-800', title: 'This download was revoked.' },
     failed: { label: 'Failed', className: 'bg-red-100 text-red-800', title: "Something went wrong while preparing this download." },
   }
   return map[state] || { label: 'Pending', className: 'bg-gray-100 text-gray-700', title: '' }
+}
+
+function getStateBadge(d) {
+  const state = d.state || 'processing'
+  const isPossiblyStuck = d.is_possibly_stuck === true && state === 'processing'
+  return stateBadge(state, isPossiblyStuck)
 }
 
 // Access mode badge: public | brand | company | specific users. When public + password, label clarifies password is required.
@@ -75,6 +89,7 @@ export default function DownloadsIndex({
   download_features: features = {},
   pagination: paginationMeta = null,
   download_users: downloadUsers = [],
+  download_brands: downloadBrands = [],
 }) {
   const { auth, flash = {}, errors: pageErrors = {} } = usePage().props
   const { bannerMessage: downloadActionError } = useDownloadErrors(['message'])
@@ -84,16 +99,44 @@ export default function DownloadsIndex({
   const [revokeConfirmId, setRevokeConfirmId] = useState(null)
   const [regenerateConfirmId, setRegenerateConfirmId] = useState(null)
   const [settingsModalDownload, setSettingsModalDownload] = useState(null)
+  const [shareEmailDownload, setShareEmailDownload] = useState(null)
   const [settingsExpandedId, setSettingsExpandedId] = useState(null)
   const [revoking, setRevoking] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [extendingId, setExtendingId] = useState(null)
   const [userDropdownOpen, setUserDropdownOpen] = useState(false)
   const userDropdownRef = useRef(null)
+  const [brandDropdownOpen, setBrandDropdownOpen] = useState(false)
+  const brandDropdownRef = useRef(null)
+
+  // Normalized state: patch-based polling only updates downloadsById; downloadIds stay stable from props
+  const [downloadsById, setDownloadsByIdState] = useState(() => keyByDownloads(downloads || []))
+  const propsDownloadKey = useMemo(
+    () => (downloads || []).map((d) => d.id).join(','),
+    [downloads]
+  )
+  useEffect(() => {
+    setDownloadsByIdState(() => keyByDownloads(downloads || []))
+  }, [propsDownloadKey])
+  const downloadIds = useMemo(() => (downloads || []).map((d) => d.id), [downloads])
+  const setDownloadsById = useCallback((updater) => {
+    if (typeof updater !== 'function') {
+      warnIfReplacingRootState('downloadsById (non-function setter)')
+    }
+    setDownloadsByIdState(updater)
+  }, [])
+  const downloadsList = useMemo(
+    () => downloadIds.map((id) => downloadsById[id]).filter(Boolean),
+    [downloadIds, downloadsById]
+  )
+  useProcessingDownloadsPolling(downloadsById, setDownloadsById, downloadIds)
+
+  const shareEmailForm = useForm({ to: '', message: '' })
   const [filters, setFilters] = useState({
     scope: initialFilters.scope ?? 'mine',
     status: initialFilters.status ?? '',
     access: initialFilters.access ?? '',
+    brand_id: initialFilters.brand_id ?? '',
     user_id: initialFilters.user_id ?? '',
     sort: initialFilters.sort ?? 'date_desc',
   })
@@ -105,10 +148,11 @@ export default function DownloadsIndex({
       scope: initialFilters.scope ?? prev.scope,
       status: initialFilters.status ?? prev.status,
       access: initialFilters.access ?? prev.access,
+      brand_id: initialFilters.brand_id ?? prev.brand_id,
       user_id: initialFilters.user_id ?? prev.user_id,
       sort: initialFilters.sort ?? prev.sort,
     }))
-  }, [initialFilters.scope, initialFilters.status, initialFilters.access, initialFilters.user_id, initialFilters.sort])
+  }, [initialFilters.scope, initialFilters.status, initialFilters.access, initialFilters.brand_id, initialFilters.user_id, initialFilters.sort])
 
   // Close user dropdown when clicking outside
   useEffect(() => {
@@ -123,12 +167,27 @@ export default function DownloadsIndex({
     }
   }, [userDropdownOpen])
 
+  // Close brand dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (brandDropdownRef.current && !brandDropdownRef.current.contains(e.target)) {
+        setBrandDropdownOpen(false)
+      }
+    }
+    if (brandDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [brandDropdownOpen])
+
+  // Polling is handled by useProcessingDownloadsPolling (patch-only, no Inertia). Never router.reload here.
+
   const applyFilters = (next, page = 1) => {
     setFilters(next)
-    router.get(route('downloads.index'), { scope: next.scope, status: next.status, access: next.access, user_id: next.user_id, sort: next.sort, page }, { preserveState: true })
+    router.get(route('downloads.index'), { scope: next.scope, status: next.status, access: next.access, brand_id: next.brand_id, user_id: next.user_id, sort: next.sort, page }, { preserveState: true })
   }
   const goToPage = (page) => {
-    router.get(route('downloads.index'), { scope: filters.scope, status: filters.status, access: filters.access, user_id: filters.user_id, sort: filters.sort, page }, { preserveState: true })
+    router.get(route('downloads.index'), { scope: filters.scope, status: filters.status, access: filters.access, brand_id: filters.brand_id, user_id: filters.user_id, sort: filters.sort, page }, { preserveState: true })
   }
 
   const brandAccent = auth?.activeBrand?.primary_color || '#6366f1'
@@ -193,12 +252,12 @@ export default function DownloadsIndex({
   }
 
   const zipDownloads = useMemo(
-    () => (downloads || []).filter((d) => d.source !== 'single_asset'),
-    [downloads]
+    () => (downloadsList || []).filter((d) => d.source !== 'single_asset'),
+    [downloadsList]
   )
   const singleAssetDownloads = useMemo(
-    () => (downloads || []).filter((d) => d.source === 'single_asset'),
-    [downloads]
+    () => (downloadsList || []).filter((d) => d.source === 'single_asset'),
+    [downloadsList]
   )
   const filteredZipDownloads = useMemo(() => {
     if (!searchQuery.trim()) return zipDownloads
@@ -245,10 +304,10 @@ export default function DownloadsIndex({
     if (action === 'revoke') setRevokeConfirmId(id)
     else if (action === 'regenerate') setRegenerateConfirmId(id)
     else if (action === 'settings') {
-      const d = (downloads || []).find((x) => x.id === id)
+      const d = downloadsById[id] || downloadsList.find((x) => x.id === id)
       setSettingsModalDownload(d || { id })
     }
-  }, [flash?.download_action, flash?.download_action_id, hasDownloadActionError, visibleDownloadIds, downloads])
+  }, [flash?.download_action, flash?.download_action_id, hasDownloadActionError, visibleDownloadIds, downloadsById, downloadsList])
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -349,6 +408,109 @@ export default function DownloadsIndex({
                     </button>
                   </div>
                 </div>
+                {(downloadBrands || []).length > 0 && (
+                  <div className="flex items-center gap-2" ref={brandDropdownRef}>
+                    <span className="text-sm font-medium text-slate-600">Brand</span>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setBrandDropdownOpen((o) => !o)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white pl-2 pr-3 py-1.5 text-sm text-slate-900 shadow-sm hover:border-slate-300 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400/20 min-w-[160px]"
+                        aria-haspopup="listbox"
+                        aria-expanded={brandDropdownOpen}
+                        id="downloads-brand-filter"
+                      >
+                        {(() => {
+                          const selected = (downloadBrands || []).find((b) => String(b.id) === String(filters.brand_id))
+                          if (selected) {
+                            return (
+                              <>
+                                <BrandAvatar
+                                  logoPath={selected.logo_path}
+                                  iconPath={selected.icon_path}
+                                  name={selected.name}
+                                  primaryColor={selected.primary_color || '#6366f1'}
+                                  icon={selected.icon}
+                                  iconBgColor={selected.icon_bg_color}
+                                  showIcon={!!(selected.icon || selected.icon_path)}
+                                  size="sm"
+                                  className="bg-slate-200 text-slate-600 shrink-0"
+                                />
+                                <span className="max-w-[140px] truncate">{selected.name}</span>
+                              </>
+                            )
+                          }
+                          return (
+                            <>
+                              <Squares2X2Icon className="h-6 w-6 text-slate-400 flex-shrink-0" aria-hidden />
+                              <span>All brands</span>
+                            </>
+                          )
+                        })()}
+                        {brandDropdownOpen ? (
+                          <ChevronUpIcon className="h-4 w-4 text-slate-400 flex-shrink-0 ml-auto" aria-hidden />
+                        ) : (
+                          <ChevronDownIcon className="h-4 w-4 text-slate-400 flex-shrink-0 ml-auto" aria-hidden />
+                        )}
+                      </button>
+                      {brandDropdownOpen && (
+                        <div
+                          className="absolute z-20 mt-1 min-w-[200px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black/5"
+                          role="listbox"
+                        >
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={!filters.brand_id}
+                            onClick={() => {
+                              applyFilters({ ...filters, brand_id: '' })
+                              setBrandDropdownOpen(false)
+                            }}
+                            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${!filters.brand_id ? 'bg-slate-100 text-slate-900' : 'text-slate-700 hover:bg-slate-50'}`}
+                          >
+                            <span className="w-5 flex-shrink-0 flex justify-center">
+                              {!filters.brand_id && <CheckIcon className="h-4 w-4" style={{ color: brandAccent }} />}
+                            </span>
+                            <Squares2X2Icon className="h-5 w-5 text-slate-400 flex-shrink-0" aria-hidden />
+                            <span>All brands</span>
+                          </button>
+                          {(downloadBrands || []).map((b) => {
+                            const isSelected = String(b.id) === String(filters.brand_id)
+                            return (
+                              <button
+                                key={b.id}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  applyFilters({ ...filters, brand_id: String(b.id) })
+                                  setBrandDropdownOpen(false)
+                                }}
+                                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${isSelected ? 'bg-slate-100 text-slate-900' : 'text-slate-700 hover:bg-slate-50'}`}
+                              >
+                                <span className="w-5 flex-shrink-0 flex justify-center">
+                                  {isSelected && <CheckIcon className="h-4 w-4" style={{ color: brandAccent }} />}
+                                </span>
+                                <BrandAvatar
+                                  logoPath={b.logo_path}
+                                  iconPath={b.icon_path}
+                                  name={b.name}
+                                  primaryColor={b.primary_color || '#6366f1'}
+                                  icon={b.icon}
+                                  iconBgColor={b.icon_bg_color}
+                                  showIcon={!!(b.icon || b.icon_path)}
+                                  size="sm"
+                                  className="bg-slate-200 text-slate-600 shrink-0"
+                                />
+                                <span className="truncate">{b.name}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {filters.scope === 'all' && (
                   <div className="flex items-center gap-2" ref={userDropdownRef}>
                     <span className="text-sm font-medium text-slate-600">User</span>
@@ -507,7 +669,7 @@ export default function DownloadsIndex({
 
           {/* ZIP / collection downloads — card-based layout */}
           <div className="mt-6 space-y-5">
-            {zipDownloads.length === 0 && (downloads || []).length === 0 ? (
+            {zipDownloads.length === 0 && (downloadsList || []).length === 0 ? (
               <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
                 <ArrowDownTrayIcon className="mx-auto h-12 w-12 text-slate-400" />
                 <h2 className="mt-3 text-lg font-semibold text-slate-900">No downloads yet</h2>
@@ -528,7 +690,7 @@ export default function DownloadsIndex({
               <>
                 {filteredZipDownloads.map((d) => {
                 const state = d.state || 'processing'
-                const badge = stateBadge(state)
+                const badge = getStateBadge(d)
                 const isOpen = expandedId === d.id
                 const canRevoke = (d.can_revoke === true) && state !== 'revoked'
                 const canRegenerate = d.can_regenerate === true
@@ -685,6 +847,18 @@ export default function DownloadsIndex({
                                 </>
                               )}
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShareEmailDownload(d)
+                                shareEmailForm.reset()
+                              }}
+                              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                              title="Share via email"
+                            >
+                              <EnvelopeIcon className="mr-1.5 h-4 w-4 text-slate-400" />
+                              Share via email
+                            </button>
                             <a
                               href={d.public_url}
                               target="_blank"
@@ -718,7 +892,24 @@ export default function DownloadsIndex({
                           </>
                         )}
                         {isProcessing && (
-                          <span className="text-sm text-slate-500">Preparing…</span>
+                          d.is_possibly_stuck && canRegenerate ? (
+                            <button
+                              type="button"
+                              onClick={() => setRegenerateConfirmId(d.id)}
+                              className="inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100"
+                              title="This may have failed. Click to retry."
+                            >
+                              May have failed — Regenerate
+                            </button>
+                          ) : (
+                            <span className="text-sm text-slate-500">
+                              {d.zip_total_chunks != null && d.zip_total_chunks > 0
+                                ? `Preparing — ${d.zip_chunk_index ?? 0} of ${d.zip_total_chunks} chunks`
+                                : d.zip_progress_percentage != null
+                                  ? `Preparing — about ${d.zip_progress_percentage}% complete`
+                                  : 'Preparing…'}
+                            </span>
+                          )
                         )}
                         {isExpired && (
                           <>
@@ -785,7 +976,28 @@ export default function DownloadsIndex({
                     {isOpen && (
                       <div className="w-full min-w-full flex-shrink-0 border-t border-slate-200 bg-slate-50 p-4 rounded-b-xl">
                         {isProcessing && (
-                          <p className="text-sm text-amber-700 mb-3">Large downloads may take a few moments to prepare.</p>
+                          <p className={`text-sm mb-3 ${d.is_possibly_stuck ? 'text-red-600' : d.is_zip_stalled ? 'text-amber-700' : 'text-amber-700'}`}>
+                            {d.is_possibly_stuck
+                              ? 'This download may have failed. Use Regenerate to retry.'
+                              : d.is_zip_stalled
+                                ? 'This download is taking longer than usual. We\'re still working on it.'
+                                : (() => {
+                                    const chunkLine = d.zip_total_chunks != null && d.zip_total_chunks > 0
+                                      ? `Preparing download — ${d.zip_chunk_index ?? 0} of ${d.zip_total_chunks} chunks complete`
+                                      : d.zip_progress_percentage != null
+                                        ? `Preparing download — about ${d.zip_progress_percentage}% complete`
+                                        : null
+                                    const timeRange = d.zip_time_estimate
+                                      ? `Based on similar downloads, this usually takes ~${d.zip_time_estimate.min_minutes}–${d.zip_time_estimate.max_minutes} minutes.`
+                                      : d.estimated_bytes != null && d.estimated_bytes > 0
+                                        ? `This download is about ${(d.estimated_bytes / (1024 * 1024)).toFixed(1)} MB. Preparation may take a few minutes.`
+                                        : null
+                                    if (chunkLine && timeRange) return `${chunkLine} ${timeRange}`
+                                    if (chunkLine) return chunkLine
+                                    if (timeRange) return timeRange
+                                    return 'Preparing download. Larger downloads may take a few minutes.'
+                                  })()}
+                          </p>
                         )}
                         {isFailed && (
                           <p className="text-sm text-red-600 mb-3">Something went wrong while preparing this download. Use Regenerate to retry.</p>
@@ -973,7 +1185,7 @@ export default function DownloadsIndex({
         open={!!revokeConfirmId}
         onClose={() => setRevokeConfirmId(null)}
         onConfirm={() => {
-          const d = downloads.find((x) => x.id === revokeConfirmId)
+          const d = downloadsById[revokeConfirmId] || downloadsList.find((x) => x.id === revokeConfirmId)
           if (d) handleRevoke(d)
         }}
         title="Revoke download"
@@ -989,7 +1201,7 @@ export default function DownloadsIndex({
         open={!!regenerateConfirmId}
         onClose={() => setRegenerateConfirmId(null)}
         onConfirm={() => {
-          const d = downloads.find((x) => x.id === regenerateConfirmId)
+          const d = downloadsById[regenerateConfirmId] || downloadsList.find((x) => x.id === regenerateConfirmId)
           if (d) handleRegenerate(d)
         }}
         title="Regenerate download"
@@ -1007,6 +1219,82 @@ export default function DownloadsIndex({
         onClose={() => setSettingsModalDownload(null)}
         onSaved={() => router.reload()}
       />
+
+      {/* Share via email modal */}
+      {shareEmailDownload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" aria-modal="true" role="dialog">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900">Share via email</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Send the download link to someone
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                shareEmailForm.post(route('downloads.public.share-email', { download: shareEmailDownload.id }), {
+                  preserveScroll: true,
+                  onSuccess: () => {
+                    setShareEmailDownload(null)
+                    shareEmailForm.reset()
+                  },
+                })
+              }}
+              className="mt-4 space-y-4"
+            >
+              <div>
+                <label htmlFor="share-email-to" className="block text-sm font-medium text-gray-700">
+                  To
+                </label>
+                <input
+                  id="share-email-to"
+                  type="email"
+                  required
+                  value={shareEmailForm.data.to}
+                  onChange={(e) => shareEmailForm.setData('to', e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  placeholder="email@example.com"
+                />
+                {(shareEmailForm.errors?.to || pageErrors?.to) && (
+                  <p className="mt-1 text-sm text-red-600">{shareEmailForm.errors.to || pageErrors.to}</p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="share-email-message" className="block text-sm font-medium text-gray-700">
+                  Optional message
+                </label>
+                <textarea
+                  id="share-email-message"
+                  rows={3}
+                  value={shareEmailForm.data.message}
+                  onChange={(e) => shareEmailForm.setData('message', e.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  placeholder="Add a personal note..."
+                />
+              </div>
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareEmailDownload(null)
+                    shareEmailForm.reset()
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={shareEmailForm.processing}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-70"
+                  style={{ backgroundColor: brandAccent }}
+                >
+                  {shareEmailForm.processing ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

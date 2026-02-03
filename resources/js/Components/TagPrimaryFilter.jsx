@@ -45,7 +45,7 @@ export default function TagPrimaryFilter({
         const timeoutId = setTimeout(async () => {
             try {
                 const response = await fetch(
-                    `/api/tenants/${tenantId}/tags/autocomplete?q=${encodeURIComponent(inputValue)}`,
+                    `/app/api/tenants/${tenantId}/tags/autocomplete?q=${encodeURIComponent(inputValue)}`,
                     {
                         headers: {
                             'Content-Type': 'application/json',
@@ -165,8 +165,8 @@ export default function TagPrimaryFilter({
                     </label>
                 )}
 
-                {/* Tags and input container */}
-                <div className="flex items-center flex-wrap gap-1 min-w-[100px] px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500 bg-white transition-colors">
+                {/* Tags and input container - compact width to match other primary filters */}
+                <div className="flex items-center flex-wrap gap-1 w-[140px] max-w-[140px] min-w-[100px] px-2 py-1.5 border border-gray-300 rounded shadow-sm focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 bg-white transition-colors">
                     {/* Selected tag pills */}
                     {selectedTags.map((tag, index) => (
                         <div
@@ -209,9 +209,9 @@ export default function TagPrimaryFilter({
                 </div>
             </div>
 
-            {/* Autocomplete suggestions */}
+            {/* Autocomplete suggestions - width matches input container */}
             {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-auto">
+                <div className="absolute z-50 w-[200px] min-w-[140px] mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-auto">
                     {suggestions.map((suggestion, index) => (
                         <button
                             key={`${suggestion.tag}-${index}`}

@@ -187,6 +187,30 @@ This is a different issue (likely frontend or file storage). Check:
 ./vendor/bin/sail stop queue
 ```
 
+## Download ZIP Jobs (Phase D-3)
+
+By default, `BuildDownloadZipJob` runs on the **default** queue so a single `php artisan queue:work` processes download ZIP builds. If downloads stay "Preparing" forever, ensure a queue worker is running (and not only a worker that listens to a different queue).
+
+To use a dedicated queue for download jobs (e.g. for higher memory/timeout), set in `.env`:
+
+```env
+QUEUE_DOWNLOADS_QUEUE=downloads
+```
+
+Then run a separate worker for the downloads queue with:
+
+- **memory** >= 2048MB
+- **concurrency** <= 2
+- **timeout** >= 900s (15 min)
+
+Example (Supervisor or similar):
+
+```bash
+php artisan queue:work database --queue=downloads --timeout=900 --memory=2048 --tries=3
+```
+
+For Docker/Sail, define a dedicated `queue-downloads` service with these flags. (No auto-deploy logic; configure manually.)
+
 ## Production Notes
 
 ⚠️ **This setup is for local development only.**

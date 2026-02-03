@@ -23,13 +23,17 @@ class AssetProcessingFailureService
      * @param string $jobClass
      * @param \Throwable $exception
      * @param int $attempts
+     * @param bool $preserveVisibility If true, do NOT set status=FAILED (asset stays visible in grid).
+     *                                 Use for thumbnail failures - asset remains usable; user can retry or download original.
+     *                                 Default false for other failures (ExtractMetadata, Promote, etc.) which may warrant hiding.
      * @return void
      */
     public function recordFailure(
         Asset $asset,
         string $jobClass,
         \Throwable $exception,
-        int $attempts
+        int $attempts,
+        bool $preserveVisibility = false
     ): void {
         // Determine if failure is retryable
         $isRetryable = $this->isRetryableFailure($exception, $attempts);
@@ -37,10 +41,12 @@ class AssetProcessingFailureService
         // Generate human-readable failure reason
         $failureReason = $this->generateFailureReason($exception, $jobClass);
 
-        // Mark asset as failed (never hide failures)
-        $asset->update([
-            'status' => AssetStatus::FAILED,
-        ]);
+        // Mark asset as failed - UNLESS preserveVisibility (thumbnail failures must never hide the asset)
+        if (! $preserveVisibility) {
+            $asset->update([
+                'status' => AssetStatus::FAILED,
+            ]);
+        }
 
         // Update asset metadata with failure information
         $currentMetadata = $asset->metadata ?? [];

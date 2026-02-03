@@ -47,12 +47,16 @@ Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/downloa
 
 // Phase D1: Public download link (no auth — anyone with link can download)
 Route::get('/d/{download}', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.public')->middleware(['web']);
+// D-SHARE: Alias for share page (same as public)
+Route::get('/downloads/{download}/share', fn (\App\Models\Download $download) => redirect()->route('downloads.public', ['download' => $download->id]))->name('downloads.share')->middleware(['web']);
 // D10.1: Public background image for download landing (no auth — so background image loads for guests)
 Route::get('/d/{download}/background', [\App\Http\Controllers\AssetThumbnailController::class, 'streamThumbnailForPublicDownload'])->name('downloads.public.background')->middleware(['web']);
 // Public file delivery only (ZIP redirect) — rate-limited to prevent abuse; landing page remains unthrottled
 Route::get('/d/{download}/file', [\App\Http\Controllers\DownloadController::class, 'deliverFile'])->name('downloads.public.file')->middleware(['web', 'throttle:20,10']);
 // D7: Unlock password-protected download (light rate limit)
 Route::post('/d/{download}/unlock', [\App\Http\Controllers\DownloadController::class, 'unlock'])->name('downloads.public.unlock')->middleware(['web', 'throttle:5,1']);
+// D-SHARE: Send download link via email (rate-limited)
+Route::post('/d/{download}/share-email', [\App\Http\Controllers\DownloadController::class, 'shareEmail'])->name('downloads.public.share-email')->middleware(['web', 'throttle:10,1']);
 
 // CSRF token refresh endpoint (for handling stale tokens after session regeneration)
 // Accessible to authenticated users (session exists, just token may be stale)
@@ -145,6 +149,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         // Phase AF-3: Notification API endpoints
         Route::get('/api/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])->name('api.notifications.index');
         Route::post('/api/notifications/{notification}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('api.notifications.read');
+
+        // Downloads poll: mutable fields only for processing downloads (patch-based polling, no Inertia)
+        Route::get('/api/downloads/poll', [\App\Http\Controllers\DownloadController::class, 'poll'])->name('api.downloads.poll');
         
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
@@ -257,6 +264,18 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::post('/admin/support/tickets/suggestions/{suggestion}/create-ticket', [\App\Http\Controllers\AdminTicketController::class, 'createTicketFromSuggestion'])->name('admin.support.tickets.suggestions.create-ticket');
     
     // Deletion Error Management routes (admin only)
+    // Phase D-2: Admin Download Failures (read-only)
+    Route::get('/admin/download-failures', [\App\Http\Controllers\Admin\AdminDownloadFailuresController::class, 'index'])->name('admin.download-failures.index');
+    Route::get('/admin/download-failures/{download:uuid}', [\App\Http\Controllers\Admin\AdminDownloadFailuresController::class, 'show'])->name('admin.download-failures.show');
+    // Phase U-1: Admin Upload Failures (read-only)
+    Route::get('/admin/upload-failures', [\App\Http\Controllers\Admin\AdminUploadFailuresController::class, 'index'])->name('admin.upload-failures.index');
+    Route::get('/admin/upload-failures/{upload:uuid}', [\App\Http\Controllers\Admin\AdminUploadFailuresController::class, 'show'])->name('admin.upload-failures.show');
+    // Phase T-1: Admin Derivative Failures (read-only)
+    Route::get('/admin/derivative-failures', [\App\Http\Controllers\Admin\AdminDerivativeFailuresController::class, 'index'])->name('admin.derivative-failures.index');
+    Route::get('/admin/derivative-failures/{failure}', [\App\Http\Controllers\Admin\AdminDerivativeFailuresController::class, 'show'])->name('admin.derivative-failures.show');
+    // Phase A-1: AI Agent Health (observability, read-only)
+    Route::get('/admin/ai-agents', [\App\Http\Controllers\Admin\AdminAIAgentHealthController::class, 'index'])->name('admin.ai-agent-health.index');
+
     Route::get('/admin/deletion-errors', [\App\Http\Controllers\DeletionErrorController::class, 'index'])->name('deletion-errors.index');
     Route::get('/admin/deletion-errors/{deletionError}', [\App\Http\Controllers\DeletionErrorController::class, 'show'])->name('deletion-errors.show');
     Route::post('/admin/deletion-errors/{deletionError}/resolve', [\App\Http\Controllers\DeletionErrorController::class, 'resolve'])->name('deletion-errors.resolve');

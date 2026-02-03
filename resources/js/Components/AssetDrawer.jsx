@@ -514,9 +514,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
             
             if (isCurrentVideo) {
-                // Fetch view URL (not download URL) for video
+                // Fetch view URL (not download URL) for video - source file always available when processing complete
                 setVideoViewUrlLoading(true)
-                fetch(`/app/assets/${currentCarouselAsset.id}/view`)
+                fetch(`/app/assets/${currentCarouselAsset.id}/view`, {
+                    headers: { 'Accept': 'application/json' },
+                })
                     .then(res => res.json())
                     .then(data => {
                         if (data.url) {

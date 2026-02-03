@@ -38,6 +38,15 @@ class AITaskType
     
     // Alert and monitoring tasks
     public const ALERT_SUMMARY = 'alert_summary';
+
+    // Download ZIP failure analysis (timeout/escalation)
+    public const DOWNLOAD_ZIP_FAILURE_ANALYSIS = 'download_zip_failure_analysis';
+
+    // Phase U-1: Upload failure analysis
+    public const UPLOAD_FAILURE_ANALYSIS = 'upload_failure_analysis';
+
+    // Phase T-1: Asset derivative failure analysis
+    public const ASSET_DERIVATIVE_FAILURE_ANALYSIS = 'asset_derivative_failure_analysis';
     
     /**
      * Get all task types as an array.
@@ -59,6 +68,9 @@ class AITaskType
             self::ASSET_METADATA_GENERATION,
             self::APPROVAL_FEEDBACK_SUMMARY,
             self::ALERT_SUMMARY,
+            self::DOWNLOAD_ZIP_FAILURE_ANALYSIS,
+            self::UPLOAD_FAILURE_ANALYSIS,
+            self::ASSET_DERIVATIVE_FAILURE_ANALYSIS,
         ];
     }
     

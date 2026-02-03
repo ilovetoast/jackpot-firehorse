@@ -25,6 +25,7 @@ use App\Services\TicketConversionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -222,8 +223,8 @@ class AdminTicketController extends Controller
         $user = Auth::user();
         $this->authorize('viewForStaff', $ticket);
 
-        // Load ticket with all relationships
-        $ticket->load([
+        // Load ticket with all relationships (convertedFrom/convertedTo only if conversion columns exist)
+        $relations = [
             'tenant:id,name,slug',
             'createdBy:id,first_name,last_name,email,avatar_url',
             'assignedTo:id,first_name,last_name,email,avatar_url',
@@ -237,9 +238,12 @@ class AdminTicketController extends Controller
                 $query->orderBy('created_at', 'asc');
             },
             'ticketLinks',
-            'convertedFrom:id,ticket_number,type,status',
-            'convertedTo:id,ticket_number,type,status',
-        ]);
+        ];
+        if (Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
+            $relations[] = 'convertedFrom:id,ticket_number,type,status';
+            $relations[] = 'convertedTo:id,ticket_number,type,status';
+        }
+        $ticket->load($relations);
 
         // Separate public and internal messages
         $publicMessages = $ticket->messages->where('is_internal', false)->values();
@@ -847,20 +851,27 @@ class AdminTicketController extends Controller
     {
         $listData = $this->formatTicketForList($ticket);
         
-        return array_merge($listData, [
-            'description' => $ticket->metadata['description'] ?? null,
-            'converted_from' => $ticket->convertedFrom ? [
+        $convertedFrom = null;
+        $convertedTo = [];
+        if (Schema::hasColumn('tickets', 'converted_from_ticket_id')) {
+            $convertedFrom = $ticket->convertedFrom ? [
                 'id' => $ticket->convertedFrom->id,
                 'ticket_number' => $ticket->convertedFrom->ticket_number,
                 'type' => $ticket->convertedFrom->type->value,
                 'status' => $ticket->convertedFrom->status->value,
-            ] : null,
-            'converted_to' => $ticket->convertedTo->map(fn($t) => [
+            ] : null;
+            $convertedTo = $ticket->convertedTo->map(fn ($t) => [
                 'id' => $t->id,
                 'ticket_number' => $t->ticket_number,
                 'type' => $t->type->value,
                 'status' => $t->status->value,
-            ]),
+            ])->all();
+        }
+
+        return array_merge($listData, [
+            'description' => $ticket->metadata['description'] ?? null,
+            'converted_from' => $convertedFrom,
+            'converted_to' => $convertedTo,
             'links' => $ticket->ticketLinks->map(fn($link) => [
                 'id' => $link->id,
                 'link_type' => $link->link_type,

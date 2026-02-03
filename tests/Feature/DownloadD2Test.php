@@ -182,4 +182,43 @@ class DownloadD2Test extends TestCase
             ->has('download_features')
         );
     }
+
+    /**
+     * Company-level download: logged-in creator (user 1) can access via public link when opening
+     * the Download button URL. Public route has no ResolveTenant, so tenant is resolved from
+     * the download when the user is authenticated and belongs to the download's tenant.
+     */
+    public function test_company_download_accessible_by_logged_in_creator_via_public_link(): void
+    {
+        $companyDownload = Download::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'created_by_user_id' => $this->user->id,
+            'download_type' => 'snapshot',
+            'source' => 'grid',
+            'slug' => 'company-link-' . uniqid(),
+            'version' => 1,
+            'status' => DownloadStatus::READY,
+            'zip_status' => ZipStatus::NONE,
+            'expires_at' => now()->addDays(30),
+            'access_mode' => DownloadAccessMode::COMPANY,
+            'allow_reshare' => true,
+        ]);
+        $companyDownload->assets()->attach($this->asset->id, ['is_primary' => true]);
+
+        // Simulate clicking Download button: user is logged in but public route has no tenant in context
+        $this->actingAs($this->user);
+        Session::forget(['tenant_id', 'brand_id']);
+
+        $response = $this->get(route('downloads.public', ['download' => $companyDownload->id]));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Downloads/Public')
+            ->where('state', 'processing')
+            ->where('message', "We're preparing your download. Please try again in a moment.")
+        );
+        // Must not be access_denied
+        $response->assertInertia(fn ($page) => $page->where('state', '!=', 'access_denied'));
+    }
 }

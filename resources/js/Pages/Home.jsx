@@ -683,124 +683,85 @@ export default function Home() {
                 </div>
             </div>
 
-            {/* Agency & Partner Program Section */}
-            <div className="bg-indigo-50">
-                <div className="mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8">
-                    <div className="mx-auto max-w-2xl text-center">
-                        <div className="mb-4 inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-sm font-semibold leading-6 text-indigo-600 ring-1 ring-inset ring-indigo-600/10">
+            {/* Agency Partner Program Section */}
+            <div className="relative overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100">
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-50/80 via-transparent to-transparent" aria-hidden="true" />
+                <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8">
+                    <div className="mx-auto max-w-3xl text-center">
+                        <span className="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-sm font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
                             Coming Soon
-                        </div>
-                        <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-                            Built for agencies managing multiple brands
+                        </span>
+                        <h2 className="mt-4 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
+                            Agency Partner Program
                         </h2>
                         <p className="mt-6 text-lg leading-8 text-gray-600">
-                            Centralize client assets, manage approvals, and grow with our upcoming agency and partner program.
+                            Built for the way agencies and brands actually work together. Agencies incubate and steward client brands; when a brand transfers to the client, the agency keeps a retained partner role and earns rewards. Clients get a production-ready DAM from day one. One platform, shared governance, shared success.
                         </p>
                     </div>
-                    <div className="mx-auto mt-16 max-w-2xl">
-                        <dl className="grid max-w-xl grid-cols-1 gap-x-8 gap-y-8 lg:max-w-none lg:grid-cols-2">
-                            <div className="flex flex-col">
-                                <dt className="flex items-center gap-x-3 text-base font-semibold leading-7 text-gray-900">
-                                    <svg
-                                        className="h-5 w-5 flex-none text-indigo-600"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth="1.5"
-                                        stroke="currentColor"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M2.25 12.75V12A2.25 2.25 0 014.5 9h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"
-                                        />
-                                    </svg>
-                                    Manage multiple client brands from one platform
-                                </dt>
-                                <dd className="mt-2 text-base leading-7 text-gray-600">
-                                    Access and organize all your client brands in a single, unified workspace.
-                                </dd>
+
+                    {/* Value for both sides */}
+                    <div className="mx-auto mt-16 max-w-4xl">
+                        <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+                            <div className="rounded-2xl bg-white/80 p-6 shadow-sm ring-1 ring-gray-200/60 backdrop-blur-sm">
+                                <h3 className="text-base font-semibold text-gray-900">For agencies</h3>
+                                <p className="mt-3 text-sm leading-6 text-gray-600">
+                                    Run multiple client brands from one workspace. Incubate brands, transfer ownership when clients are ready, and stay on as a trusted partner with upload, approval, and brand-management access. Partner tier and rewards grow as more clients activate.
+                                </p>
                             </div>
-                            <div className="flex flex-col">
-                                <dt className="flex items-center gap-x-3 text-base font-semibold leading-7 text-gray-900">
-                                    <svg
-                                        className="h-5 w-5 flex-none text-indigo-600"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth="1.5"
-                                        stroke="currentColor"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
-                                        />
-                                    </svg>
-                                    Approve assets and metadata on behalf of clients
-                                </dt>
-                                <dd className="mt-2 text-base leading-7 text-gray-600">
-                                    Streamline workflows by handling approvals directly within the platform.
-                                </dd>
+                            <div className="rounded-2xl bg-white/80 p-6 shadow-sm ring-1 ring-gray-200/60 backdrop-blur-sm">
+                                <h3 className="text-base font-semibold text-gray-900">For clients</h3>
+                                <p className="mt-3 text-sm leading-6 text-gray-600">
+                                    Your agency delivers a fully configured DAM and hands over ownership with one transfer — no re-upload, no re-setup. Keep your agency as a partner with clear roles and no billing control, so you stay in charge while they keep supporting your brands.
+                                </p>
                             </div>
-                            <div className="flex flex-col">
-                                <dt className="flex items-center gap-x-3 text-base font-semibold leading-7 text-gray-900">
-                                    <svg
-                                        className="h-5 w-5 flex-none text-indigo-600"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth="1.5"
-                                        stroke="currentColor"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
-                                        />
-                                    </svg>
-                                    Shared governance with brand owners
-                                </dt>
-                                <dd className="mt-2 text-base leading-7 text-gray-600">
-                                    Collaborate with brand owners while maintaining clear approval workflows.
-                                </dd>
-                            </div>
-                            <div className="flex flex-col">
-                                <dt className="flex items-center gap-x-3 text-base font-semibold leading-7 text-gray-900">
-                                    <svg
-                                        className="h-5 w-5 flex-none text-indigo-600"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth="1.5"
-                                        stroke="currentColor"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5z"
-                                        />
-                                    </svg>
-                                    Partner revenue sharing and discounts (planned)
-                                </dt>
-                                <dd className="mt-2 text-base leading-7 text-gray-600">
-                                    Earn revenue share and access exclusive partner discounts as the program launches.
-                                </dd>
-                            </div>
-                        </dl>
+                        </div>
                     </div>
-                    <div className="mt-12 flex items-center justify-center gap-x-6">
-                        <button
-                            onClick={(e) => e.preventDefault()}
-                            className="rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                        >
-                            Join the Partner Program
-                        </button>
+
+                    {/* Silver, Gold, Platinum tiers */}
+                    <div className="mx-auto mt-20 max-w-6xl">
+                        <h3 className="text-center text-sm font-semibold uppercase tracking-wider text-gray-500">Partner tiers</h3>
+                        <p className="mt-2 text-center text-base text-gray-600">Advance by activated clients; more transfers unlock higher tiers and benefits.</p>
+                        <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-3">
+                            <div className="flex flex-col rounded-2xl border border-gray-200/80 bg-white p-8 shadow-sm ring-1 ring-gray-100">
+                                <div className="flex items-center gap-3">
+                                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-200/80 text-gray-600 font-bold shadow-inner" aria-hidden="true">Ag</span>
+                                    <h4 className="text-lg font-bold tracking-tight text-gray-900">Silver</h4>
+                                </div>
+                                <p className="mt-4 text-sm leading-6 text-gray-600">
+                                    Entry tier. Unlimited incubated brands, revenue credit on activated clients, and partner directory listing (coming soon). Perfect for agencies onboarding their first client brands.
+                                </p>
+                                <p className="mt-3 text-xs font-medium text-gray-500">0 activated clients to qualify</p>
+                            </div>
+                            <div className="flex flex-col rounded-2xl border-2 border-amber-200/80 bg-white p-8 shadow-md ring-1 ring-amber-100 lg:-my-2 lg:scale-105">
+                                <div className="flex items-center gap-3">
+                                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-amber-200 to-amber-400 text-amber-900 font-bold shadow-inner" aria-hidden="true">Au</span>
+                                    <h4 className="text-lg font-bold tracking-tight text-gray-900">Gold</h4>
+                                </div>
+                                <p className="mt-4 text-sm leading-6 text-gray-600">
+                                    Higher revenue credit, priority support, co-branding options, and agency dashboards. For agencies with multiple activated clients who want visibility and recognition.
+                                </p>
+                                <p className="mt-3 text-xs font-medium text-amber-700">5 activated clients to qualify</p>
+                            </div>
+                            <div className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-8 shadow-sm ring-1 ring-slate-100">
+                                <div className="flex items-center gap-3">
+                                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-slate-300 to-slate-400 text-slate-800 font-bold shadow-inner" aria-hidden="true">Pt</span>
+                                    <h4 className="text-lg font-bold tracking-tight text-gray-900">Platinum</h4>
+                                </div>
+                                <p className="mt-4 text-sm leading-6 text-gray-600">
+                                    Custom revenue share, white-label options, joint sales, and early feature access. For strategic partners ready to scale with us.
+                                </p>
+                                <p className="mt-3 text-xs font-medium text-slate-600">15 activated clients to qualify</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-16 flex justify-center">
                         <a
                             href="#"
-                            className="text-sm font-semibold leading-6 text-gray-900 hover:text-gray-700"
+                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-500"
                         >
-                            Contact Sales <span aria-hidden="true">→</span>
+                            Contact Sales
+                            <span aria-hidden="true">→</span>
                         </a>
                     </div>
                 </div>

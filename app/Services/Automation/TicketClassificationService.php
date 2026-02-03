@@ -151,7 +151,7 @@ Available Severities: {$availableSeverities}
 Available Components: {$availableComponents}
 Available Environments: {$availableEnvironments}
 
-Is Engineering Ticket: {$isEngineering ? 'Yes' : 'No'}
+Is Engineering Ticket: {($isEngineering ? 'Yes' : 'No')}
 
 Please provide a JSON response with the following structure:
 {

@@ -3,11 +3,14 @@
 namespace App\Jobs;
 
 use App\Enums\DownloadStatus;
+use App\Enums\DownloadZipFailureReason;
 use App\Enums\StorageBucketStatus;
 use App\Enums\ZipStatus;
 use App\Models\Download;
 use App\Models\StorageBucket;
 use App\Services\DownloadEventEmitter;
+use App\Services\DownloadNotificationService;
+use App\Services\DownloadZipFailureEscalationService;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
@@ -16,68 +19,45 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use ZipArchive;
 
 /**
- * 🔒 Phase 3.1 — Downloader System (LOCKED)
- * 
- * Do not refactor or change behavior.
- * Future phases may consume outputs only.
- * 
- * Builds ZIP files for download groups by:
- * - Streaming asset files from S3
- * - Creating ZIP archive
- * - Uploading ZIP directly to S3
- * - Updating download model with ZIP metadata
- * 
- * Safety Rules:
- * - Never deletes asset files
- * - Never blocks user requests (runs in background)
- * - Job is idempotent
- * - Uses best-effort deletion patterns
+ * Builds ZIP files for download groups.
+ *
+ * Chunked ZIP creation (resumable), failure classification, agent trigger, escalation.
+ *
+ * - Chunk size: 100 assets per batch
+ * - Persists partial ZIP progress; resumes on retry
+ * - Failure reason: timeout, disk_full, s3_read_error, permission_error, unknown
+ * - Agent trigger: timeout OR failure_count >= 2
+ * - Ticket escalation: failure_count >= 3 OR agent severity === "system"
  */
 class BuildDownloadZipJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * The number of times the job may be attempted.
-     *
-     * @var int
-     */
-    public $tries = 3;
+    /** @var int Job timeout in seconds (15 min) — Phase D-3 */
+    public int $timeout = 900;
 
-    /**
-     * The number of seconds to wait before retrying the job.
-     *
-     * @var int
-     */
-    public $backoff = [60, 300, 900]; // 1 minute, 5 minutes, 15 minutes
+    public int $tries = 3;
 
-    /**
-     * Create a new job instance.
-     */
+    /** @var array<int> Backoff delays (seconds) between retries — Phase D-3 */
+    public array $backoff = [60, 300, 600];
+
+    protected const CHUNK_SIZE = 100;
+
     public function __construct(
         public readonly string $downloadId
-    ) {}
+    ) {
+        $this->onQueue(config('queue.downloads_queue', 'default'));
+    }
 
-    /**
-     * Execute the job.
-     *
-     * D9.2: ZIP build timing is observability only. It must never affect permissions,
-     * access, or UX state directly. Event names: download.zip.build.started | completed | failed.
-     */
     public function handle(): void
     {
-        // Find download first (D9.2: set timing at job start)
         $download = Download::withTrashed()->findOrFail($this->downloadId);
 
-        // D9.2: Record build start (idempotent — do not overwrite on re-run)
         if (! $download->zip_build_started_at) {
-            $download->forceFill([
-                'zip_build_started_at' => now(),
-            ])->saveQuietly();
+            $download->forceFill(['zip_build_started_at' => now()])->saveQuietly();
         }
 
         Log::info('download.zip.build.started', [
@@ -88,7 +68,6 @@ class BuildDownloadZipJob implements ShouldQueue
 
         $startTime = microtime(true);
 
-        // Verify download exists and status allows ZIP build
         if (! $this->canBuildZip($download)) {
             Log::warning('[BuildDownloadZipJob] Cannot build ZIP for download', [
                 'download_id' => $download->id,
@@ -98,8 +77,7 @@ class BuildDownloadZipJob implements ShouldQueue
             return;
         }
 
-        // Verify ZIP needs regeneration
-        if (!$download->zipNeedsRegeneration() && $download->hasZip()) {
+        if (! $download->zipNeedsRegeneration() && $download->hasZip()) {
             Log::info('[BuildDownloadZipJob] ZIP already exists and does not need regeneration', [
                 'download_id' => $download->id,
                 'zip_path' => $download->zip_path,
@@ -107,56 +85,67 @@ class BuildDownloadZipJob implements ShouldQueue
             return;
         }
 
-        // Update status to BUILDING (idempotent - may already be BUILDING)
         $download->zip_status = ZipStatus::BUILDING;
         $download->save();
 
         try {
-            // Load assets for this download (with storage bucket relationship)
-            $assets = $download->assets()->with('storageBucket')->get();
-            
+            $assets = $download->assets()->with('storageBucket')->orderBy('assets.id')->get();
             if ($assets->isEmpty()) {
                 throw new \RuntimeException('Cannot build ZIP: download has no assets');
             }
 
-            // Get storage bucket from first asset (all assets should be in same bucket for a tenant)
             $bucket = $assets->first()->storageBucket ?? null;
-            if (!$bucket) {
+            if (! $bucket) {
                 throw new \RuntimeException('Cannot build ZIP: assets have no storage bucket');
             }
 
-            // Create S3 client
+            // D-Progress: persist total chunks and heartbeat when starting (fresh) or resume
+            $totalChunks = (int) ceil($assets->count() / self::CHUNK_SIZE);
+            $chunkIndex = (int) ($download->zip_build_chunk_index ?? 0);
+            if ($chunkIndex === 0) {
+                $download->forceFill([
+                    'zip_total_chunks' => $totalChunks,
+                    'zip_build_chunk_index' => 0,
+                    'zip_last_progress_at' => now(),
+                ])->saveQuietly();
+            } else {
+                $download->forceFill(['zip_last_progress_at' => now()])->saveQuietly();
+            }
+
             $s3Client = $this->createS3Client();
 
-            // Build ZIP file
-            $zipPath = $this->buildZip($download, $assets, $bucket, $s3Client);
+            $zipPath = $this->buildZipChunked($download, $assets, $bucket, $s3Client);
 
-            // Upload ZIP to S3
             $zipSizeBytes = $this->uploadZipToS3($download, $zipPath, $bucket, $s3Client);
 
-            // Delete old ZIP from S3 if it exists and is different
             if ($download->zip_path && $download->zip_path !== $zipPath) {
                 $this->deleteOldZip($download->zip_path, $bucket, $s3Client);
             }
 
-            // D9.2: Record build completed (right before marking READY)
+            $durationSeconds = (int) round(microtime(true) - $startTime);
+
             $download->forceFill([
                 'zip_build_completed_at' => now(),
+                'zip_build_duration_seconds' => $durationSeconds,
+                'failure_reason' => null,
+                'failure_count' => 0,
+                'last_failed_at' => null,
+                'zip_build_chunk_index' => 0,
             ])->saveQuietly();
 
-            // Update download model (store S3 key, not local path — Phase D1 fix)
             $s3ZipKey = "downloads/{$download->id}/download.zip";
             $download->zip_status = ZipStatus::READY;
             $download->zip_path = $s3ZipKey;
             $download->zip_size_bytes = $zipSizeBytes;
             $options = $download->download_options ?? [];
-            $options['generation_time_seconds'] = round(microtime(true) - $startTime, 2);
+            $options['generation_time_seconds'] = $durationSeconds;
             $options['asset_count'] = $assets->count();
             $download->download_options = $options;
             $download->save();
 
-            // Phase 3.1 Step 5: Emit ZIP build success event
             DownloadEventEmitter::emitDownloadZipBuildSuccess($download, $zipSizeBytes);
+
+            app(DownloadNotificationService::class)->notifyOnZipReady($download);
 
             Log::info('download.zip.build.completed', [
                 'download_id' => $download->id,
@@ -167,177 +156,203 @@ class BuildDownloadZipJob implements ShouldQueue
                 'attempt' => $this->attempts(),
             ]);
 
-            // Clean up temporary ZIP file
             if (file_exists($zipPath)) {
                 @unlink($zipPath);
             }
         } catch (\Throwable $e) {
-            // D9.2: Record build failed (do not reset started_at on retry)
-            $download->forceFill([
-                'zip_build_failed_at' => now(),
-            ])->saveQuietly();
-
-            Log::error('download.zip.build.failed', [
-                'download_id' => $download->id,
-                'tenant_id' => $download->tenant_id,
-                'asset_count' => $download->assets()->count(),
-                'attempt' => $this->attempts(),
-                'exception' => $e->getMessage(),
-            ]);
-            Log::error('[BuildDownloadZipJob] ZIP build failed', [
-                'download_id' => $download->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            // Update download status to FAILED
-            $download->zip_status = ZipStatus::FAILED;
-            $download->save();
-
-            // Phase 3.1 Step 5: Emit ZIP build failure event
+            $this->recordFailure($download, $e);
             DownloadEventEmitter::emitDownloadZipFailed($download, $e->getMessage());
+
+            $shouldTriggerAgent = $download->failure_reason === DownloadZipFailureReason::TIMEOUT
+                || $download->failure_count >= 2;
+            if ($shouldTriggerAgent) {
+                TriggerDownloadZipFailureAgentJob::dispatch($download->id);
+            }
+
+            if ($download->failure_count >= 3) {
+                app(DownloadZipFailureEscalationService::class)->createTicketIfNeeded($download, null);
+            }
 
             throw $e;
         }
     }
 
-    /**
-     * Check if ZIP can be built for this download.
-     * 
-     * @param Download $download
-     * @return bool
-     */
-    protected function canBuildZip(Download $download): bool
+    protected function recordFailure(Download $download, \Throwable $e): void
     {
-        // Download status must allow ZIP build
-        if ($download->status === DownloadStatus::FAILED) {
-            return false;
-        }
+        $reason = $this->classifyFailure($e);
 
-        // If ZIP is already BUILDING, allow retry (idempotent)
-        if ($download->zip_status === ZipStatus::BUILDING) {
-            return true;
+        $options = $download->download_options ?? [];
+        if (! isset($options['estimated_bytes'])) {
+            $options['estimated_bytes'] = $download->zip_size_bytes ?? 0;
         }
+        $download->download_options = $options;
+        $download->saveQuietly();
 
-        // ZIP needs regeneration check
-        if ($download->zipNeedsRegeneration()) {
-            return true;
-        }
+        $download->recordFailure($e, $reason);
 
-        // If no ZIP exists and status is ready, can build
-        if ($download->zip_status === ZipStatus::NONE && $download->status === DownloadStatus::READY) {
-            return true;
-        }
-
-        return false;
+        Log::error('download.zip.build.failed', [
+            'download_id' => $download->id,
+            'tenant_id' => $download->tenant_id,
+            'failure_reason' => $reason->value,
+            'failure_count' => $download->fresh()->failure_count,
+            'attempt' => $this->attempts(),
+            'exception' => $e->getMessage(),
+        ]);
     }
 
-    /**
-     * Build ZIP file from assets.
-     * 
-     * @param Download $download
-     * @param \Illuminate\Database\Eloquent\Collection $assets
-     * @param \App\Models\StorageBucket $bucket
-     * @param S3Client $s3Client
-     * @return string Path to temporary ZIP file
-     */
-    protected function buildZip(
+    protected function classifyFailure(\Throwable $e): DownloadZipFailureReason
+    {
+        $msg = strtolower($e->getMessage());
+        $class = $e::class;
+
+        if ($class === \Illuminate\Queue\MaxAttemptsExceededException::class
+            || $class === \Illuminate\Queue\TimeoutExceededException::class
+            || str_contains($msg, 'timeout')
+            || str_contains($msg, 'timed out')) {
+            return DownloadZipFailureReason::TIMEOUT;
+        }
+
+        if (str_contains($msg, 'disk')
+            || str_contains($msg, 'no space')
+            || str_contains($msg, 'enospc')) {
+            return DownloadZipFailureReason::DISK_FULL;
+        }
+
+        if ($e instanceof S3Exception
+            || str_contains($msg, 's3')
+            || str_contains($msg, 'aws')
+            || str_contains($msg, 'getobject')) {
+            return DownloadZipFailureReason::S3_READ_ERROR;
+        }
+
+        if (str_contains($msg, 'permission')
+            || str_contains($msg, 'access denied')
+            || str_contains($msg, 'forbidden')) {
+            return DownloadZipFailureReason::PERMISSION_ERROR;
+        }
+
+        return DownloadZipFailureReason::UNKNOWN;
+    }
+
+    protected function buildZipChunked(
         Download $download,
         $assets,
         $bucket,
         S3Client $s3Client
     ): string {
-        $tempZipPath = tempnam(sys_get_temp_dir(), 'download_zip_') . '.zip';
-        
+        $tempZipPath = sys_get_temp_dir() . '/download_zip_' . $download->id . '.zip';
+        $chunkIndex = (int) ($download->zip_build_chunk_index ?? 0);
+        if (! file_exists($tempZipPath)) {
+            $chunkIndex = 0;
+            $download->forceFill(['zip_build_chunk_index' => 0])->saveQuietly();
+        }
+        $isResume = $chunkIndex > 0;
+
         $zip = new ZipArchive();
-        if ($zip->open($tempZipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new \RuntimeException('Failed to create ZIP archive');
+        $flags = $isResume ? ZipArchive::CREATE : ZipArchive::CREATE | ZipArchive::OVERWRITE;
+        if ($zip->open($tempZipPath, $flags) !== true) {
+            throw new \RuntimeException('Failed to create or open ZIP archive');
         }
 
         try {
-            foreach ($assets as $asset) {
-                try {
-                    // Get asset file path from S3
-                    $assetPath = $asset->storage_root_path ?? $asset->path;
-                    if (!$assetPath) {
-                        Log::warning('[BuildDownloadZipJob] Asset missing storage path, skipping', [
-                            'asset_id' => $asset->id,
-                            'download_id' => $download->id,
-                        ]);
-                        continue;
-                    }
+            $skipCount = $chunkIndex * self::CHUNK_SIZE;
+            $chunks = $assets->chunk(self::CHUNK_SIZE);
+            $currentChunk = 0;
 
-                    // Download asset from S3 to memory
-                    $assetContent = $this->downloadAssetFromS3($bucket, $assetPath, $s3Client);
-                    
-                    if ($assetContent === null) {
-                        Log::warning('[BuildDownloadZipJob] Failed to download asset from S3, skipping', [
-                            'asset_id' => $asset->id,
-                            'asset_path' => $assetPath,
-                            'download_id' => $download->id,
-                        ]);
-                        continue;
-                    }
-
-                    // Add to ZIP with asset filename
-                    $zipFileName = $asset->original_filename ?? basename($assetPath);
-                    
-                    // Handle duplicate filenames by prefixing with index
-                    $index = 0;
-                    while ($zip->locateName($zipFileName) !== false) {
-                        $index++;
-                        $pathInfo = pathinfo($asset->original_filename ?? basename($assetPath));
-                        $zipFileName = ($pathInfo['filename'] ?? 'file') . '_' . $index;
-                        if (isset($pathInfo['extension'])) {
-                            $zipFileName .= '.' . $pathInfo['extension'];
-                        }
-                    }
-
-                    $zip->addFromString($zipFileName, $assetContent);
-
-                    Log::debug('[BuildDownloadZipJob] Added asset to ZIP', [
-                        'asset_id' => $asset->id,
-                        'zip_file_name' => $zipFileName,
-                        'asset_size' => strlen($assetContent),
-                    ]);
-                } catch (\Throwable $e) {
-                    Log::warning('[BuildDownloadZipJob] Failed to add asset to ZIP, continuing', [
-                        'asset_id' => $asset->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                    // Continue with other assets - best effort
+            foreach ($chunks as $chunkAssets) {
+                if ($currentChunk < $chunkIndex) {
+                    $currentChunk++;
+                    continue;
                 }
+
+                foreach ($chunkAssets as $asset) {
+                    try {
+                        $assetPath = $asset->storage_root_path ?? $asset->path;
+                        if (! $assetPath) {
+                            Log::warning('[BuildDownloadZipJob] Asset missing storage path, skipping', [
+                                'asset_id' => $asset->id,
+                                'download_id' => $download->id,
+                            ]);
+                            continue;
+                        }
+
+                        $assetContent = $this->downloadAssetFromS3($bucket, $assetPath, $s3Client);
+                        if ($assetContent === null) {
+                            Log::warning('[BuildDownloadZipJob] Failed to download asset from S3, skipping', [
+                                'asset_id' => $asset->id,
+                                'download_id' => $download->id,
+                            ]);
+                            continue;
+                        }
+
+                        $zipFileName = $asset->original_filename ?? basename($assetPath);
+                        $index = 0;
+                        while ($zip->locateName($zipFileName) !== false) {
+                            $index++;
+                            $pathInfo = pathinfo($asset->original_filename ?? basename($assetPath));
+                            $zipFileName = ($pathInfo['filename'] ?? 'file') . '_' . $index;
+                            if (isset($pathInfo['extension'])) {
+                                $zipFileName .= '.' . $pathInfo['extension'];
+                            }
+                        }
+
+                        $zip->addFromString($zipFileName, $assetContent);
+                    } catch (\Throwable $e) {
+                        Log::warning('[BuildDownloadZipJob] Failed to add asset to ZIP, continuing', [
+                            'asset_id' => $asset->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+
+                $zip->close();
+                $zip = new ZipArchive();
+                $zip->open($tempZipPath, ZipArchive::CREATE);
+
+                $currentChunk++;
+                $download->forceFill([
+                    'zip_build_chunk_index' => $currentChunk,
+                    'zip_last_progress_at' => now(),
+                ])->saveQuietly();
             }
 
             $zip->close();
 
-            if (!file_exists($tempZipPath) || filesize($tempZipPath) === 0) {
+            if (! file_exists($tempZipPath) || filesize($tempZipPath) === 0) {
                 throw new \RuntimeException('ZIP file is empty or does not exist');
             }
 
             return $tempZipPath;
         } catch (\Throwable $e) {
-            // Clean up ZIP file on error
             $zip->close();
-            if (file_exists($tempZipPath)) {
-                @unlink($tempZipPath);
-            }
             throw $e;
         }
     }
 
-    /**
-     * Download asset file from S3 to memory.
-     * 
-     * @param \App\Models\StorageBucket $bucket
-     * @param string $assetPath S3 key
-     * @param S3Client $s3Client
-     * @return string|null Asset content or null if download failed
-     */
+    protected function canBuildZip(Download $download): bool
+    {
+        if ($download->status === DownloadStatus::FAILED) {
+            return false;
+        }
+        if ($download->zip_status === ZipStatus::BUILDING) {
+            return true;
+        }
+        if ($download->zipNeedsRegeneration()) {
+            return true;
+        }
+        if ($download->zip_status === ZipStatus::NONE && $download->status === DownloadStatus::READY) {
+            return true;
+        }
+        if ($download->zip_status === ZipStatus::FAILED) {
+            return true;
+        }
+        return false;
+    }
+
     protected function downloadAssetFromS3($bucket, string $assetPath, S3Client $s3Client): ?string
     {
         try {
-            if (!$s3Client->doesObjectExist($bucket->name, $assetPath)) {
+            if (! $s3Client->doesObjectExist($bucket->name, $assetPath)) {
                 Log::warning('[BuildDownloadZipJob] Asset file does not exist in S3', [
                     'bucket' => $bucket->name,
                     'asset_path' => $assetPath,
@@ -349,9 +364,7 @@ class BuildDownloadZipJob implements ShouldQueue
                 'Bucket' => $bucket->name,
                 'Key' => $assetPath,
             ]);
-
-            $body = $result['Body'];
-            return (string) $body;
+            return (string) $result['Body'];
         } catch (S3Exception $e) {
             Log::error('[BuildDownloadZipJob] Failed to download asset from S3', [
                 'bucket' => $bucket->name,
@@ -362,15 +375,6 @@ class BuildDownloadZipJob implements ShouldQueue
         }
     }
 
-    /**
-     * Upload ZIP file to S3.
-     * 
-     * @param Download $download
-     * @param string $zipPath Local path to ZIP file
-     * @param \App\Models\StorageBucket $bucket
-     * @param S3Client $s3Client
-     * @return int ZIP file size in bytes
-     */
     protected function uploadZipToS3(
         Download $download,
         string $zipPath,
@@ -379,8 +383,6 @@ class BuildDownloadZipJob implements ShouldQueue
     ): int {
         $zipSizeBytes = filesize($zipPath);
         $zipContent = file_get_contents($zipPath);
-
-        // Generate S3 path for ZIP: downloads/{download_id}/download.zip
         $s3ZipPath = "downloads/{$download->id}/download.zip";
 
         try {
@@ -410,14 +412,6 @@ class BuildDownloadZipJob implements ShouldQueue
         }
     }
 
-    /**
-     * Delete old ZIP file from S3 (best-effort).
-     * 
-     * @param string $oldZipPath S3 key
-     * @param \App\Models\StorageBucket $bucket
-     * @param S3Client $s3Client
-     * @return void
-     */
     protected function deleteOldZip(string $oldZipPath, $bucket, S3Client $s3Client): void
     {
         try {
@@ -426,14 +420,12 @@ class BuildDownloadZipJob implements ShouldQueue
                     'Bucket' => $bucket->name,
                     'Key' => $oldZipPath,
                 ]);
-
                 Log::info('[BuildDownloadZipJob] Old ZIP deleted from S3', [
                     'old_zip_path' => $oldZipPath,
                     'bucket' => $bucket->name,
                 ]);
             }
         } catch (\Throwable $e) {
-            // Best-effort deletion - log but don't fail
             Log::warning('[BuildDownloadZipJob] Failed to delete old ZIP from S3 (non-fatal)', [
                 'old_zip_path' => $oldZipPath,
                 'error' => $e->getMessage(),
@@ -441,12 +433,6 @@ class BuildDownloadZipJob implements ShouldQueue
         }
     }
 
-    /**
-     * Create S3 client instance.
-     * When S3Client is bound in the container (e.g. in tests), use it for fake storage.
-     *
-     * @return S3Client
-     */
     protected function createS3Client(): S3Client
     {
         if (app()->bound(S3Client::class)) {
@@ -465,30 +451,35 @@ class BuildDownloadZipJob implements ShouldQueue
         ]);
     }
 
-    /**
-     * Handle job failure.
-     * 
-     * @param \Throwable $exception
-     * @return void
-     */
     public function failed(\Throwable $exception): void
     {
-        Log::info('download.build.failure', [
-            'download_id' => $this->downloadId,
-            'tenant_id' => null,
-            'error' => $exception->getMessage(),
-        ]);
+        $download = Download::find($this->downloadId);
+        if (! $download) {
+            Log::error('[BuildDownloadZipJob] Job failed, download not found', [
+                'download_id' => $this->downloadId,
+                'error' => $exception->getMessage(),
+            ]);
+            return;
+        }
+
+        $this->recordFailure($download, $exception);
+
+        $shouldTriggerAgent = $download->failure_reason === DownloadZipFailureReason::TIMEOUT
+            || $download->failure_count >= 2;
+        if ($shouldTriggerAgent) {
+            TriggerDownloadZipFailureAgentJob::dispatch($download->id);
+        }
+
+        if ($download->failure_count >= 3) {
+            app(DownloadZipFailureEscalationService::class)->createTicketIfNeeded($download, null);
+        }
+
         Log::error('[BuildDownloadZipJob] Job failed permanently', [
             'download_id' => $this->downloadId,
+            'failure_count' => $download->failure_count,
+            'failure_reason' => $download->failure_reason?->value,
             'error' => $exception->getMessage(),
             'trace' => $exception->getTraceAsString(),
         ]);
-
-        // Mark download ZIP status as FAILED
-        $download = Download::find($this->downloadId);
-        if ($download) {
-            $download->zip_status = ZipStatus::FAILED;
-            $download->save();
-        }
     }
 }

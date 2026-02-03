@@ -3,6 +3,8 @@ import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { usePermission } from '../../hooks/usePermission'
+import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
+import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
@@ -220,6 +222,10 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     // DISABLED: useThumbnailSmartPoll handles async updates without reloads
     // useAssetReconciliation uses router.reload() which causes grid remounts
     // Async processing (thumbnails, AI, video posters) must NEVER call router.reload
+    // Incremental load: show 24 initially, load more on scroll or button click
+    const infiniteResetDeps = [selectedCategoryId, typeof window !== 'undefined' ? window.location.search : '']
+    const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)
+
     // useThumbnailSmartPoll updates localAssets in-place via handleThumbnailUpdate callback
     // This matches Assets/Index behavior - reconciliation is disabled there too
     // useAssetReconciliation({
@@ -719,8 +725,9 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                         
                         {/* Deliverables Grid or Empty State */}
                         {localAssets && localAssets.length > 0 ? (
+                            <>
                             <AssetGrid 
-                                assets={localAssets} 
+                                assets={visibleItems} 
                                 onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
                                 cardSize={cardSize}
                                 showInfo={showInfo}
@@ -729,6 +736,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
                             />
+                            <LoadMoreFooter onLoadMore={loadMore} hasMore={hasMore} />
+                            </>
                         ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
                                 <div className="mb-8">

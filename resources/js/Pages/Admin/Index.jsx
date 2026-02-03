@@ -21,6 +21,8 @@ import {
     UsersIcon,
     DocumentIcon,
     ChartBarIcon,
+    ArrowDownTrayIcon,
+    CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
@@ -143,6 +145,10 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
     const canViewMetadataRegistry = permissionsArray.includes('metadata.registry.view')
 
     const adminTools = [
+        { name: 'Download Failures', icon: ArrowDownTrayIcon, description: stats ? `Failed: ${stats.download_failures_last_24h ?? 0} (24h), Escalated: ${stats.download_failures_escalated ?? 0}, Awaiting: ${stats.download_failures_awaiting_review ?? 0}` : 'Failed ZIP builds, escalated cases, AI assessments', href: '/app/admin/download-failures' },
+        { name: 'Upload Failures', icon: CloudArrowUpIcon, description: stats ? `Failed: ${stats.upload_failures_last_24h ?? 0} (24h), Escalated: ${stats.upload_failures_escalated ?? 0}, Awaiting: ${stats.upload_failures_awaiting_review ?? 0}` : 'Failed uploads, escalated cases, AI assessments', href: '/app/admin/upload-failures' },
+        { name: 'Derivative Failures', icon: ExclamationTriangleIcon, description: stats ? `Total: ${stats.derivative_failures_total ?? 0}, Escalated: ${stats.derivative_failures_escalated ?? 0}` : 'Thumbnail/preview failures, by processor and type', href: '/app/admin/derivative-failures' },
+        { name: 'AI Agent Health', icon: BoltIcon, description: stats ? `Failures (24h): ${stats.ai_agent_failures_24h ?? 0}` : 'Agent runs, conclusions, escalation', href: '/app/admin/ai-agents' },
         { name: 'Agencies', icon: BuildingOfficeIcon, description: 'Manage agency partners and approvals', href: '/app/admin/agencies' },
         { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
         { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },

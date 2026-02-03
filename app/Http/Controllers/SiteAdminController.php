@@ -11,6 +11,9 @@ use App\Mail\PlanChangedAdmin;
 use App\Enums\TicketStatus;
 use App\Models\ActivityEvent;
 use App\Models\Brand;
+use App\Models\Download;
+use App\Models\UploadSession;
+use App\Models\AssetDerivativeFailure;
 use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\User;
@@ -130,6 +133,55 @@ class SiteAdminController extends Controller
                 // Phase AG-11: Agency stats
                 'total_agencies' => Tenant::where('is_agency', true)->count(),
                 'total_incubated_clients' => Tenant::whereNotNull('incubated_by_agency_id')->count(),
+                // Phase D-2: Download failure stats
+                'download_failures_last_24h' => Download::withTrashed()
+                    ->whereNotNull('last_failed_at')
+                    ->where('last_failed_at', '>=', now()->subDay())
+                    ->count(),
+                'download_failures_escalated' => Download::withTrashed()
+                    ->where(function ($q) {
+                        $q->whereNotNull('escalation_ticket_id')
+                            ->orWhere('failure_count', '>=', 3);
+                    })
+                    ->whereNotNull('last_failed_at')
+                    ->count(),
+                'download_failures_awaiting_review' => Download::withTrashed()
+                    ->whereNotNull('last_failed_at')
+                    ->whereNull('escalation_ticket_id')
+                    ->where(function ($q) {
+                        $q->where('failure_count', '<', 3)->orWhereNull('failure_count');
+                    })
+                    ->where('last_failed_at', '>=', now()->subDay())
+                    ->count(),
+                // Phase U-1: Upload failure stats
+                'upload_failures_last_24h' => UploadSession::withTrashed()
+                    ->whereNotNull('last_failed_at')
+                    ->where('last_failed_at', '>=', now()->subDay())
+                    ->count(),
+                'upload_failures_escalated' => UploadSession::withTrashed()
+                    ->where(function ($q) {
+                        $q->whereNotNull('escalation_ticket_id')
+                            ->orWhere('failure_count', '>=', 3);
+                    })
+                    ->whereNotNull('last_failed_at')
+                    ->count(),
+                'upload_failures_awaiting_review' => UploadSession::withTrashed()
+                    ->whereNotNull('last_failed_at')
+                    ->whereNull('escalation_ticket_id')
+                    ->where(function ($q) {
+                        $q->where('failure_count', '<', 3)->orWhereNull('failure_count');
+                    })
+                    ->where('last_failed_at', '>=', now()->subDay())
+                    ->count(),
+                // Phase T-1: Derivative failure stats
+                'derivative_failures_total' => AssetDerivativeFailure::count(),
+                'derivative_failures_escalated' => AssetDerivativeFailure::where(function ($q) {
+                    $q->whereNotNull('escalation_ticket_id')->orWhere('failure_count', '>=', 3);
+                })->count(),
+                // Phase A-1: AI agent health stats
+                'ai_agent_failures_24h' => \App\Models\AIAgentRun::where('status', 'failed')
+                    ->where('started_at', '>=', now()->subDay())
+                    ->count(),
             ];
         });
 

@@ -4116,8 +4116,19 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 </div>
                                             </div>
 
-                                {/* Category + Collections: half width each on sm+ (col-sm-6 equivalent) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+                                {/* Upload Tray — files first, then metadata filters below */}
+                                {/* CLEAN UPLOADER V2: UploadTray now uses v2Files state */}
+                                <UploadTray
+                                    uploadManager={v2UploadManager}
+                                    onRemoveItem={(clientId) => {
+                                        // Remove file from v2Files state
+                                        removeFile(clientId)
+                                    }}
+                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                />
+
+                                {/* Category + Collections: half width each on sm+ (col-sm-6 equivalent) — below uploads */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-4 border-t border-gray-200 mt-4">
                                     <GlobalMetadataPanel
                                         uploadManager={v2UploadManager}
                                         categories={filteredCategories}
@@ -4159,7 +4170,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     }}
                                 />
 
-                                {/* Dynamic Metadata Fields (no header — flows into field groups) */}
+                                {/* Dynamic Metadata Fields (Creative, General, Legal/Rights) — below uploads */}
                                 {selectedCategoryId && (
                                     <div>
                                             {isLoadingMetadataSchema ? (
@@ -4175,7 +4186,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                                     showErrors={showMetadataErrors}
                                                     onValidationAttempt={() => {
-                                                        // Trigger scroll to first invalid group
                                                         setShowMetadataErrors(true)
                                                     }}
                                                 />
@@ -4189,16 +4199,28 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     </div>
                                 )}
 
-                                {/* Upload Tray */}
-                                {/* CLEAN UPLOADER V2: UploadTray now uses v2Files state */}
-                                <UploadTray 
-                                    uploadManager={v2UploadManager}
-                                    onRemoveItem={(clientId) => {
-                                        // Remove file from v2Files state
-                                        removeFile(clientId)
-                                    }}
-                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                />
+                                {/* Starred toggle — below uploads when schema includes starred */}
+                                {uploadMetadataSchema?.groups?.some((g) => (g.fields || []).some((f) => f.key === 'starred')) && (
+                                    <div className="flex items-center gap-3 py-2">
+                                        <span className="text-sm font-medium text-slate-700">Starred</span>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={!!globalMetadataDraft.starred}
+                                            disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                            onClick={() => handleMetadataFieldChange('starred', !globalMetadataDraft.starred)}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                globalMetadataDraft.starred ? 'bg-indigo-600' : 'bg-gray-200'
+                                            }`}
+                                        >
+                                            <span
+                                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                    globalMetadataDraft.starred ? 'translate-x-5' : 'translate-x-1'
+                                                }`}
+                                            />
+                                        </button>
+                                    </div>
+                                )}
 
                                 {/* Phase 2.5 Step 3: Dev-only diagnostics panel */}
                                 {/* Read-only panel showing normalized errors and upload session info */}

@@ -17,6 +17,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Downloads Queue Name
+    |--------------------------------------------------------------------------
+    |
+    | BuildDownloadZipJob is pushed to this queue. Default 'default' so a
+    | single `php artisan queue:work` processes downloads. Set to 'downloads'
+    | and run a dedicated worker (e.g. --queue=downloads) for heavy ZIP builds.
+    |
+    */
+    'downloads_queue' => env('QUEUE_DOWNLOADS_QUEUE', 'default'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |
