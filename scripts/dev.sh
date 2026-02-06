@@ -86,7 +86,7 @@ print_status() {
         return 1
     fi
 }
-
+##
 # Function to start scheduler
 start_scheduler() {
     if [ -f "$SCHEDULER_PID" ]; then
