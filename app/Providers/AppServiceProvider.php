@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
+use Illuminate\Support\Facades\App;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -71,15 +72,19 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function validateViteManifest(): void
     {
-        $env = config('app.env');
-        $manifestPath = public_path('build/manifest.json');
-
-        // In local environment, dev server is used - manifest not required
-        if ($env === 'local') {
+        // 🚫 Never validate during CLI operations (deploy, composer, artisan, CI)
+        if (App::runningInConsole()) {
             return;
         }
-
-        // In staging/production, manifest MUST exist
+    
+        // 🧪 Local uses Vite dev server — no manifest required
+        if (app()->environment('local')) {
+            return;
+        }
+    
+        // 🚨 Staging / Production MUST have built assets
+        $manifestPath = public_path('build/manifest.json');
+    
         if (! File::exists($manifestPath)) {
             throw new RuntimeException(
                 'Vite build missing. Run npm run build.'
