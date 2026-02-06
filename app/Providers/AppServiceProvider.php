@@ -77,7 +77,7 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
     
-        // 🧪 Local uses Vite dev server — no manifest required
+        // 🧪 Local uses Vite dev server — no manifest required a
         if (app()->environment('local')) {
             return;
         }
