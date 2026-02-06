@@ -28,8 +28,16 @@ jobs:
             --targets "Key=tag:Role,Values=jackpot-staging-web" \
             --comment "Staging deploy from GitHub Actions" \
             --parameters 'commands=[
+              "set -e",
               "cd /var/www/jackpot",
-              "echo Deploying as: $(whoami)",
-              "echo Current branch: $(git rev-parse --abbrev-ref HEAD)",
-              "GIT_REF=master ./scripts/deploy.sh"
+
+              "echo === Checking for repo-owned deploy script ===",
+              "if [ ! -x current/scripts/deploy.sh ]; then",
+              "  echo ERROR: repo deploy script not found at current/scripts/deploy.sh",
+              "  echo Run legacy deploy once to bootstrap",
+              "  exit 1",
+              "fi",
+
+              "echo === Running repo deploy script ===",
+              "GIT_REF=master ./current/scripts/deploy.sh"
             ]'
