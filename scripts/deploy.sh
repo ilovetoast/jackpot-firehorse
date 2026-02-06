@@ -52,6 +52,17 @@ Git ref:    $GIT_REF
 Release ID: $RELEASE_ID
 EOF
 
+############################################
+# Record deploy metadata
+############################################
+
+cat <<EOF > "$RELEASE_PATH/DEPLOYED_AT"
+Deployed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+Git ref:    $GIT_REF
+Release ID: $RELEASE_ID
+EOF
+
+
 # Atomic switch
 ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
 
