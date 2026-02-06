@@ -21,18 +21,17 @@ jobs:
           role-to-assume: arn:aws:iam::755199214013:role/jackpot-staging-cicd-role
           aws-region: us-east-2
 
-      - name: Run deploy on EC2 via SSM
+      - name: SSM proof test (instance ID)
         run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets "Key=tag:Role,Values=jackpot-staging-web" \
-            --comment "Staging deploy from GitHub Actions" \
+            --targets "Key=InstanceIds,Values=i-08219b6e485f830bb" \
+            --comment "SSM PROOF TEST" \
             --parameters '{
               "commands": [
-                "set -e",
-                "cd /var/www/jackpot",
-                "echo Running deploy on $(hostname)",
-                "GIT_REF=master ./current/scripts/deploy.sh"
+                "echo SSM_WORKED > /tmp/ssm_proof",
+                "date >> /tmp/ssm_proof"
               ]
             }'
+
 
