@@ -1,0 +1,45 @@
+name: Staging Deploy
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::755199214013:role/jackpot-staging-cicd-role
+          aws-region: us-east-2
+
+      - name: Upload code to EC2 (via SSM)
+        run: |
+          tar czf /tmp/jackpot.tar.gz .
+          aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=instanceIds,Values=i-08219b6e485f830bb" \
+            --parameters commands="[
+              \"rm -rf /tmp/jackpot-src\",
+              \"mkdir -p /tmp/jackpot-src\",
+              \"tar xzf /tmp/jackpot.tar.gz -C /tmp/jackpot-src\"
+            ]"
+
+      - name: Deploy on EC2
+        run: |
+          aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=instanceIds,Values=i-08219b6e485f830bb" \
+            --parameters commands="[
+              \"/var/www/jackpot/deploy.sh $GITHUB_SHA\"
+            ]"
