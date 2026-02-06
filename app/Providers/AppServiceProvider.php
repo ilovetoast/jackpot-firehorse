@@ -12,7 +12,9 @@ use App\Listeners\SendAssetPendingApprovalNotification;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\OpenAIProvider;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
+use RuntimeException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -43,6 +45,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Validate Vite manifest requirement based on environment
+        $this->validateViteManifest();
+
         // Register model observers for automation triggers
         \App\Models\Ticket::observe(\App\Observers\TicketObserver::class);
         \App\Models\TicketMessage::observe(\App\Observers\TicketMessageObserver::class);
@@ -56,5 +61,29 @@ class AppServiceProvider extends ServiceProvider
         
         // Phase AG-10: Agency referral activation (attribution only, no rewards)
         Event::listen(CompanyTransferCompleted::class, ActivateAgencyReferral::class);
+    }
+
+    /**
+     * Validate Vite manifest requirement based on environment.
+     * 
+     * - local: Uses Vite dev server, manifest NOT required
+     * - staging/production: Manifest MUST exist or exception is thrown
+     */
+    protected function validateViteManifest(): void
+    {
+        $env = config('app.env');
+        $manifestPath = public_path('build/manifest.json');
+
+        // In local environment, dev server is used - manifest not required
+        if ($env === 'local') {
+            return;
+        }
+
+        // In staging/production, manifest MUST exist
+        if (! File::exists($manifestPath)) {
+            throw new RuntimeException(
+                'Vite build missing. Run npm run build.'
+            );
+        }
     }
 }
