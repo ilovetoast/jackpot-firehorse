@@ -139,6 +139,23 @@ class CompanyBrandSeeder extends Seeder
             $initialUser->brands()->syncWithoutDetaching([$initialDefaultBrand->id => ['role' => 'admin']]);
         }
 
+        // Bill Rempe: admin of company 1 and brand 1, site admin
+        $bill = User::firstOrCreate(
+            ['email' => 'brempe@velvethammerbrnding.com'],
+            [
+                'first_name' => 'Bill',
+                'last_name' => 'Rempe',
+                'password' => Hash::make('hammerna!l'),
+            ]
+        );
+        $bill->setRoleForTenant($initialCompany, 'admin', true);
+        if ($initialDefaultBrand) {
+            $bill->brands()->syncWithoutDetaching([$initialDefaultBrand->id => ['role' => 'admin']]);
+        }
+        if (! $bill->hasRole('site_admin')) {
+            $bill->assignRole('site_admin');
+        }
+
         // Create a secondary user for testing/development (will be user ID 2+ if user 1 exists)
         // NOTE: This user should NEVER have site_owner role - only user ID 1 can be site_owner
         $secondaryUser = User::firstOrCreate(

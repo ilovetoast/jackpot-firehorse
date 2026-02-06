@@ -117,3 +117,10 @@ ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
 echo
 echo "✅ Deploy complete!"
 echo "• Active release: $RELEASE_ID"
+cat <<EOF > "$RELEASE_PATH/DEPLOYED_AT"
+Deployed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+Git ref:    $GIT_REF
+Release ID: $RELEASE_ID
+EOF
+
+

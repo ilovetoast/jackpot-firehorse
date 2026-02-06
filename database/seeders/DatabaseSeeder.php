@@ -2,11 +2,9 @@
 
 namespace Database\Seeders;
 
-use App\Models\Tenant;
-use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class DatabaseSeeder extends Seeder
 {
@@ -17,6 +15,8 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        
+
         $this->call([
             RoleSeeder::class, // Creates Spatie roles (tenant-level and legacy)
             TenantRoleSeeder::class, // Ensures tenant roles are properly seeded (owner, admin, member)
@@ -31,5 +31,7 @@ class DatabaseSeeder extends Seeder
             MetadataFieldPermissionSeeder::class, // Seed metadata field permissions (owner/admin can edit all fields)
             MetadataFieldsSeeder::class, // Create and configure all metadata fields with category-specific settings
         ]);
+
+        Log::info('DatabaseSeeder executed during deploy');
     }
 }
