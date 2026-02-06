@@ -45,12 +45,15 @@ php artisan migrate --force
 php artisan db:seed --force
 php artisan optimize
 
-# Record deploy metadata
-echo "Deployed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC') | Git ref: $GIT_REF | Release: $RELEASE_ID" > "$RELEASE_PATH/DEPLOYED_AT"
-
-
-
 # Atomic switch
 ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
+
+############################################
+# Record deploy metadata (always visible)
+############################################
+
+echo "Deployed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" > "$CURRENT_LINK/DEPLOYED_AT"
+echo "Release:     $RELEASE_ID" >> "$CURRENT_LINK/DEPLOYED_AT"
+echo "Git ref:     $GIT_REF" >> "$CURRENT_LINK/DEPLOYED_AT"
 
 echo "✅ Deploy complete: $RELEASE_ID"
