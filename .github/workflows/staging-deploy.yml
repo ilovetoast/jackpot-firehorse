@@ -30,8 +30,6 @@ jobs:
             --parameters '{
               "commands": [
                 "set -e",
-                "cd /var/www/jackpot",
-                "echo Running deploy on $(hostname)",
-                "GIT_REF=master ./current/scripts/deploy.sh"
+                "sudo -u ubuntu bash -lc \"cd /var/www/jackpot && GIT_REF=master ./current/scripts/deploy.sh\""
               ]
             }'
