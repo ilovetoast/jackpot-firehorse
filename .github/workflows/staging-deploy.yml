@@ -30,6 +30,8 @@ jobs:
             --parameters '{
               "commands": [
                 "set -e",
-                "sudo -u ubuntu bash -lc \"cd /var/www/jackpot && GIT_REF=master ./current/scripts/deploy.sh\""
+                "export GIT_REF=master",
+                "export GITHUB_SHA=${{ github.sha }}",
+                "/var/www/jackpot/scripts/deploy.sh"
               ]
             }'
