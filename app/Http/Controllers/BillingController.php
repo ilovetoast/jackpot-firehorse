@@ -156,7 +156,7 @@ class BillingController extends Controller
                         $latestPayment = $subscription->latestPayment();
                         if ($latestPayment && is_object($latestPayment) && isset($latestPayment->id)) {
                             try {
-                                $paymentUrl = route('cashier.payment', $latestPayment->id);
+                                $paymentUrl = route('subscription.payment', $latestPayment->id);
                             } catch (\Exception $routeError) {
                                 // If route doesn't exist, construct URL manually
                                 $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
@@ -350,9 +350,9 @@ class BillingController extends Controller
                         $latestPayment = $subscription->latestPayment();
                         if ($latestPayment && $latestPayment->id) {
                             // Return error with payment URL - Cashier provides this route
-                            // The route name might be 'cashier.payment' or we need to construct the URL
+                            // Uses our custom subscription.payment route
                             try {
-                                $paymentUrl = route('cashier.payment', $latestPayment->id);
+                                $paymentUrl = route('subscription.payment', $latestPayment->id);
                             } catch (\Exception $routeError) {
                                 // If route doesn't exist, construct URL manually
                                 $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
@@ -582,7 +582,7 @@ class BillingController extends Controller
                         $latestPayment = $subscription->latestPayment();
                         if ($latestPayment && is_object($latestPayment) && isset($latestPayment->id)) {
                             try {
-                                $paymentUrl = route('cashier.payment', $latestPayment->id);
+                                $paymentUrl = route('subscription.payment', $latestPayment->id);
                             } catch (\Exception $routeError) {
                                 // If route doesn't exist, construct URL manually
                                 $paymentUrl = url('/subscription/payment/' . $latestPayment->id);

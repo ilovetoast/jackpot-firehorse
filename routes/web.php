@@ -331,7 +331,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/billing/portal', [\App\Http\Controllers\BillingController::class, 'customerPortal'])->name('billing.portal');
     
     // Payment confirmation route for incomplete payments (Cashier-style)
-    Route::get('/subscription/payment/{payment}', [\App\Http\Controllers\BillingController::class, 'payment'])->name('cashier.payment');
+    Route::get('/subscription/payment/{payment}', [\App\Http\Controllers\BillingController::class, 'payment'])->name('subscription.payment');
     
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.
     Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
