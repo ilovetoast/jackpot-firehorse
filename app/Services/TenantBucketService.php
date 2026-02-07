@@ -6,6 +6,7 @@ use App\Enums\StorageBucketStatus;
 use App\Exceptions\BucketNotProvisionedException;
 use App\Exceptions\BucketProvisioningNotAllowedException;
 use App\Models\StorageBucket;
+use App\Support\AdminLogStream;
 use App\Models\Tenant;
 use App\Services\TenantBucket\EnsureBucketResult;
 use Aws\S3\Exception\S3Exception;
@@ -50,6 +51,19 @@ class TenantBucketService
         if ($bucket) {
             return $bucket;
         }
+
+        Log::channel('admin')->error('Storage bucket missing', [
+            'tenant_id' => $tenant->id,
+            'expected_bucket' => $expectedName,
+            'env' => app()->environment(),
+        ]);
+
+        AdminLogStream::push('web', [
+            'level' => 'error',
+            'message' => 'Storage bucket missing',
+            'tenant_id' => $tenant->id,
+            'expected_bucket' => $expectedName,
+        ]);
 
         Log::error('[STORAGE_BUCKET_MISSING]', [
             'tenant_id' => $tenant->id,

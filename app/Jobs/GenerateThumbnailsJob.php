@@ -20,6 +20,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use App\Support\AdminLogStream;
 use App\Support\Logging\PipelineLogger;
 
 /**
@@ -679,6 +680,22 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'exception_class' => get_class($e),
                 'attempt' => $this->attempts(),
             ]);
+            Log::channel('admin_worker')->error('Thumbnail generation failed', [
+                'asset_id' => $this->assetId,
+                'job' => self::class,
+                'attempt' => $this->attempts(),
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
+
+            AdminLogStream::push('worker', [
+                'level' => 'error',
+                'message' => 'Thumbnail generation failed',
+                'asset_id' => $this->assetId,
+                'job' => self::class,
+                'attempt' => $this->attempts(),
+            ]);
+
             Log::error('[GenerateThumbnailsJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
                 'job_id' => $this->job->getJobId() ?? 'unknown',

@@ -155,6 +155,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
         { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
         { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
+        { name: 'Logs', icon: DocumentTextIcon, description: 'Error and warning logs from web and workers (Redis-backed)', href: '/app/admin/logs' },
         ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
         ...(canViewMetadataRegistry ? [{ name: 'Metadata Registry', icon: TagIcon, description: 'Inspect system metadata fields and their behavior', href: '/app/admin/metadata/registry' }] : []),
         { name: 'Billing Overview', icon: ChartBarIcon, description: 'View income, expenses, and financial reports', href: '/app/admin/billing' },
