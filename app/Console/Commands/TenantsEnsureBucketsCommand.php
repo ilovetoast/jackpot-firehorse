@@ -2,29 +2,44 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\StorageBucketStatus;
+use App\Models\StorageBucket;
 use App\Models\Tenant;
-use App\Services\TenantBucket\EnsureBucketResult;
+use App\Services\CompanyStorageProvisioner;
 use App\Services\TenantBucketService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
- * Tenants Ensure Buckets
+ * Tenants Ensure Buckets (Reconciler)
  *
- * Staging reconciliation: ensure each tenant has an S3 bucket.
- * Loops through tenants, calls TenantBucketService::ensureBucketExists.
- * Aborts in local unless --force.
+ * Ensures each tenant has exactly one canonical ACTIVE storage bucket.
+ * - Computes expected bucket name from storage.bucket_name_pattern (via TenantBucketService).
+ * - Promotes existing expected-name bucket to ACTIVE if it was PROVISIONING.
+ * - Creates bucket (S3 + row) via CompanyStorageProvisioner when no expected-name row exists.
+ * - Marks legacy shared buckets (e.g. dam-local-shared) as DEPRECATED so they do not block resolution.
+ *
+ * Idempotent and safe to run repeatedly in staging and production.
+ *
+ * WHERE TO RUN: Worker EC2, CI, or one-off ops only. Do not run from web EC2 so that
+ * provisioning (CreateBucket, PutBucketCors, etc.) stays off the web tier.
+ *
+ * STATUS CASING: All status writes use StorageBucketStatus enum (values are lowercase:
+ * active, provisioning, deprecated, deleting). If you see uppercase in DB, fix with:
+ *   SELECT DISTINCT status FROM storage_buckets;
+ * and normalize legacy rows if needed.
  */
 class TenantsEnsureBucketsCommand extends Command
 {
     protected $signature = 'tenants:ensure-buckets
         {--tenant-id= : Limit to a single tenant by ID}
-        {--dry-run : Report what would happen without creating buckets}
+        {--dry-run : Report what would happen without making changes}
         {--force : Allow running in local environment}
     ';
 
-    protected $description = 'Ensure S3 buckets exist for all tenants (staging reconciliation)';
+    protected $description = 'Reconcile storage buckets: ensure one ACTIVE bucket per tenant; deprecate legacy shared buckets';
 
-    public function handle(TenantBucketService $service): int
+    public function handle(TenantBucketService $bucketService, CompanyStorageProvisioner $provisioner): int
     {
         if (config('app.env') === 'local' && ! $this->option('force')) {
             $this->error('Aborted: APP_ENV=local. Use --force to run anyway.');
@@ -45,83 +60,134 @@ class TenantsEnsureBucketsCommand extends Command
 
         $dryRun = $this->option('dry-run');
         if ($dryRun) {
-            $this->info('Dry run: no buckets will be created.');
+            $this->info('Dry run: no changes will be made.');
         }
 
-        $created = 0;
-        $skipped = 0;
+        $rows = [];
         $failed = 0;
 
-        $rows = [];
         foreach ($tenants as $tenant) {
-            if ($dryRun) {
-                $result = $this->dryRunCheck($service, $tenant);
-            } else {
-                $result = $service->ensureBucketExists($tenant);
-            }
-
-            $status = $this->statusLabel($result);
-            if ($result->wasCreated()) {
-                $created++;
-            } elseif ($result->wasSkipped()) {
-                $skipped++;
-            } else {
-                $failed++;
-            }
+            $result = $dryRun
+                ? $this->reconcileTenantDryRun($bucketService, $tenant)
+                : $this->reconcileTenant($bucketService, $provisioner, $tenant);
 
             $rows[] = [
                 $tenant->id,
                 $tenant->slug,
-                $result->bucketName,
-                $status,
-                $result->errorMessage ?? '-',
+                $result['expected_bucket'],
+                $result['action_summary'],
+                $result['error'] ?? '-',
             ];
+
+            if (isset($result['error']) && $result['error'] !== '-') {
+                $failed++;
+            }
         }
 
         $this->table(
-            ['Tenant ID', 'Slug', 'Bucket', 'Status', 'Error'],
+            ['Tenant ID', 'Slug', 'Expected bucket', 'Action', 'Error'],
             $rows
         );
 
         $this->newLine();
-        $this->info("Summary: {$created} created, {$skipped} already existed, {$failed} failed.");
+        $this->info($failed > 0 ? "Summary: {$failed} tenant(s) had errors." : 'Reconciliation complete.');
 
         return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 
-    protected function dryRunCheck(TenantBucketService $service, Tenant $tenant): EnsureBucketResult
+    /**
+     * Reconcile one tenant: ensure one ACTIVE bucket with expected name; deprecate legacy ACTIVE buckets.
+     *
+     * @return array{expected_bucket: string, action_summary: string, error?: string}
+     */
+    protected function reconcileTenant(TenantBucketService $bucketService, CompanyStorageProvisioner $provisioner, Tenant $tenant): array
     {
+        $expectedName = $bucketService->getBucketName($tenant);
+        $buckets = StorageBucket::where('tenant_id', $tenant->id)->get();
+        $expectedBucket = $buckets->firstWhere('name', $expectedName);
+        $actions = [];
+
         try {
-            $bucketName = $service->getBucketName($tenant);
-            $exists = $service->bucketExists($tenant);
-            if ($exists) {
-                return new EnsureBucketResult(EnsureBucketResult::OUTCOME_SKIPPED, $bucketName);
+            // A) Expected-name bucket exists: promote to ACTIVE if not already
+            if ($expectedBucket) {
+                if ($expectedBucket->status !== StorageBucketStatus::ACTIVE) {
+                    $expectedBucket->update(['status' => StorageBucketStatus::ACTIVE]);
+                    $actions[] = 'promoted';
+                } else {
+                    $actions[] = 'ok';
+                }
+            } else {
+                // B) No bucket with expected name: provision (creates S3 + row)
+                $provisioner->provision($tenant);
+                $actions[] = 'created';
             }
 
-            return new EnsureBucketResult(EnsureBucketResult::OUTCOME_CREATED, $bucketName);
+            // C) Legacy shared buckets (same tenant, different name, ACTIVE): mark DEPRECATED
+            $legacyActive = $buckets->filter(fn ($b) => $b->name !== $expectedName && $b->status === StorageBucketStatus::ACTIVE);
+            $deprecatedCount = 0;
+            foreach ($legacyActive as $legacy) {
+                $legacy->update(['status' => StorageBucketStatus::DEPRECATED]);
+                $deprecatedCount++;
+            }
+            if ($deprecatedCount > 0) {
+                $actions[] = "deprecated {$deprecatedCount}";
+            }
+
+            $actionSummary = implode(', ', $actions);
+            Log::info('[tenants:ensure-buckets] reconciled', [
+                'tenant_id' => $tenant->id,
+                'tenant_slug' => $tenant->slug,
+                'expected_bucket' => $expectedName,
+                'actions' => $actions,
+            ]);
+
+            return [
+                'expected_bucket' => $expectedName,
+                'action_summary' => $actionSummary,
+            ];
         } catch (\Throwable $e) {
-            $bucketName = 'unknown';
-            try {
-                $bucketName = $service->getBucketName($tenant);
-            } catch (\Throwable) {
-                // use 'unknown' if getBucketName also fails
-            }
+            Log::error('[tenants:ensure-buckets] failed', [
+                'tenant_id' => $tenant->id,
+                'tenant_slug' => $tenant->slug,
+                'expected_bucket' => $expectedName,
+                'error' => $e->getMessage(),
+            ]);
 
-            return new EnsureBucketResult(
-                EnsureBucketResult::OUTCOME_FAILED,
-                $bucketName,
-                $e->getMessage()
-            );
+            return [
+                'expected_bucket' => $expectedName,
+                'action_summary' => 'failed',
+                'error' => $e->getMessage(),
+            ];
         }
     }
 
-    protected function statusLabel(EnsureBucketResult $result): string
+    /**
+     * Dry run: compute what would be done without making changes.
+     *
+     * @return array{expected_bucket: string, action_summary: string, error?: string}
+     */
+    protected function reconcileTenantDryRun(TenantBucketService $bucketService, Tenant $tenant): array
     {
-        return match ($result->outcome) {
-            EnsureBucketResult::OUTCOME_CREATED => 'created',
-            EnsureBucketResult::OUTCOME_SKIPPED => 'already existed',
-            EnsureBucketResult::OUTCOME_FAILED => 'failed',
-            default => $result->outcome,
-        };
+        $expectedName = $bucketService->getBucketName($tenant);
+        $buckets = StorageBucket::where('tenant_id', $tenant->id)->get();
+        $expectedBucket = $buckets->firstWhere('name', $expectedName);
+        $actions = [];
+
+        if ($expectedBucket) {
+            $actions[] = $expectedBucket->status === StorageBucketStatus::ACTIVE ? 'ok' : 'would promote';
+        } else {
+            $actions[] = 'would create';
+        }
+
+        $legacyActive = $buckets->filter(fn ($b) => $b->name !== $expectedName && $b->status === StorageBucketStatus::ACTIVE);
+        $n = $legacyActive->count();
+        if ($n > 0) {
+            $actions[] = "would deprecate {$n}";
+        }
+
+        return [
+            'expected_bucket' => $expectedName,
+            'action_summary' => implode(', ', $actions),
+        ];
     }
 }

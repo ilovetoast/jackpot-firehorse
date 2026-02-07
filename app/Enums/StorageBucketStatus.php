@@ -5,9 +5,8 @@ namespace App\Enums;
 /**
  * S3 storage bucket status.
  *
- * Tracks the lifecycle state of storage buckets.
- * In production, one bucket exists per company/tenant.
- * In local/staging, a shared bucket is used.
+ * Valid statuses: PROVISIONING, ACTIVE, SUSPENDED, DEPRECATED, DELETING.
+ * resolveActiveBucketOrFail() only accepts ACTIVE; legacy shared buckets should be DEPRECATED.
  */
 enum StorageBucketStatus: string
 {
@@ -33,6 +32,13 @@ enum StorageBucketStatus: string
      * Assets remain in storage but are not accessible.
      */
     case SUSPENDED = 'suspended';
+
+    /**
+     * Bucket is deprecated (e.g. legacy shared bucket).
+     * Not used for new uploads; resolveActiveBucketOrFail() only accepts ACTIVE.
+     * Do not delete or reuse; kept for audit/history.
+     */
+    case DEPRECATED = 'deprecated';
 
     /**
      * Bucket is being deleted.

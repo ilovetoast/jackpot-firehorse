@@ -19,6 +19,7 @@ use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\MetadataPersistenceService;
+use App\Services\TenantBucketService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -176,12 +177,12 @@ class DevelopmentDataSeeder extends Seeder
      */
     public function run(): void
     {
-        // Safety check - only run in local/development
+        // Safety check - only run in local/testing; never staging or production
         $env = app()->environment();
-        if (!in_array($env, ['local', 'development', 'testing'])) {
-            $this->command->error('⚠️  This seeder is DEVELOPMENT ONLY!');
+        if (! in_array($env, ['local', 'testing'], true)) {
+            $this->command->error('⚠️  This seeder is for local/testing only.');
             $this->command->error("Current environment: {$env}");
-            $this->command->error('Aborting to prevent accidental production data generation.');
+            $this->command->error('Aborting to prevent accidental staging/production data.');
             return;
         }
         
@@ -274,12 +275,13 @@ class DevelopmentDataSeeder extends Seeder
             'stripe_id' => fake()->boolean(30) ? 'cus_' . Str::random(24) : null, // 30% have Stripe
         ]);
         
-        // Create storage bucket
+        // Create storage bucket with canonical expected name (so resolveActiveBucketOrFail finds it)
+        $expectedBucketName = app(TenantBucketService::class)->getBucketName($company);
         $bucket = StorageBucket::create([
             'tenant_id' => $company->id,
-            'name' => 'dev-bucket-' . $company->id,
+            'name' => $expectedBucketName,
             'status' => StorageBucketStatus::ACTIVE,
-            'region' => 'us-east-1',
+            'region' => config('storage.default_region', 'us-east-1'),
         ]);
         
         // Create brands
