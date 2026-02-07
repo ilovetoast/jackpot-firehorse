@@ -108,12 +108,13 @@ class TenantsEnsureBucketsCommand extends Command
         $actions = [];
 
         try {
-            // A) Expected-name bucket exists: promote to ACTIVE if not already
+            // A) Expected-name bucket exists: ensure S3 config (CORS, etc.) and ACTIVE status
             if ($expectedBucket) {
                 if ($expectedBucket->status !== StorageBucketStatus::ACTIVE) {
-                    $expectedBucket->update(['status' => StorageBucketStatus::ACTIVE]);
+                    $provisioner->provision($tenant);
                     $actions[] = 'promoted';
                 } else {
+                    $provisioner->provision($tenant);
                     $actions[] = 'ok';
                 }
             } else {

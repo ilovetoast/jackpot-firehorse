@@ -358,8 +358,8 @@ class CompanyStorageProvisioner
 
     /**
      * Apply CORS to bucket for browser presigned uploads (idempotent).
-     * Uses config storage.cors_allowed_origins (defaults to APP_URL origin).
-     * IAM: s3:PutBucketCORS required.
+     * AllowedOrigins always includes app URL (origin); plus any storage.cors_allowed_origins.
+     * IAM: s3:PutBucketCORS required. Safe to re-run.
      *
      * @param string $bucketName
      * @return void
@@ -367,7 +367,7 @@ class CompanyStorageProvisioner
      */
     protected function applyCors(string $bucketName): void
     {
-        $origins = config('storage.cors_allowed_origins', []);
+        $origins = $this->getCorsOrigins();
 
         if (empty($origins)) {
             return;
@@ -386,6 +386,44 @@ class CompanyStorageProvisioner
                 ],
             ],
         ]);
+    }
+
+    /**
+     * Build CORS allowed origins list. Always includes app URL (as origin); no wildcard in prod.
+     *
+     * @return list<string>
+     */
+    protected function getCorsOrigins(): array
+    {
+        $origins = config('storage.cors_allowed_origins', []);
+        $appUrl = config('app.url');
+        $appOrigin = $this->originFromUrl($appUrl);
+        $combined = is_array($origins) ? $origins : [];
+        if ($appOrigin !== '' && ! in_array($appOrigin, $combined, true)) {
+            $combined = array_merge([$appOrigin], $combined);
+        }
+
+        return array_values(array_unique(array_filter($combined)));
+    }
+
+    /**
+     * Derive CORS origin (scheme + host + port) from a full URL.
+     */
+    protected function originFromUrl(string $url): string
+    {
+        $p = parse_url($url);
+        if (! isset($p['host'])) {
+            return '';
+        }
+        $scheme = $p['scheme'] ?? 'https';
+        $host = $p['host'];
+        $port = $p['port'] ?? null;
+        $origin = $scheme . '://' . $host;
+        if ($port !== null && ! in_array((int) $port, [80, 443], true)) {
+            $origin .= ':' . $port;
+        }
+
+        return $origin;
     }
 
     /**
