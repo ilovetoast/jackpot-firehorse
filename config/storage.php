@@ -83,9 +83,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Origins allowed in S3 bucket CORS. Browser uploads to presigned URLs
-    | require the app origin to be allowed. Defaults to origin derived from
-    | APP_URL (scheme + host + port if non-standard). Set STORAGE_CORS_ORIGINS
-    | to override (comma-separated for multiple).
+    | require the app origin to be allowed. Set STORAGE_CORS_ORIGINS to
+    | override (comma-separated). Default: staging, production, localhost.
     |
     */
     'cors_allowed_origins' => (function () {
@@ -93,15 +92,17 @@ return [
         if ($custom !== null && $custom !== '') {
             return array_values(array_filter(array_map('trim', explode(',', $custom))));
         }
-        $url = env('APP_URL', 'http://localhost');
-        $p = parse_url($url);
-        $origin = ($p['scheme'] ?? 'http') . '://' . ($p['host'] ?? 'localhost');
-        if (! empty($p['port']) && ! in_array((int) $p['port'], [80, 443], true)) {
-            $origin .= ':' . $p['port'];
-        }
 
-        return [$origin];
+        return [
+            'https://staging-jackpot.velvetysoft.com',
+            'https://jackpot.velvetysoft.com',
+            'http://localhost:3000',
+            'http://localhost:5173',
+        ];
     })(),
+
+    'cors_expose_headers' => ['ETag', 'x-amz-request-id', 'x-amz-id-2'],
+    'cors_max_age_seconds' => 3000,
 
     'bucket_config' => [
         /*

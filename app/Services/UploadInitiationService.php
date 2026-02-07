@@ -732,6 +732,13 @@ class UploadInitiationService
             '+' . self::DEFAULT_EXPIRATION_MINUTES . ' minutes'
         );
 
+        Log::info('[UPLOAD_PRESIGNED]', [
+            'tenant_id' => $bucket->tenant_id,
+            'bucket_name' => $bucket->name,
+            'region' => $bucket->region,
+            'is_presigned' => true,
+        ]);
+
         return (string) $presignedRequest->getUri();
     }
 

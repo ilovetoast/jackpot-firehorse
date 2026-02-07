@@ -358,8 +358,8 @@ class CompanyStorageProvisioner
 
     /**
      * Apply CORS to bucket for browser presigned uploads (idempotent).
-     * AllowedOrigins always includes app URL (origin); plus any storage.cors_allowed_origins.
-     * IAM: s3:PutBucketCORS required. Safe to re-run.
+     * Uses config: storage.cors_allowed_origins, cors_expose_headers, cors_max_age_seconds.
+     * IAM: s3:PutBucketCORS required. Only run from console/queued jobs (caller must guard).
      *
      * @param string $bucketName
      * @return void
@@ -367,63 +367,126 @@ class CompanyStorageProvisioner
      */
     protected function applyCors(string $bucketName): void
     {
-        $origins = $this->getCorsOrigins();
-
+        $origins = config('storage.cors_allowed_origins', []);
         if (empty($origins)) {
             return;
         }
 
+        $rule = $this->getExpectedCorsRule();
         $this->s3Client->putBucketCors([
             'Bucket' => $bucketName,
             'CORSConfiguration' => [
-                'CORSRules' => [
-                    [
-                        'AllowedHeaders' => ['*'],
-                        'AllowedMethods' => ['GET', 'PUT', 'POST', 'HEAD'],
-                        'AllowedOrigins' => $origins,
-                        'ExposeHeaders' => ['ETag'],
-                    ],
-                ],
+                'CORSRules' => [$rule],
             ],
         ]);
     }
 
     /**
-     * Build CORS allowed origins list. Always includes app URL (as origin); no wildcard in prod.
+     * Expected CORS rule (for PutBucketCors and comparison).
      *
-     * @return list<string>
+     * @return array<string, mixed>
      */
-    protected function getCorsOrigins(): array
+    public function getExpectedCorsRule(): array
     {
         $origins = config('storage.cors_allowed_origins', []);
-        $appUrl = config('app.url');
-        $appOrigin = $this->originFromUrl($appUrl);
-        $combined = is_array($origins) ? $origins : [];
-        if ($appOrigin !== '' && ! in_array($appOrigin, $combined, true)) {
-            $combined = array_merge([$appOrigin], $combined);
+        $expose = config('storage.cors_expose_headers', ['ETag', 'x-amz-request-id', 'x-amz-id-2']);
+        $maxAge = (int) config('storage.cors_max_age_seconds', 3000);
+
+        $rule = [
+            'AllowedHeaders' => ['*'],
+            'AllowedMethods' => ['GET', 'PUT', 'POST', 'HEAD'],
+            'AllowedOrigins' => is_array($origins) ? $origins : [],
+            'ExposeHeaders' => is_array($expose) ? $expose : ['ETag', 'x-amz-request-id', 'x-amz-id-2'],
+        ];
+        if ($maxAge > 0) {
+            $rule['MaxAgeSeconds'] = $maxAge;
         }
 
-        return array_values(array_unique(array_filter($combined)));
+        return $rule;
     }
 
     /**
-     * Derive CORS origin (scheme + host + port) from a full URL.
+     * Get current bucket CORS configuration (for dry-run / comparison). Returns null if no CORS or error.
+     *
+     * @param string $bucketName
+     * @return array<string, mixed>|null CORSRules array or null
      */
-    protected function originFromUrl(string $url): string
+    public function getBucketCors(string $bucketName): ?array
     {
-        $p = parse_url($url);
-        if (! isset($p['host'])) {
-            return '';
+        try {
+            $result = $this->s3Client->getBucketCors(['Bucket' => $bucketName]);
+            $rules = $result->get('CORSRules');
+            return is_array($rules) ? $rules : null;
+        } catch (S3Exception $e) {
+            if ($e->getAwsErrorCode() === 'NoSuchCORSConfiguration' || str_contains($e->getMessage(), 'CORS')) {
+                return null;
+            }
+            throw $e;
         }
-        $scheme = $p['scheme'] ?? 'https';
-        $host = $p['host'];
-        $port = $p['port'] ?? null;
-        $origin = $scheme . '://' . $host;
-        if ($port !== null && ! in_array((int) $port, [80, 443], true)) {
-            $origin .= ':' . $port;
-        }
+    }
 
-        return $origin;
+    /**
+     * Whether bucket CORS matches expected config (normalized comparison).
+     *
+     * @param string $bucketName
+     * @return bool
+     */
+    public function bucketCorsMatchesExpected(string $bucketName): bool
+    {
+        $current = $this->getBucketCors($bucketName);
+        if ($current === null || empty($current)) {
+            return false;
+        }
+        $expected = $this->getExpectedCorsRule();
+        return $this->corsRulesEquivalent($expected, $current[0] ?? []);
+    }
+
+    /**
+     * Compare two CORS rule arrays (order-independent for arrays).
+     *
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     * @return bool
+     */
+    protected function corsRulesEquivalent(array $a, array $b): bool
+    {
+        $normalize = function (array $r) {
+            $out = [
+                'AllowedHeaders' => isset($r['AllowedHeaders']) ? (array) $r['AllowedHeaders'] : [],
+                'AllowedMethods' => isset($r['AllowedMethods']) ? (array) $r['AllowedMethods'] : [],
+                'AllowedOrigins' => isset($r['AllowedOrigins']) ? (array) $r['AllowedOrigins'] : [],
+                'ExposeHeaders' => isset($r['ExposeHeaders']) ? (array) $r['ExposeHeaders'] : [],
+            ];
+            sort($out['AllowedHeaders']);
+            sort($out['AllowedMethods']);
+            sort($out['AllowedOrigins']);
+            sort($out['ExposeHeaders']);
+            if (isset($r['MaxAgeSeconds'])) {
+                $out['MaxAgeSeconds'] = (int) $r['MaxAgeSeconds'];
+            }
+            return $out;
+        };
+        return $normalize($a) === $normalize($b);
+    }
+
+    /**
+     * Ensure bucket has expected CORS; apply if missing or different. Only run from console/queued jobs.
+     *
+     * @param string $bucketName
+     * @return bool true if CORS was applied, false if already ok
+     * @throws S3Exception
+     * @throws BucketProvisioningNotAllowedException
+     */
+    public function ensureBucketCors(string $bucketName): bool
+    {
+        if (! app()->runningInConsole() && ! in_array(app()->environment(), ['local', 'testing'], true)) {
+            throw new BucketProvisioningNotAllowedException(app()->environment());
+        }
+        if ($this->bucketCorsMatchesExpected($bucketName)) {
+            return false;
+        }
+        $this->applyCors($bucketName);
+        return true;
     }
 
     /**

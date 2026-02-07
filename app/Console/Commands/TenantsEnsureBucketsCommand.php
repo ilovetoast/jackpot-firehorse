@@ -68,7 +68,7 @@ class TenantsEnsureBucketsCommand extends Command
 
         foreach ($tenants as $tenant) {
             $result = $dryRun
-                ? $this->reconcileTenantDryRun($bucketService, $tenant)
+                ? $this->reconcileTenantDryRun($bucketService, $provisioner, $tenant)
                 : $this->reconcileTenant($bucketService, $provisioner, $tenant);
 
             $rows[] = [
@@ -123,6 +123,10 @@ class TenantsEnsureBucketsCommand extends Command
                 $actions[] = 'created';
             }
 
+            // Ensure CORS is present on the expected bucket (idempotent; never touch DEPRECATED)
+            $corsApplied = $provisioner->ensureBucketCors($expectedName);
+            $actions[] = $corsApplied ? 'cors-applied' : 'cors-ok';
+
             // C) Legacy shared buckets (same tenant, different name, ACTIVE): mark DEPRECATED
             $legacyActive = $buckets->filter(fn ($b) => $b->name !== $expectedName && $b->status === StorageBucketStatus::ACTIVE);
             $deprecatedCount = 0;
@@ -163,11 +167,12 @@ class TenantsEnsureBucketsCommand extends Command
     }
 
     /**
-     * Dry run: compute what would be done without making changes.
+     * Dry run: compute what would be done without making changes; report CORS status for existing buckets.
+     * Never touches DEPRECATED buckets.
      *
      * @return array{expected_bucket: string, action_summary: string, error?: string}
      */
-    protected function reconcileTenantDryRun(TenantBucketService $bucketService, Tenant $tenant): array
+    protected function reconcileTenantDryRun(TenantBucketService $bucketService, CompanyStorageProvisioner $provisioner, Tenant $tenant): array
     {
         $expectedName = $bucketService->getBucketName($tenant);
         $buckets = StorageBucket::where('tenant_id', $tenant->id)->get();
@@ -176,6 +181,13 @@ class TenantsEnsureBucketsCommand extends Command
 
         if ($expectedBucket) {
             $actions[] = $expectedBucket->status === StorageBucketStatus::ACTIVE ? 'ok' : 'would promote';
+            // Report CORS for expected bucket only (never DEPRECATED)
+            try {
+                $corsOk = $provisioner->bucketCorsMatchesExpected($expectedName);
+                $actions[] = $corsOk ? 'cors-ok' : 'cors-missing';
+            } catch (\Throwable $e) {
+                $actions[] = 'cors-check-error';
+            }
         } else {
             $actions[] = 'would create';
         }
