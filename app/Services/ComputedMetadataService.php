@@ -226,53 +226,25 @@ class ComputedMetadataService
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
         
-        // Get credentials - prefer bucket, fall back to env
-        $accessKey = !empty($bucket->access_key_id) ? $bucket->access_key_id : env('AWS_ACCESS_KEY_ID');
-        $secretKey = !empty($bucket->secret_access_key) ? $bucket->secret_access_key : env('AWS_SECRET_ACCESS_KEY');
-        $region = $bucket->region ?? env('AWS_DEFAULT_REGION', 'us-east-1');
-        
-        // Validate credentials are present
-        if (empty($accessKey) || empty($secretKey)) {
-            Log::error('[ComputedMetadataService] S3 credentials missing', [
-                'bucket_id' => $bucket->id ?? 'unknown',
-                'bucket_name' => $bucket->name ?? 'unknown',
-                'has_bucket_key' => !empty($bucket->access_key_id),
-                'has_bucket_secret' => !empty($bucket->secret_access_key),
-                'has_env_key' => !empty(env('AWS_ACCESS_KEY_ID')),
-                'has_env_secret' => !empty(env('AWS_SECRET_ACCESS_KEY')),
-                'access_key_value' => $accessKey ? 'present' : 'missing',
-                'secret_key_value' => $secretKey ? 'present' : 'missing',
-            ]);
-            throw new \RuntimeException('S3 credentials not available - bucket credentials and AWS env vars are both missing');
-        }
-        
+        $region = $bucket->region ?? config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1'));
+
         $config = [
             'version' => 'latest',
             'region' => $region,
-            'credentials' => [
-                'key' => $accessKey,
-                'secret' => $secretKey,
-            ],
         ];
-        
-        // Support MinIO for local development
-        if ($bucket->endpoint) {
+        if (!empty($bucket->endpoint)) {
             $config['endpoint'] = $bucket->endpoint;
             $config['use_path_style_endpoint'] = $bucket->use_path_style_endpoint ?? true;
-        } elseif (env('AWS_ENDPOINT')) {
-            $config['endpoint'] = env('AWS_ENDPOINT');
-            $config['use_path_style_endpoint'] = env('AWS_USE_PATH_STYLE_ENDPOINT', true);
+        } elseif (config('filesystems.disks.s3.endpoint')) {
+            $config['endpoint'] = config('filesystems.disks.s3.endpoint');
+            $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
         }
-        
+
         try {
             $s3Client = new \Aws\S3\S3Client($config);
         } catch (\Exception $e) {
             Log::error('[ComputedMetadataService] Failed to create S3 client', [
                 'error' => $e->getMessage(),
-                'config_keys' => array_keys($config),
-                'credentials_keys' => array_keys($config['credentials']),
-                'access_key_present' => !empty($accessKey),
-                'secret_key_present' => !empty($secretKey),
             ]);
             throw $e;
         }

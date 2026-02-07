@@ -572,17 +572,11 @@ class PromoteAssetJob implements ShouldQueue
 
             $config = [
                 'version' => 'latest',
-                'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
-                'credentials' => [
-                    'key' => env('AWS_ACCESS_KEY_ID'),
-                    'secret' => env('AWS_SECRET_ACCESS_KEY'),
-                ],
+                'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
             ];
-
-            // Support MinIO for local development
-            if (env('AWS_ENDPOINT')) {
-                $config['endpoint'] = env('AWS_ENDPOINT');
-                $config['use_path_style_endpoint'] = env('AWS_USE_PATH_STYLE_ENDPOINT', true);
+            if (config('filesystems.disks.s3.endpoint')) {
+                $config['endpoint'] = config('filesystems.disks.s3.endpoint');
+                $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
             }
 
             $this->s3Client = new S3Client($config);

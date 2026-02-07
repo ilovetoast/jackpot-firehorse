@@ -116,10 +116,6 @@ class StreamingZipService
         return new S3Client([
             'version' => 'latest',
             'region' => config('filesystems.disks.s3.region'),
-            'credentials' => [
-                'key' => config('filesystems.disks.s3.key'),
-                'secret' => config('filesystems.disks.s3.secret'),
-            ],
         ]);
     }
 }

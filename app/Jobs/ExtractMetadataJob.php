@@ -231,16 +231,15 @@ class ExtractMetadataJob implements ShouldQueue
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
 
-        $s3Client = new \Aws\S3\S3Client([
+        $config = [
             'version' => 'latest',
-            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
-            'credentials' => [
-                'key' => env('AWS_ACCESS_KEY_ID'),
-                'secret' => env('AWS_SECRET_ACCESS_KEY'),
-            ],
-            'endpoint' => env('AWS_ENDPOINT'),
-            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
-        ]);
+            'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
+        ];
+        if (config('filesystems.disks.s3.endpoint')) {
+            $config['endpoint'] = config('filesystems.disks.s3.endpoint');
+            $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
+        }
+        $s3Client = new \Aws\S3\S3Client($config);
 
         try {
             $result = $s3Client->getObject([

@@ -643,18 +643,11 @@ class ColorAnalysisService
             throw new \RuntimeException('AWS SDK not installed.');
         }
 
-        $accessKey = !empty($bucket->access_key_id) ? $bucket->access_key_id : env('AWS_ACCESS_KEY_ID');
-        $secretKey = !empty($bucket->secret_access_key) ? $bucket->secret_access_key : env('AWS_SECRET_ACCESS_KEY');
-        $region = $bucket->region ?? env('AWS_DEFAULT_REGION', 'us-east-1');
-
-        if (empty($accessKey) || empty($secretKey)) {
-            throw new \RuntimeException('S3 credentials not available.');
-        }
+        $region = $bucket->region ?? config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1'));
 
         $config = [
             'version' => 'latest',
             'region' => $region,
-            'credentials' => ['key' => $accessKey, 'secret' => $secretKey],
         ];
         if (!empty($bucket->endpoint)) {
             $config['endpoint'] = $bucket->endpoint;

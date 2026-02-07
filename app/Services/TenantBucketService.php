@@ -355,13 +355,6 @@ class TenantBucketService
             'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
         ];
 
-        if (config('filesystems.disks.s3.key') && config('filesystems.disks.s3.secret')) {
-            $config['credentials'] = [
-                'key' => config('filesystems.disks.s3.key'),
-                'secret' => config('filesystems.disks.s3.secret'),
-            ];
-        }
-
         if (config('filesystems.disks.s3.endpoint')) {
             $config['endpoint'] = config('filesystems.disks.s3.endpoint');
             $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);

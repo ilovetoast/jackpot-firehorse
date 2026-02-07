@@ -566,15 +566,7 @@ class SystemStatusController extends Controller
             'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
         ];
 
-        // Add credentials if provided
-        if (config('filesystems.disks.s3.key') && config('filesystems.disks.s3.secret')) {
-            $config['credentials'] = [
-                'key' => config('filesystems.disks.s3.key'),
-                'secret' => config('filesystems.disks.s3.secret'),
-            ];
-        }
-
-        // Add endpoint for MinIO/local S3
+        // Endpoint for MinIO/local S3; credentials via SDK default chain
         if (config('filesystems.disks.s3.endpoint')) {
             $config['endpoint'] = config('filesystems.disks.s3.endpoint');
             $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);

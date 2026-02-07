@@ -120,15 +120,14 @@ class CollectionZipBuilderService
             return app(S3Client::class);
         }
 
-        return new S3Client([
+        $config = [
             'version' => 'latest',
             'region' => config('filesystems.disks.s3.region'),
-            'credentials' => [
-                'key' => config('filesystems.disks.s3.key'),
-                'secret' => config('filesystems.disks.s3.secret'),
-            ],
-            'endpoint' => config('filesystems.disks.s3.endpoint'),
-            'use_path_style_endpoint' => config('filesystems.disks.s3.use_path_style_endpoint', false),
-        ]);
+        ];
+        if (config('filesystems.disks.s3.endpoint')) {
+            $config['endpoint'] = config('filesystems.disks.s3.endpoint');
+            $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
+        }
+        return new S3Client($config);
     }
 }
