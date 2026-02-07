@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Exceptions\BucketNotProvisionedException;
+use App\Exceptions\BucketProvisioningNotAllowedException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Brand;
 use App\Models\StorageBucket;
@@ -285,31 +287,30 @@ class UploadInitiationService
     ): array {
         $results = [];
 
-        // Get or provision bucket once before processing files (shared resource)
-        // This is safe because bucket provisioning is idempotent
+        // Get or provision bucket once before processing files (shared resource).
+        // In staging/production only resolve is used; no provisioning. Semantic exceptions are rethrown unchanged.
         $bucket = null;
         try {
             $bucket = $this->getOrProvisionBucket($tenant);
-        } catch (\Exception $e) {
-            // If bucket provisioning fails, all files fail
+        } catch (BucketNotProvisionedException|BucketProvisioningNotAllowedException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
             Log::error('Failed to get or provision bucket for batch upload', [
                 'tenant_id' => $tenant->id,
                 'error' => $e->getMessage(),
             ]);
-            
-            // Return error for all files
             foreach ($files as $file) {
                 $results[] = [
                     'upload_session_id' => null,
                     'client_reference' => $file['client_reference'] ?? null,
-                    'batch_reference' => $batchReference, // Batch-level correlation ID even for failed initiations
+                    'batch_reference' => $batchReference,
                     'upload_session_status' => null,
                     'upload_type' => null,
                     'upload_url' => null,
                     'multipart_upload_id' => null,
                     'chunk_size' => null,
                     'expires_at' => null,
-                    'error' => 'Storage bucket unavailable: ' . $e->getMessage(),
+                    'error' => 'Storage bucket unavailable.',
                 ];
             }
             return $results;

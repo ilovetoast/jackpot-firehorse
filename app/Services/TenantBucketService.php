@@ -56,12 +56,14 @@ class TenantBucketService
     /**
      * Provision bucket infrastructure (CreateBucket, CORS, versioning, etc.).
      * MUST NOT be called from web requests in staging/production.
+     * Guard runs before any AWS client is constructed (provisioner is only resolved after guard passes).
      *
      * @throws BucketProvisioningNotAllowedException If called from web in staging/production (guard)
      */
     public function provisionBucket(Tenant $tenant): StorageBucket
     {
-        if (! $this->isProvisioningAllowed()) {
+        // Guard FIRST: no AWS SDK usage until this passes. Queue workers run in console.
+        if (! $this->isProvisioningAllowed() && $this->isStagingOrProduction()) {
             throw new BucketProvisioningNotAllowedException(config('app.env'));
         }
 
@@ -127,6 +129,11 @@ class TenantBucketService
     protected function isLocalOrTesting(): bool
     {
         return in_array(config('app.env'), ['local', 'testing'], true);
+    }
+
+    protected function isStagingOrProduction(): bool
+    {
+        return in_array(config('app.env'), ['staging', 'production'], true);
     }
 
     /**

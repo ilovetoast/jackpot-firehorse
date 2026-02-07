@@ -2,9 +2,9 @@
 
 namespace App\Exceptions;
 
-use Exception;
+use RuntimeException;
 
-class BucketProvisioningNotAllowedException extends Exception
+class BucketProvisioningNotAllowedException extends RuntimeException
 {
     /**
      * Create a new exception instance.
@@ -13,7 +13,7 @@ class BucketProvisioningNotAllowedException extends Exception
         public string $environment,
         ?string $message = null
     ) {
-        $message = $message ?? 'Bucket provisioning is not allowed in this context. Provisioning may only run in console or in a queued job (e.g. ProvisionCompanyStorageJob). Web requests must not create buckets.';
+        $message = $message ?? 'Bucket provisioning is not allowed in a web request. Provisioning may only run via CLI or queued jobs.';
 
         parent::__construct($message);
     }

@@ -2,9 +2,9 @@
 
 namespace App\Exceptions;
 
-use Exception;
+use RuntimeException;
 
-class BucketNotProvisionedException extends Exception
+class BucketNotProvisionedException extends RuntimeException
 {
     /**
      * Create a new exception instance.
@@ -13,7 +13,7 @@ class BucketNotProvisionedException extends Exception
         public int $tenantId,
         ?string $message = null
     ) {
-        $message = $message ?? 'No active storage bucket for this tenant. Run on a worker or CLI: php artisan tenants:ensure-buckets';
+        $message = $message ?? "No active storage bucket for this tenant.\nProvisioning must be run on a worker or via CLI:\nphp artisan tenants:ensure-buckets";
 
         parent::__construct($message);
     }
