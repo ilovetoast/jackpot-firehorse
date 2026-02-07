@@ -42,37 +42,17 @@ class TenantBucketService
     {
         $expectedName = $this->getExpectedBucketName($tenant);
 
-        // [DIAGNOSTIC] Table stats and resolve attempt (read-only)
-        Log::info('[STORAGE_BUCKET_TABLE_STATS]', [
-            'total' => StorageBucket::count(),
-            'active' => StorageBucket::where('status', StorageBucketStatus::ACTIVE)->count(),
-        ]);
-        Log::info('[BUCKET_RESOLVE_ATTEMPT]', [
-            'tenant_id' => $tenant->id,
-            'tenant_slug' => $tenant->slug,
-            'expected_bucket' => $expectedName,
-            'env' => app()->environment(),
-        ]);
-
         $bucket = StorageBucket::where('tenant_id', $tenant->id)
             ->where('name', $expectedName)
             ->where('status', StorageBucketStatus::ACTIVE)
             ->first();
 
         if ($bucket) {
-            Log::info('[BUCKET_RESOLVE_SUCCESS]', [
-                'tenant_id' => $tenant->id,
-                'bucket_id' => $bucket->id,
-                'bucket_name' => $bucket->name,
-                'status' => $bucket->status?->value ?? (string) $bucket->status,
-            ]);
-
             return $bucket;
         }
 
-        Log::error('[BUCKET_RESOLVE_FAILED]', [
+        Log::error('[STORAGE_BUCKET_MISSING]', [
             'tenant_id' => $tenant->id,
-            'tenant_slug' => $tenant->slug,
             'expected_bucket' => $expectedName,
             'env' => app()->environment(),
         ]);
@@ -121,6 +101,30 @@ class TenantBucketService
     public function getBucketName(Tenant $tenant): string
     {
         return $this->getExpectedBucketName($tenant);
+    }
+
+    /**
+     * Generate a presigned GetObject URL for a key in the given bucket.
+     * Use for download URLs, streaming, ZIP delivery. Never read bucket from config.
+     *
+     * @param StorageBucket $bucket Resolved via resolveActiveBucketOrFail
+     * @param string $key S3 object key (e.g. zip_path, storage_root_path)
+     * @param int $expiresMinutes URL expiration in minutes
+     * @param string|null $responseContentDisposition Optional Content-Disposition header (e.g. attachment; filename="x.zip")
+     */
+    public function getPresignedGetUrl(StorageBucket $bucket, string $key, int $expiresMinutes = 15, ?string $responseContentDisposition = null): string
+    {
+        $params = [
+            'Bucket' => $bucket->name,
+            'Key' => $key,
+        ];
+        if ($responseContentDisposition !== null) {
+            $params['ResponseContentDisposition'] = $responseContentDisposition;
+        }
+        $command = $this->s3Client->getCommand('GetObject', $params);
+        $request = $this->s3Client->createPresignedRequest($command, "+{$expiresMinutes} minutes");
+
+        return (string) $request->getUri();
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Download;
+use App\Services\TenantBucketService;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
 use ZipStream\ZipStream;
@@ -12,6 +13,7 @@ use ZipStream\ZipStream;
  *
  * Uses ZipStream to stream assets from S3 into a ZIP. No BuildDownloadZipJob.
  * Enable via config('features.streaming_downloads') when total_bytes > threshold.
+ * Bucket resolved via TenantBucketService::resolveActiveBucketOrFail (never config).
  */
 class StreamingZipService
 {
@@ -25,15 +27,13 @@ class StreamingZipService
      */
     public function stream(Download $download, string $outputFilename = self::DEFAULT_FILENAME): void
     {
-        $assets = $download->assets()->with('storageBucket')->orderBy('assets.id')->get();
+        $assets = $download->assets()->orderBy('assets.id')->get();
         if ($assets->isEmpty()) {
             throw new \RuntimeException('Download has no assets');
         }
 
-        $bucket = $assets->first()->storageBucket;
-        if (! $bucket) {
-            throw new \RuntimeException('Assets have no storage bucket');
-        }
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
 
         $s3Client = $this->createS3Client();
         $usedNames = [];

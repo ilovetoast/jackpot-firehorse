@@ -8,13 +8,13 @@ use App\Models\Collection;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionZipBuilderService;
 use App\Services\DownloadNameResolver;
+use App\Services\TenantBucketService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\URL;
 use Inertia\Inertia;
@@ -194,13 +194,8 @@ class PublicCollectionController extends Controller
             abort(422, 'This collection has no assets to download.');
         }
 
-        $bucket = $assets->first()->storageBucket;
-        if (! $bucket) {
-            Log::error('[PublicCollectionController] Collection assets have no storage bucket', [
-                'collection_id' => $collection->id,
-            ]);
-            abort(500, 'Unable to build download.');
-        }
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
 
         $tempPath = null;
         try {
@@ -268,21 +263,17 @@ class PublicCollectionController extends Controller
             abort(404, 'File not available.');
         }
 
-        try {
-            Log::info('Public collection download', [
-                'collection_id' => $collection->id,
-                'asset_id' => $asset->id,
-                'brand_slug' => $brand_slug,
-            ]);
+        Log::info('Public collection download', [
+            'collection_id' => $collection->id,
+            'asset_id' => $asset->id,
+            'brand_slug' => $brand_slug,
+        ]);
 
-            $disk = Storage::disk('s3');
-            $signedUrl = $disk->temporaryUrl($asset->storage_root_path, now()->addMinutes(15));
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
+        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $asset->storage_root_path, 15);
 
-            return redirect($signedUrl);
-        } catch (\Throwable $e) {
-            report($e);
-            abort(500, 'Failed to generate download link.');
-        }
+        return redirect($signedUrl);
     }
 
     /**
@@ -337,13 +328,11 @@ class PublicCollectionController extends Controller
             abort(404, 'Thumbnail not available.');
         }
 
-        try {
-            $signedUrl = Storage::disk('s3')->temporaryUrl($path, now()->addMinutes(15));
-            return redirect($signedUrl);
-        } catch (\Throwable $e) {
-            report($e);
-            abort(404, 'Thumbnail not available.');
-        }
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($tenant);
+        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $path, 15);
+
+        return redirect($signedUrl);
     }
 
     /**

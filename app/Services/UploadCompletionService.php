@@ -859,21 +859,6 @@ class UploadCompletionService
             // Local (sync): afterCommit still runs after commit; listener runs in same request, behavior unchanged.
             $assetForEvent = $asset;
             DB::afterCommit(function () use ($assetForEvent) {
-                // TEMPORARY: QUEUE_DEBUG to verify staging dispatch (remove after confirmation)
-                Log::info('[QUEUE_DEBUG] Entered upload processing', [
-                    'env' => app()->environment(),
-                    'queue' => config('queue.default'),
-                ]);
-                Log::info('[QUEUE_DEBUG] About to fire AssetUploaded (queues ProcessAssetOnUpload)', [
-                    'job' => \App\Listeners\ProcessAssetOnUpload::class,
-                    'env' => app()->environment(),
-                ]);
-                \App\Support\Logging\PipelineLogger::info('[UploadCompletionService] Dispatching AssetUploaded event', [
-                    'asset_id' => $assetForEvent->id,
-                    'asset_type' => $assetForEvent->type?->value ?? 'unknown',
-                    'tenant_id' => $assetForEvent->tenant_id,
-                    'brand_id' => $assetForEvent->brand_id,
-                ]);
                 event(new AssetUploaded($assetForEvent));
 
                 // NOTE: Processing jobs are now handled by ProcessAssetJob chain via AssetUploaded event

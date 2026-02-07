@@ -14,6 +14,7 @@ use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\DownloadBucketService;
+use App\Services\TenantBucketService;
 use App\Services\DownloadEventEmitter;
 use App\Services\DownloadExpirationPolicy;
 use App\Services\DownloadPublicPageBrandingResolver;
@@ -32,7 +33,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -986,26 +986,20 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
-        try {
-            $download->increment('access_count');
-            $filename = $this->getDownloadZipFilename($download);
-            $disk = Storage::disk('s3');
-            $signedUrl = $disk->temporaryUrl($download->zip_path, now()->addMinutes(10), [
-                'ResponseContentDisposition' => 'attachment; filename="' . addcslashes($filename, '"\\') . '"',
-            ]);
-            DownloadEventEmitter::emitDownloadZipRequested($download);
-            DownloadEventEmitter::emitDownloadZipCompleted($download);
+        $download->increment('access_count');
+        $filename = $this->getDownloadZipFilename($download);
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
+        $signedUrl = $bucketService->getPresignedGetUrl(
+            $bucket,
+            $download->zip_path,
+            10,
+            'attachment; filename="' . addcslashes($filename, '"\\') . '"'
+        );
+        DownloadEventEmitter::emitDownloadZipRequested($download);
+        DownloadEventEmitter::emitDownloadZipCompleted($download);
 
-            return redirect($signedUrl);
-        } catch (\Exception $e) {
-            Log::error('[DownloadController] Failed to generate download URL', [
-                'download_id' => $download->id,
-                'zip_path' => $download->zip_path,
-                'error' => $e->getMessage(),
-            ]);
-
-            return $this->publicPage($download, 'failed', 'Failed to generate download URL');
-        }
+        return redirect($signedUrl);
     }
 
     /**

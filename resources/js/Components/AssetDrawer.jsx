@@ -2324,12 +2324,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             events={activityEvents} 
                             loading={activityLoading}
                             onThumbnailRetry={() => {
-                                // Phase 3.0C: UI-only retry (max 2 retries)
-                                if (thumbnailRetryCount < 2) {
-                                    setThumbnailRetryCount(prev => prev + 1)
-                                    // Trigger a re-render by updating asset reference
-                                    // This is UI-only - no backend call
-                                    // The thumbnail will be re-checked on next render
+                                // Phase 3.0C: Call backend to retry thumbnail generation (max 2 retries)
+                                if (thumbnailRetryCount < 2 && canRetryThumbnail) {
+                                    handleRetryThumbnail()
                                 }
                             }}
                             thumbnailRetryCount={thumbnailRetryCount}

@@ -23,7 +23,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Illuminate\Support\Facades\DB;
@@ -1473,15 +1472,11 @@ class AssetController extends Controller
             abort(404, 'File not available.');
         }
 
-        try {
-            $disk = Storage::disk('s3');
-            $signedUrl = $disk->temporaryUrl($asset->storage_root_path, now()->addMinutes(15));
+        $bucketService = app(\App\Services\TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($asset->tenant);
+        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $asset->storage_root_path, 15);
 
-            return redirect($signedUrl);
-        } catch (\Throwable $e) {
-            report($e);
-            abort(500, 'Failed to generate download link.');
-        }
+        return redirect($signedUrl);
     }
 
     /**
@@ -1511,23 +1506,18 @@ class AssetController extends Controller
             ], 422);
         }
 
-        try {
-            $previewUrl = null;
+        $previewUrl = null;
 
-            if ($asset->storage_root_path) {
-                $disk = Storage::disk('s3');
-                $previewUrl = $disk->temporaryUrl($asset->storage_root_path, now()->addMinutes(15));
-            }
-
-            return response()->json([
-                'url' => $previewUrl,
-                'expires_at' => $previewUrl ? now()->addMinutes(15)->toIso8601String() : null,
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Failed to generate preview URL: ' . $e->getMessage(),
-            ], 500);
+        if ($asset->storage_root_path) {
+            $bucketService = app(\App\Services\TenantBucketService::class);
+            $bucket = $bucketService->resolveActiveBucketOrFail($asset->tenant);
+            $previewUrl = $bucketService->getPresignedGetUrl($bucket, $asset->storage_root_path, 15);
         }
+
+        return response()->json([
+            'url' => $previewUrl,
+            'expires_at' => $previewUrl ? now()->addMinutes(15)->toIso8601String() : null,
+        ], 200);
     }
 
     /**

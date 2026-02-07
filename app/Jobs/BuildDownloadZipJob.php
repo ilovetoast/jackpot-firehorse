@@ -94,10 +94,8 @@ class BuildDownloadZipJob implements ShouldQueue
                 throw new \RuntimeException('Cannot build ZIP: download has no assets');
             }
 
-            $bucket = $assets->first()->storageBucket ?? null;
-            if (! $bucket) {
-                throw new \RuntimeException('Cannot build ZIP: assets have no storage bucket');
-            }
+            $bucketService = app(\App\Services\TenantBucketService::class);
+            $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
 
             // D-Progress: persist total chunks and heartbeat when starting (fresh) or resume
             $totalChunks = (int) ceil($assets->count() / self::CHUNK_SIZE);

@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Download;
-use App\Models\StorageBucket;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
 
@@ -77,26 +76,11 @@ class DownloadExpiredAuditService
 
     private function zipExistsInStorage(Download $download): bool
     {
-        $bucket = StorageBucket::where('tenant_id', $download->tenant_id)
-            ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
-            ->first();
+        $bucketService = app(\App\Services\TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
 
-        if (! $bucket) {
-            return false;
-        }
-
-        try {
-            $client = $this->s3Client();
-            return $client->doesObjectExist($bucket->name, $download->zip_path);
-        } catch (\Throwable $e) {
-            Log::error('[DownloadExpiredAudit] Failed to check S3', [
-                'download_id' => $download->id,
-                'zip_path' => $download->zip_path,
-                'error' => $e->getMessage(),
-                'event' => 'download_audit_check_failure',
-            ]);
-            return false;
-        }
+        $client = $this->s3Client();
+        return $client->doesObjectExist($bucket->name, $download->zip_path);
     }
 
     private function s3Client(): S3Client

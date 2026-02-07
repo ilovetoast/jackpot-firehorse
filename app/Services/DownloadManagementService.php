@@ -3,11 +3,9 @@
 namespace App\Services;
 
 use App\Enums\DownloadAccessMode;
-use App\Enums\StorageBucketStatus;
 use App\Enums\ZipStatus;
 use App\Jobs\BuildDownloadZipJob;
 use App\Models\Download;
-use App\Models\StorageBucket;
 use App\Models\User;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
@@ -192,20 +190,12 @@ class DownloadManagementService
 
     /**
      * Delete ZIP from S3 (tenant-specific bucket).
+     * Bucket resolved via TenantBucketService::resolveActiveBucketOrFail (never config).
      */
     protected function deleteZipFromS3(Download $download): void
     {
-        $bucket = StorageBucket::where('tenant_id', $download->tenant_id)
-            ->where('status', StorageBucketStatus::ACTIVE)
-            ->first();
-
-        if (! $bucket) {
-            Log::warning('[DownloadManagement] No storage bucket for tenant', [
-                'download_id' => $download->id,
-                'tenant_id' => $download->tenant_id,
-            ]);
-            return;
-        }
+        $bucketService = app(\App\Services\TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
 
         try {
             $config = [

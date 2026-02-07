@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\Download;
-use App\Models\StorageBucket;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -189,26 +188,13 @@ class CleanupExpiredDownloadsJob implements ShouldQueue
     }
 
     /**
-     * @return string 'deleted'|'missing'|'no_bucket'|'failure'
+     * @return string 'deleted'|'missing'|'failure'
+     * @throws \App\Exceptions\BucketNotProvisionedException If no ACTIVE bucket for tenant
      */
     protected function deleteZipFromStorage(Download $download, S3Client $s3Client): string
     {
-        $bucket = StorageBucket::where('tenant_id', $download->tenant_id)
-            ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
-            ->first();
-
-        if (! $bucket) {
-            Log::warning('download.cleanup.failed', [
-                'download_id' => $download->id,
-                'tenant_id' => $download->tenant_id,
-                'artifact_path' => $download->zip_path,
-                'bytes' => $download->zip_size_bytes,
-                'actor' => self::ACTOR,
-                'timestamp' => now()->toIso8601String(),
-                'message' => 'No storage bucket for tenant',
-            ]);
-            return 'no_bucket';
-        }
+        $bucketService = app(\App\Services\TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
 
         if (! $s3Client->doesObjectExist($bucket->name, $download->zip_path)) {
             return 'missing';
@@ -236,19 +222,14 @@ class CleanupExpiredDownloadsJob implements ShouldQueue
 
     protected function artifactExistsInStorage(Download $download, S3Client $s3Client): bool
     {
-        $bucket = StorageBucket::where('tenant_id', $download->tenant_id)
-            ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
-            ->first();
-
-        if (! $bucket || ! $download->zip_path) {
+        if (! $download->zip_path) {
             return false;
         }
 
-        try {
-            return $s3Client->doesObjectExist($bucket->name, $download->zip_path);
-        } catch (\Throwable $e) {
-            return false;
-        }
+        $bucketService = app(\App\Services\TenantBucketService::class);
+        $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
+
+        return $s3Client->doesObjectExist($bucket->name, $download->zip_path);
     }
 
     protected function recordMetrics(Download $download, ?int $bytes): void
