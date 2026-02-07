@@ -19,12 +19,18 @@ jobs:
           role-to-assume: arn:aws:iam::755199214013:role/jackpot-staging-cicd-role
           aws-region: us-east-2
 
-      - name: Run deploy on EC2 via SSM
+      - name: Deploy Web
         run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets "Key=instanceIds,Values=i-08219b6e485f830bb" \
-            --comment "Staging deploy from GitHub Actions" \
-            --parameters commands="[
-              \"sudo -u ubuntu /var/www/jackpot/deploy/deploy.sh\"
-            ]"
+            --targets "Key=instanceids,Values=i-08219b6e485f830bb" \
+            --comment "Staging deploy (web)" \
+            --parameters 'commands=["sudo -u ubuntu /var/www/jackpot/deploy/deploy.sh"]'
+
+      - name: Deploy Worker
+        run: |
+          aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=instanceids,Values=i-05eb319ceb5bf1851" \
+            --comment "Staging deploy (worker)" \
+            --parameters 'commands=["sudo -u ubuntu /var/www/jackpot/deploy/deploy.sh"]'
