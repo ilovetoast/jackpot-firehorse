@@ -13,9 +13,10 @@ import {
     ArrowPathIcon,
     LinkIcon,
     SparklesIcon,
+    CubeIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun, horizonAvailable, horizonUrl }) {
+export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun, horizonAvailable, horizonUrl, deployedAt }) {
     const { auth } = usePage().props
 
     // Get status badge config
@@ -106,6 +107,33 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                             Monitor system health, queues, scheduler, storage, and asset processing
                         </p>
                     </div>
+
+                    {/* Deployment / Deployed commit */}
+                    {deployedAt && Object.keys(deployedAt).length > 0 && (
+                        <div className="mb-8">
+                            <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment</h2>
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="p-6">
+                                    <div className="flex items-center mb-4">
+                                        <CubeIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                        <h3 className="text-sm font-medium text-gray-900">Current release</h3>
+                                    </div>
+                                    <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                                        {Object.entries(deployedAt).map(([key, value]) => (
+                                            <div key={key}>
+                                                <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                                                </dt>
+                                                <dd className="mt-0.5 text-sm font-mono text-gray-900 break-all">
+                                                    {value}
+                                                </dd>
+                                            </div>
+                                        ))}
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* System Health Cards */}
                     <div className="mb-8">

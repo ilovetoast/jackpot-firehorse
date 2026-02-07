@@ -62,6 +62,9 @@ class SystemStatusController extends Controller
         // Get latest AI insight
         $latestInsight = $this->getLatestAIInsight();
 
+        // Deployment info from DEPLOYED_AT file (written on each deploy)
+        $deployedAt = $this->getDeployedAtInfo();
+
         return Inertia::render('Admin/SystemStatus', [
             'systemHealth' => $systemHealth,
             'recentFailedJobs' => $recentFailedJobs,
@@ -71,7 +74,47 @@ class SystemStatusController extends Controller
             'queueNextRun' => $queueNextRun,
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
+            'deployedAt' => $deployedAt,
         ]);
+    }
+
+    /**
+     * Read deployment info from DEPLOYED_AT file in project root (created on each deploy).
+     * Returns parsed key-value array or null if file does not exist.
+     *
+     * @return array<string, string>|null
+     */
+    protected function getDeployedAtInfo(): ?array
+    {
+        $path = base_path('DEPLOYED_AT');
+
+        if (! is_file($path) || ! is_readable($path)) {
+            return null;
+        }
+
+        $content = @file_get_contents($path);
+        if ($content === false) {
+            return null;
+        }
+
+        $lines = explode("\n", trim($content));
+        $info = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            // Split on first ": " to handle values that might contain colons
+            $pos = strpos($line, ':');
+            if ($pos !== false) {
+                $key = trim(substr($line, 0, $pos));
+                $value = trim(substr($line, $pos + 1));
+                $info[$key] = $value;
+            }
+        }
+
+        return $info === [] ? null : $info;
     }
 
     /**
