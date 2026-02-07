@@ -15,7 +15,7 @@ import {
     SparklesIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun }) {
+export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun, horizonAvailable, horizonUrl }) {
     const { auth } = usePage().props
 
     // Get status badge config
@@ -118,6 +118,9 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                         <div className="flex items-center">
                                             <QueueListIcon className="h-6 w-6 text-gray-400 mr-3" />
                                             <h3 className="text-sm font-medium text-gray-900">Queue</h3>
+                                            {systemHealth?.queue?.queue_driver && (
+                                                <span className="ml-2 text-xs text-gray-500">({systemHealth.queue.queue_driver})</span>
+                                            )}
                                         </div>
                                         <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${queueStatus.className}`}>
                                             <QueueStatusIcon className="h-4 w-4 mr-1" />
@@ -143,6 +146,19 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                         {queueNextRun && (
                                             <div className="text-xs text-gray-500 mt-2">
                                                 Next job: {queueNextRun.job_name} in {queueNextRun.next_run_in}
+                                            </div>
+                                        )}
+                                        {horizonAvailable && horizonUrl && (
+                                            <div className="pt-2 mt-2 border-t border-gray-100">
+                                                <a
+                                                    href={horizonUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                                >
+                                                    <LinkIcon className="h-3.5 w-3.5 mr-1" />
+                                                    Open Horizon Dashboard
+                                                </a>
                                             </div>
                                         )}
                                     </div>

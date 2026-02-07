@@ -43,17 +43,19 @@ return [
     | Bucket Naming Pattern
     |--------------------------------------------------------------------------
     |
-    | Pattern for generating company-specific bucket names in production.
-    | Available placeholders:
-    |   {company_id} - The tenant ID
-    |   {company_slug} - The tenant slug
-    |   {env} - Current environment (prod, staging, etc.)
+    | Pattern for generating company-specific bucket names (per_company strategy).
+    | Must match IAM resource pattern (e.g. jackpot-staging-*).
     |
-    | Default: '{env}-dam-{company_slug}'
+    | Approved structure: {app-prefix}-{environment}-{tenant-slug}
+    | Placeholders: {env}, {company_id}, {company_slug}
+    |
+    | Examples:
+    |   jackpot-{env}-{company_slug}  → jackpot-staging-acme, jackpot-staging-velvet-hammer
+    |   {env}-dam-{company_slug}      → staging-dam-velvethammerbranding (legacy)
     |
     */
 
-    'bucket_name_pattern' => env('STORAGE_BUCKET_NAME_PATTERN', '{env}-dam-{company_slug}'),
+    'bucket_name_pattern' => env('STORAGE_BUCKET_NAME_PATTERN', 'jackpot-{env}-{company_slug}'),
 
     /*
     |--------------------------------------------------------------------------
@@ -74,6 +76,32 @@ return [
     | Default settings applied to all provisioned buckets.
     |
     */
+
+    /*
+    |--------------------------------------------------------------------------
+    | CORS Allowed Origins (for presigned uploads)
+    |--------------------------------------------------------------------------
+    |
+    | Origins allowed in S3 bucket CORS. Browser uploads to presigned URLs
+    | require the app origin to be allowed. Defaults to origin derived from
+    | APP_URL (scheme + host + port if non-standard). Set STORAGE_CORS_ORIGINS
+    | to override (comma-separated for multiple).
+    |
+    */
+    'cors_allowed_origins' => (function () {
+        $custom = env('STORAGE_CORS_ORIGINS');
+        if ($custom !== null && $custom !== '') {
+            return array_values(array_filter(array_map('trim', explode(',', $custom))));
+        }
+        $url = env('APP_URL', 'http://localhost');
+        $p = parse_url($url);
+        $origin = ($p['scheme'] ?? 'http') . '://' . ($p['host'] ?? 'localhost');
+        if (! empty($p['port']) && ! in_array((int) $p['port'], [80, 443], true)) {
+            $origin .= ':' . $p['port'];
+        }
+
+        return [$origin];
+    })(),
 
     'bucket_config' => [
         /*

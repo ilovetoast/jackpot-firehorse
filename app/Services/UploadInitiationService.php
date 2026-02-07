@@ -10,6 +10,7 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Services\CompanyStorageProvisioner;
+use App\Services\TenantBucketService;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -600,22 +601,34 @@ class UploadInitiationService
     /**
      * Get or provision storage bucket for tenant.
      *
+     * Uses current STORAGE_PROVISION_STRATEGY and bucket naming. When strategy is
+     * per_company we look up by the expected per-tenant bucket name so we do not
+     * reuse an old shared bucket record (e.g. dam-local-shared) after switching env.
+     *
      * @param Tenant $tenant
      * @return StorageBucket
      * @throws \Exception
      */
     protected function getOrProvisionBucket(Tenant $tenant): StorageBucket
     {
-        $bucket = StorageBucket::where('tenant_id', $tenant->id)
-            ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
-            ->first();
+        $strategy = config('storage.provision_strategy', 'shared');
 
-        if (!$bucket) {
-            // Provision bucket (this will queue the job)
+        if ($strategy === 'per_company') {
+            $expectedName = app(TenantBucketService::class)->getBucketName($tenant);
+            $bucket = StorageBucket::where('tenant_id', $tenant->id)
+                ->where('name', $expectedName)
+                ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
+                ->first();
+        } else {
+            $bucket = StorageBucket::where('tenant_id', $tenant->id)
+                ->where('status', \App\Enums\StorageBucketStatus::ACTIVE)
+                ->first();
+        }
+
+        if (! $bucket) {
             $provisioner = app(CompanyStorageProvisioner::class);
             $bucket = $provisioner->provision($tenant);
 
-            // If bucket is still provisioning, wait a bit or throw
             if ($bucket->status === \App\Enums\StorageBucketStatus::PROVISIONING) {
                 throw new \RuntimeException('Storage bucket is being provisioned. Please try again in a few moments.');
             }

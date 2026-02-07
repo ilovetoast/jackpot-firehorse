@@ -51,31 +51,31 @@ class CompanyStorageProvisioner
      */
     protected function provisionPerCompany(Tenant $tenant): StorageBucket
     {
-        // Check if bucket already exists
+        $expectedName = $this->generateBucketName($tenant);
+
+        // Find existing bucket that matches current per_company naming (not a stale shared bucket)
         $existingBucket = StorageBucket::where('tenant_id', $tenant->id)
+            ->where('name', $expectedName)
             ->where('status', '!=', StorageBucketStatus::DELETING)
             ->first();
 
         if ($existingBucket) {
-            // Idempotency: If bucket exists and is active, verify configuration
             if ($existingBucket->status === StorageBucketStatus::ACTIVE) {
-                $this->verifyBucketConfiguration($existingBucket);
+                $this->verifyBucketConfiguration($existingBucket->name);
                 return $existingBucket;
             }
 
-            // If provisioning, update existing record
             if ($existingBucket->status === StorageBucketStatus::PROVISIONING) {
                 $bucketName = $existingBucket->name;
                 $region = $existingBucket->region;
             } else {
-                // Bucket exists but needs reprovisioning
                 $existingBucket->update(['status' => StorageBucketStatus::PROVISIONING]);
                 $bucketName = $existingBucket->name;
                 $region = $existingBucket->region;
             }
         } else {
-            // Create new bucket record
-            $bucketName = $this->generateBucketName($tenant);
+            // No bucket with expected name (e.g. tenant had old shared bucket record). Create new one.
+            $bucketName = $expectedName;
             $region = config('storage.default_region', 'us-east-1');
 
             $existingBucket = StorageBucket::create([
@@ -103,6 +103,9 @@ class CompanyStorageProvisioner
 
             // Apply lifecycle rules (idempotent)
             $this->applyLifecycleRules($bucketName);
+
+            // Apply CORS for browser presigned uploads (idempotent)
+            $this->applyCors($bucketName);
 
             // Update status to active
             $existingBucket->update(['status' => StorageBucketStatus::ACTIVE]);
@@ -347,16 +350,47 @@ class CompanyStorageProvisioner
     }
 
     /**
-     * Verify bucket configuration matches expected settings.
+     * Apply CORS to bucket for browser presigned uploads (idempotent).
+     * Uses config storage.cors_allowed_origins (defaults to APP_URL origin).
+     * IAM: s3:PutBucketCORS required.
      *
-     * @param StorageBucket $bucket
+     * @param string $bucketName
+     * @return void
+     * @throws S3Exception
+     */
+    protected function applyCors(string $bucketName): void
+    {
+        $origins = config('storage.cors_allowed_origins', []);
+
+        if (empty($origins)) {
+            return;
+        }
+
+        $this->s3Client->putBucketCors([
+            'Bucket' => $bucketName,
+            'CORSConfiguration' => [
+                'CORSRules' => [
+                    [
+                        'AllowedHeaders' => ['*'],
+                        'AllowedMethods' => ['GET', 'PUT', 'POST', 'HEAD'],
+                        'AllowedOrigins' => $origins,
+                        'ExposeHeaders' => ['ETag'],
+                    ],
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Verify bucket configuration matches expected settings (idempotent).
+     * Ensures CORS is applied so existing buckets get correct origins (e.g. after APP_URL change).
+     *
+     * @param string $bucketName
      * @return void
      */
-    protected function verifyBucketConfiguration(StorageBucket $bucket): void
+    protected function verifyBucketConfiguration(string $bucketName): void
     {
-        // This method can be called to verify bucket configuration matches expected settings
-        // Currently a no-op, but can be extended to verify versioning, encryption, etc.
-        // This supports idempotency by ensuring existing buckets match expected config
+        $this->applyCors($bucketName);
     }
 
     /**

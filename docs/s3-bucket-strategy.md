@@ -6,11 +6,17 @@ This document defines the S3 bucket strategy for the DAM application across loca
 
 ## Bucket Naming Conventions
 
+**Approved structure:** `{app-prefix}-{environment}-{tenant-slug}`
+
+Examples: `jackpot-staging-acme`, `jackpot-staging-velvet-hammer`, `jackpot-staging-st-croix`
+
+This matches IAM resource patterns such as `arn:aws:s3:::jackpot-staging-*`.
+
 | Environment | Strategy | Naming Convention | Example |
 |-------------|----------|-------------------|---------|
 | **Local** | Shared | Single bucket via `AWS_BUCKET` | `dam-local-shared` |
-| **Staging** | Shared | Single bucket via `AWS_BUCKET` | `staging-dam-shared` |
-| **Production** | Per-tenant | Pattern: `{env}-dam-{company_slug}` | `production-dam-velvethammerbranding` |
+| **Staging** | Per-tenant (recommended) or Shared | Pattern: `jackpot-{env}-{company_slug}` or `AWS_BUCKET` | `jackpot-staging-acme`, `jackpot-staging-velvet-hammer` |
+| **Production** | Per-tenant | Pattern: `jackpot-{env}-{company_slug}` | `jackpot-production-velvethammerbranding` |
 
 ### Local
 - One shared bucket for all tenants.
@@ -18,13 +24,13 @@ This document defines the S3 bucket strategy for the DAM application across loca
 - Typically used with MinIO or localstack for development.
 
 ### Staging
-- One shared bucket for all tenants.
-- Configured via `AWS_BUCKET` in `.env`.
-- May use a path prefix or object key structure to separate tenant data.
+- **Per-tenant (recommended):** Set `STORAGE_PROVISION_STRATEGY=per_company` and `STORAGE_BUCKET_NAME_PATTERN=jackpot-{env}-{company_slug}` so bucket names match IAM `jackpot-staging-*`. One bucket per company; provisioned on first use.
+- **Shared:** Set `STORAGE_PROVISION_STRATEGY=shared` and `AWS_BUCKET` to a single bucket name.
+- Set `APP_URL` to your staging domain (e.g. `https://staging-jackpot.velvetysoft.com`). The app uses this to set S3 CORS allowed origins for browser uploads.
 
 ### Production
 - One dedicated bucket per company (tenant).
-- Bucket name derived from `STORAGE_BUCKET_NAME_PATTERN` (default: `{env}-dam-{company_slug}`).
+- Bucket name from `STORAGE_BUCKET_NAME_PATTERN` (default: `jackpot-{env}-{company_slug}`).
 - Placeholders: `{env}`, `{company_id}`, `{company_slug}`.
 - S3 rules: lowercase, 3–63 characters, alphanumeric and hyphens only.
 
@@ -35,8 +41,19 @@ This document defines the S3 bucket strategy for the DAM application across loca
 | Environment | Strategy | Shared or Per-Tenant | Env Variable |
 |-------------|----------|----------------------|--------------|
 | **Local** | `shared` | Shared (one bucket for all) | `STORAGE_PROVISION_STRATEGY=shared` |
-| **Staging** | `shared` | Shared (one bucket for all) | `STORAGE_PROVISION_STRATEGY=shared` |
+| **Staging** | `per_company` or `shared` | Per-tenant (recommended) or shared | `STORAGE_PROVISION_STRATEGY=per_company`, `STORAGE_BUCKET_NAME_PATTERN=jackpot-{env}-{company_slug}` |
 | **Production** | `per_company` | Per-tenant (one bucket per company) | `STORAGE_PROVISION_STRATEGY=per_company` |
+
+### Staging environment variables (per-tenant buckets)
+
+Use these in staging `.env` when using per-tenant buckets and IAM pattern `jackpot-staging-*`:
+
+- `APP_ENV=staging`
+- `APP_URL=https://your-staging-domain.com` (e.g. `https://staging-jackpot.velvetysoft.com`) — used for CORS allowed origin
+- `STORAGE_PROVISION_STRATEGY=per_company`
+- `STORAGE_BUCKET_NAME_PATTERN=jackpot-{env}-{company_slug}` (optional; this is the default)
+
+Optional: `STORAGE_CORS_ORIGINS` — comma-separated origins for S3 CORS. If unset, the app derives the origin from `APP_URL`.
 
 ---
 
@@ -52,8 +69,9 @@ For **per_company** strategy, the provisioner applies:
 - Versioning (if `storage.bucket_config.versioning` is true)
 - Encryption (AES256 or aws:kms)
 - Lifecycle rules (e.g., noncurrent version expiration, abort incomplete multipart uploads)
+- **CORS** — allowed origins default to the origin derived from `APP_URL` (scheme + host). Required for browser presigned uploads. The IAM role that creates/updates buckets must have `s3:PutBucketCORS`.
 
-For **shared** strategy, the bucket is assumed to exist; the provisioner does not create it or modify versioning/encryption/lifecycle.
+For **shared** strategy, the bucket is assumed to exist; the provisioner does not create it or modify versioning/encryption/lifecycle/CORS.
 
 ---
 

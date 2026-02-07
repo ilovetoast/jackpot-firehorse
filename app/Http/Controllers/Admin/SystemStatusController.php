@@ -11,8 +11,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schedule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -51,7 +52,13 @@ class SystemStatusController extends Controller
         $assetsWithIssues = $this->getAssetsWithIssues();
         $scheduledTasks = $this->getScheduledTasks();
         $queueNextRun = $this->getQueueNextRunTime();
-        
+
+        // Horizon dashboard is served by this app (web server); it reads from the same Redis
+        // that the worker server uses. No need to hit the worker server.
+        $horizonAvailable = class_exists(\Laravel\Horizon\Horizon::class);
+        $horizonPath = $horizonAvailable ? (config('horizon.path', 'horizon')) : null;
+        $horizonUrl = $horizonPath ? url($horizonPath) : null;
+
         // Get latest AI insight
         $latestInsight = $this->getLatestAIInsight();
 
@@ -62,6 +69,8 @@ class SystemStatusController extends Controller
             'latestAIInsight' => $latestInsight,
             'scheduledTasks' => $scheduledTasks,
             'queueNextRun' => $queueNextRun,
+            'horizonAvailable' => $horizonAvailable,
+            'horizonUrl' => $horizonUrl,
         ]);
     }
 
@@ -82,36 +91,23 @@ class SystemStatusController extends Controller
 
     /**
      * Get queue health metrics.
-     * 
+     *
+     * When QUEUE_CONNECTION=redis (e.g. Horizon on a separate worker server), pending
+     * jobs are read from Redis. Failed jobs remain in the database. When using
+     * database driver, both pending and failed come from the DB.
+     *
      * @return array
      */
     protected function getQueueHealth(): array
     {
+        $driver = config('queue.default');
+
         try {
-            $pendingCount = DB::table('jobs')->count();
-            $failedCount = DB::table('failed_jobs')->count();
-            
-            $lastJob = DB::table('jobs')
-                ->orderBy('created_at', 'desc')
-                ->first();
-            
-            $status = 'healthy';
-            if ($failedCount > 0) {
-                $status = 'warning';
+            if ($driver === 'redis') {
+                return $this->getQueueHealthFromRedis();
             }
-            if ($pendingCount > 100) {
-                $status = 'warning';
-            }
-            if ($failedCount > 10) {
-                $status = 'unhealthy';
-            }
-            
-            return [
-                'status' => $status,
-                'pending_count' => $pendingCount,
-                'failed_count' => $failedCount,
-                'last_processed_at' => $lastJob ? date('c', $lastJob->created_at) : null,
-            ];
+
+            return $this->getQueueHealthFromDatabase();
         } catch (\Exception $e) {
             Log::error('Failed to get queue health', ['error' => $e->getMessage()]);
             return [
@@ -119,8 +115,81 @@ class SystemStatusController extends Controller
                 'pending_count' => 0,
                 'failed_count' => 0,
                 'last_processed_at' => null,
+                'queue_driver' => $driver,
             ];
         }
+    }
+
+    /**
+     * Queue health when using Redis (Horizon). Pending from Redis; failed from DB.
+     *
+     * @return array
+     */
+    protected function getQueueHealthFromRedis(): array
+    {
+        $pendingCount = 0;
+        try {
+            $defaultQueue = config('queue.connections.redis.queue', 'default');
+            $pendingCount += Queue::size($defaultQueue);
+            $pendingCount += Queue::size('downloads');
+        } catch (\Exception $e) {
+            Log::warning('Failed to get Redis queue size', ['error' => $e->getMessage()]);
+        }
+
+        $failedCount = (int) DB::table('failed_jobs')->count();
+
+        $status = 'healthy';
+        if ($failedCount > 0) {
+            $status = 'warning';
+        }
+        if ($pendingCount > 100) {
+            $status = 'warning';
+        }
+        if ($failedCount > 10) {
+            $status = 'unhealthy';
+        }
+
+        return [
+            'status' => $status,
+            'pending_count' => $pendingCount,
+            'failed_count' => $failedCount,
+            'last_processed_at' => null,
+            'queue_driver' => 'redis',
+        ];
+    }
+
+    /**
+     * Queue health when using database driver.
+     *
+     * @return array
+     */
+    protected function getQueueHealthFromDatabase(): array
+    {
+        $pendingCount = (int) DB::table('jobs')->count();
+        $failedCount = (int) DB::table('failed_jobs')->count();
+
+        $lastJob = DB::table('jobs')
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        $status = 'healthy';
+        if ($failedCount > 0) {
+            $status = 'warning';
+        }
+        if ($pendingCount > 100) {
+            $status = 'warning';
+        }
+        if ($failedCount > 10) {
+            $status = 'unhealthy';
+        }
+
+        return [
+            'status' => $status,
+            'pending_count' => $pendingCount,
+            'failed_count' => $failedCount,
+            'last_processed_at' => $lastJob ? date('c', $lastJob->created_at) : null,
+            'queue_driver' => 'database',
+        ];
     }
 
     /**
@@ -513,24 +582,28 @@ class SystemStatusController extends Controller
 
     /**
      * Get the next run time for the queue (next job available_at).
+     * Only available when using database queue driver; with Redis/Horizon returns null.
      *
      * @return array|null
      */
     protected function getQueueNextRunTime(): ?array
     {
+        if (config('queue.default') !== 'database') {
+            return null;
+        }
+
         try {
             $nextJob = DB::table('jobs')
                 ->where('available_at', '>', now()->timestamp)
                 ->orderBy('available_at', 'asc')
                 ->first();
 
-            if (!$nextJob) {
+            if (! $nextJob) {
                 return null;
             }
 
             $nextRunDate = \Carbon\Carbon::createFromTimestamp($nextJob->available_at);
 
-            // Extract job name from payload
             $payload = json_decode($nextJob->payload, true);
             $jobName = $payload['displayName'] ?? class_basename($payload['job'] ?? 'Unknown');
 
