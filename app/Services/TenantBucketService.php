@@ -2,6 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\StorageBucketStatus;
+use App\Exceptions\BucketNotProvisionedException;
+use App\Exceptions\BucketProvisioningNotAllowedException;
+use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Services\TenantBucket\EnsureBucketResult;
 use Aws\S3\Exception\S3Exception;
@@ -13,11 +17,13 @@ use RuntimeException;
 /**
  * TenantBucketService
  *
- * Resolves and ensures S3 bucket existence for tenants.
- * - Local: uses shared test bucket (no creation)
- * - Staging/Production: per-tenant buckets with versioning
+ * Resolves and provisions S3 buckets for tenants.
  *
- * No automatic execution. No observers. No event listeners. No side effects on tenant creation.
+ * RULES:
+ * - Web requests must NEVER create buckets. Use resolveActiveBucketOrFail or getOrProvisionBucket (staging/prod = resolve only).
+ * - Bucket creation ONLY in console or queued jobs via provisionBucket().
+ * - Local/testing: getOrProvisionBucket may provision synchronously.
+ * - Staging/production: buckets must already exist; missing bucket = clear error.
  */
 class TenantBucketService
 {
@@ -28,20 +34,111 @@ class TenantBucketService
     }
 
     /**
-     * Get the bucket name for a tenant.
-     * Local: shared bucket. Staging/Production: per-tenant bucket.
+     * Resolve the ACTIVE StorageBucket for a tenant (read-only, never provisions).
+     *
+     * @throws BucketNotProvisionedException If no active bucket exists (message instructs to run tenants:ensure-buckets)
+     */
+    public function resolveActiveBucketOrFail(Tenant $tenant): StorageBucket
+    {
+        $expectedName = $this->getExpectedBucketName($tenant);
+        $bucket = StorageBucket::where('tenant_id', $tenant->id)
+            ->where('name', $expectedName)
+            ->where('status', StorageBucketStatus::ACTIVE)
+            ->first();
+
+        if (! $bucket) {
+            throw new BucketNotProvisionedException($tenant->id);
+        }
+
+        return $bucket;
+    }
+
+    /**
+     * Provision bucket infrastructure (CreateBucket, CORS, versioning, etc.).
+     * MUST NOT be called from web requests in staging/production.
+     *
+     * @throws BucketProvisioningNotAllowedException If called from web in staging/production (guard)
+     */
+    public function provisionBucket(Tenant $tenant): StorageBucket
+    {
+        if (! $this->isProvisioningAllowed()) {
+            throw new BucketProvisioningNotAllowedException(config('app.env'));
+        }
+
+        return app(CompanyStorageProvisioner::class)->provision($tenant);
+    }
+
+    /**
+     * Get bucket for upload/asset flows. Local/testing: resolve or provision. Staging/production: resolve only (never provisions).
+     */
+    public function getOrProvisionBucket(Tenant $tenant): StorageBucket
+    {
+        if ($this->isLocalOrTesting()) {
+            $bucket = $this->resolveActiveBucketOrFailIfExists($tenant);
+            if ($bucket) {
+                return $bucket;
+            }
+
+            return $this->provisionBucket($tenant);
+        }
+
+        return $this->resolveActiveBucketOrFail($tenant);
+    }
+
+    /**
+     * Get the expected bucket name for a tenant (no DB lookup).
+     * Local: shared bucket config. Staging/Production: per-tenant generated name.
      */
     public function getBucketName(Tenant $tenant): string
+    {
+        return $this->getExpectedBucketName($tenant);
+    }
+
+    /**
+     * Resolve ACTIVE bucket if it exists (no throw). Used by getOrProvisionBucket in local/testing.
+     */
+    protected function resolveActiveBucketOrFailIfExists(Tenant $tenant): ?StorageBucket
+    {
+        $expectedName = $this->getExpectedBucketName($tenant);
+
+        return StorageBucket::where('tenant_id', $tenant->id)
+            ->where('name', $expectedName)
+            ->where('status', StorageBucketStatus::ACTIVE)
+            ->first();
+    }
+
+    /**
+     * Expected bucket name for tenant (no DB). Local: shared_bucket. Staging/Production: generated name.
+     */
+    protected function getExpectedBucketName(Tenant $tenant): string
     {
         if ($this->isLocal()) {
             $name = config('storage.shared_bucket');
             if (! $name) {
                 throw new RuntimeException('Shared bucket not configured. Set AWS_BUCKET in .env for local.');
             }
+
             return $name;
         }
 
         return $this->generateBucketName($tenant);
+    }
+
+    protected function isLocalOrTesting(): bool
+    {
+        return in_array(config('app.env'), ['local', 'testing'], true);
+    }
+
+    /**
+     * Provisioning allowed only in console (includes queue workers) or local/testing.
+     */
+    protected function isProvisioningAllowed(): bool
+    {
+        if (app()->runningInConsole()) {
+            return true;
+        }
+
+        return $this->isLocalOrTesting();
     }
 
     /**

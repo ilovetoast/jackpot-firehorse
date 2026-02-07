@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\StorageBucketStatus;
+use App\Exceptions\BucketProvisioningNotAllowedException;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use Aws\S3\Exception\S3Exception;
@@ -27,12 +28,18 @@ class CompanyStorageProvisioner
      * This method is idempotent and safe to retry. If the bucket already exists,
      * it will verify and update its configuration rather than failing.
      *
+     * MUST NOT be called from web requests in staging/production (use TenantBucketService::provisionBucket which guards).
+     *
      * @param Tenant $tenant
      * @return StorageBucket
      * @throws \Exception
      */
     public function provision(Tenant $tenant): StorageBucket
     {
+        if (! app()->runningInConsole() && ! in_array(app()->environment(), ['local', 'testing'], true)) {
+            throw new BucketProvisioningNotAllowedException(app()->environment());
+        }
+
         $strategy = config('storage.provision_strategy', 'shared');
 
         return match ($strategy) {
