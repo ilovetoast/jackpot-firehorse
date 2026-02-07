@@ -206,16 +206,19 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                             </p>
                                             {event.metadata && Object.keys(event.metadata).length > 0 && (
                                                 <div className="mt-1 text-xs text-gray-500">
-                                                    {event.metadata.error && (
+                                                    {/* Show error for non-AI events */}
+                                                    {event.metadata.error && 
+                                                     event.event_type !== 'asset.ai_metadata.failed' && 
+                                                     event.event_type !== 'asset.ai_suggestions.failed' && (
                                                         <p className="text-red-600">{event.metadata.error}</p>
                                                     )}
-                                                    {/* Show error details for AI failures */}
+                                                    {/* Show user-friendly error for AI failures */}
                                                     {(event.event_type === 'asset.ai_metadata.failed' || 
                                                       event.event_type === 'asset.ai_suggestions.failed') && 
                                                      event.metadata.error && (
                                                         <p className="text-xs text-red-600 mt-1">
                                                             {event.metadata.error_type === 'quota_exceeded' 
-                                                                ? 'API quota exceeded - check billing settings'
+                                                                ? 'API quota exceeded. Check billing settings.'
                                                                 : event.metadata.error}
                                                         </p>
                                                     )}

@@ -273,10 +273,10 @@ class OpenAIProvider implements AIProviderInterface
     /**
      * Analyze an image with a prompt using OpenAI Vision API.
      *
-     * This method handles vision-based image analysis for metadata generation.
-     * All OpenAI-specific logic (API key, base URL, request format) is contained here.
+     * Accepts image as base64 data URL (data:image/webp;base64,...).
+     * No presigned S3 URLs are passed to OpenAI; images are fetched internally via IAM.
      *
-     * @param string $imageUrl URL to the image (must be accessible by OpenAI)
+     * @param string $imageBase64DataUrl Base64 data URL (data:image/webp;base64,{base64})
      * @param string $prompt Text prompt describing what to analyze
      * @param array $options Additional options:
      *   - model: Model name to use (default: gpt-4o-mini)
@@ -290,7 +290,7 @@ class OpenAIProvider implements AIProviderInterface
      *   - metadata: Provider-specific metadata
      * @throws \Exception If the API call fails
      */
-    public function analyzeImage(string $imageUrl, string $prompt, array $options = []): array
+    public function analyzeImage(string $imageBase64DataUrl, string $prompt, array $options = []): array
     {
         $model = $options['model'] ?? 'gpt-4o-mini';
         $maxTokens = $options['max_tokens'] ?? 1000;
@@ -319,7 +319,7 @@ class OpenAIProvider implements AIProviderInterface
                                 [
                                     'type' => 'image_url',
                                     'image_url' => [
-                                        'url' => $imageUrl,
+                                        'url' => $imageBase64DataUrl,
                                     ],
                                 ],
                             ],

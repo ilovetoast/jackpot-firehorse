@@ -30,11 +30,15 @@ class AiMetadataGenerationJobTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        
-        // Mock AI provider for all tests
-        // This will be used by AiMetadataGenerationService via dependency injection
+
+        // Mock AI provider
         $mockProvider = Mockery::mock(AIProviderInterface::class);
         $this->app->instance(AIProviderInterface::class, $mockProvider);
+
+        // Mock TenantBucketService - service fetches image internally via S3/IAM
+        $mockBucket = Mockery::mock(\App\Services\TenantBucketService::class);
+        $mockBucket->shouldReceive('getObjectContents')->andReturn('fake-image-bytes');
+        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
     }
 
     protected function tearDown(): void
@@ -84,7 +88,10 @@ class AiMetadataGenerationJobTest extends TestCase
     public function test_skips_when_no_thumbnail(): void
     {
         $asset = $this->createAssetWithCategory();
-        $asset->medium_thumbnail_url = null;
+        // Remove thumbnail path so waitForThumbnail returns false
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['thumbnails'], $metadata['preview_thumbnails']);
+        $asset->metadata = $metadata;
         $asset->save();
 
         $job = new AiMetadataGenerationJob($asset->id);
@@ -103,7 +110,11 @@ class AiMetadataGenerationJobTest extends TestCase
     public function test_skips_when_no_category(): void
     {
         $asset = $this->createAsset();
-        $asset->medium_thumbnail_url = 'https://example.com/thumbnail.jpg';
+        // Add thumbnail path so waitForThumbnail passes, but no category
+        $asset->metadata = array_merge($asset->metadata ?? [], [
+            'thumbnails' => ['medium' => ['path' => 'assets/test/medium.webp']],
+        ]);
+        $asset->thumbnail_status = \App\Enums\ThumbnailStatus::COMPLETED;
         $asset->save();
 
         $job = new AiMetadataGenerationJob($asset->id);
@@ -325,8 +336,9 @@ class AiMetadataGenerationJobTest extends TestCase
             'storage_root_path' => 'test/path.jpg',
             'metadata' => [
                 'category_id' => $category->id,
+                'thumbnails' => ['medium' => ['path' => 'assets/test/medium.webp']],
             ],
-            'medium_thumbnail_url' => 'https://example.com/thumbnail.jpg',
+            'thumbnail_status' => \App\Enums\ThumbnailStatus::COMPLETED,
             'status' => \App\Enums\AssetStatus::VISIBLE,
             'type' => \App\Enums\AssetType::ASSET,
         ]);

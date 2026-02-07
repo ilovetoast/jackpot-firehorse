@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\EventType;
 use App\Models\Asset;
+use App\Support\AiErrorSanitizer;
 use App\Models\Category;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataSuggestionService;
@@ -200,27 +201,26 @@ class AiMetadataSuggestionJob implements ShouldQueue
                 'suggestions_count' => count($suggestions),
             ]);
         } catch (\Throwable $e) {
-            // AI failures must not affect upload success
-            // Log error but don't throw - allow job to complete
+            $rawError = $e->getMessage();
+            $userFriendlyError = AiErrorSanitizer::forUser($rawError);
+
             Log::error('[AiMetadataSuggestionJob] Failed to generate suggestions', [
                 'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
+                'error' => $rawError,
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // Mark as failed in asset metadata
             $currentMetadata = $asset->metadata ?? [];
             $currentMetadata['ai_metadata_suggestions_failed'] = true;
             $currentMetadata['ai_metadata_suggestions_failed_at'] = now()->toIso8601String();
-            $currentMetadata['ai_metadata_suggestions_error'] = $e->getMessage();
+            $currentMetadata['ai_metadata_suggestions_error'] = $userFriendlyError;
 
             $asset->update([
                 'metadata' => $currentMetadata,
             ]);
 
-            // Log failure event for timeline display
             ActivityRecorder::logAsset($asset, EventType::ASSET_AI_SUGGESTIONS_FAILED, [
-                'error' => $e->getMessage(),
+                'error' => $userFriendlyError,
                 'error_type' => get_class($e),
             ]);
 

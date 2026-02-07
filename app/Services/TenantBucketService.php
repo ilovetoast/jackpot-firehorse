@@ -142,6 +142,25 @@ class TenantBucketService
     }
 
     /**
+     * Fetch object contents from S3 using IAM role (worker) or configured credentials.
+     * Use for AI image analysis, processing; never expose S3 URLs to external providers.
+     *
+     * @param StorageBucket $bucket Resolved via asset->storageBucket
+     * @param string $key S3 object key (e.g. thumbnails path from asset metadata)
+     * @return string Raw file contents (binary)
+     * @throws S3Exception If object not found or fetch fails
+     */
+    public function getObjectContents(StorageBucket $bucket, string $key): string
+    {
+        $result = $this->s3Client->getObject([
+            'Bucket' => $bucket->name,
+            'Key' => $key,
+        ]);
+
+        return (string) $result['Body']->getContents();
+    }
+
+    /**
      * Resolve ACTIVE bucket if it exists (no throw). Used by getOrProvisionBucket in local/testing.
      */
     protected function resolveActiveBucketOrFailIfExists(Tenant $tenant): ?StorageBucket

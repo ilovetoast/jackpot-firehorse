@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\Tenant;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\MetadataVisibilityResolver;
+use App\Services\TenantBucketService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -29,23 +30,21 @@ class AiMetadataGenerationService
     protected AIProviderInterface $provider;
     protected string $defaultModel;
     protected MetadataVisibilityResolver $visibilityResolver;
+    protected TenantBucketService $bucketService;
 
     /**
      * Create a new service instance.
      *
      * @param AIProviderInterface|null $provider Provider instance (resolved from container if not provided)
      * @param MetadataVisibilityResolver|null $visibilityResolver Visibility resolver (resolved from container if not provided)
+     * @param TenantBucketService|null $bucketService Bucket service for S3 fetch (resolved from container if not provided)
      */
-    public function __construct(?AIProviderInterface $provider = null, ?MetadataVisibilityResolver $visibilityResolver = null)
+    public function __construct(?AIProviderInterface $provider = null, ?MetadataVisibilityResolver $visibilityResolver = null, ?TenantBucketService $bucketService = null)
     {
-        // Resolve provider from container if not provided (allows dependency injection)
         $this->provider = $provider ?? app(AIProviderInterface::class);
-        
-        // Resolve visibility resolver from container if not provided
         $this->visibilityResolver = $visibilityResolver ?? app(MetadataVisibilityResolver::class);
-        
-        // Default to GPT-4o-mini for cost efficiency
-        // Check config for model name, fallback to direct model name
+        $this->bucketService = $bucketService ?? app(TenantBucketService::class);
+
         $modelConfig = config('ai.models.gpt-4o-mini', []);
         $this->defaultModel = $modelConfig['model_name'] ?? 'gpt-4o-mini';
     }
@@ -78,25 +77,18 @@ class AiMetadataGenerationService
         // Build prompt
         $prompt = $this->buildPrompt($asset, $fields);
 
-        // Get image URL (use medium thumbnail)
-        // CRITICAL: This should have been verified by AiMetadataGenerationJob's waitForThumbnail()
-        // But we check again here as a safety measure
-        $imageUrl = $asset->medium_thumbnail_url;
-        if (!$imageUrl) {
-            Log::error('[AiMetadataGenerationService] Thumbnail URL not available despite prerequisite check', [
+        // Fetch image bytes internally via S3/IAM (never pass presigned URLs to AI providers)
+        $imageBase64DataUrl = $this->fetchThumbnailAsBase64DataUrl($asset);
+        if (!$imageBase64DataUrl) {
+            Log::error('[AiMetadataGenerationService] AI image fetch failed before provider call', [
                 'asset_id' => $asset->id,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
-            throw new \Exception('Asset does not have a medium thumbnail URL');
+            throw new \Exception('AI image fetch failed before provider call');
         }
 
-        Log::debug('[AiMetadataGenerationService] Using thumbnail URL for AI analysis', [
-            'asset_id' => $asset->id,
-            'thumbnail_url' => $imageUrl,
-        ]);
-
-        // Call provider's image analysis method
-        $response = $this->provider->analyzeImage($imageUrl, $prompt, [
+        // Call provider's image analysis method (passes base64 data URL, not S3 URL)
+        $response = $this->provider->analyzeImage($imageBase64DataUrl, $prompt, [
             'model' => $this->defaultModel,
             'max_tokens' => 1000,
             'response_format' => ['type' => 'json_object'],
@@ -322,6 +314,96 @@ class AiMetadataGenerationService
         ];
 
         return $this->visibilityResolver->isFieldVisible($fieldDefinition, $category, $tenant);
+    }
+
+    /**
+     * Fetch medium thumbnail from S3/MinIO and return as base64 data URL.
+     * Uses IAM role (worker) or configured credentials; never exposes S3 URLs to AI providers.
+     *
+     * @return string|null Base64 data URL (data:image/webp;base64,...) or null on failure
+     */
+    protected function fetchThumbnailAsBase64DataUrl(Asset $asset): ?string
+    {
+        $thumbnailPath = $this->resolveThumbnailPath($asset);
+        if (!$thumbnailPath) {
+            return null;
+        }
+
+        $bucket = $asset->storageBucket;
+        if (!$bucket) {
+            Log::warning('[AiMetadataGenerationService] Asset missing storage bucket', [
+                'asset_id' => $asset->id,
+            ]);
+            return null;
+        }
+
+        try {
+            $contents = $this->bucketService->getObjectContents($bucket, $thumbnailPath);
+        } catch (\Throwable $e) {
+            Log::error('[AiMetadataGenerationService] AI image fetch failed before provider call', [
+                'asset_id' => $asset->id,
+                'thumbnail_path' => $thumbnailPath,
+                'bucket' => $bucket->name,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        if (strlen($contents) === 0) {
+            Log::error('[AiMetadataGenerationService] AI image fetch failed: empty file', [
+                'asset_id' => $asset->id,
+                'thumbnail_path' => $thumbnailPath,
+            ]);
+            return null;
+        }
+
+        $base64 = base64_encode($contents);
+        $mimeType = $this->inferMimeTypeFromPath($thumbnailPath);
+
+        return "data:{$mimeType};base64,{$base64}";
+    }
+
+    /**
+     * Resolve thumbnail path from asset metadata (same logic as Asset::getMediumThumbnailUrlAttribute).
+     *
+     * @return string|null S3 key path (assets/... or temp/uploads/...) or null if not available
+     */
+    protected function resolveThumbnailPath(Asset $asset): ?string
+    {
+        $metadata = $asset->metadata ?? [];
+
+        if (isset($metadata['thumbnails']['medium']['path'])) {
+            $path = $metadata['thumbnails']['medium']['path'];
+            if (str_starts_with($path, 'assets/') || str_starts_with($path, 'temp/uploads/')) {
+                if (str_starts_with($path, 'temp/uploads/') && $asset->thumbnail_status !== \App\Enums\ThumbnailStatus::COMPLETED) {
+                    return null;
+                }
+                return $path;
+            }
+        }
+
+        if (isset($metadata['preview_thumbnails']['preview']['path'])) {
+            return $metadata['preview_thumbnails']['preview']['path'];
+        }
+
+        return null;
+    }
+
+    /**
+     * Infer MIME type from file extension.
+     */
+    protected function inferMimeTypeFromPath(string $path): string
+    {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $map = [
+            'webp' => 'image/webp',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+        ];
+
+        return $map[$ext] ?? 'image/webp';
     }
 
     /**

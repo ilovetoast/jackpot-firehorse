@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Services\AiMetadataGenerationService;
 use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\TenantBucketService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Mockery;
@@ -26,15 +27,22 @@ class AiMetadataGenerationServiceTest extends TestCase
     protected AiMetadataGenerationService $service;
     protected $mockProvider;
 
+    protected $mockBucketService;
+
     protected function setUp(): void
     {
         parent::setUp();
-        
-        // Mock AI provider interface
+
         $this->mockProvider = Mockery::mock(AIProviderInterface::class);
-        
-        // Create service with mocked provider
-        $this->service = new AiMetadataGenerationService($this->mockProvider);
+        $this->mockBucketService = Mockery::mock(TenantBucketService::class);
+        $this->mockBucketService->shouldReceive('getObjectContents')
+            ->andReturn('fake-image-bytes-for-ai-test');
+
+        $this->service = new AiMetadataGenerationService(
+            $this->mockProvider,
+            null,
+            $this->mockBucketService
+        );
     }
 
     protected function tearDown(): void
@@ -260,11 +268,29 @@ class AiMetadataGenerationServiceTest extends TestCase
     }
 
     /**
+     * Test: Throws when AI image fetch fails before provider call
+     */
+    public function test_throws_when_image_fetch_fails(): void
+    {
+        $mockBucket = Mockery::mock(TenantBucketService::class);
+        $mockBucket->shouldReceive('getObjectContents')
+            ->once()
+            ->andThrow(new \RuntimeException('S3 fetch failed'));
+
+        $service = new AiMetadataGenerationService($this->mockProvider, null, $mockBucket);
+        $asset = $this->createAssetWithCategory();
+        $this->createAiEligibleField('photo_type', $asset->tenant_id);
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('AI image fetch failed before provider call');
+        $service->generateMetadata($asset);
+    }
+
+    /**
      * Test: Handles API failure gracefully
      */
     public function test_handles_api_failure_gracefully(): void
     {
-        // Mock provider to throw exception
         $this->mockProvider->shouldReceive('analyzeImage')
             ->once()
             ->andThrow(new \Exception('API error'));
@@ -369,8 +395,11 @@ class AiMetadataGenerationServiceTest extends TestCase
 
         $asset->metadata = array_merge($asset->metadata ?? [], [
             'category_id' => $category->id,
+            'thumbnails' => [
+                'medium' => ['path' => 'assets/test/medium.webp'],
+            ],
         ]);
-        $asset->medium_thumbnail_url = 'https://example.com/thumbnail.jpg';
+        $asset->thumbnail_status = \App\Enums\ThumbnailStatus::COMPLETED;
         $asset->save();
 
         return $asset;

@@ -69,10 +69,10 @@ interface AIProviderInterface
     /**
      * Analyze an image with a prompt using vision capabilities.
      *
-     * This method is used for image analysis tasks like metadata generation.
-     * The provider handles image URL resolution, API authentication, and response parsing.
+     * Accepts image as base64 data URL (e.g. data:image/webp;base64,...).
+     * Images are fetched internally via S3/IAM; never expose presigned URLs to providers.
      *
-     * @param string $imageUrl URL to the image (must be accessible by the provider)
+     * @param string $imageBase64DataUrl Base64 data URL (data:image/webp;base64,{base64})
      * @param string $prompt Text prompt describing what to analyze
      * @param array $options Additional options:
      *   - model: Model name to use (overrides default)
@@ -87,5 +87,5 @@ interface AIProviderInterface
      *   - metadata: Provider-specific metadata
      * @throws \Exception If the API call fails
      */
-    public function analyzeImage(string $imageUrl, string $prompt, array $options = []): array;
+    public function analyzeImage(string $imageBase64DataUrl, string $prompt, array $options = []): array;
 }

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Exceptions\PlanLimitExceededException;
 use App\Exceptions\AIQuotaExceededException;
 use App\Models\Asset;
+use App\Support\AiErrorSanitizer;
 use App\Models\Tenant;
 use App\Models\AIAgentRun;
 use App\Enums\AITaskType;
@@ -132,9 +133,8 @@ class AiMetadataGenerationJob implements ShouldQueue
             return;
         }
 
-        // 3. Verify prerequisites - wait for thumbnail with retry logic
-        $thumbnailUrl = $this->waitForThumbnail($asset);
-        if (!$thumbnailUrl) {
+        // 3. Verify prerequisites - wait for thumbnail path (used internally by service via S3/IAM)
+        if (!$this->waitForThumbnail($asset)) {
             // waitForThumbnail already logged the failure
             $this->markAsSkipped($asset, 'thumbnail_unavailable');
             return;
@@ -254,21 +254,24 @@ class AiMetadataGenerationJob implements ShouldQueue
             return;
         } catch (\Throwable $e) {
             // AI failures must not affect upload success
+            $rawError = $e->getMessage();
+            $userFriendlyError = AiErrorSanitizer::forUser($rawError);
+
             if (isset($agentRun)) {
-                $agentRun->markAsFailed($e->getMessage());
+                $agentRun->markAsFailed($rawError);
             }
             Log::error('[AiMetadataGenerationJob] AI Metadata Generation failed', [
                 'asset_id' => $asset->id,
                 'agent_run_id' => $agentRun->id ?? null,
                 'agent_id' => 'metadata_generator',
-                'error' => $e->getMessage(),
+                'error' => $rawError,
                 'trace' => $e->getTraceAsString(),
             ]);
-            $this->markAsFailed($asset, $e->getMessage());
-            
-            // Log failure event for timeline display
+            $this->markAsFailed($asset, $userFriendlyError);
+
+            // Log failure event for timeline (user-friendly message only)
             ActivityRecorder::logAsset($asset, EventType::ASSET_AI_METADATA_FAILED, [
-                'error' => $e->getMessage(),
+                'error' => $userFriendlyError,
                 'error_type' => get_class($e),
                 'agent_run_id' => $agentRun->id ?? null,
                 'agent_id' => 'metadata_generator',
@@ -317,28 +320,25 @@ class AiMetadataGenerationJob implements ShouldQueue
     }
 
     /**
-     * Wait for thumbnail to be available with enterprise-level retry logic.
+     * Wait for thumbnail path to be available with retry logic.
      *
-     * This method implements intelligent waiting for thumbnails that may be:
-     * - In temp path during processing (before asset promotion)
-     * - In final path after promotion
-     * - Still being generated (thumbnail_status = PROCESSING)
+     * AiMetadataGenerationService fetches thumbnails internally via S3/IAM (no presigned URLs).
+     * This method waits for the thumbnail path to exist in asset metadata.
      *
      * Retry strategy:
      * - Initial check (immediate)
      * - Retry with exponential backoff (2s, 4s, 8s, 16s)
      * - Maximum wait time: 30 seconds
-     * - Checks both temp and final thumbnail paths
      *
      * @param Asset $asset
-     * @return string|null Thumbnail URL if available, null if timeout
+     * @return bool True if thumbnail path is available, false if timeout
      */
-    protected function waitForThumbnail(Asset $asset): ?string
+    protected function waitForThumbnail(Asset $asset): bool
     {
         $maxWaitSeconds = 30;
         $maxRetries = 5;
-        $retryDelays = [0, 2, 4, 8, 16]; // Exponential backoff
-        
+        $retryDelays = [0, 2, 4, 8, 16];
+
         Log::info('[AiMetadataGenerationJob] Waiting for thumbnail', [
             'asset_id' => $asset->id,
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
@@ -346,19 +346,16 @@ class AiMetadataGenerationJob implements ShouldQueue
         ]);
 
         for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
-            // Refresh asset to get latest state
             $asset->refresh();
-            
-            // Check if thumbnail URL is available
-            $thumbnailUrl = $asset->medium_thumbnail_url;
-            if ($thumbnailUrl) {
+
+            $path = $this->resolveThumbnailPath($asset);
+            if ($path) {
                 Log::info('[AiMetadataGenerationJob] Thumbnail available', [
                     'asset_id' => $asset->id,
                     'attempt' => $attempt + 1,
-                    'thumbnail_url' => $thumbnailUrl,
                     'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
                 ]);
-                return $thumbnailUrl;
+                return true;
             }
 
             // Check if we should continue waiting
@@ -396,6 +393,32 @@ class AiMetadataGenerationJob implements ShouldQueue
             'attempts' => $maxRetries,
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
         ]);
+
+        return false;
+    }
+
+    /**
+     * Resolve thumbnail path from asset metadata (matches AiMetadataGenerationService logic).
+     *
+     * @return string|null S3 key path or null if not available
+     */
+    protected function resolveThumbnailPath(Asset $asset): ?string
+    {
+        $metadata = $asset->metadata ?? [];
+
+        if (isset($metadata['thumbnails']['medium']['path'])) {
+            $path = $metadata['thumbnails']['medium']['path'];
+            if (str_starts_with($path, 'assets/') || str_starts_with($path, 'temp/uploads/')) {
+                if (str_starts_with($path, 'temp/uploads/') && $asset->thumbnail_status !== \App\Enums\ThumbnailStatus::COMPLETED) {
+                    return null;
+                }
+                return $path;
+            }
+        }
+
+        if (isset($metadata['preview_thumbnails']['preview']['path'])) {
+            return $metadata['preview_thumbnails']['preview']['path'];
+        }
 
         return null;
     }
