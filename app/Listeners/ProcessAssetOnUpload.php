@@ -6,6 +6,7 @@ use App\Events\AssetUploaded;
 use App\Jobs\ProcessAssetJob;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Support\Facades\Log;
 
 class ProcessAssetOnUpload implements ShouldQueue
 {
@@ -24,7 +25,13 @@ class ProcessAssetOnUpload implements ShouldQueue
             'tenant_id' => $event->asset->tenant_id,
             'brand_id' => $event->asset->brand_id,
         ]);
-        
+
+        // TEMPORARY: QUEUE_DEBUG (remove after confirmation)
+        Log::info('[QUEUE_DEBUG] About to dispatch job', [
+            'job' => ProcessAssetJob::class,
+            'env' => app()->environment(),
+        ]);
+
         // Dispatch processing job when asset is uploaded
         ProcessAssetJob::dispatch($event->asset->id);
         

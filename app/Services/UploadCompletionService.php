@@ -854,32 +854,32 @@ class UploadCompletionService
                 }
             }
 
-            // Emit AssetUploaded event (only emit once, even if called multiple times)
-            // The event system should handle duplicate events gracefully
-            // Pipeline health logging: Confirm event is dispatched
-            // Gated by PIPELINE_DEBUG env var to reduce production noise
-            \App\Support\Logging\PipelineLogger::info('[UploadCompletionService] Dispatching AssetUploaded event', [
-                'asset_id' => $asset->id,
-                'asset_type' => $asset->type?->value ?? 'unknown',
-                'tenant_id' => $asset->tenant_id,
-                'brand_id' => $asset->brand_id,
-            ]);
-            event(new AssetUploaded($asset));
+            // Emit AssetUploaded event after transaction commits so queued listener (ProcessAssetOnUpload)
+            // runs only when the asset is visible to workers. Prevents "asset not found" in Redis/staging.
+            // Local (sync): afterCommit still runs after commit; listener runs in same request, behavior unchanged.
+            $assetForEvent = $asset;
+            DB::afterCommit(function () use ($assetForEvent) {
+                // TEMPORARY: QUEUE_DEBUG to verify staging dispatch (remove after confirmation)
+                Log::info('[QUEUE_DEBUG] Entered upload processing', [
+                    'env' => app()->environment(),
+                    'queue' => config('queue.default'),
+                ]);
+                Log::info('[QUEUE_DEBUG] About to fire AssetUploaded (queues ProcessAssetOnUpload)', [
+                    'job' => \App\Listeners\ProcessAssetOnUpload::class,
+                    'env' => app()->environment(),
+                ]);
+                \App\Support\Logging\PipelineLogger::info('[UploadCompletionService] Dispatching AssetUploaded event', [
+                    'asset_id' => $assetForEvent->id,
+                    'asset_type' => $assetForEvent->type?->value ?? 'unknown',
+                    'tenant_id' => $assetForEvent->tenant_id,
+                    'brand_id' => $assetForEvent->brand_id,
+                ]);
+                event(new AssetUploaded($assetForEvent));
 
-            // NOTE: Processing jobs are now handled by ProcessAssetJob chain via AssetUploaded event
-            // Do NOT dispatch GenerateThumbnailsJob separately - it breaks the processing chain
-            // The ProcessAssetJob chain handles: ExtractMetadata -> GenerateThumbnails -> GeneratePreview -> ComputedMetadata -> etc.
-            // If thumbnails are generated separately, ProcessAssetJob sees completed status and skips the entire chain
-            // This prevents ComputedMetadataJob and other automated metadata jobs from running
-            // 
-            // For unsupported formats, ProcessAssetJob will handle marking as skipped
-            // No need to dispatch jobs here - let the chain handle everything
-            
-            // NOTE: ExtractMetadataJob is also part of the ProcessAssetJob chain
-            // Do NOT dispatch it separately - it will run as part of the chain
-            
-            // Emit AssetProcessingCompleteEvent
-            event(new AssetProcessingCompleteEvent($asset));
+                // NOTE: Processing jobs are now handled by ProcessAssetJob chain via AssetUploaded event
+                // Do NOT dispatch GenerateThumbnailsJob separately - it breaks the processing chain
+                event(new AssetProcessingCompleteEvent($assetForEvent));
+            });
 
             // Log asset upload finalized (non-blocking)
             try {
