@@ -109,15 +109,15 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                     </div>
 
                     {/* Deployment / Deployed commit */}
-                    {deployedAt && Object.keys(deployedAt).length > 0 && (
-                        <div className="mb-8">
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment</h2>
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="p-6">
-                                    <div className="flex items-center mb-4">
-                                        <CubeIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                        <h3 className="text-sm font-medium text-gray-900">Current release</h3>
-                                    </div>
+                    <div className="mb-8">
+                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment</h2>
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="p-6">
+                                <div className="flex items-center mb-4">
+                                    <CubeIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                    <h3 className="text-sm font-medium text-gray-900">Current release</h3>
+                                </div>
+                                {deployedAt && Object.keys(deployedAt).length > 0 ? (
                                     <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
                                         {Object.entries(deployedAt).map(([key, value]) => (
                                             <div key={key}>
@@ -130,10 +130,14 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                             </div>
                                         ))}
                                     </dl>
-                                </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500">
+                                        Deployment info not available — <code className="bg-gray-100 px-1 rounded">DEPLOYED_AT</code> not found in application root. It is created on deploy (e.g. at <code className="bg-gray-100 px-1 rounded">/var/www/jackpot/current/DEPLOYED_AT</code> on staging).
+                                    </p>
+                                )}
                             </div>
                         </div>
-                    )}
+                    </div>
 
                     {/* System Health Cards */}
                     <div className="mb-8">
@@ -238,13 +242,20 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                         </span>
                                     </div>
                                     <div className="space-y-2">
+                                        {systemHealth?.storage?.strategy === 'per_company' && (
+                                            <div className="text-sm">
+                                                <span className="text-gray-500">Per-tenant buckets: </span>
+                                                <span className="font-medium text-gray-900">{systemHealth?.storage?.bucket_count ?? 0}</span>
+                                            </div>
+                                        )}
                                         {systemHealth?.storage?.bucket && (
                                             <div className="text-sm">
                                                 <span className="text-gray-500">Bucket: </span>
-                                                <span className="font-medium text-gray-900">{systemHealth.storage.bucket}</span>
+                                                <span className="font-medium text-gray-900 font-mono">{systemHealth.storage.bucket}</span>
                                             </div>
                                         )}
-                                        {systemHealth?.storage?.error && (
+                                        <div className="text-xs text-gray-600 mt-1">{systemHealth?.storage?.message}</div>
+                                        {(systemHealth?.storage?.error) && (
                                             <div className="text-xs text-red-600 mt-2">{systemHealth.storage.error}</div>
                                         )}
                                     </div>

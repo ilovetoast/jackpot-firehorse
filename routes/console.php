@@ -2,16 +2,27 @@
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Scheduler heartbeat (records that scheduler is running)
-// This is used by System Status page to detect if scheduler is healthy
+// When scheduler runs only on worker (staging/production), set SCHEDULER_ENABLED=false on web to avoid
+// running schedule:run there; worker must have SCHEDULER_ENABLED=true or unset (default true).
+// When false in staging, no scheduled tasks are registered (heartbeat and all jobs are skipped).
+$schedulerEnabled = config('app.env') !== 'staging'
+    || filter_var(env('SCHEDULER_ENABLED', true), FILTER_VALIDATE_BOOLEAN);
+
+if ($schedulerEnabled) {
+
+// Scheduler heartbeat: written by the process that runs schedule:run (worker in staging, same machine in local).
+// Stored in the default cache store (Cache::put). For web and worker to see the same value, use shared storage:
+// - CACHE_STORE=redis or CACHE_STORE=database (same DB/Redis as web). Do NOT use "file" or "array" when
+// scheduler runs on a different host than the web server; otherwise the web cannot see the heartbeat.
 Schedule::call(function () {
-    \Illuminate\Support\Facades\Cache::put('laravel_scheduler_last_heartbeat', now()->toIso8601String(), now()->addMinutes(10));
+    Cache::put('laravel_scheduler_last_heartbeat', now()->toIso8601String(), now()->addMinutes(10));
 })->everyMinute()
     ->name('scheduler:heartbeat')
     ->withoutOverlapping()
@@ -81,3 +92,5 @@ Schedule::job(new \App\Jobs\CleanupExpiredDownloadsJob())
     ->withoutOverlapping()
     ->name('cleanup-expired-downloads')
     ->description('Delete expired download ZIPs from storage and verify cleanup');
+
+} // end if ($schedulerEnabled)

@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
+use App\Enums\StorageBucketStatus;
 use App\Models\Asset;
+use App\Models\StorageBucket;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -237,7 +239,11 @@ class SystemStatusController extends Controller
 
     /**
      * Get scheduler health metrics.
-     * 
+     *
+     * Heartbeat is written by the process that runs schedule:run (worker in staging; same machine in local).
+     * It is stored in the default cache store (Redis or database). Web and worker share the same cache,
+     * so the web server can read the heartbeat with no direct network access to the worker.
+     *
      * @return array
      */
     protected function getSchedulerHealth(): array
@@ -285,48 +291,88 @@ class SystemStatusController extends Controller
 
     /**
      * Get storage (S3) health metrics.
-     * 
+     *
+     * When provision strategy is per_company (staging/production), returns bucket count from DB
+     * only — no S3 API calls from web. When shared (local), uses configured bucket and optional connectivity check.
+     *
      * @return array
      */
     protected function getStorageHealth(): array
     {
+        $strategy = config('storage.provision_strategy', 'shared');
+
+        if ($strategy === 'per_company') {
+            try {
+                $bucketCount = StorageBucket::where('status', StorageBucketStatus::ACTIVE)->count();
+
+                return [
+                    'status' => $bucketCount > 0 ? 'healthy' : 'warning',
+                    'bucket' => null,
+                    'bucket_count' => $bucketCount,
+                    'message' => $bucketCount === 0
+                        ? 'No per-tenant buckets registered yet. Run on worker/CLI: php artisan tenants:ensure-buckets'
+                        : "{$bucketCount} per-tenant bucket(s) registered",
+                    'strategy' => 'per_company',
+                ];
+            } catch (\Exception $e) {
+                Log::error('Failed to get storage health (per_company)', ['error' => $e->getMessage()]);
+
+                return [
+                    'status' => 'unknown',
+                    'bucket' => null,
+                    'bucket_count' => null,
+                    'message' => 'Failed to count storage buckets',
+                    'strategy' => 'per_company',
+                ];
+            }
+        }
+
         try {
             $s3Client = $this->getS3Client();
             $bucketName = config('filesystems.disks.s3.bucket');
-            
-            if (!$bucketName) {
+
+            if (! $bucketName) {
                 return [
                     'status' => 'unhealthy',
                     'bucket' => null,
+                    'bucket_count' => null,
                     'message' => 'S3 bucket not configured',
+                    'strategy' => 'shared',
                 ];
             }
-            
-            // Perform lightweight connectivity check
+
             $s3Client->listObjectsV2([
                 'Bucket' => $bucketName,
                 'MaxKeys' => 1,
                 'Prefix' => 'health-check-' . uniqid(),
             ]);
-            
+
             return [
                 'status' => 'healthy',
                 'bucket' => $bucketName,
+                'bucket_count' => null,
                 'message' => 'S3 connection successful',
+                'strategy' => 'shared',
             ];
         } catch (S3Exception $e) {
             Log::error('S3 connectivity check failed', ['error' => $e->getMessage()]);
+
             return [
                 'status' => 'unhealthy',
                 'bucket' => config('filesystems.disks.s3.bucket'),
+                'bucket_count' => null,
                 'message' => 'S3 connection failed: ' . $e->getMessage(),
+                'strategy' => 'shared',
             ];
         } catch (\Exception $e) {
             Log::error('Failed to get storage health', ['error' => $e->getMessage()]);
+
             return [
                 'status' => 'unknown',
                 'bucket' => config('filesystems.disks.s3.bucket'),
+                'bucket_count' => null,
                 'message' => 'Failed to check storage health',
+                'strategy' => 'shared',
             ];
         }
     }

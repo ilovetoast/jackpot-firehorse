@@ -144,7 +144,7 @@ class SystemReliabilityAgentService
             })
             ->toArray();
 
-        // Scheduler heartbeat health
+        // Scheduler heartbeat (written by schedule:run; stored in shared cache so web can read it)
         $lastHeartbeat = Cache::get('laravel_scheduler_last_heartbeat');
         $schedulerHealth = [
             'last_heartbeat' => $lastHeartbeat ? \Carbon\Carbon::parse($lastHeartbeat)->toIso8601String() : null,
