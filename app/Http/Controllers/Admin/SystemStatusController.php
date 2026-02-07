@@ -251,11 +251,19 @@ class SystemStatusController extends Controller
         try {
             $lastHeartbeat = Cache::get('laravel_scheduler_last_heartbeat');
             
-            if (!$lastHeartbeat) {
+            if (! $lastHeartbeat) {
+                $cacheStore = config('cache.default');
+                $hint = 'Ensure the worker runs schedule:run and web and worker use the same cache (CACHE_STORE=redis or database).';
+                if (app()->environment('staging')) {
+                    $hint .= ' On the worker, SCHEDULER_ENABLED must be true or unset.';
+                }
+
                 return [
                     'status' => 'not_running',
                     'last_heartbeat' => null,
                     'message' => 'Scheduler has not sent a heartbeat.',
+                    'hint' => $hint,
+                    'cache_store' => $cacheStore,
                 ];
             }
             
@@ -278,13 +286,16 @@ class SystemStatusController extends Controller
                 'status' => $status,
                 'last_heartbeat' => $lastHeartbeatTime->toIso8601String(),
                 'message' => $message,
+                'cache_store' => config('cache.default'),
             ];
         } catch (\Exception $e) {
             Log::error('Failed to get scheduler health', ['error' => $e->getMessage()]);
+
             return [
                 'status' => 'unknown',
                 'last_heartbeat' => null,
                 'message' => 'Failed to check scheduler health',
+                'cache_store' => config('cache.default'),
             ];
         }
     }
@@ -300,6 +311,12 @@ class SystemStatusController extends Controller
     protected function getStorageHealth(): array
     {
         $strategy = config('storage.provision_strategy', 'shared');
+        $env = config('app.env');
+
+        // In staging/production we expect per_company; if still shared, show bucket count from DB and avoid S3 check from web
+        if ($strategy !== 'per_company' && in_array($env, ['staging', 'production'], true)) {
+            $strategy = 'per_company';
+        }
 
         if ($strategy === 'per_company') {
             try {

@@ -99,6 +99,17 @@ class UploadInitiationService
         // Validate plan limits
         $this->validatePlanLimits($tenant, $fileSize);
 
+        // [DIAGNOSTIC] Trace tenant + bucket context before resolve (read-only)
+        Log::info('[UPLOAD_BUCKET_TRACE]', [
+            'env' => app()->environment(),
+            'tenant_id' => $tenant->id ?? null,
+            'tenant_slug' => $tenant->slug ?? null,
+            'brand_id' => $brand?->id ?? null,
+            'brand_slug' => $brand?->slug ?? null,
+            'request_path' => request()->path(),
+            'user_id' => auth()->id(),
+        ]);
+
         // Get or provision storage bucket
         $bucket = $this->getOrProvisionBucket($tenant);
 
@@ -197,6 +208,17 @@ class UploadInitiationService
         // Validate plan limits
         $this->validatePlanLimits($tenant, $fileSize);
 
+        // [DIAGNOSTIC] Trace tenant + bucket context before resolve (read-only)
+        Log::info('[UPLOAD_BUCKET_TRACE]', [
+            'env' => app()->environment(),
+            'tenant_id' => $tenant->id ?? null,
+            'tenant_slug' => $tenant->slug ?? null,
+            'brand_id' => $brand->id ?? null,
+            'brand_slug' => $brand->slug ?? null,
+            'request_path' => request()->path(),
+            'user_id' => auth()->id(),
+        ]);
+
         // Get or provision storage bucket
         $bucket = $this->getOrProvisionBucket($tenant);
 
@@ -286,6 +308,17 @@ class UploadInitiationService
         ?string $batchReference = null
     ): array {
         $results = [];
+
+        // [DIAGNOSTIC] Trace tenant + bucket context before resolve (read-only)
+        Log::info('[UPLOAD_BUCKET_TRACE]', [
+            'env' => app()->environment(),
+            'tenant_id' => $tenant->id ?? null,
+            'tenant_slug' => $tenant->slug ?? null,
+            'brand_id' => $brand?->id ?? null,
+            'brand_slug' => $brand?->slug ?? null,
+            'request_path' => request()->path(),
+            'user_id' => auth()->id(),
+        ]);
 
         // Get or provision bucket once before processing files (shared resource).
         // In staging/production only resolve is used; no provisioning. Semantic exceptions are rethrown unchanged.

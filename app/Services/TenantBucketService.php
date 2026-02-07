@@ -41,16 +41,43 @@ class TenantBucketService
     public function resolveActiveBucketOrFail(Tenant $tenant): StorageBucket
     {
         $expectedName = $this->getExpectedBucketName($tenant);
+
+        // [DIAGNOSTIC] Table stats and resolve attempt (read-only)
+        Log::info('[STORAGE_BUCKET_TABLE_STATS]', [
+            'total' => StorageBucket::count(),
+            'active' => StorageBucket::where('status', StorageBucketStatus::ACTIVE)->count(),
+        ]);
+        Log::info('[BUCKET_RESOLVE_ATTEMPT]', [
+            'tenant_id' => $tenant->id,
+            'tenant_slug' => $tenant->slug,
+            'expected_bucket' => $expectedName,
+            'env' => app()->environment(),
+        ]);
+
         $bucket = StorageBucket::where('tenant_id', $tenant->id)
             ->where('name', $expectedName)
             ->where('status', StorageBucketStatus::ACTIVE)
             ->first();
 
-        if (! $bucket) {
-            throw new BucketNotProvisionedException($tenant->id);
+        if ($bucket) {
+            Log::info('[BUCKET_RESOLVE_SUCCESS]', [
+                'tenant_id' => $tenant->id,
+                'bucket_id' => $bucket->id,
+                'bucket_name' => $bucket->name,
+                'status' => $bucket->status?->value ?? (string) $bucket->status,
+            ]);
+
+            return $bucket;
         }
 
-        return $bucket;
+        Log::error('[BUCKET_RESOLVE_FAILED]', [
+            'tenant_id' => $tenant->id,
+            'tenant_slug' => $tenant->slug,
+            'expected_bucket' => $expectedName,
+            'env' => app()->environment(),
+        ]);
+
+        throw new BucketNotProvisionedException($tenant->id);
     }
 
     /**

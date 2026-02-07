@@ -224,6 +224,12 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                         {systemHealth?.scheduler?.message && (
                                             <div className="text-xs text-gray-600 mt-1">{systemHealth.scheduler.message}</div>
                                         )}
+                                        {systemHealth?.scheduler?.hint && (
+                                            <div className="text-xs text-amber-700 mt-2 p-2 bg-amber-50 rounded">{systemHealth.scheduler.hint}</div>
+                                        )}
+                                        {systemHealth?.scheduler?.cache_store && (
+                                            <div className="text-xs text-gray-500 mt-1">Cache store: {systemHealth.scheduler.cache_store}</div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
