@@ -6,6 +6,8 @@ import { createRoot } from 'react-dom/client'
 import BrandThemeProvider from './Components/BrandThemeProvider'
 import FlashMessage from './Components/FlashMessage'
 import AssetProcessingTray from './Components/AssetProcessingTray'
+import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
+import { BucketProvider } from './contexts/BucketContext'
 
 const pages = import.meta.glob('./Pages/**/*.jsx', { eager: false })
 
@@ -21,14 +23,16 @@ createInertiaApp({
         const pageModule = await component()
         const PageComponent = pageModule.default || pageModule
         
-        // Wrap the page component with FlashMessage and AssetProcessingTray
-        // These components need access to Inertia context via usePage() hook
-        // AssetProcessingTray handles its own visibility (only shows if processing assets exist)
+        // Wrap the page component with FlashMessage, AssetProcessingTray, and app-level download bucket bar.
+        // DownloadBucketBarGlobal uses BucketContext so state is shared; rendering it here keeps it in the
+        // same DOM tree as the page so it's visible (fixed bottom bar). Bucket state lives in BucketProvider
+        // so the bar shows the correct count without refetch on category change.
         return (props) => (
             <>
                 <PageComponent {...props} />
                 <FlashMessage />
                 <AssetProcessingTray />
+                <DownloadBucketBarGlobal />
             </>
         )
     },
@@ -36,7 +40,9 @@ createInertiaApp({
         const root = createRoot(el)
         root.render(
             <BrandThemeProvider initialPage={props.initialPage}>
-                <App {...props} />
+                <BucketProvider>
+                    <App {...props} />
+                </BucketProvider>
             </BrandThemeProvider>
         )
     },

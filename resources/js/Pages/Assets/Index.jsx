@@ -9,7 +9,7 @@ import AssetGridMetadataPrimaryFilters from '../../Components/AssetGridMetadataP
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
-import DownloadBucketBar from '../../Components/DownloadBucketBar'
+import { useBucket } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
@@ -94,88 +94,23 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [isBulkMode, setIsBulkMode] = useState(false)
     const [showBulkEditModal, setShowBulkEditModal] = useState(false)
 
-    // Phase D1: Download bucket — IDs for grid selection; count = bucketAssetIds.length
-    const [bucketAssetIds, setBucketAssetIds] = useState([])
+    // Phase D1: Download bucket from app-level context so the bar does not remount on category change (no flash)
+    const { bucketAssetIds, bucketAdd: ctxBucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
     const [bucketAddFeedback, setBucketAddFeedback] = useState(null) // Brief message when asset can't be added (e.g. not published)
 
-    // Fetch bucket items on mount and when returning to page (sync from server)
     useEffect(() => {
-        if (typeof window === 'undefined' || !window.route) return
-        fetch(route('download-bucket.items'), {
-            method: 'GET',
-            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        })
-            .then((r) => r.ok ? r.json() : Promise.reject(new Error('Failed to load bucket')))
-            .then((data) => {
-                const ids = (data.items || []).map((i) => (typeof i === 'string' ? i : i.id))
-                setBucketAssetIds(ids)
-            })
-            .catch(() => setBucketAssetIds([]))
-    }, [selectedCategoryId])
+        clearIfEmpty(pageProps.download_bucket_count ?? 0)
+    }, [pageProps.download_bucket_count, clearIfEmpty])
 
-    // Sync bucket count from shared props when it changes (e.g. after Create Download on another tab)
-    useEffect(() => {
-        const count = pageProps.download_bucket_count ?? 0
-        if (typeof count === 'number' && count === 0 && bucketAssetIds.length > 0) {
-            setBucketAssetIds([])
-        }
-    }, [pageProps.download_bucket_count])
-
-    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
-
-    const applyBucketResponse = useCallback((data) => {
-        const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
-        setBucketAssetIds(ids)
-    }, [])
-
-    // Phase D1: Add asset to bucket (API), then update local state from response.
-    // Server returns 200 with current bucket state (soft filter). If asset wasn't added (unpublished/archived or no access), show brief feedback.
     const bucketAdd = useCallback((assetId) => {
-        return fetch(route('download-bucket.add'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ asset_id: assetId }),
+        return ctxBucketAdd(assetId).then((data) => {
+            const ids = (data?.items || [])?.map((i) => (typeof i === 'string' ? i : i.id))
+            if (ids && !ids.includes(assetId)) {
+                setBucketAddFeedback("This asset can't be added to the download (it may not be published yet).")
+                setTimeout(() => setBucketAddFeedback(null), 4000)
+            }
         })
-            .then((r) => r.json().catch(() => ({})))
-            .then((data) => {
-                if (Array.isArray(data?.items) || typeof data?.count === 'number') {
-                    applyBucketResponse(data)
-                    const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
-                    if (!ids.includes(assetId)) {
-                        setBucketAddFeedback("This asset can't be added to the download (it may not be published yet).")
-                        setTimeout(() => setBucketAddFeedback(null), 4000)
-                    }
-                }
-            })
-    }, [applyBucketResponse])
-
-    const bucketRemove = useCallback((assetId) => {
-        return fetch(route('download-bucket.remove', { asset: assetId }), {
-            method: 'DELETE',
-            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        }).then((r) => r.json()).then(applyBucketResponse)
-    }, [applyBucketResponse])
-
-    const bucketClear = useCallback(() => {
-        return fetch(route('download-bucket.clear'), {
-            method: 'POST',
-            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        }).then((r) => r.json()).then(applyBucketResponse)
-    }, [applyBucketResponse])
-
-    const bucketAddBatch = useCallback((assetIds) => {
-        if (!assetIds.length) return Promise.resolve()
-        return fetch(route('download-bucket.add_batch'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ asset_ids: assetIds }),
-        }).then((r) => r.json()).then(applyBucketResponse)
-    }, [applyBucketResponse])
+    }, [ctxBucketAdd])
 
     // UX: Click on asset card always opens drawer. Checkbox is the only way to add/remove from download bucket.
     const handleAssetClick = useCallback((asset) => {
@@ -1087,14 +1022,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 />
             )}
 
-            {/* Phase D1 / D1.1: Sticky download bucket bar when items > 0 */}
-            <DownloadBucketBar
-                bucketCount={bucketAssetIds.length}
-                onCountChange={() => setBucketAssetIds([])}
-                onRemove={bucketRemove}
-                onClear={bucketClear}
-                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
-            />
+            {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on category change */}
         </div>
     )
 }

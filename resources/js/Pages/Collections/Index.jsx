@@ -12,7 +12,7 @@ import EditCollectionModal from '../../Components/Collections/EditCollectionModa
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetDrawer from '../../Components/AssetDrawer'
-import DownloadBucketBar from '../../Components/DownloadBucketBar'
+import { useBucket } from '../../contexts/BucketContext'
 import { RectangleStackIcon, FolderIcon } from '@heroicons/react/24/outline'
 import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
@@ -72,61 +72,13 @@ export default function CollectionsIndex({
         setActiveAssetId(null)
     }, [selectedCollectionId])
 
-    // Phase D1: Download bucket — same as Assets/Index; persists across /app/assets, /app/deliverables, /app/collections (session)
-    const [bucketAssetIds, setBucketAssetIds] = useState([])
-    useEffect(() => {
-        if (typeof window === 'undefined' || !window.route) return
-        fetch(route('download-bucket.items'), {
-            method: 'GET',
-            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        })
-            .then((r) => r.ok ? r.json() : Promise.reject(new Error('Failed to load bucket')))
-            .then((data) => {
-                const ids = (data.items || []).map((i) => (typeof i === 'string' ? i : i.id))
-                setBucketAssetIds(ids)
-            })
-            .catch(() => setBucketAssetIds([]))
-    }, [selectedCollectionId])
+    // Phase D1: Download bucket from app-level context so the bar does not remount on collection/category change (no flash)
+    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, clearIfEmpty } = useBucket()
 
     useEffect(() => {
-        const count = download_bucket_count ?? 0
-        if (typeof count === 'number' && count === 0 && bucketAssetIds.length > 0) {
-            setBucketAssetIds([])
-        }
-    }, [download_bucket_count])
+        clearIfEmpty(download_bucket_count ?? 0)
+    }, [download_bucket_count, clearIfEmpty])
 
-    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
-    const applyBucketResponse = useCallback((data) => {
-        const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
-        setBucketAssetIds(ids)
-    }, [])
-    const bucketAdd = useCallback((assetId) => {
-        return fetch(route('download-bucket.add'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ asset_id: assetId }),
-        })
-            .then((r) => r.json().catch(() => ({})))
-            .then((data) => {
-                if (Array.isArray(data?.items) || typeof data?.count === 'number') applyBucketResponse(data)
-            })
-    }, [applyBucketResponse])
-    const bucketRemove = useCallback((assetId) => {
-        return fetch(route('download-bucket.remove', { asset: assetId }), {
-            method: 'DELETE',
-            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        }).then((r) => r.json()).then(applyBucketResponse)
-    }, [applyBucketResponse])
-    const bucketClear = useCallback(() => {
-        return fetch(route('download-bucket.clear'), {
-            method: 'POST',
-            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        }).then((r) => r.json()).then(applyBucketResponse)
-    }, [applyBucketResponse])
     const handleBucketToggle = useCallback((assetId) => {
         if (bucketAssetIds.includes(assetId)) bucketRemove(assetId)
         else bucketAdd(assetId)
@@ -299,12 +251,7 @@ export default function CollectionsIndex({
                         </div>
                     </div>
 
-                    <DownloadBucketBar
-                        bucketCount={bucketAssetIds.length}
-                        onCountChange={() => setBucketAssetIds([])}
-                        onRemove={bucketRemove}
-                        onClear={bucketClear}
-                    />
+                    {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on collection change */}
 
                     {/* Asset Drawer - Desktop */}
                     {activeAssetId && (

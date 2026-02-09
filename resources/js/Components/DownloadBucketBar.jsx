@@ -166,7 +166,7 @@ export default function DownloadBucketBar({
 
   return (
     <>
-    <div className="fixed bottom-0 left-0 right-0 z-[60] border-t border-gray-200 bg-white shadow-lg safe-area-pb">
+    <div className="fixed bottom-0 left-0 right-0 z-[100] border-t border-gray-200 bg-white shadow-lg safe-area-pb">
       {/* Expandable preview panel — grows upward */}
       {expanded && (
         <div className="border-b border-gray-200 bg-gray-50 max-h-64 overflow-y-auto">
