@@ -4,13 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Enums\EventType;
 use App\Mail\InviteMember;
-use App\Models\Asset;
 use App\Models\Brand;
-use App\Models\Category;
 use App\Models\CollectionUser;
 use App\Models\User;
 use App\Services\ActivityRecorder;
-use App\Services\AssetEligibilityService;
 use App\Services\BrandService;
 use App\Services\CategoryService;
 use App\Services\FeatureGate;
@@ -25,7 +22,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -35,8 +31,7 @@ class BrandController extends Controller
         protected BrandService $brandService,
         protected PlanService $planService,
         protected CategoryService $categoryService,
-        protected SystemCategoryService $systemCategoryService,
-        protected AssetEligibilityService $assetEligibilityService
+        protected SystemCategoryService $systemCategoryService
     ) {
     }
 
@@ -442,39 +437,6 @@ class BrandController extends Controller
         $currentPrivateCount = $brand->categories()->custom()->where('is_private', true)->count();
         $canEditSystemCategories = $this->planService->hasFeature($tenant, 'edit_system_categories');
 
-        // D10: Logo assets for download landing branding (category slug = logos)
-        $logoCategory = Category::where('brand_id', $brand->id)->where('slug', 'logos')->first();
-        $logoAssets = [];
-        if ($logoCategory) {
-            $logoAssets = Asset::where('brand_id', $brand->id)
-                ->where('metadata->category_id', $logoCategory->id)
-                ->get(['id', 'original_filename'])
-                ->map(fn (Asset $a) => [
-                    'id' => $a->id,
-                    'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $a->id, 'style' => 'thumb']),
-                    'original_filename' => $a->original_filename ?? '',
-                ])
-                ->values()
-                ->all();
-        }
-
-        // D10: Thumbnail URLs for selected background assets
-        $brandSettings = $brand->download_landing_settings ?? [];
-        $backgroundIds = $brandSettings['background_asset_ids'] ?? [];
-        $backgroundAssetDetails = [];
-        if (! empty($backgroundIds)) {
-            $backgroundAssetDetails = Asset::where('brand_id', $brand->id)
-                ->whereIn('id', $backgroundIds)
-                ->get(['id', 'original_filename'])
-                ->map(fn (Asset $a) => [
-                    'id' => $a->id,
-                    'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $a->id, 'style' => 'thumb']),
-                    'original_filename' => $a->original_filename ?? '',
-                ])
-                ->values()
-                ->all();
-        }
-
         return Inertia::render('Brands/Edit', [
             'brand' => [
                 'id' => $brand->id,
@@ -492,9 +454,6 @@ class BrandController extends Controller
                 'nav_color' => $brand->nav_color,
                 'logo_filter' => $brand->logo_filter ?? 'none',
                 'settings' => $brand->settings,
-                'download_landing_settings' => $brand->download_landing_settings ?? [],
-                'logo_assets' => $logoAssets,
-                'background_asset_details' => $backgroundAssetDetails,
             ],
             'categories' => $categories->map(function ($category) {
                 // Get access rules for private categories
@@ -579,14 +538,6 @@ class BrandController extends Controller
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
-            'download_landing_settings' => 'nullable|array', // D10: brand-level download branding
-            'download_landing_settings.enabled' => 'nullable|boolean',
-            'download_landing_settings.logo_asset_id' => 'nullable|uuid',
-            'download_landing_settings.color_role' => 'nullable|string|in:primary,secondary,accent',
-            'download_landing_settings.default_headline' => 'nullable|string|max:200',
-            'download_landing_settings.default_subtext' => 'nullable|string|max:500',
-            'download_landing_settings.background_asset_ids' => 'nullable|array',
-            'download_landing_settings.background_asset_ids.*' => 'uuid',
         ]);
 
         // Handle logo file upload
@@ -650,14 +601,6 @@ class BrandController extends Controller
         // Always set settings (even if empty) to ensure the column is updated
         $validated['settings'] = $mergedSettings;
 
-        // D10: Download landing settings (replace, not merge — frontend sends full object)
-        if ($request->has('download_landing_settings')) {
-            $raw = $request->input('download_landing_settings');
-            $validated['download_landing_settings'] = is_array($raw) ? $this->sanitizeDownloadLandingSettings($raw, $brand) : [];
-        } else {
-            $validated['download_landing_settings'] = $brand->download_landing_settings ?? [];
-        }
-
         try {
             $this->brandService->update($brand, $validated);
 
@@ -667,172 +610,6 @@ class BrandController extends Controller
                 'error' => $e->getMessage(),
             ])->onlyInput('name', 'slug');
         }
-    }
-
-    /**
-     * D10: Sanitize download landing settings — no raw URL/hex; logo from asset (category logo); color from palette role; backgrounds from brand assets.
-     *
-     * @param  array<string, mixed>  $input
-     * @return array<string, mixed>
-     *
-     * @throws ValidationException
-     */
-    private function sanitizeDownloadLandingSettings(array $input, Brand $brand): array
-    {
-        // Reject raw URL/hex — D10: visuals from brand system only
-        if (! empty($input['logo_url']) || ! empty($input['accent_color'])) {
-            throw ValidationException::withMessages([
-                'download_landing_settings' => ['Logo and accent must be selected from brand assets and palette, not entered as URL or hex.'],
-            ]);
-        }
-
-        $out = [
-            'enabled' => (bool) ($input['enabled'] ?? false),
-            'logo_asset_id' => null,
-            'color_role' => 'primary',
-            'background_asset_ids' => [],
-            'default_headline' => null,
-            'default_subtext' => null,
-        ];
-
-        if (isset($input['logo_asset_id']) && is_string($input['logo_asset_id']) && preg_match('/^[0-9a-f-]{36}$/i', $input['logo_asset_id'])) {
-            $asset = Asset::where('id', $input['logo_asset_id'])->where('brand_id', $brand->id)->first();
-            if (! $asset) {
-                throw ValidationException::withMessages([
-                    'download_landing_settings.logo_asset_id' => ['Selected logo asset does not belong to this brand.'],
-                ]);
-            }
-            $logoCategory = Category::where('brand_id', $brand->id)->where('slug', 'logos')->first();
-            if (! $logoCategory) {
-                throw ValidationException::withMessages([
-                    'download_landing_settings.logo_asset_id' => ['This brand has no logo category.'],
-                ]);
-            }
-            $assetCategoryId = $asset->metadata['category_id'] ?? null;
-            if ((string) $assetCategoryId !== (string) $logoCategory->id) {
-                throw ValidationException::withMessages([
-                    'download_landing_settings.logo_asset_id' => ['Logo must be an asset in the Logos category.'],
-                ]);
-            }
-            $out['logo_asset_id'] = $asset->id;
-        }
-
-        if (isset($input['color_role']) && in_array($input['color_role'], ['primary', 'secondary', 'accent'], true)) {
-            $out['color_role'] = $input['color_role'];
-        }
-
-        if (isset($input['default_headline']) && is_string($input['default_headline'])) {
-            $out['default_headline'] = substr(trim(strip_tags($input['default_headline'])), 0, 200) ?: null;
-        }
-        if (isset($input['default_subtext']) && is_string($input['default_subtext'])) {
-            $out['default_subtext'] = substr(trim(strip_tags($input['default_subtext'])), 0, 500) ?: null;
-        }
-
-        if (isset($input['background_asset_ids']) && is_array($input['background_asset_ids'])) {
-            $ids = array_values(array_filter(array_slice($input['background_asset_ids'], 0, 5), fn ($id) => is_string($id) && preg_match('/^[0-9a-f-]{36}$/i', $id)));
-            foreach ($ids as $id) {
-                $asset = Asset::where('id', $id)->where('brand_id', $brand->id)->first();
-                if (! $asset) {
-                    throw ValidationException::withMessages([
-                        'download_landing_settings.background_asset_ids' => ['All background assets must belong to this brand.'],
-                    ]);
-                }
-                if (! $this->assetEligibilityService->isEligibleForDownloadBackground($asset)) {
-                    throw ValidationException::withMessages([
-                        'download_landing_settings.background_asset_ids' => ['Background images must be at least 1920×1080.'],
-                    ]);
-                }
-            }
-            $out['background_asset_ids'] = $ids;
-        }
-
-        return $out;
-    }
-
-    /**
-     * D10: List brand assets for download landing (generic picker; no category filter).
-     */
-    public function downloadBrandingAssets(Brand $brand): \Illuminate\Http\JsonResponse
-    {
-        $tenant = app('tenant');
-        if ($brand->tenant_id !== $tenant->id) {
-            abort(403, 'Brand does not belong to this tenant.');
-        }
-        $this->authorize('update', $brand);
-
-        $assets = Asset::where('brand_id', $brand->id)
-            ->whereNotNull('published_at')
-            ->orderByDesc('created_at')
-            ->limit(50)
-            ->get(['id', 'original_filename'])
-            ->map(fn (Asset $a) => [
-                'id' => $a->id,
-                'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $a->id, 'style' => 'thumb']),
-                'original_filename' => $a->original_filename ?? '',
-            ])
-            ->values()
-            ->all();
-
-        return response()->json(['assets' => $assets]);
-    }
-
-    /**
-     * D10.1: List brand assets for download landing background picker — Photography or Graphics (image categories), with dimensions.
-     */
-    public function downloadBackgroundCandidates(Brand $brand): \Illuminate\Http\JsonResponse
-    {
-        $tenant = app('tenant');
-        if ($brand->tenant_id !== $tenant->id) {
-            abort(403, 'Brand does not belong to this tenant.');
-        }
-        $this->authorize('update', $brand);
-
-        $imageCategoryIds = Category::where('brand_id', $brand->id)
-            ->whereIn('slug', ['photography', 'graphics'])
-            ->pluck('id')
-            ->all();
-
-        if (empty($imageCategoryIds)) {
-            return response()->json(['assets' => []]);
-        }
-
-        $query = Asset::where('brand_id', $brand->id)
-            ->whereNotNull('published_at')
-            ->whereNull('archived_at')
-            ->where(function ($q) use ($imageCategoryIds) {
-                foreach ($imageCategoryIds as $cid) {
-                    $q->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) = ?', [(string) $cid]);
-                }
-            });
-
-        $assets = $query->orderByDesc('created_at')
-            ->limit(100)
-            ->get()
-            ->map(function (Asset $a) {
-                $w = null;
-                $h = null;
-                $meta = $a->metadata ?? [];
-                if (isset($meta['image_width'], $meta['image_height'])) {
-                    $w = (int) $meta['image_width'];
-                    $h = (int) $meta['image_height'];
-                } elseif ($a->video_width !== null && $a->video_height !== null) {
-                    $w = (int) $a->video_width;
-                    $h = (int) $a->video_height;
-                }
-                $qualityRating = $meta['fields']['quality_rating'] ?? $meta['quality_rating'] ?? null;
-                return [
-                    'id' => $a->id,
-                    'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $a->id, 'style' => 'thumb']),
-                    'original_filename' => $a->original_filename ?? '',
-                    'width' => $w,
-                    'height' => $h,
-                    'quality_rating' => $qualityRating,
-                ];
-            })
-            ->values()
-            ->all();
-
-        return response()->json(['assets' => $assets]);
     }
 
     /**

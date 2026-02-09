@@ -257,15 +257,22 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
     // This ensures incompatible filters are removed when switching categories
-    // 
-    // References:
-    // - filterQueryOwnership.shouldPurgeOnCategoryChange(): Determines which params to purge
-    // - filterScopeRules.isCategoryCompatible(): Checks filter compatibility with category
+    //
+    // IMPORTANT: Skip when change came from handleCategorySelect - that already does router.get.
+    // This effect only runs for external URL changes (e.g. browser back/forward).
     const prevCategoryIdRef = useRef(selectedCategoryId)
+    const categoryChangeFromClickRef = useRef(false)
     useEffect(() => {
         const prevCategoryId = prevCategoryIdRef.current
         const nextCategoryId = selectedCategoryId
-        
+
+        // Skip if this change came from handleCategorySelect - avoid double router.get (causes white flash)
+        if (categoryChangeFromClickRef.current) {
+            categoryChangeFromClickRef.current = false
+            prevCategoryIdRef.current = nextCategoryId
+            return
+        }
+
         // Only run cleanup if category actually changed
         if (prevCategoryId === nextCategoryId) {
             prevCategoryIdRef.current = nextCategoryId
@@ -493,22 +500,20 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const handleCategorySelect = useCallback((category) => {
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
-        
+
+        // Signal to useEffect (filter cleanup) to skip - prevents double router.get and white flash
+        categoryChangeFromClickRef.current = true
+
         // Phase 2 invariant: Explicitly reset dialog state before preserveState navigation
-        // This prevents Inertia from preserving isUploadDialogOpen=true across category changes
         setIsUploadDialogOpen(false)
-        
+
         setSelectedCategoryId(categoryId)
-        
-        router.get('/app/assets', 
+
+        router.get('/app/assets',
             categorySlug ? { category: categorySlug } : {},
-            { 
+            {
                 preserveState: true,
                 preserveScroll: true,
-                // Explicitly reload filterable_schema when category changes
-                // This ensures category-specific is_primary values are correctly applied
-                // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
-                // The filterable_schema contains effective_is_primary computed for the selected category.
                 only: ['filterable_schema', 'available_values', 'assets', 'selected_category', 'selected_category_slug']
             }
         )

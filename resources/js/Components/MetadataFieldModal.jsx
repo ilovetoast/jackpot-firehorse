@@ -702,11 +702,11 @@ export default function MetadataFieldModal({
                                                     </div>
                                                 )}
 
-                                                {/* Deliverable Categories */}
+                                                {/* Execution Categories (internal: deliverable) */}
                                                 {groupedCategories.deliverable.length > 0 && (
                                                     <div className="px-2 py-1 border-t border-gray-200 mt-1">
                                                         <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 px-2 mt-2">
-                                                            Deliverable Categories
+                                                            Execution Categories
                                                         </div>
                                                         {groupedCategories.deliverable.map(category => {
                                                             const isSelected = formData.selectedCategories.includes(category.id)

@@ -14,6 +14,7 @@ import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilter
 import AssetDrawer from '../../Components/AssetDrawer'
 import DownloadBucketBar from '../../Components/DownloadBucketBar'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
+import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../utils/uiLabels'
 import {
     TagIcon,
     SparklesIcon,
@@ -489,7 +490,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                     <div className="flex flex-col w-72 h-full" style={{ backgroundColor: sidebarColor }}>
                         <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
                             <nav className="mt-5 flex-1 px-2 space-y-1">
-                                {/* Add Deliverable Button - Persistent in sidebar (only show if user has upload permissions) */}
+                                {/* Add Execution Button - Persistent in sidebar (only show if user has upload permissions) */}
                                 {auth?.user && (
                                     <div className="px-3 py-2 mb-4">
                                         <AddAssetButton 
@@ -607,7 +608,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                             ))
                                         ) : (
                                             <div className="px-3 py-2 text-sm" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}>
-                                                No deliverable categories yet
+                                                No execution categories yet
                                             </div>
                                         )}
                                     </div>
@@ -723,7 +724,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             />
                         </div>
                         
-                        {/* Deliverables Grid or Empty State */}
+                        {/* Executions Grid or Empty State */}
                         {localAssets && localAssets.length > 0 ? (
                             <>
                             <AssetGrid 
@@ -744,12 +745,12 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                     <SparklesIcon className="mx-auto h-16 w-16 text-gray-300" />
                                 </div>
                                 <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                    {selectedCategoryId ? 'No deliverables in this category yet' : 'No deliverables yet'}
+                                    {selectedCategoryId ? `No ${DELIVERABLES_ITEM_LABEL_PLURAL} in this category yet` : `No ${DELIVERABLES_ITEM_LABEL_PLURAL} yet`}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
                                     {selectedCategoryId
-                                        ? 'Get started by uploading your first deliverable to this category. Manage your brand assets with ease and keep everything organized.'
-                                        : 'Get started by selecting a category or uploading your first deliverable. Manage your brand assets with ease and keep everything in sync.'}
+                                        ? `Get started by uploading your first ${DELIVERABLES_ITEM_LABEL} to this category. Manage your brand assets with ease and keep everything organized.`
+                                        : `Get started by selecting a category or uploading your first ${DELIVERABLES_ITEM_LABEL}. Manage your brand assets with ease and keep everything in sync.`}
                                 </p>
                                 <div className="mt-8">
                                     <AddAssetButton 

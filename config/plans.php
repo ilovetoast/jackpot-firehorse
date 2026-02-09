@@ -38,29 +38,14 @@ return [
             'approval_summaries.enabled' => false,
         ],
         'public_collections_enabled' => false,
-        'public_collection_downloads_enabled' => false, // D6: Download collection as ZIP (Enterprise only)
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 50,
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
         ],
-        // Phase D2: Download management capabilities | D3: rename | D7: password_protection, branding
-        'download_management' => [
-            'extend_expiration' => false,
-            'revoke' => false,
-            'restrict_access_brand' => false,
-            'restrict_access_company' => false,
-            'restrict_access_users' => false,
-            'non_expiring' => false,
-            'regenerate' => false,
-            'rename' => false,
-            'password_protection' => false, // D7: Enterprise only
-            'branding' => false, // D7: Pro + Enterprise
-            'max_expiration_days' => 30,
-        ],
         'notes' => [
-            'No "All" button in Assets/Deliverables category sidebar',
+            'No "All" button in Assets/Executions category sidebar',
             'Download links limited to 50 per month',
             'Limited to 1 tag per asset for basic organization',
             '5 AI tagging operations and 10 AI suggestions per month',
@@ -95,28 +80,14 @@ return [
             'approval_summaries.enabled' => false,
         ],
         'public_collections_enabled' => false,
-        'public_collection_downloads_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 200,
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
         ],
-        'download_management' => [
-            'extend_expiration' => false,
-            'revoke' => false,
-            'restrict_access_brand' => false,
-            'restrict_access_company' => false,
-            'restrict_access_users' => false,
-            'non_expiring' => false,
-            'regenerate' => false,
-            'rename' => false,
-            'password_protection' => false,
-            'branding' => false,
-            'max_expiration_days' => 30,
-        ],
         'notes' => [
-            '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
+            '"All" button in Assets/Executions category sidebar to view all assets across categories',
             'Download links limited to 200 per month',
             'Up to 5 tags per asset for better organization',
             '50 AI tagging operations and 100 AI suggestions per month',
@@ -155,28 +126,14 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => false,
-        'public_collection_downloads_enabled' => false,
         'download_features' => [
             'download_links_limited' => true,
             'download_links_limit' => 1000,
             'custom_download_permissions' => true,
             'share_downloads_with_permissions' => true,
         ],
-        'download_management' => [
-            'extend_expiration' => true,
-            'revoke' => true,
-            'restrict_access_brand' => true,
-            'restrict_access_company' => true,
-            'restrict_access_users' => false,
-            'non_expiring' => false,
-            'regenerate' => false,
-            'rename' => false,
-            'password_protection' => false, // D7: Enterprise only
-            'branding' => true, // D7: Pro + Enterprise
-            'max_expiration_days' => 90,
-        ],
         'notes' => [
-            '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
+            '"All" button in Assets/Executions category sidebar to view all assets across categories',
             'Download links limited to 1,000 per month',
             'Share downloads with custom permissions',
             'Up to 10 tags per asset for comprehensive categorization',
@@ -217,35 +174,14 @@ return [
             'approval_summaries.enabled' => true,
         ],
         'public_collections_enabled' => true, // C10: Enterprise only
-        'public_collection_downloads_enabled' => true, // D6: Download collection as ZIP
         'download_features' => [
             'download_links_limited' => false,
             'download_links_limit' => 999999, // Unlimited
             'custom_download_permissions' => true,
             'share_downloads_with_permissions' => true,
         ],
-        'download_management' => [
-            'extend_expiration' => true,
-            'revoke' => true,
-            'restrict_access_brand' => true,
-            'restrict_access_company' => true,
-            'restrict_access_users' => true,
-            'non_expiring' => true,
-            'regenerate' => true,
-            'rename' => true,
-            'password_protection' => true, // D7: Enterprise only
-            'branding' => true, // D7: Pro + Enterprise
-            'max_expiration_days' => 365,
-        ],
-        // D11: Enterprise Download Policy — organizational delivery rules (Enterprise only). Non-enterprise: no key / null.
-        'download_policy' => [
-            'disable_single_asset_downloads' => true,
-            'force_expiration_days' => 30,
-            'disallow_non_expiring' => true,
-            'require_password_for_public' => false, // default: not required; set true per-tenant if needed
-        ],
         'notes' => [
-            '"All" button in Assets/Deliverables category sidebar to view all assets across categories',
+            '"All" button in Assets/Executions category sidebar to view all assets across categories',
             'Unlimited download links',
             'Share downloads with custom permissions',
             'Up to 15 tags per asset for maximum flexibility',

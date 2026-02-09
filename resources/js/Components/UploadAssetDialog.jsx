@@ -34,6 +34,7 @@ import ApprovalNotice from './Upload/ApprovalNotice' // TASK 1: Approval notice 
 import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh' // CSRF token refresh for 419 errors
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
+import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -4018,7 +4019,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         {/* Header */}
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
-                                Add {defaultAssetType === 'asset' ? 'Asset' : 'Deliverable'}
+                                Add {defaultAssetType === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR}
                             </h3>
                             {!hasUploadingItems && batchStatus !== 'finalizing' && (
                                 <button

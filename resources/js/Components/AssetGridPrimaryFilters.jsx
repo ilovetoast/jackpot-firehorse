@@ -24,6 +24,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
+import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 
 /**
  * Primary Filter Bar Component
@@ -210,7 +211,7 @@ export default function AssetGridPrimaryFilters({
                             className="block w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                         >
                             <option value="asset">Assets</option>
-                            <option value="deliverable">Deliverables</option>
+                            <option value="deliverable">{DELIVERABLES_PAGE_LABEL}</option>
                         </select>
                     </div>
                     

@@ -6,6 +6,7 @@ import AppFooter from '../../Components/AppFooter'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
 import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
 import { CategoryIcon, getIconById } from '../../Helpers/categoryIcons'
+import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 
 export default function CategoriesIndex({ categories, filters, limits, asset_types, plan }) {
     const { auth } = usePage().props
@@ -315,7 +316,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                             ))}
                                         </select>
                                         <p className="mt-1 text-xs text-gray-500">
-                                            Creating a {data.asset_type === 'asset' ? 'Asset' : 'Deliverable'} category
+                                            Creating an {data.asset_type === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR} category
                                         </p>
                                     </div>
                                     <div>
@@ -410,7 +411,7 @@ export default function CategoriesIndex({ categories, filters, limits, asset_typ
                                     >
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75m0 0h.375c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-.375A1.125 1.125 0 012 19.875v-4.5c0-.621.504-1.125 1.125-1.125H4.5z" />
                                     </svg>
-                                    Deliverable
+                                    {DELIVERABLES_PAGE_LABEL_SINGULAR}
                                 </button>
                             </nav>
                         </div>

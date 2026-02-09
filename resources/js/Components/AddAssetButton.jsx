@@ -4,6 +4,7 @@
 
 import { usePage } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
+import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 import PermissionGate from './PermissionGate'
 
 /**
@@ -34,7 +35,7 @@ export default function AddAssetButton({
     
     const defaultText = defaultAssetType === 'asset' 
         ? 'Add Asset' 
-        : 'Add Deliverable'
+        : `Add ${DELIVERABLES_PAGE_LABEL_SINGULAR}`
 
     return (
         <button

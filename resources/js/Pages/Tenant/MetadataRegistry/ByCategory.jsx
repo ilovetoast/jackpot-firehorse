@@ -1029,11 +1029,11 @@ export default function ByCategoryView({
                             </div>
                         )}
 
-                        {/* Deliverable Categories */}
+                        {/* Execution Categories (internal: deliverable) */}
                         {groupedCategories.deliverable.length > 0 && (
                             <div className="mt-4">
                                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                                    Deliverable Categories
+                                    Execution Categories
                                 </div>
                                 {groupedCategories.deliverable.map(category => (
                                     <button

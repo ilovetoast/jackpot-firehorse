@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
+import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 import AppBrandLogo from './AppBrandLogo'
 import PermissionGate from './PermissionGate'
 import Avatar from './Avatar'
@@ -318,10 +319,10 @@ export default function AppNav({ brand, tenant }) {
                             )}
                         </div>
 
-                        {/* Main menu: Dashboard, Assets, Deliverables, Collections, Generative, Downloads (C12: flag + .app-nav-main-links for CSS) */}
+                        {/* Main menu: Dashboard, Assets, Executions, Collections, Generative, Downloads (C12: flag + .app-nav-main-links for CSS) */}
                         {isAppPage ? (isCollectionOnlyNav ? (
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute items-center" style={{ left: '18rem' }} data-collection-only="true">
-                                {['Dashboard', 'Assets', 'Deliverables'].map((label) => (
+                                {['Dashboard', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
                                     <span
                                         key={label}
                                         className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
@@ -449,7 +450,7 @@ export default function AppNav({ brand, tenant }) {
                                             : 'transparent'
                                     }}
                                 >
-                                    Deliverables
+                                    {DELIVERABLES_PAGE_LABEL}
                                 </Link>
                                 <Link
                                     href="/app/collections"
@@ -536,7 +537,7 @@ export default function AppNav({ brand, tenant }) {
                                             : 'transparent'
                                     }}
                                 >
-                                    Deliverables
+                                    {DELIVERABLES_PAGE_LABEL}
                                 </Link>
                                 <Link
                                     href="/app/collections"

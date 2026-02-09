@@ -288,7 +288,7 @@ export default function Home() {
                                     Raw vs final separation
                                 </dt>
                                 <dd className="mt-2 text-base leading-7 text-gray-600">
-                                    Keep raw marketing assets separate from final deliverables with clear, organized structure.
+                                    Keep raw marketing assets separate from final executions with clear, organized structure.
                                 </dd>
                             </div>
                             <div className="relative pl-16">
