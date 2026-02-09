@@ -90,10 +90,22 @@ class MetadataFilterService
             if ($value === null || $value === '') {
                 continue; // Skip empty filters
             }
+            // Normalize select: frontend may send single value as string or as single-element array
+            $fieldType = $field['type'] ?? 'text';
+            if ($fieldKey !== 'collection' && $fieldType === 'select' && is_array($value) && count($value) === 1) {
+                $value = reset($value);
+            }
 
             // C9.2: Collection filter uses asset_collections pivot, not asset_metadata
             if ($fieldKey === 'collection') {
                 $this->applyCollectionFilter($query, $value);
+                continue;
+            }
+
+            // Starred (and quality_rating) are stored at assets.metadata top level; filter by that column only
+            // (same source as sort) so filtering works regardless of asset_metadata rows.
+            if ($fieldKey === 'starred') {
+                $this->applyStarredFilter($query, $value);
                 continue;
             }
 
@@ -130,6 +142,30 @@ class MetadataFilterService
     }
 
     /**
+     * Apply starred filter using assets.metadata only (same storage as sort).
+     * Starred is synced to metadata->starred; match the same robust check as sort.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param mixed $value true, 'true', 1 for "starred only"; false, 'false', 0 for "not starred"
+     */
+    protected function applyStarredFilter($query, $value): void
+    {
+        $wantStarred = $value === true || $value === 'true' || $value === 1 || $value === '1';
+        if ($wantStarred) {
+            $query->where(function ($q) {
+                $q->whereRaw("JSON_EXTRACT(metadata, '$.starred') = true")
+                    ->orWhereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1')");
+            });
+        } else {
+            $query->where(function ($q) {
+                $q->whereRaw("JSON_EXTRACT(metadata, '$.starred') IS NULL")
+                    ->orWhereRaw("JSON_EXTRACT(metadata, '$.starred') = false")
+                    ->orWhereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('false', '0', '')");
+            });
+        }
+    }
+
+    /**
      * Apply filter for a specific field.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
@@ -157,22 +193,25 @@ class MetadataFilterService
         }
 
         // Apply filter using OR condition to check both asset_metadata table AND metadata JSON column
-        // This ensures compatibility with both storage methods
-        $query->where(function ($q) use ($fieldId, $fieldKey, $fieldType, $operator, $value) {
+        // This ensures compatibility with both storage methods.
+        // Include all sources that can have approved values (same as AssetMetadataStateResolver):
+        // user, system, ai, automatic, manual_override — so approved AI e.g. scene_classification is filterable.
+        $approvedSources = ['user', 'system', 'ai', 'automatic', 'manual_override'];
+        $query->where(function ($q) use ($fieldId, $fieldKey, $fieldType, $operator, $value, $approvedSources) {
             // Option 1: Check asset_metadata table (preferred - normalized storage)
-            $q->whereExists(function ($subQ) use ($fieldId, $fieldType, $operator, $value) {
+            $q->whereExists(function ($subQ) use ($fieldId, $fieldType, $operator, $value, $approvedSources) {
                 $subQ->select(DB::raw(1))
                     ->from('asset_metadata as am')
                     ->whereColumn('am.asset_id', 'assets.id')
                     ->where('am.metadata_field_id', $fieldId)
-                    ->whereIn('am.source', ['user', 'system'])
+                    ->whereIn('am.source', $approvedSources)
                     ->whereNotNull('am.approved_at')
                     ->whereRaw("am.approved_at = (
                         SELECT MAX(approved_at)
                         FROM asset_metadata
                         WHERE asset_id = am.asset_id
                         AND metadata_field_id = ?
-                        AND source IN ('user', 'system')
+                        AND source IN ('" . implode("','", $approvedSources) . "')
                         AND approved_at IS NOT NULL
                     )", [$fieldId]);
 
@@ -205,21 +244,22 @@ class MetadataFilterService
         }
 
         $placeholders = implode(',', array_fill(0, count($buckets), '?'));
-        $query->where(function ($q) use ($fieldId, $buckets, $placeholders) {
+        $approvedSources = ['user', 'system', 'ai', 'automatic', 'manual_override'];
+        $query->where(function ($q) use ($fieldId, $buckets, $placeholders, $approvedSources) {
             // Option 1: asset_metadata table (canonical) — JSON_UNQUOTE exact match, IN (OR across buckets)
-            $q->whereExists(function ($subQ) use ($fieldId, $buckets, $placeholders) {
+            $q->whereExists(function ($subQ) use ($fieldId, $buckets, $placeholders, $approvedSources) {
                 $subQ->select(DB::raw(1))
                     ->from('asset_metadata as am')
                     ->whereColumn('am.asset_id', 'assets.id')
                     ->where('am.metadata_field_id', $fieldId)
-                    ->whereIn('am.source', ['user', 'system'])
+                    ->whereIn('am.source', $approvedSources)
                     ->whereNotNull('am.approved_at')
                     ->whereRaw("am.approved_at = (
                         SELECT MAX(approved_at)
                         FROM asset_metadata
                         WHERE asset_id = am.asset_id
                         AND metadata_field_id = ?
-                        AND source IN ('user', 'system')
+                        AND source IN ('" . implode("','", $approvedSources) . "')
                         AND approved_at IS NOT NULL
                     )", [$fieldId])
                     ->whereRaw('JSON_UNQUOTE(am.value_json) IN (' . $placeholders . ')', $buckets);
@@ -235,16 +275,22 @@ class MetadataFilterService
      * Apply operator filter to metadata JSON column (legacy/fallback).
      * 
      * Checks metadata->fields->{fieldKey} in the assets.metadata JSON column.
+     * Exception: starred and quality_rating are stored at top level (metadata->starred, metadata->quality_rating)
+     * for sort/display; filter must check that path so filtering works when only assets.metadata is populated.
      */
     protected function applyOperatorFilterToJsonColumn($query, string $fieldKey, string $fieldType, string $operator, $value): void
     {
-        $jsonPath = "JSON_EXTRACT(metadata, '$.fields.{$fieldKey}')";
-        
+        // Sort fields (starred, quality_rating) are synced to metadata root, not metadata.fields
+        $topLevelSortFields = ['starred', 'quality_rating'];
+        $jsonPath = in_array($fieldKey, $topLevelSortFields, true)
+            ? "JSON_EXTRACT(metadata, '$.{$fieldKey}')"
+            : "JSON_EXTRACT(metadata, '$.fields.{$fieldKey}')";
+
         switch ($fieldType) {
             case 'select':
-                // For select, match exact value
-                $encodedValue = json_encode($value);
-                $query->orWhereRaw("{$jsonPath} = ?", [$encodedValue]);
+                // For select, match value case-insensitively (UI may send "Wordmark", DB may store "wordmark")
+                $selectValue = is_array($value) ? (reset($value) ?? $value) : $value;
+                $query->orWhereRaw('LOWER(JSON_UNQUOTE(' . $jsonPath . ')) = LOWER(?)', [(string) $selectValue]);
                 break;
                 
             case 'text':
@@ -260,7 +306,24 @@ class MetadataFilterService
                 // For multiselect, check if value is in array
                 $query->orWhereRaw("JSON_CONTAINS({$jsonPath}, ?)", [json_encode($value)]);
                 break;
-                
+
+            case 'boolean':
+                $boolValue = $value === true || $value === 'true' || $value === 1;
+                $encodedValue = json_encode($boolValue);
+                $query->orWhereRaw("({$jsonPath} = ? OR JSON_UNQUOTE({$jsonPath}) = ?)", [$encodedValue, $boolValue ? 'true' : 'false']);
+                break;
+
+            case 'rating':
+                // quality_rating etc.: stored as number or string at metadata root
+                if ($operator === 'equals') {
+                    $query->orWhereRaw("({$jsonPath} = ? OR {$jsonPath} = ? OR JSON_UNQUOTE({$jsonPath}) = ?)", [
+                        json_encode((int) $value),
+                        json_encode((string) $value),
+                        (string) $value,
+                    ]);
+                }
+                break;
+
             // Add other field types as needed
         }
     }
@@ -300,16 +363,24 @@ class MetadataFilterService
 
             case 'boolean':
                 $boolValue = $value === true || $value === 'true' || $value === 1;
-                $query->where('am.value_json', json_encode($boolValue));
+                // Compare using JSON_UNQUOTE so we match both JSON literal true and string "true"
+                $query->whereRaw('JSON_UNQUOTE(am.value_json) = ?', [$boolValue ? 'true' : 'false']);
                 break;
 
             case 'select':
-                // For select fields, value_json is stored as JSON-encoded string
-                // e.g., "studio" is stored as "\"studio\"" (JSON string)
-                // Use JSON_UNQUOTE to compare the unquoted values for reliability
-                // Compare using JSON_UNQUOTE to handle any encoding differences
-                // This compares the actual unquoted string values
-                $query->whereRaw('JSON_UNQUOTE(am.value_json) = ?', [$value]);
+                // For select fields, value_json is stored as JSON-encoded string.
+                // Compare case-insensitively so UI label (e.g. "Wordmark") matches stored value (e.g. "wordmark").
+                $query->whereRaw('LOWER(JSON_UNQUOTE(am.value_json)) = LOWER(?)', [(string) $value]);
+                break;
+
+            case 'rating':
+                // Rating (e.g. quality_rating 1–5): stored as number or string; match both
+                if ($operator === 'equals') {
+                    $query->where(function ($q) use ($value) {
+                        $q->where('am.value_json', json_encode((int) $value))
+                            ->orWhere('am.value_json', json_encode((string) $value));
+                    });
+                }
                 break;
 
             case 'multiselect':
@@ -355,8 +426,13 @@ class MetadataFilterService
     public function getFilterableFields(array $schema, ?Category $category = null, ?\App\Models\Tenant $tenant = null): array
     {
         $candidateFields = [];
+        $alwaysHiddenFields = config('metadata_category_defaults.always_hidden_fields', []);
 
         foreach ($schema['fields'] ?? [] as $field) {
+            $fieldKey = $field['key'] ?? null;
+            if ($fieldKey && in_array($fieldKey, $alwaysHiddenFields, true)) {
+                continue; // Behind-the-scenes fields (e.g. dimensions) never appear in More filters
+            }
             if (!($field['is_filterable'] ?? false)) {
                 continue;
             }
@@ -393,10 +469,8 @@ class MetadataFilterService
 
             $fieldType = $field['type'] ?? 'text';
 
-            // Skip rating fields
-            if ($fieldType === 'rating') {
-                continue;
-            }
+            // Include rating fields (e.g. quality_rating) so they can appear as primary/secondary filters
+            // when is_primary is set and available_values exist; options are attached in the controller.
 
             $candidateFields[] = $field;
         }
@@ -491,6 +565,21 @@ class MetadataFilterService
 
             $filterable[] = $entry;
         }
+
+        // Order: Tags and Collection first (top of More filters), then rest preserve schema order
+        $filterOrderPriority = ['tags' => 0, 'collection' => 1];
+        $orderValue = static function ($entry) use ($filterOrderPriority) {
+            $key = $entry['field_key'] ?? $entry['field_id'] ?? '';
+            return $filterOrderPriority[$key] ?? 2;
+        };
+        usort($filterable, static function ($a, $b) use ($orderValue) {
+            $pa = $orderValue($a);
+            $pb = $orderValue($b);
+            if ($pa !== $pb) {
+                return $pa <=> $pb;
+            }
+            return 0;
+        });
 
         return $filterable;
     }

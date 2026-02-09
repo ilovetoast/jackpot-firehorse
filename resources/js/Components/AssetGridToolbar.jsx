@@ -30,6 +30,7 @@ import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
+import { updateFilterDebug } from '../utils/assetFilterDebug'
 
 export default function AssetGridToolbar({
     showInfo = true,
@@ -76,32 +77,17 @@ export default function AssetGridToolbar({
     const canApprove = isBrandApprover || isTenantOwnerOrAdmin
     const approvalsEnabled = auth?.approval_features?.approvals_enabled
     
-    // Fetch pending assets count for current category
     useEffect(() => {
-        // Debug logging
-        console.log('[AssetGridToolbar] Pending assets check:', {
-            canApprove,
-            approvalsEnabled,
-            brandId: brand?.id,
-            selectedCategoryId,
-            brandRole,
-            tenantRole,
-        })
-        
+        updateFilterDebug({ pendingAssets: { categoryId: selectedCategoryId, loading: true } })
         if (!canApprove || !approvalsEnabled || !brand?.id || !selectedCategoryId) {
             setPendingAssetsCount(0)
             setPendingTagsCount(0)
+            updateFilterDebug({ pendingAssets: { categoryId: selectedCategoryId, count: 0, loading: false } })
             return
         }
-        
         setLoadingPendingCounts(true)
-        
-        // Fetch pending assets for this category (API filters by category_id)
-        // Ensure category_id is a number
         const categoryId = typeof selectedCategoryId === 'string' ? parseInt(selectedCategoryId, 10) : selectedCategoryId
         const url = `/app/api/brands/${brand.id}/pending-assets?category_id=${categoryId}`
-        console.log('[AssetGridToolbar] Fetching pending assets from:', url, 'categoryId:', categoryId)
-        
         fetch(url, {
             method: 'GET',
             headers: {
@@ -120,16 +106,15 @@ export default function AssetGridToolbar({
                 return res.json()
             })
             .then((data) => {
-                // API already filters by category, so all returned assets are for this category
                 const count = data.count || data.assets?.length || 0
-                console.log('[AssetGridToolbar] Pending assets count:', count, 'for category', selectedCategoryId)
                 setPendingAssetsCount(count)
                 setLoadingPendingCounts(false)
+                updateFilterDebug({ pendingAssets: { categoryId: selectedCategoryId, count, loading: false } })
             })
             .catch((err) => {
-                console.error('[AssetGridToolbar] Failed to fetch pending assets count', err)
                 setPendingAssetsCount(0)
                 setLoadingPendingCounts(false)
+                updateFilterDebug({ pendingAssets: { categoryId: selectedCategoryId, count: 0, loading: false, error: String(err?.message || err) } })
             })
         
         // TODO: Fetch pending tag suggestions count for this category

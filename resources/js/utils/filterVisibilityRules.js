@@ -227,28 +227,13 @@ export function getFilterVisibilityState(filter, context) {
     const { category_id, asset_type, available_values = {} } = context;
     const fieldKey = filter.key || filter.field_key;
     
-    // DEBUG: Log visibility check
-    console.log('[filterVisibilityRules] DEBUG - getFilterVisibilityState:', {
-        field_key: fieldKey,
-        is_primary: filter.is_primary,
-        category_id,
-        asset_type,
-        available_values_for_field: available_values[fieldKey],
-    });
-    
     // Rule 1: Check scope compatibility
-    // If filter is incompatible with current category/asset_type, it's hidden
     const isCompatible = isFilterCompatible(filter, { category_id, asset_type });
-    console.log('[filterVisibilityRules] DEBUG - isFilterCompatible:', isCompatible, 'for', fieldKey);
     if (!isCompatible) {
-        console.log('[filterVisibilityRules] DEBUG - HIDDEN (scope incompatible):', fieldKey);
         return 'hidden';
     }
     
-    // Rule 2: Primary filters visibility
-    // System primary filters (Search, Category, Asset Type, Brand) are always visible
-    // Metadata primary filters (is_primary === true) still require available_values
-    // This prevents showing empty dropdowns for metadata filters (UX-hostile)
+    // Rule 2: System primary filters always visible
     const isSystemPrimary = filter.is_primary === true && (
         filter.key === 'search' || 
         filter.key === 'category' || 
@@ -259,29 +244,16 @@ export function getFilterVisibilityState(filter, context) {
         filter.field_key === 'asset_type' ||
         filter.field_key === 'brand'
     );
-    
-    console.log('[filterVisibilityRules] DEBUG - isSystemPrimary:', isSystemPrimary, 'for', fieldKey);
-    
     if (isSystemPrimary) {
-        console.log('[filterVisibilityRules] DEBUG - VISIBLE (system primary):', fieldKey);
-        return 'visible'; // System primary filters are always visible
+        return 'visible';
     }
     
-    // Metadata primary filters (is_primary === true but not system filters)
-    // Still need to check available_values to prevent empty dropdowns
-    
-    // Rule 3: Check available values
-    // If filter has no available values, it's hidden
-    // This prevents showing empty dropdowns (UX-hostile)
+    // Rule 3: Metadata primary/secondary need available values
     const hasValues = hasAvailableValues(filter, available_values);
-    console.log('[filterVisibilityRules] DEBUG - hasAvailableValues:', hasValues, 'for', fieldKey);
     if (!hasValues) {
-        console.log('[filterVisibilityRules] DEBUG - HIDDEN (no available values):', fieldKey);
         return 'hidden';
     }
     
-    // Rule 4: All checks passed → visible
-    console.log('[filterVisibilityRules] DEBUG - VISIBLE (all checks passed):', fieldKey);
     return 'visible';
 }
 

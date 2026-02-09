@@ -16,6 +16,7 @@ import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
+import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
 import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
@@ -243,66 +244,34 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             urlParams.delete(param)
         })
         
-        // Step 2: Clean up 'filters' param (metadata filters) using filterScopeRules
-        // The 'filters' param contains metadata field filters that need category compatibility checks
-        // Use filterScopeRules.isCategoryCompatible() to check each filter against the new category
-        const filtersParam = urlParams.get('filters')
-        if (filtersParam) {
-            try {
-                const filters = JSON.parse(decodeURIComponent(filtersParam))
+        // Step 2: Clean up metadata filters (URL may have 'filters' JSON or flat params) using filterScopeRules
+        const filterKeys = (filterable_schema || []).map(f => f.field_key || f.key).filter(Boolean)
+        const filters = parseFiltersFromUrl(urlParams, filterKeys)
+        if (Object.keys(filters).length > 0) {
+            if (nextCategoryId === null) {
+                filterKeys.forEach(k => urlParams.delete(k))
+                urlParams.delete('filters')
+                hasChanges = true
+            } else if (prevCategoryId !== null && prevCategoryId !== nextCategoryId && filterable_schema.length > 0) {
                 const compatibleFilters = {}
-                
-                // If switching to "All Categories" (nextCategoryId === null),
-                // remove all filters - only global filters are compatible with "All Categories"
-                // filterScopeRules.isCategoryCompatible() returns false for non-global filters when category_id is null
-                if (nextCategoryId === null) {
-                    // Remove all filters - category-scoped metadata filters are incompatible with "All Categories"
-                    urlParams.delete('filters')
-                    hasChanges = true
-                } else if (prevCategoryId !== null && prevCategoryId !== nextCategoryId && filterable_schema.length > 0) {
-                    // Switching between specific categories
-                    // Check each filter for category compatibility using filterScopeRules.isCategoryCompatible()
-                    // We need filterable_schema to get full filter descriptors for compatibility checking
-                    Object.entries(filters).forEach(([fieldKey, filterDef]) => {
-                        // Find the filter descriptor in filterable_schema
-                        const filterDescriptor = filterable_schema.find(
-                            field => (field.field_key || field.key) === fieldKey
-                        )
-                        
-                        if (filterDescriptor) {
-                            // Check category compatibility using filterScopeRules.isCategoryCompatible()
-                            // This uses the filter's category_ids to determine compatibility
-                            if (isCategoryCompatible(filterDescriptor, nextCategoryId)) {
-                                // Filter is compatible with new category - keep it
-                                compatibleFilters[fieldKey] = filterDef
-                            } else {
-                                // Filter is incompatible with new category - remove it
-                                hasChanges = true
-                            }
-                        } else {
-                            // Filter descriptor not found in schema - remove it (likely invalid)
-                            hasChanges = true
-                        }
-                    })
-                    
-                    // Update filters param if we removed any
-                    if (Object.keys(compatibleFilters).length === 0) {
-                        urlParams.delete('filters')
-                    } else if (Object.keys(compatibleFilters).length < Object.keys(filters).length) {
-                        urlParams.set('filters', JSON.stringify(compatibleFilters))
+                Object.entries(filters).forEach(([fieldKey, filterDef]) => {
+                    const filterDescriptor = filterable_schema.find(field => (field.field_key || field.key) === fieldKey)
+                    if (filterDescriptor && isCategoryCompatible(filterDescriptor, nextCategoryId)) {
+                        compatibleFilters[fieldKey] = filterDef
+                    } else {
+                        hasChanges = true
                     }
-                } else if (prevCategoryId !== null && prevCategoryId !== nextCategoryId) {
-                    // Switching between categories but no filterable_schema available
-                    // Conservative approach: remove all filters when switching categories
-                    // (metadata fields are category-scoped by definition)
-                    urlParams.delete('filters')
-                    hasChanges = true
-                }
-                // If switching from "All Categories" to a specific category, keep filters
-                // (they'll be validated by filterScopeRules in the UI)
-            } catch (e) {
-                // If filters param is malformed, remove it
-                console.error('[Assets/Index] Failed to parse filters param during category cleanup', e)
+                })
+                filterKeys.forEach(k => urlParams.delete(k))
+                urlParams.delete('filters')
+                Object.entries(compatibleFilters).forEach(([key, def]) => {
+                    const v = def?.value
+                    if (v != null && v !== '' && (!Array.isArray(v) || v.length > 0)) {
+                        urlParams.set(key, Array.isArray(v) ? String(v[0]) : String(v))
+                    }
+                })
+            } else if (prevCategoryId !== null && prevCategoryId !== nextCategoryId) {
+                filterKeys.forEach(k => urlParams.delete(k))
                 urlParams.delete('filters')
                 hasChanges = true
             }
@@ -362,7 +331,32 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
     })
-    
+
+    // Single consolidated filter debug log (opt-in: set window.__DEBUG_FILTERS__ = true in console)
+    useEffect(() => {
+        if (typeof window === 'undefined' || !window.__DEBUG_FILTERS__) return
+        const urlParams = new URLSearchParams(window.location.search)
+        const filterKeys = (filterable_schema || []).map((f) => f.field_key || f.key).filter(Boolean)
+        const filters = parseFiltersFromUrl(urlParams, filterKeys)
+        const appliedFilterValues = Object.fromEntries(
+            Object.entries(filters).map(([k, def]) => [k, def?.value])
+        )
+        const sample = (localAssets || []).slice(0, 3).map((a) => {
+            const fields = a.metadata?.fields || {}
+            const sampleFields = {}
+            Object.keys(appliedFilterValues).forEach((key) => {
+                sampleFields[key] = fields[key] ?? a.metadata?.[key] ?? null
+            })
+            return { id: a.id, title: a.title, filter_fields: sampleFields }
+        })
+        console.log('[filters] troubleshooting (set window.__DEBUG_FILTERS__ = false to disable)', {
+            appliedFilters: appliedFilterValues,
+            category_id: selectedCategoryId,
+            assetCount: (localAssets || []).length,
+            sampleAssets: sample,
+        })
+    }, [localAssets, selectedCategoryId, filterable_schema])
+
     // Incremental load: show 24 initially, load more on scroll or button click
     const infiniteResetDeps = [selectedCategoryId, typeof window !== 'undefined' ? window.location.search : '']
     const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)

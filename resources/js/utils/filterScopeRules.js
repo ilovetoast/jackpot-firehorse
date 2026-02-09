@@ -319,32 +319,14 @@ export function isAssetTypeCompatible(filter, asset_type) {
  */
 export function isFilterCompatible(filter, context) {
     if (!filter || typeof filter !== 'object') {
-        console.log('[filterScopeRules] DEBUG - isFilterCompatible: filter is invalid', filter);
         return false;
     }
-    
     if (!context || typeof context !== 'object') {
-        console.log('[filterScopeRules] DEBUG - isFilterCompatible: context is invalid', context);
         return false;
     }
-    
     const { category_id, asset_type } = context;
-    
     const categoryCompatible = isCategoryCompatible(filter, category_id);
     const assetTypeCompatible = isAssetTypeCompatible(filter, asset_type);
-    
-    console.log('[filterScopeRules] DEBUG - isFilterCompatible:', {
-        field_key: filter.field_key || filter.key,
-        category_id,
-        asset_type,
-        filter_category_ids: filter.category_ids,
-        filter_asset_types: filter.asset_types,
-        categoryCompatible,
-        assetTypeCompatible,
-        result: categoryCompatible && assetTypeCompatible,
-    });
-    
-    // Both category and asset type compatibility must pass
     return categoryCompatible && assetTypeCompatible;
 }
 

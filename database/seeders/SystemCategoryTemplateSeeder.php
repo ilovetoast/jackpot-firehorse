@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\AssetType;
+use App\Models\Category;
 use App\Models\SystemCategory;
 use Illuminate\Database\Seeder;
 
@@ -10,9 +11,10 @@ use Illuminate\Database\Seeder;
  * System Category Template Seeder
  *
  * Seeds initial system category templates that will be copied to new brands.
- * 
- * ASSET asset type categories: Logos, Photography, Graphics
- * Deliverable asset type categories: Catalogs, Press Releases, Digital Ads, Social Creative, Videos
+ *
+ * ASSET asset type categories: Logos, Photography, Graphics, Video
+ * Execution/Deliverable asset type categories (exactly these 10):
+ *   Print, Digital, OOH, Events, Videos, Sales Collateral, PR, Packaging, Product Renders, Radio
  */
 class SystemCategoryTemplateSeeder extends Seeder
 {
@@ -55,34 +57,34 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_hidden' => false,
                 'sort_order' => 3,
             ],
-            // Deliverable asset type system categories
+            // Execution/Deliverable asset type system categories (exactly 10; slugs match metadata_category_defaults)
             [
-                'name' => 'Catalogs',
-                'slug' => 'catalogs',
+                'name' => 'Print',
+                'slug' => 'print',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 0,
             ],
             [
-                'name' => 'Press Releases',
-                'slug' => 'press-releases',
+                'name' => 'Digital',
+                'slug' => 'digital-ads',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 1,
             ],
             [
-                'name' => 'Digital Ads',
-                'slug' => 'digital-ads',
+                'name' => 'OOH',
+                'slug' => 'ooh',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 2,
             ],
             [
-                'name' => 'Social Creative',
-                'slug' => 'social-creative',
+                'name' => 'Events',
+                'slug' => 'events',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -96,6 +98,46 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_hidden' => false,
                 'sort_order' => 4,
             ],
+            [
+                'name' => 'Sales Collateral',
+                'slug' => 'sales-collateral',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 5,
+            ],
+            [
+                'name' => 'PR',
+                'slug' => 'pr',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 6,
+            ],
+            [
+                'name' => 'Packaging',
+                'slug' => 'packaging',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 7,
+            ],
+            [
+                'name' => 'Product Renders',
+                'slug' => 'product-renders',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 8,
+            ],
+            [
+                'name' => 'Radio',
+                'slug' => 'radio',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 9,
+            ],
         ];
 
         foreach ($templates as $template) {
@@ -107,5 +149,20 @@ class SystemCategoryTemplateSeeder extends Seeder
                 $template
             );
         }
+
+        // Rename "Digital Ads" to "Digital" (slug stays digital-ads for config compatibility)
+        SystemCategory::where('asset_type', AssetType::DELIVERABLE)
+            ->where('slug', 'digital-ads')
+            ->update(['name' => 'Digital']);
+
+        // Hide removed deliverable templates so they no longer appear in Executions sidebar
+        SystemCategory::where('asset_type', AssetType::DELIVERABLE)
+            ->whereIn('slug', ['catalogs', 'press-releases', 'social-creative'])
+            ->update(['is_hidden' => true]);
+
+        // Hide existing brand categories that used the removed templates (so sidebar shows new list only)
+        Category::where('asset_type', AssetType::DELIVERABLE)
+            ->whereIn('slug', ['catalogs', 'press-releases', 'social-creative'])
+            ->update(['is_hidden' => true]);
     }
 }

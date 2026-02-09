@@ -80,13 +80,14 @@ class CompanyBrandSeeder extends Seeder
         // Get the user as Eloquent model
         $initialUser = User::find(1);
 
-        // Create initial company for user 1
+        // Canonical: Company ID 1 = Velvet Hammer (primary agency)
         $initialCompany = Tenant::firstOrCreate(
             ['slug' => 'velvethammerbranding'],
-            ['name' => 'Velve Hammer Branding']
+            ['name' => 'Velvet Hammer']
         );
+        $initialCompany->update(['name' => 'Velvet Hammer']);
 
-        // Set tenant 1 to enterprise plan and mark as agency (approved)
+        // Agency: enterprise plan (feature limits), Silver tier, approved
         $silverTier = AgencyTier::where('name', 'Silver')->first();
         $initialCompany->update([
             'manual_plan_override' => 'enterprise',
@@ -139,9 +140,9 @@ class CompanyBrandSeeder extends Seeder
             $initialUser->brands()->syncWithoutDetaching([$initialDefaultBrand->id => ['role' => 'admin']]);
         }
 
-        // Bill Rempe: admin of company 1 and brand 1, site admin
+        // Bill Rempe: admin for tenant 1 (Velvet Hammer), member of all other tenants and all brands
         $bill = User::firstOrCreate(
-            ['email' => 'brempe@velvethammerbrnding.com'],
+            ['email' => 'brempe@velvethammerbranding.com'],
             [
                 'first_name' => 'Bill',
                 'last_name' => 'Rempe',
@@ -194,11 +195,19 @@ class CompanyBrandSeeder extends Seeder
                 $tenant->update(['name' => $companyName]);
             }
 
-            // Attach secondary user to every company with default role = member
-            // Use RoleRegistry to ensure canonical role
+            // Client companies are logically owned by the agency (supports spin-off testing)
+            $tenant->update(['incubated_by_agency_id' => $initialCompany->id]);
+
+            // msteele and brempe: members of all seeded tenants and brands
+            $initialUser->setRoleForTenant($tenant, 'member');
+            $bill->setRoleForTenant($tenant, 'member');
+            foreach ($tenant->brands as $brand) {
+                $initialUser->setRoleForBrand($brand, 'viewer');
+                $bill->setRoleForBrand($brand, 'viewer');
+            }
+
+            // Secondary dev user
             $secondaryUser->setRoleForTenant($tenant, 'member');
-            
-            // Assign secondary user to all brands with default brand role = viewer
             foreach ($tenant->brands as $brand) {
                 $secondaryUser->setRoleForBrand($brand, 'viewer');
             }
@@ -263,6 +272,16 @@ class CompanyBrandSeeder extends Seeder
                     ]
                 );
             }
+        }
+
+        // Ensure msteele and brempe are on every seeded brand (including those created above)
+        $allSeededBrands = Brand::whereHas('tenant', function ($q) use ($initialCompany, $companiesData) {
+            $slugs = array_merge([$initialCompany->slug], array_map(fn ($n) => Str::slug($n), array_keys($companiesData)));
+            $q->whereIn('slug', $slugs);
+        })->get();
+        foreach ($allSeededBrands as $brand) {
+            $initialUser->setRoleForBrand($brand, $brand->tenant_id === $initialCompany->id ? 'admin' : 'viewer');
+            $bill->setRoleForBrand($brand, $brand->tenant_id === $initialCompany->id ? 'admin' : 'viewer');
         }
     }
     

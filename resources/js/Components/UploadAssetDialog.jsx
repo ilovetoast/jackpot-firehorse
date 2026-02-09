@@ -4152,7 +4152,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     </div>
                                 )}
 
-                                {/* Category + Collections: one row each, inputs constrained width — below uploads */}
+                                {/* Category only — Collections are in General metadata group (seeder: group_key general) */}
                                 <div className="flex flex-col gap-3 pt-4 border-t border-gray-200 mt-4">
                                     <GlobalMetadataPanel
                                         uploadManager={v2UploadManager}
@@ -4162,28 +4162,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         inline
                                         inputClassName="flex-1 min-w-0 max-w-sm"
                                     />
-                                    {collectionFieldVisible && (
-                                        <div className="flex items-center gap-2 min-w-0 [&_.flex-1]:max-w-sm">
-                                            <label className="flex-shrink-0 w-24 text-sm font-medium text-gray-700 whitespace-nowrap">
-                                                Collections:
-                                            </label>
-                                            {collectionsListLoading ? (
-                                                <span className="text-sm text-gray-500">Loading…</span>
-                                            ) : (
-                                                <div className="flex-1 min-w-0">
-                                                    <CollectionSelector
-                                                        collections={collectionsList}
-                                                        selectedIds={selectedCollectionIds}
-                                                        onChange={setSelectedCollectionIds}
-                                                        disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
-                                                        placeholder="Select"
-                                                        showCreateButton={true}
-                                                        onCreateClick={() => setShowCreateCollectionModal(true)}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
                                 </div>
 
                                 <CreateCollectionModal
@@ -4214,6 +4192,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                     onValidationAttempt={() => {
                                                         setShowMetadataErrors(true)
                                                     }}
+                                                    collectionProps={collectionFieldVisible ? {
+                                                        collections: collectionsList,
+                                                        collectionsLoading: collectionsListLoading,
+                                                        selectedIds: selectedCollectionIds,
+                                                        onChange: setSelectedCollectionIds,
+                                                        showCreateButton: true,
+                                                        onCreateClick: () => setShowCreateCollectionModal(true),
+                                                    } : null}
                                                 />
                                             ) : (
                                                 <div className="rounded-md bg-gray-50 border border-gray-200 p-3">

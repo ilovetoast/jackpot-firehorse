@@ -11,6 +11,7 @@
 
 import { isFieldSatisfied } from '../../utils/metadataValidation'
 import TagInputUnified from '../TagInputUnified'
+import CollectionSelector from '../Collections/CollectionSelector'
 import StarRating from '../StarRating'
 import { usePage } from '@inertiajs/react'
 
@@ -24,7 +25,7 @@ import { usePage } from '@inertiajs/react'
  * @param {boolean} [props.disabled] - Whether field is disabled
  * @param {boolean} [props.showError] - Whether to show validation error
  */
-export default function MetadataFieldInput({ field, value, onChange, disabled = false, showError = false, isUploadContext = true }) {
+export default function MetadataFieldInput({ field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null }) {
     const isRequired = field.is_required || false
     // UPLOAD CONTEXT FIX: During upload, all fields are editable (approval happens after upload)
     // For non-upload contexts (e.g., asset drawer), respect can_edit permission
@@ -35,6 +36,35 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
         if (!isDisabled) {
             onChange(newValue)
         }
+    }
+
+    // C9.2: Collections field — render inside General group when collectionProps provided (uploader)
+    if (field.key === 'collection' && collectionProps) {
+        const { collections, collectionsLoading, selectedIds, onChange: onCollectionChange, showCreateButton, onCreateClick } = collectionProps
+        return (
+            <div className="flex items-start gap-2 min-w-0">
+                <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700 pt-0.5">
+                    {field.display_label}
+                    {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                </label>
+                <div className="flex-1 min-w-0">
+                    {collectionsLoading ? (
+                        <span className="text-sm text-gray-500">Loading…</span>
+                    ) : (
+                        <CollectionSelector
+                            collections={collections || []}
+                            selectedIds={selectedIds || []}
+                            onChange={onCollectionChange}
+                            disabled={isDisabled}
+                            placeholder="Select"
+                            showCreateButton={showCreateButton === true}
+                            onCreateClick={onCreateClick}
+                        />
+                    )}
+                </div>
+                {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
+            </div>
+        )
     }
 
     // Phase J.2.8: Special handling for tags field

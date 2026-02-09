@@ -263,41 +263,32 @@ class AssetController extends Controller
             $brand
         );
 
-        // Apply metadata filters from request
+        // Apply metadata filters from request (JSON 'filters' or readable flat params)
         $filters = $request->input('filters', []);
         if (is_string($filters)) {
             $filters = json_decode($filters, true) ?? [];
         }
-        if (!empty($filters) && is_array($filters)) {
-            // Resolve schema for filter application (matches pattern used for filterableSchema)
-            // Use 'image' as default file type for metadata schema resolution
-            $fileType = 'image';
-            if ($categoryId && $category) {
-                $schema = $this->metadataSchemaResolver->resolve(
-                    $tenant->id,
-                    $brand->id,
-                    $categoryId,
-                    $fileType
-                );
-            } elseif (!$categoryId) {
-                // "All Categories" view: Resolve schema without category context
-                $schema = $this->metadataSchemaResolver->resolve(
-                    $tenant->id,
-                    $brand->id,
-                    null, // No category context
-                    $fileType
-                );
-            } else {
-                // Category ID provided but category not found - use null category
-                $schema = $this->metadataSchemaResolver->resolve(
-                    $tenant->id,
-                    $brand->id,
-                    null,
-                    $fileType
-                );
+        $fileType = 'image';
+        $schema = $categoryId && $category
+            ? $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, $categoryId, $fileType)
+            : $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, null, $fileType);
+        // If no filters JSON, build from flat query params (e.g. photo_type=action&scene_classification=product)
+        // Schema returns 'fields' (not field_map); derive filter keys from field keys
+        if (empty($filters) || ! is_array($filters)) {
+            $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
+            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters'];
+            $filters = [];
+            foreach ($filterKeys as $key) {
+                if (in_array($key, $reserved, true)) {
+                    continue;
+                }
+                $val = $request->input($key);
+                if ($val !== null && $val !== '') {
+                    $filters[$key] = ['operator' => 'equals', 'value' => $val];
+                }
             }
-            
-            // Apply filters to query
+        }
+        if (! empty($filters) && is_array($filters)) {
             $this->metadataFilterService->applyFilters(
                 $assetsQuery,
                 $filters,
@@ -536,6 +527,8 @@ class AssetController extends Controller
                     ] : null,
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
+                    // Phase V-1: Video quick preview on hover (grid and drawer)
+                    'video_preview_url' => $asset->video_preview_url,
                 ];
             })
             ->values();
@@ -798,7 +791,29 @@ class AssetController extends Controller
                         }
                     }
                 }
-                
+
+                // Source 2b: Top-level metadata (starred, quality_rating) — synced to metadata root, not metadata.fields
+                $topLevelFilterKeys = ['starred', 'quality_rating'];
+                foreach ($assets as $asset) {
+                    $meta = $asset->metadata ?? [];
+                    foreach ($topLevelFilterKeys as $key) {
+                        if (! isset($filterableFieldKeys[$key])) {
+                            continue;
+                        }
+                        if (! array_key_exists($key, $meta)) {
+                            continue;
+                        }
+                        $v = $meta[$key];
+                        if (! isset($availableValues[$key])) {
+                            $availableValues[$key] = [];
+                        }
+                        $normalized = is_numeric($v) ? (int) $v : $v;
+                        if (! in_array($normalized, $availableValues[$key], true)) {
+                            $availableValues[$key][] = $normalized;
+                        }
+                    }
+                }
+
                 // TASK 2: Log value availability check before removing empty arrays
                 foreach ($availableValues as $fieldKey => $values) {
                     if (empty($values)) {
@@ -848,16 +863,22 @@ class AssetController extends Controller
                     }
                 }
 
-                // Seed available_values for primary rating/select fields so primary filter shows when no asset has a value yet
+                // Seed available_values for primary fields only when none exist yet (so filter still shows).
+                // When at least one value exists in the current asset set, do NOT merge in all schema options —
+                // primary filter dropdown should show only options that exist (limit options based on what exists).
                 foreach ($filterableSchema as $field) {
                     $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
                     $isPrimary = ($field['is_primary'] ?? false) === true;
-                    if (!$fieldKey || !$isPrimary || !isset($filterableFieldKeys[$fieldKey])) {
+                    if (! $fieldKey || ! $isPrimary || ! isset($filterableFieldKeys[$fieldKey])) {
                         continue;
+                    }
+                    $existing = $availableValues[$fieldKey] ?? [];
+                    if (! empty($existing)) {
+                        continue; // Already have values from current asset set — do not seed with all options
                     }
                     $optionValues = [];
                     $options = $field['options'] ?? [];
-                    if (!empty($options)) {
+                    if (! empty($options)) {
                         foreach ($options as $opt) {
                             $v = is_array($opt) ? ($opt['value'] ?? $opt['id'] ?? null) : $opt;
                             if ($v !== null && $v !== '') {
@@ -869,11 +890,8 @@ class AssetController extends Controller
                     if (empty($optionValues) && ($field['type'] ?? '') === 'rating') {
                         $optionValues = [1, 2, 3, 4, 5];
                     }
-                    if (!empty($optionValues)) {
-                        $availableValues[$fieldKey] = array_values(array_unique(array_merge(
-                            $availableValues[$fieldKey] ?? [],
-                            $optionValues
-                        )));
+                    if (! empty($optionValues)) {
+                        $availableValues[$fieldKey] = array_values(array_unique(array_merge($existing, $optionValues)));
                         sort($availableValues[$fieldKey]);
                     }
                 }
@@ -951,6 +969,7 @@ class AssetController extends Controller
         unset($field);
 
         return Inertia::render('Assets/Index', [
+            'tenant' => $tenant ? ['id' => $tenant->id] : null, // For Tags filter autocomplete
             'categories' => $allCategories,
             'categories_by_type' => [
                 'all' => $allCategories,

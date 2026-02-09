@@ -31,7 +31,10 @@ class MetadataFieldsSeeder extends Seeder
     {
         // Handle field renames (campaign -> collection)
         $this->handleFieldRenames();
-        
+
+        // Dimensions: system, auto-populated; never on upload, quick view, or filters (Part 1)
+        $this->seedDimensionsField();
+
         // Seed all metadata fields
         $this->seedBasicFields();
         $this->seedFilterOnlyFields();
@@ -98,12 +101,12 @@ class MetadataFieldsSeeder extends Seeder
         DB::table('metadata_fields')
             ->whereIn('key', ['ai_color_palette', 'ai_detected_objects'])
             ->delete();
-            
+
         // Convert Scene Classification from automatic to regular metadata field
         $sceneField = DB::table('metadata_fields')
             ->where('key', 'scene_classification')
             ->first();
-            
+
         if ($sceneField) {
             DB::table('metadata_fields')
                 ->where('id', $sceneField->id)
@@ -122,11 +125,33 @@ class MetadataFieldsSeeder extends Seeder
     }
 
     /**
+     * Seed dimensions field: behind-the-scenes only (auto-populated from file).
+     * Never visible on upload, quick view, or More filters. Config always_hidden_fields enforces
+     * is_filter_hidden=true (and is_hidden, is_upload_hidden) for every category.
+     */
+    protected function seedDimensionsField(): void
+    {
+        $this->getOrCreateField([
+            'key' => 'dimensions',
+            'system_label' => 'Dimensions',
+            'type' => 'text',
+            'applies_to' => 'image',
+            'scope' => 'system',
+            'group_key' => 'technical',
+            'is_filterable' => false,
+            'is_user_editable' => false,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => false,
+            'is_internal_only' => true,
+        ]);
+    }
+
+    /**
      * Seed basic metadata fields (from PhotoTypeSeeder).
      */
     protected function seedBasicFields(): void
     {
-        // Photo Type
+        // Photo Type (Photography) — options: studio, lifestyle only
         $photoTypeId = $this->getOrCreateField([
             'key' => 'photo_type',
             'system_label' => 'Photo Type',
@@ -139,19 +164,15 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => true,
             'is_upload_visible' => true,
             'is_internal_only' => false,
-            'ai_eligible' => true, // Enable AI by default
+            'ai_eligible' => true,
+            'display_widget' => 'select',
         ]);
-
-        $this->createOptions($photoTypeId, [
+        $this->syncOptions($photoTypeId, [
             ['value' => 'studio', 'system_label' => 'Studio'],
             ['value' => 'lifestyle', 'system_label' => 'Lifestyle'],
-            ['value' => 'product', 'system_label' => 'Product'],
-            ['value' => 'action', 'system_label' => 'Action'],            
-            ['value' => 'plate', 'system_label' => 'Plate'],            
-            ['value' => 'event', 'system_label' => 'Event'],
         ]);
 
-        // Logo Type
+        // Logo Type (Logos) — options: primary, secondary, promotional only; no AI by default
         $logoTypeId = $this->getOrCreateField([
             'key' => 'logo_type',
             'system_label' => 'Logo Type',
@@ -164,17 +185,106 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => true,
             'is_upload_visible' => true,
             'is_internal_only' => false,
-            'ai_eligible' => true, // Enable AI suggestions
+            'ai_eligible' => false,
+            'display_widget' => 'select',
         ]);
-
-        $this->createOptions($logoTypeId, [
+        $this->syncOptions($logoTypeId, [
             ['value' => 'primary', 'system_label' => 'Primary'],
             ['value' => 'secondary', 'system_label' => 'Secondary'],
-            ['value' => 'submark', 'system_label' => 'Submark'],
-            ['value' => 'icon_mark', 'system_label' => 'Icon / Mark'],
-            ['value' => 'wordmark', 'system_label' => 'Wordmark'],
-            ['value' => 'monogram', 'system_label' => 'Monogram'],
-            ['value' => 'lockup', 'system_label' => 'Lockup'],
+            ['value' => 'promotional', 'system_label' => 'Promotional'],
+        ]);
+
+        // Graphics — graphic_type
+        $graphicTypeId = $this->getOrCreateField([
+            'key' => 'graphic_type',
+            'system_label' => 'Graphic Type',
+            'type' => 'select',
+            'applies_to' => 'image',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($graphicTypeId, [
+            ['value' => 'icon', 'system_label' => 'Icon'],
+            ['value' => 'effect', 'system_label' => 'Effect'],
+            ['value' => 'texture', 'system_label' => 'Texture'],
+        ]);
+
+        // Video Assets — video_type
+        $videoTypeId = $this->getOrCreateField([
+            'key' => 'video_type',
+            'system_label' => 'Video Type',
+            'type' => 'select',
+            'applies_to' => 'video',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($videoTypeId, [
+            ['value' => 'b_roll', 'system_label' => 'B-Roll'],
+            ['value' => 'interviews', 'system_label' => 'Interviews'],
+        ]);
+
+        // Templates — template_type
+        $templateTypeId = $this->getOrCreateField([
+            'key' => 'template_type',
+            'system_label' => 'Template Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($templateTypeId, [
+            ['value' => 'email', 'system_label' => 'Email'],
+            ['value' => 'social', 'system_label' => 'Social'],
+        ]);
+
+        // Audio — audio_type (field only, no options)
+        $this->getOrCreateField([
+            'key' => 'audio_type',
+            'system_label' => 'Audio Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+
+        // 3D Models — model_3d_type (field only, no options)
+        $this->getOrCreateField([
+            'key' => 'model_3d_type',
+            'system_label' => '3D Model Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
         ]);
 
         // Orientation
@@ -318,11 +428,12 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => false, // Collections are not AI-generated
         ]);
         
-        // C9.2: Ensure collection field is not deprecated (needed for Metadata Management governance)
+        // C9.2: Ensure collection field is not deprecated and is grouped under General in uploader
         DB::table('metadata_fields')
             ->where('id', $collectionId)
             ->update([
                 'deprecated_at' => null,
+                'group_key' => 'general',
                 'updated_at' => now(),
             ]);
 
@@ -444,6 +555,213 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => true, // Hidden from asset views (filtering only)
             'ai_eligible' => false, // Not AI eligible (system calculated)
         ]);
+
+        // --- Execution / Deliverables type fields (exactly these 10; no others) ---
+        // 1. Print  2. Digital  3. OOH  4. Events  5. Video (Executions)  6. Sales Collateral
+        // 7. PR  8. Packaging  9. Product Renders  10. Radio
+
+        // 1. Print
+        $printTypeId = $this->getOrCreateField([
+            'key' => 'print_type',
+            'system_label' => 'Print Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($printTypeId, [
+            ['value' => 'ads', 'system_label' => 'Ads'],
+            ['value' => 'brochures', 'system_label' => 'Brochures'],
+            ['value' => 'posters', 'system_label' => 'Posters'],
+            ['value' => 'inserts', 'system_label' => 'Inserts'],
+        ]);
+
+        // 2. Digital (rename from Digital Ads)
+        $digitalTypeId = $this->getOrCreateField([
+            'key' => 'digital_type',
+            'system_label' => 'Digital Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($digitalTypeId, [
+            ['value' => 'display_ads', 'system_label' => 'Display Ads'],
+        ]);
+
+        // 3. OOH
+        $oohTypeId = $this->getOrCreateField([
+            'key' => 'ooh_type',
+            'system_label' => 'OOH Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($oohTypeId, [
+            ['value' => 'billboards', 'system_label' => 'Billboards'],
+            ['value' => 'signage', 'system_label' => 'Signage'],
+        ]);
+
+        // 4. Events
+        $eventTypeId = $this->getOrCreateField([
+            'key' => 'event_type',
+            'system_label' => 'Event Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($eventTypeId, [
+            ['value' => 'booths', 'system_label' => 'Booths'],
+            ['value' => 'transit', 'system_label' => 'Transit'],
+            ['value' => 'experiential', 'system_label' => 'Experiential'],
+        ]);
+
+        // 5. Video (Executions)
+        $executionVideoTypeId = $this->getOrCreateField([
+            'key' => 'execution_video_type',
+            'system_label' => 'Execution Video Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($executionVideoTypeId, [
+            ['value' => 'broadcast', 'system_label' => 'Broadcast'],
+            ['value' => 'pre_roll', 'system_label' => 'Pre-Roll'],
+            ['value' => 'brand_video', 'system_label' => 'Brand Video'],
+            ['value' => 'explainer_video', 'system_label' => 'Explainer Video'],
+            ['value' => 'product_demos', 'system_label' => 'Product Demos'],
+        ]);
+
+        // 6. Sales Collateral
+        $salesCollateralTypeId = $this->getOrCreateField([
+            'key' => 'sales_collateral_type',
+            'system_label' => 'Sales Collateral Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($salesCollateralTypeId, [
+            ['value' => 'catalogs', 'system_label' => 'Catalogs'],
+            ['value' => 'sales_sheets', 'system_label' => 'Sales Sheets'],
+            ['value' => 'trade_show_materials', 'system_label' => 'Trade Show Materials'],
+        ]);
+
+        // 7. PR
+        $prTypeId = $this->getOrCreateField([
+            'key' => 'pr_type',
+            'system_label' => 'PR Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($prTypeId, [
+            ['value' => 'press_releases', 'system_label' => 'Press Releases'],
+            ['value' => 'media_kits', 'system_label' => 'Media Kits'],
+            ['value' => 'backgrounders', 'system_label' => 'Backgrounders'],
+        ]);
+
+        // 8. Packaging
+        $packagingTypeId = $this->getOrCreateField([
+            'key' => 'packaging_type',
+            'system_label' => 'Packaging Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($packagingTypeId, [
+            ['value' => 'flat_art', 'system_label' => 'Flat Art'],
+            ['value' => 'renders_3d', 'system_label' => '3D Renders'],
+        ]);
+
+        // 9. Product Renders (field only; options left empty)
+        $this->getOrCreateField([
+            'key' => 'product_render_type',
+            'system_label' => 'Product Render Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+
+        // 10. Radio
+        $radioTypeId = $this->getOrCreateField([
+            'key' => 'radio_type',
+            'system_label' => 'Radio Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->createOptions($radioTypeId, [
+            ['value' => 'broadcast_spots', 'system_label' => 'Broadcast Spots'],
+            ['value' => 'live_reads', 'system_label' => 'Live Reads'],
+        ]);
     }
 
     /**
@@ -485,8 +803,8 @@ class MetadataFieldsSeeder extends Seeder
                 ]);
         }
 
-        // Dimensions: system field, auto-populated, must NEVER appear in upload, quick view, or filters.
-        // Enforced via field-level config so UI and resolvers exclude it without ad-hoc conditionals.
+        // Dimensions: behind-the-scenes only; never in upload, quick view, or More filters.
+        // always_hidden_fields in config ensures category visibility has is_filter_hidden=true.
         $dimensionsField = DB::table('metadata_fields')->where('key', 'dimensions')->first();
         if ($dimensionsField) {
             DB::table('metadata_fields')
@@ -498,8 +816,10 @@ class MetadataFieldsSeeder extends Seeder
                     'show_on_edit' => false,
                     'show_in_filters' => false,
                     'readonly' => true,
+                    'is_filterable' => false,
+                    'is_user_editable' => false,
                     'is_upload_visible' => false,
-                    'is_internal_only' => true, // Hidden from all metadata UI surfaces
+                    'is_internal_only' => true,
                     'updated_at' => now(),
                 ]);
         }
@@ -697,7 +1017,7 @@ class MetadataFieldsSeeder extends Seeder
                     }
                 }
                 
-                // Dimensions (and any always_hidden_fields): never enabled for any category
+                // Behind-the-scenes fields (e.g. dimensions): never in upload, quick view, or More filters
                 $alwaysHiddenFields = $defaultsConfig['always_hidden_fields'] ?? [];
                 foreach ($alwaysHiddenFields as $fieldKey) {
                     $field = DB::table('metadata_fields')->where('key', $fieldKey)->first();
@@ -814,6 +1134,31 @@ class MetadataFieldsSeeder extends Seeder
                 'updated_at' => now(),
             ])
         );
+    }
+
+    /**
+     * Create options for a metadata field (idempotent).
+     *
+     * @param int $fieldId
+     * @param array $options Array of ['value' => string, 'system_label' => string]
+     * @return void
+     */
+    /**
+     * Sync options for a select field: keep only the given options (remove others), then create/update as needed.
+     *
+     * @param int $fieldId
+     * @param array $options Array of ['value' => string, 'system_label' => string]
+     */
+    protected function syncOptions(int $fieldId, array $options): void
+    {
+        $allowedValues = array_column($options, 'value');
+        if (!empty($allowedValues)) {
+            DB::table('metadata_options')
+                ->where('metadata_field_id', $fieldId)
+                ->whereNotIn('value', $allowedValues)
+                ->delete();
+        }
+        $this->createOptions($fieldId, $options);
     }
 
     /**

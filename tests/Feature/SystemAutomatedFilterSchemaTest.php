@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AssetType;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Tenant;
@@ -64,7 +65,7 @@ class SystemAutomatedFilterSchemaTest extends TestCase
             'brand_id' => $this->brand->id,
             'name' => 'Photography',
             'slug' => 'photography',
-            'asset_type' => 'image',
+            'asset_type' => AssetType::ASSET,
             'is_system' => false,
         ]);
 

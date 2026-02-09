@@ -31,7 +31,8 @@ export default function MetadataGroups({
     onChange, 
     disabled = false,
     showErrors = false,
-    onValidationAttempt = null
+    onValidationAttempt = null,
+    collectionProps = null,
 }) {
     const { auth } = usePage().props
     const groupRefs = useRef({})
@@ -94,6 +95,7 @@ export default function MetadataGroups({
                             disabled={disabled}
                             showErrors={showErrors}
                             autoExpand={showErrors && hasErrors}
+                            collectionProps={collectionProps}
                         />
                     </div>
                 )

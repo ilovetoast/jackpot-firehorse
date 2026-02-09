@@ -23,7 +23,8 @@ export default function TagPrimaryFilter({
     tenantId = null,
     placeholder = "Filter by tags...",
     className = "",
-    compact = true
+    compact = true,
+    fullWidth = false
 }) {
     const [inputValue, setInputValue] = useState('')
     const [suggestions, setSuggestions] = useState([])
@@ -36,7 +37,8 @@ export default function TagPrimaryFilter({
 
     // Debounced autocomplete for existing canonical tags
     useEffect(() => {
-        if (!inputValue.trim() || inputValue.length < 2 || !tenantId) {
+        const tid = tenantId ?? undefined
+        if (!inputValue.trim() || inputValue.length < 2 || !tid) {
             setSuggestions([])
             setShowSuggestions(false)
             return
@@ -44,31 +46,34 @@ export default function TagPrimaryFilter({
 
         const timeoutId = setTimeout(async () => {
             try {
-                const response = await fetch(
-                    `/app/api/tenants/${tenantId}/tags/autocomplete?q=${encodeURIComponent(inputValue)}`,
-                    {
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                        },
-                        credentials: 'same-origin',
-                    }
-                )
+                const url = `/app/api/tenants/${tid}/tags/autocomplete?q=${encodeURIComponent(inputValue.trim())}`
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                    },
+                    credentials: 'same-origin',
+                })
 
                 if (response.ok) {
                     const data = await response.json()
-                    // Filter out already selected tags
-                    const filteredSuggestions = (data.suggestions || []).filter(
-                        suggestion => !selectedTags.includes(suggestion.tag)
+                    const list = Array.isArray(data.suggestions) ? data.suggestions : []
+                    const filteredSuggestions = list.filter(
+                        suggestion => suggestion && !selectedTags.includes(suggestion.tag)
                     )
                     setSuggestions(filteredSuggestions)
                     setShowSuggestions(true)
                     setSelectedIndex(-1)
+                } else {
+                    setSuggestions([])
                 }
             } catch (error) {
                 console.error('[TagPrimaryFilter] Autocomplete failed:', error)
+                setSuggestions([])
             }
-        }, 200) // Faster for filters (200ms vs 300ms)
+        }, 200)
 
         return () => clearTimeout(timeoutId)
     }, [inputValue, tenantId, selectedTags])
@@ -165,8 +170,8 @@ export default function TagPrimaryFilter({
                     </label>
                 )}
 
-                {/* Tags and input container - compact width to match other primary filters */}
-                <div className="flex items-center flex-wrap gap-1 w-[140px] max-w-[140px] min-w-[100px] px-2 py-1.5 border border-gray-300 rounded shadow-sm focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 bg-white transition-colors">
+                {/* Single border only (no inner outline): one visible box */}
+                <div className={`flex items-center flex-wrap gap-1 px-2 py-1 rounded-md bg-white text-xs border border-gray-300 focus-within:border-indigo-500 focus-within:ring-0 transition-colors ${fullWidth ? 'w-full min-w-0 max-w-[220px]' : 'w-[140px] max-w-[140px] min-w-[100px] py-1.5 shadow-sm'}`}>
                     {/* Selected tag pills */}
                     {selectedTags.map((tag, index) => (
                         <div
@@ -186,7 +191,7 @@ export default function TagPrimaryFilter({
                         </div>
                     ))}
 
-                    {/* Input */}
+                    {/* Input - no border/outline/ring so only the wrapper shows one box */}
                     <input
                         ref={inputRef}
                         type="text"
@@ -200,8 +205,8 @@ export default function TagPrimaryFilter({
                             }
                         }}
                         placeholder={selectedTags.length > 0 ? "Add more..." : placeholder}
-                        className="border-0 outline-0 ring-0 focus:border-0 focus:outline-0 focus:ring-0 bg-transparent text-sm flex-1 min-w-0 placeholder-gray-400"
-                        style={{ boxShadow: 'none' }}
+                        className="flex-1 min-w-[3rem] bg-transparent text-xs placeholder-gray-400 border-none outline-none ring-0 focus:border-none focus:outline-none focus:ring-0 focus:ring-offset-0 appearance-none"
+                        style={{ boxShadow: 'none', minWidth: '3rem' }}
                         aria-label="Tag filter input"
                         aria-expanded={showSuggestions}
                         aria-activedescendant={selectedIndex >= 0 ? `tag-primary-suggestion-${selectedIndex}` : undefined}
@@ -211,7 +216,7 @@ export default function TagPrimaryFilter({
 
             {/* Autocomplete suggestions - width matches input container */}
             {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute z-50 w-[200px] min-w-[140px] mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-auto">
+                <div className={`absolute z-50 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-auto ${fullWidth ? 'w-full min-w-0' : 'w-[200px] min-w-[140px]'}`}>
                     {suggestions.map((suggestion, index) => (
                         <button
                             key={`${suggestion.tag}-${index}`}

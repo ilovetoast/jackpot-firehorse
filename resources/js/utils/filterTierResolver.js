@@ -152,18 +152,11 @@ function isPrimaryFilter(field, config) {
     // Explicit check: only return true if explicitly set to true
     // false, null, undefined all return false (treated as secondary)
     const isPrimaryValue = field.is_primary === true;
-    console.log('[filterTierResolver] DEBUG - isPrimaryFilter:', {
-        field_key: fieldKey,
-        is_primary: field.is_primary,
-        is_primary_type: typeof field.is_primary,
-        is_primary_strict_true: field.is_primary === true,
-        result: isPrimaryValue,
-    });
-    
+
     if (isPrimaryValue) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -175,35 +168,17 @@ function isPrimaryFilter(field, config) {
  * @returns {FilterClassification} Classification result
  */
 function classifyFilter(field, config) {
-    // DEBUG: Log classification
     const fieldKey = field.field_key || field.key;
     const isPrimary = isPrimaryFilter(field, config);
-    console.log('[filterTierResolver] DEBUG - classifyFilter:', {
-        field_key: fieldKey,
-        is_primary: field.is_primary,
-        isPrimaryFilter_result: isPrimary,
-        hasAvailableValues: hasAvailableValues(field, config.available_values),
-    });
-    
-    // Check if filter is primary
+
     if (isPrimary) {
-        console.log('[filterTierResolver] DEBUG - Classified as PRIMARY:', fieldKey);
         return {
             field_key: field.field_key,
             tier: 'primary',
             field: field,
         };
     }
-    
-    // Default to secondary for metadata fields (regardless of available_values)
-    // Explicit routing: is_primary !== true (false, null, undefined) → secondary
-    // This ensures backward compatibility (missing is_primary treated as secondary)
-    // 
-    // NOTE: available_values does NOT affect tier classification
-    // available_values only limits OPTIONS within filters, not filter visibility
-    // Filters should always be classified as secondary if enabled, even if they have no values
-    // The visibility rules will handle showing/hiding based on available_values if needed
-    console.log('[filterTierResolver] DEBUG - Classified as SECONDARY:', fieldKey);
+
     return {
         field_key: field.field_key,
         tier: 'secondary',
@@ -219,6 +194,10 @@ function classifyFilter(field, config) {
  * @param {FilterTierConfig} config - Configuration object
  * @returns {Object<FilterTier, Array<FilterClassification>>} Map of tier to filter classifications
  */
+/** Set to true to log a single summary (e.g. window.__DEBUG_FILTER_TIERS__ = true) */
+const isFilterTierDebugEnabled = () =>
+    typeof window !== 'undefined' && (window.__DEBUG_FILTER_TIERS__ === true || window.__DEBUG_FILTERS__ === true);
+
 export function resolveFilterTiers(config) {
     const {
         brand_id,
@@ -228,38 +207,61 @@ export function resolveFilterTiers(config) {
         is_multi_brand = false,
         available_values = {},
     } = config;
-    
+
     // Validate required parameters
     if (!brand_id) {
         throw new Error('brand_id is required for filter tier resolution');
     }
-    
+
     if (!asset_type) {
         throw new Error('asset_type is required for filter tier resolution');
     }
-    
+
+    const fullConfig = {
+        brand_id,
+        category_id,
+        asset_type,
+        is_multi_brand,
+        available_values,
+    };
+
     // Classify all filters
-    const classifications = filterable_schema.map(field => 
-        classifyFilter(field, {
-            brand_id,
-            category_id,
-            asset_type,
-            is_multi_brand,
-            available_values,
-        })
+    const classifications = filterable_schema.map((field) =>
+        classifyFilter(field, fullConfig)
     );
-    
+
     // Group by tier
     const tiers = {
         primary: [],
         secondary: [],
         hidden: [],
     };
-    
-    classifications.forEach(classification => {
+
+    classifications.forEach((classification) => {
         tiers[classification.tier].push(classification);
     });
-    
+
+    // Single consolidated debug log for troubleshooting (opt-in via window.__DEBUG_FILTER_TIERS__ or __DEBUG_FILTERS__)
+    if (isFilterTierDebugEnabled()) {
+        const summary = {
+            filterTierResolver: {
+                config: { brand_id, category_id, asset_type, is_multi_brand },
+                tiers: {
+                    primary: tiers.primary.map((c) => c.field_key),
+                    secondary: tiers.secondary.map((c) => c.field_key),
+                    hidden: tiers.hidden.map((c) => c.field_key),
+                },
+                classifications: classifications.map((c) => ({
+                    field_key: c.field_key ?? c.field?.key ?? c.field?.field_key,
+                    tier: c.tier,
+                    is_primary: c.field?.is_primary,
+                })),
+                available_value_keys: Object.keys(available_values),
+            },
+        };
+        console.log('[filterTierResolver] summary (set window.__DEBUG_FILTER_TIERS__ = false to disable)', summary);
+    }
+
     return tiers;
 }
 

@@ -8,6 +8,7 @@ import {
     XMarkIcon,
     SparklesIcon,
 } from '@heroicons/react/24/outline'
+import { updateFilterDebug } from '../utils/assetFilterDebug'
 
 /**
  * AssetProcessingTray Component
@@ -63,51 +64,13 @@ export default function AssetProcessingTray() {
             const previousCount = processingAssets.length
             const currentCount = active_jobs.length
 
-            if (currentCount !== previousCount) {
-                console.log('[AssetProcessingTray] Processing count changed', {
-                    previous: previousCount,
-                    current: currentCount,
-                    added: currentCount > previousCount ? currentCount - previousCount : 0,
-                    removed: previousCount > currentCount ? previousCount - currentCount : 0,
-                    stale_count,
-                    fetched_at,
-                })
-            }
-
-            // Log when items are added
-            if (currentCount > previousCount) {
-                const addedIds = active_jobs
-                    .filter(job => !processingAssets.find(prev => prev.id === job.id))
-                    .map(job => job.id)
-                if (addedIds.length > 0) {
-                    console.log('[AssetProcessingTray] Processing items added', {
-                        asset_ids: addedIds,
-                        count: addedIds.length,
-                    })
-                }
-            }
-
-            // Log when items are removed
-            if (previousCount > currentCount) {
-                const removedIds = processingAssets
-                    .filter(prev => !active_jobs.find(job => job.id === prev.id))
-                    .map(prev => prev.id)
-                if (removedIds.length > 0) {
-                    console.log('[AssetProcessingTray] Processing items removed', {
-                        asset_ids: removedIds,
-                        count: removedIds.length,
-                        reason: 'terminal_state_reached',
-                    })
-                }
-            }
-
-            // Log stale jobs
-            if (stale_count > 0) {
-                console.warn('[AssetProcessingTray] Stale jobs detected', {
-                    stale_count,
-                    message: 'Jobs processing longer than 10 minutes - auto-cleared from UI',
-                })
-            }
+            updateFilterDebug({
+                processingTray: {
+                    activeJobs: currentCount,
+                    staleCount: stale_count,
+                    fetchedAt: fetched_at,
+                },
+            })
 
             // Update state with backend truth
             setProcessingAssets(active_jobs)
@@ -121,7 +84,7 @@ export default function AssetProcessingTray() {
                     clearTimeout(autoDismissTimerRef.current)
                 }
                 autoDismissTimerRef.current = setTimeout(() => {
-                    console.log('[AssetProcessingTray] Auto-dismissing - no active jobs')
+                    updateFilterDebug({ processingTray: { autoDismiss: true, activeJobs: 0 } })
                     setIsDismissed(true)
                 }, 2000)
             } else if (active_jobs.length > 0) {
@@ -190,7 +153,6 @@ export default function AssetProcessingTray() {
     }
 
     const handleDismiss = () => {
-        console.log('[AssetProcessingTray] Manually dismissed by user')
         setIsDismissed(true)
         // Clear session storage on manual dismiss
         if (typeof window !== 'undefined') {

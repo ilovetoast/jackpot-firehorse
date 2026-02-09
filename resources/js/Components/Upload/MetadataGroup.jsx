@@ -23,7 +23,7 @@ import { validateMetadata } from '../../utils/metadataValidation'
  * @param {boolean} [props.showErrors] - Whether to show validation errors
  * @param {boolean} [props.autoExpand] - Whether to auto-expand if group has errors
  */
-export default function MetadataGroup({ group, values = {}, onChange, disabled = false, showErrors = false, autoExpand = false }) {
+export default function MetadataGroup({ group, values = {}, onChange, disabled = false, showErrors = false, autoExpand = false, collectionProps = null }) {
     const [isExpanded, setIsExpanded] = useState(true)
 
     // Check if this group has any validation errors
@@ -37,9 +37,9 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
         }
     }, [autoExpand, hasErrors, isExpanded])
 
-    // C9.2: In upload form, collection is shown in dedicated Collections section only — exclude from metadata groups
     // Starred is rendered as a toggle on the uploader section — exclude from metadata groups
-    const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'collection' && f.key !== 'starred')
+    // Collection is rendered inside General group when group_key is general (seeder)
+    const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'starred')
 
     // Handle empty groups
     if (fieldsToRender.length === 0) {
@@ -76,11 +76,12 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
                             <div key={field.key}>
                                 <MetadataFieldInput
                                     field={field}
-                                    value={values[field.key]}
-                                    onChange={(value) => onChange(field.key, value)}
+                                    value={field.key === 'collection' && collectionProps ? collectionProps.selectedIds : values[field.key]}
+                                    onChange={field.key === 'collection' && collectionProps ? collectionProps.onChange : (value) => onChange(field.key, value)}
                                     disabled={disabled}
                                     showError={showErrors && !!groupErrors[field.key]}
                                     isUploadContext={true}
+                                    collectionProps={field.key === 'collection' ? collectionProps : undefined}
                                 />
                             </div>
                         ))}

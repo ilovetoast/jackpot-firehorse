@@ -17,7 +17,7 @@ class EnsureDefaultBrandsSeeder extends Seeder
      */
     public function run(): void
     {
-        // Ensure company 1 (Velve Hammer Branding) has a default brand
+        // Ensure company 1 (Velvet Hammer) has a default brand
         $company1 = Tenant::find(1);
         
         if (! $company1) {

@@ -54,9 +54,12 @@ import { usePage, router } from '@inertiajs/react'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters } from '../utils/filterVisibilityRules'
+import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters } from '../utils/filterUrlUtils'
+import { updateFilterDebug } from '../utils/assetFilterDebug'
 import TagPrimaryFilter from './TagPrimaryFilter'
 import DominantColorsFilter from './DominantColorsFilter'
 import ColorSwatchFilter from './ColorSwatchFilter'
+import { XMarkIcon } from '@heroicons/react/24/outline'
 
 /**
  * Primary Metadata Filter Bar Component
@@ -109,152 +112,119 @@ export default function AssetGridMetadataPrimaryFilters({
         // The normalizedConfig.asset_type might be organizational ('asset', 'deliverable')
         // For metadata field compatibility, we need to use 'image' as the file type
         // since most assets are images and metadata schema is resolved with file type
-        const context = {
+        return {
             category_id: normalizedConfig.category_id,
             asset_type: 'image', // Use file type for metadata filter compatibility
             available_values: normalizedConfig.available_values,
         };
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - visibilityContext:', context);
-        return context;
     }, [normalizedConfig])
     
+    const filterKeys = useMemo(() => 
+        (filterable_schema || []).map(f => f.field_key || f.key).filter(Boolean),
+        [filterable_schema]
+    )
+    
     const visiblePrimaryFilters = useMemo(() => {
-        // DEBUG: Log filterable_schema to see what we're working with
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - filterable_schema:', filterable_schema)
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - selectedCategoryId:', selectedCategoryId)
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - available_values:', available_values)
-        
-        // Extract .field from FilterClassification objects before checking visibility
-        // getVisibleFilters expects filter objects, not classification objects
         const filterFields = primaryFilterClassifications.map(classification => classification.field || classification)
-        
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - primaryFilterClassifications:', primaryFilterClassifications)
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - filterFields:', filterFields)
-        
-        // Filter to only metadata fields (exclude system filters like search, category, asset_type, brand)
-        // System filters are handled by AssetGridPrimaryFilters component
         const metadataFields = filterFields.filter(field => {
             const fieldKey = field.field_key || field.key
-            // Exclude system filter keys
-            return fieldKey !== 'search' && 
-                   fieldKey !== 'category' && 
-                   fieldKey !== 'asset_type' && 
-                   fieldKey !== 'brand'
+            return fieldKey !== 'search' && fieldKey !== 'category' && fieldKey !== 'asset_type' && fieldKey !== 'brand'
         })
-        
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - metadataFields:', metadataFields)
-        
-        // Explicit guard: Only include fields where is_primary === true
-        // Primary filters = effective_is_primary === true (category-scoped, computed by MetadataSchemaResolver)
-        // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
-        // A field may be primary in Photography but secondary in Logos.
-        // The field.is_primary value is already the effective_is_primary from schema resolution.
-        const primaryMetadataFields = metadataFields.filter(field => {
-            const isPrimary = field.is_primary === true
-            console.log('[AssetGridMetadataPrimaryFilters] DEBUG - field:', field.field_key || field.key, 'is_primary:', field.is_primary, 'matches:', isPrimary)
-            return isPrimary
-        })
-        
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - primaryMetadataFields:', primaryMetadataFields)
-        
-        // Apply visibility rules (category compatibility, asset_type compatibility, available_values)
-        const visible = getVisibleFilters(primaryMetadataFields, visibilityContext)
-        
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - visiblePrimaryFilters:', visible)
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - visibilityContext:', visibilityContext)
-        
-        return visible
+        const primaryMetadataFields = metadataFields.filter(field => field.is_primary === true)
+        return getVisibleFilters(primaryMetadataFields, visibilityContext)
     }, [primaryFilterClassifications, visibilityContext, filterable_schema, selectedCategoryId, available_values])
     
-    // Filter state (stored in URL query params)
-    const [filters, setFilters] = useState({})
+    const page = usePage()
+    const [filters, setFilters] = useState(() => {
+        try {
+            const search = typeof window !== 'undefined' ? window.location.search : (page.url?.split('?')[1] || '')
+            const urlParams = new URLSearchParams(search)
+            return parseFiltersFromUrl(urlParams, filterKeys)
+        } catch (e) { /* ignore */ }
+        return {}
+    })
     
-    // Load filters from URL params on mount
+    // Sync filters from URL when page/URL changes (e.g. after router.get, back/forward, or initial load with query)
     useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search)
-        const filtersParam = urlParams.get('filters')
-        if (filtersParam) {
-            try {
-                setFilters(JSON.parse(decodeURIComponent(filtersParam)))
-            } catch (e) {
-                console.error('[AssetGridMetadataPrimaryFilters] Failed to parse filters from URL', e)
-            }
-        }
-    }, [])
+        const search = typeof window !== 'undefined' ? window.location.search : (page.url?.includes('?') ? '?' + page.url.split('?')[1] : '')
+        const urlParams = new URLSearchParams(search)
+        setFilters(parseFiltersFromUrl(urlParams, filterKeys))
+    }, [page.url, filterKeys])
     
-    // Update filter value and immediately update URL
     const handleFilterChange = (fieldKey, operator, value) => {
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - handleFilterChange:', {
-            fieldKey,
-            operator,
-            value,
-            value_type: typeof value,
-        });
-        
-        const newFilters = {
-            ...filters,
-            [fieldKey]: { operator, value },
-        }
-        
-        // Remove filter if value is empty/null
+        const newFilters = { ...filters, [fieldKey]: { operator, value } }
         if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
             delete newFilters[fieldKey]
         }
-        
         setFilters(newFilters)
-        
-        // Update URL immediately (no Apply button)
         const urlParams = new URLSearchParams(window.location.search)
-        
-        // Remove existing filters param
-        urlParams.delete('filters')
-        
-        // Add new filters if any
-        const activeFilters = Object.entries(newFilters).filter(([_, filter]) => {
-            return filter && filter.value !== null && filter.value !== '' && 
-                   (!Array.isArray(filter.value) || filter.value.length > 0)
-        })
-        
-        if (activeFilters.length > 0) {
-            const filtersObj = {}
-            activeFilters.forEach(([key, filter]) => {
-                filtersObj[key] = {
-                    operator: filter.operator,
-                    value: filter.value,
-                }
-            })
-            const filtersJson = JSON.stringify(filtersObj)
-            urlParams.set('filters', filtersJson)
-            console.log('[AssetGridMetadataPrimaryFilters] DEBUG - Setting filters in URL:', {
-                filtersObj,
-                filtersJson,
-                urlParams: Object.fromEntries(urlParams),
-            });
-        } else {
-            console.log('[AssetGridMetadataPrimaryFilters] DEBUG - No active filters, removing from URL');
-        }
-        
-        // Update URL without full page reload
-        const urlParamsObj = Object.fromEntries(urlParams);
-        console.log('[AssetGridMetadataPrimaryFilters] DEBUG - Router.get with params:', urlParamsObj);
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets'], // Only reload assets
+            only: ['assets'],
         })
     }
     
+    const handleRemoveFilter = (fieldKey) => {
+        const newFilters = { ...filters }
+        delete newFilters[fieldKey]
+        setFilters(newFilters)
+        const urlParams = new URLSearchParams(window.location.search)
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        router.get(window.location.pathname, urlParamsObj, {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets'],
+        })
+    }
+    
+    // Single debug state update (inspect window.__assetFilterDebug in console)
+    useEffect(() => {
+        updateFilterDebug({
+            filters,
+            url: { search: typeof window !== 'undefined' ? window.location.search : '', flatParams: buildUrlParamsWithFlatFilters(new URLSearchParams(window.location.search || ''), filters, filterKeys) },
+            visibility: {
+                visiblePrimary: (visiblePrimaryFilters || []).map(f => f.field_key || f.key),
+                hiddenCount: (filterable_schema || []).length - (visiblePrimaryFilters || []).length,
+            },
+            schema: { filterKeys, primaryKeys: (visiblePrimaryFilters || []).map(f => f.field_key || f.key) },
+        })
+    }, [filters, visiblePrimaryFilters, filterable_schema, filterKeys])
+    
+    const appliedFiltersList = useMemo(() => {
+        return Object.entries(filters).filter(([key, def]) => {
+            if (key === 'category' || key === 'asset_type') return false
+            if (!def || (def.value !== 0 && !def.value)) return false
+            if (Array.isArray(def.value) && def.value.length === 0) return false
+            return true
+        })
+    }, [filters])
+
+    // Only show active filter pills in the primary bar for primary fields; secondary filters show in "More filters" bar
+    const primaryFilterKeys = useMemo(() =>
+        new Set((visiblePrimaryFilters || []).map((f) => f.field_key || f.key)),
+        [visiblePrimaryFilters]
+    )
+    const appliedPrimaryFiltersList = useMemo(() =>
+        appliedFiltersList.filter(([key]) => primaryFilterKeys.has(key)),
+        [appliedFiltersList, primaryFilterKeys]
+    )
+    
+    const getFieldLabel = (fieldKey) => {
+        const field = (filterable_schema || []).find(f => (f.field_key || f.key) === fieldKey)
+        return field?.display_label || field?.label || fieldKey
+    }
+    
     // Always render the primary filter container
-    // Content changes based on category, but container persists
-    // Show nothing if no filters available
     if (compact) {
-        // Compact mode for toolbar placement (between search and controls)
-        if (visiblePrimaryFilters.length === 0) {
+        if (visiblePrimaryFilters.length === 0 && appliedPrimaryFiltersList.length === 0) {
             return null
         }
         
         return (
-            <div className="flex items-center">
+            <div className="flex items-center flex-wrap gap-2">
+                {/* Primary applied filter pills render in "More filters" bar (inline with More filters) */}
                 <div className="flex items-center gap-1.5">
                     {visiblePrimaryFilters.map((field) => {
                         const fieldKey = field.field_key || field.key
@@ -280,13 +250,31 @@ export default function AssetGridMetadataPrimaryFilters({
         )
     }
     
-    // Full-width mode (standalone bar)
-    if (visiblePrimaryFilters.length === 0) {
+    if (visiblePrimaryFilters.length === 0 && appliedPrimaryFiltersList.length === 0) {
         return null
     }
     
     return (
         <div className="bg-white border-b border-gray-200 px-4 py-3 sm:px-6">
+            {appliedPrimaryFiltersList.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className="text-xs text-gray-500 font-medium">Applied:</span>
+                    {appliedPrimaryFiltersList.map(([fieldKey, def]) => {
+                        const valueLabel = Array.isArray(def.value) ? (def.value[0] ?? '') : String(def.value ?? '')
+                        return (
+                            <span
+                                key={fieldKey}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded"
+                            >
+                                {getFieldLabel(fieldKey)}: {valueLabel}
+                                <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}>
+                                    <XMarkIcon className="h-3.5 w-3.5" />
+                                </button>
+                            </span>
+                        )
+                    })}
+                </div>
+            )}
             <div className="flex flex-wrap items-center gap-3">
                 {visiblePrimaryFilters.map((field) => {
                 const fieldKey = field.field_key || field.key
@@ -332,8 +320,9 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     const isColorFilter = field.filter_type === 'color'
     // C9.2: Collection = single select only, no operator dropdown (no "Contains any")
     const isCollectionFilter = fieldKey === 'collection'
-    // Boolean with display_widget=toggle (e.g. Starred) — render as toggle, no operator dropdown
     const isToggleBoolean = (fieldKey === 'starred' || field.display_widget === 'toggle') && fieldType === 'boolean'
+    const isExpirationDateFilter = fieldKey === 'expiration_date'
+    const isTagsFilter = fieldKey === 'tags'
 
     // Phase J.2.8: Special rendering for tags field (no label)
     if (fieldKey === 'tags') {
@@ -357,31 +346,21 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
             return null // null means "use all options" (no filtering applied)
         }
         
-        // If no available values provided, show all options (fallback)
         if (!availableValues || availableValues.length === 0) {
-            return null // null means "use all options"
+            return [] // Only available options: none → show no options
         }
         
-        // Filter options to only those with values in available_values
-        // available_values contains the actual values used in assets (e.g., 'action', 'lifestyle')
-        // Options may have value, option_id, or both - check all possible formats
+        // Only show options that exist in available_values (rule: only available options)
+        // Match case-insensitively so "Product" / "product" and "Wordmark" / "wordmark" align
         const filtered = field.options.filter(option => {
             const optionValue = option.value
             const optionId = option.option_id
-            // Check if either the value or option_id matches any available value
-            // Convert to string for comparison to handle number/string mismatches
-            return availableValues.some(av => 
-                String(av) === String(optionValue) || 
-                (optionId !== undefined && String(av) === String(optionId))
+            return availableValues.some(av =>
+                String(av).toLowerCase() === String(optionValue).toLowerCase() ||
+                (optionId !== undefined && String(av).toLowerCase() === String(optionId).toLowerCase())
             )
         })
-        
-        // If filtering resulted in no matches, fall back to all options
-        // This prevents empty dropdowns when there's a value format mismatch
-        if (filtered.length === 0) {
-            return null // null means "use all options" (fallback)
-        }
-        
+        // No fallback to all options: if no match, show no options (only "Any" / placeholder)
         return filtered
     }, [field.options, availableValues, fieldKey])
     
@@ -389,26 +368,24 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         onChange(e.target.value, value)
     }
     
-    // STEP 3: For color filters, always use 'equals' operator and ensure value is array (OR semantics)
-    const handleValueChange = (newValue) => {
+    const handleValueChange = (newValueOrOperator, maybeValue) => {
+        if (isTagsFilter && maybeValue !== undefined) {
+            onChange(newValueOrOperator, maybeValue)
+            return
+        }
         if (isColorFilter) {
-            // Color filters: handle both object format { operator, value } and legacy value-only format
-            if (newValue && typeof newValue === 'object' && 'operator' in newValue && 'value' in newValue) {
-                // ColorSwatchFilter emits full payload: { operator: 'equals', value: [...] }
-                onChange(newValue.operator, newValue.value)
+            if (newValueOrOperator && typeof newValueOrOperator === 'object' && 'operator' in newValueOrOperator && 'value' in newValueOrOperator) {
+                onChange(newValueOrOperator.operator, newValueOrOperator.value)
             } else {
-                // Legacy format: just the value
-                const arrayValue = Array.isArray(newValue) ? newValue : (newValue != null ? [newValue] : null)
+                const arrayValue = Array.isArray(newValueOrOperator) ? newValueOrOperator : (newValueOrOperator != null ? [newValueOrOperator] : null)
                 onChange('equals', arrayValue)
             }
         } else if (isCollectionFilter) {
-            // Collection: single select, always use 'equals'
-            onChange('equals', newValue)
+            onChange('equals', newValueOrOperator)
         } else if (isToggleBoolean) {
-            // Toggle boolean: value is true or null (off = no filter)
-            onChange('equals', newValue)
+            onChange('equals', newValueOrOperator)
         } else {
-            onChange(operator, newValue)
+            onChange(operator, newValueOrOperator)
         }
     }
     
@@ -426,7 +403,7 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         <div className="flex-shrink-0">
             <div className="flex items-center gap-1.5">
                 {/* STEP 3: Hide operator dropdown for color filters; C9.2: hide for collection; toggle boolean (e.g. Starred) */}
-                {!isColorFilter && !isCollectionFilter && !isToggleBoolean && field.operators && field.operators.length > 1 && (
+                {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isExpirationDateFilter && !isTagsFilter && field.operators && field.operators.length > 1 && (
                     <select
                         value={effectiveOperator}
                         onChange={handleOperatorChange}
@@ -468,9 +445,9 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
     
     // Phase J.2.8: Special handling for tags field
     if (fieldKey === 'tags') {
-        // Get tenant ID from page props for tag autocomplete
+        // Get tenant ID from page props for tag autocomplete (activeCompany = current tenant)
         const pageProps = usePage().props
-        const tenantId = pageProps.tenant?.id || pageProps.auth?.user?.current_tenant_id
+        const tenantId = pageProps.tenant?.id || pageProps.auth?.activeCompany?.id || pageProps.auth?.user?.current_tenant_id
 
         return (
             <TagPrimaryFilter
@@ -506,9 +483,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
 
     // C9.2: Collection primary filter = dropdown with collection name (label), not text/number
     if (fieldKey === 'collection') {
-        const opts = (filteredOptions !== null && filteredOptions.length > 0)
-            ? filteredOptions
-            : (field.options || [])
+        const opts = Array.isArray(filteredOptions) ? filteredOptions : (field.options || [])
         const label = (opt) => opt.display_label ?? opt.label ?? opt.value
         const placeholder = (labelInDropdown && placeholderLabel) ? placeholderLabel : 'Any'
         return (
@@ -527,6 +502,56 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                     <option key={option.value} value={option.value}>
                         {label(option)}
                     </option>
+                ))}
+            </select>
+        )
+    }
+
+    // Expiration date: preset options (Expired, Expires within X days)
+    if (fieldKey === 'expiration_date') {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const toISO = (d) => d.toISOString().slice(0, 10)
+        const addDays = (n) => {
+            const d = new Date(today)
+            d.setDate(d.getDate() + n)
+            return toISO(d)
+        }
+        const todayStr = toISO(today)
+        const presets = [
+            { value: '', label: 'Any' },
+            { value: 'expired', label: 'Expired', operator: 'before', value: todayStr },
+            { value: 'within_7', label: 'Expires within 7 days', operator: 'range', value: [todayStr, addDays(7)] },
+            { value: 'within_30', label: 'Expires within 30 days', operator: 'range', value: [todayStr, addDays(30)] },
+            { value: 'within_60', label: 'Expires within 60 days', operator: 'range', value: [todayStr, addDays(60)] },
+            { value: 'within_90', label: 'Expires within 90 days', operator: 'range', value: [todayStr, addDays(90)] },
+        ]
+        let currentPreset = ''
+        if (operator === 'before' && value === todayStr) currentPreset = 'expired'
+        else if (operator === 'range' && Array.isArray(value) && value.length === 2) {
+            const end = value[1]
+            if (end === addDays(7)) currentPreset = 'within_7'
+            else if (end === addDays(30)) currentPreset = 'within_30'
+            else if (end === addDays(60)) currentPreset = 'within_60'
+            else if (end === addDays(90)) currentPreset = 'within_90'
+        }
+        const placeholder = (labelInDropdown && placeholderLabel) ? placeholderLabel : 'Any'
+        return (
+            <select
+                value={currentPreset}
+                onChange={(e) => {
+                    const key = e.target.value
+                    if (!key) {
+                        onChange('equals', null)
+                        return
+                    }
+                    const preset = presets.find(p => p.value === key && p.operator)
+                    if (preset) onChange(preset.operator, preset.value)
+                }}
+                className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${compact ? 'min-w-[80px]' : 'min-w-[100px]'}`}
+            >
+                {presets.map((p) => (
+                    <option key={p.value || 'any'} value={p.value}>{p.label}</option>
                 ))}
             </select>
         )
@@ -567,13 +592,8 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         )
     }
     
-    // Use filteredOptions if provided and non-empty, otherwise fall back to field.options
-    // filteredOptions is null when not provided (use all options)
-    // filteredOptions is [] when filtering resulted in no matches (still use all options as fallback)
-    // filteredOptions has items when filtering found matches (use filtered list)
-    const options = (filteredOptions !== null && filteredOptions.length > 0) 
-        ? filteredOptions 
-        : (field.options || [])
+    // Only available options: use filteredOptions when array (may be [] or [...])
+    const options = Array.isArray(filteredOptions) ? filteredOptions : (field.options || [])
     
     const inputClass = `px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${compact ? 'min-w-[80px]' : 'min-w-[100px]'}`
 
@@ -638,11 +658,12 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
             )
         }
         
-        case 'select': {
+        case 'select':
+        case 'rating': {
             const selectPlaceholder = (labelInDropdown && placeholderLabel) ? placeholderLabel : 'Any'
             return (
                 <select
-                    value={value || ''}
+                    value={value ?? ''}
                     onChange={(e) => onChange(e.target.value || null)}
                     className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${
                         compact ? 'min-w-[80px]' : 'min-w-[100px]'

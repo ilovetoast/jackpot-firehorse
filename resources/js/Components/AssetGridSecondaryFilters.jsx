@@ -31,8 +31,10 @@ import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
+import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters } from '../utils/filterUrlUtils'
 import DominantColorsFilter from './DominantColorsFilter'
 import ColorSwatchFilter from './ColorSwatchFilter'
+import TagPrimaryFilter from './TagPrimaryFilter'
 import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
 
@@ -306,62 +308,16 @@ export default function AssetGridSecondaryFilters({
         // The normalizedConfig.asset_type might be organizational ('asset', 'deliverable')
         // For metadata field compatibility, we need to use 'image' as the file type
         // since most assets are images and metadata schema is resolved with file type
-        const context = {
+        return {
             category_id: normalizedConfig.category_id,
-            asset_type: 'image', // Use file type for metadata filter compatibility
+            asset_type: 'image',
             available_values: normalizedConfig.available_values,
         };
-        console.log('[AssetGridSecondaryFilters] DEBUG - visibilityContext:', context);
-        return context;
     }, [normalizedConfig])
     
     const visibleSecondaryFilters = useMemo(() => {
-        // DEBUG: Log to understand why filters aren't showing
-        console.log('[AssetGridSecondaryFilters] DEBUG - filterable_schema:', filterable_schema)
-        console.log('[AssetGridSecondaryFilters] DEBUG - selectedCategoryId:', selectedCategoryId)
-        console.log('[AssetGridSecondaryFilters] DEBUG - available_values:', available_values)
-        console.log('[AssetGridSecondaryFilters] DEBUG - secondaryFilters:', secondaryFilters)
-        console.log('[AssetGridSecondaryFilters] DEBUG - visibilityContext:', visibilityContext)
-        
-        // Extract .field from FilterClassification objects
-        // For secondary filters: Show ALL scope-compatible filters, regardless of available_values
-        // available_values will be used to limit OPTIONS within each filter, not to hide filters
-        // This ensures filters are always visible if they're enabled in management
         const filterFields = secondaryFilters.map(classification => classification.field || classification)
-        
-        console.log('[AssetGridSecondaryFilters] DEBUG - filterFields:', filterFields)
-        
-        // Filter by scope compatibility only (category/asset_type), NOT by available_values
-        // Rule: If a filter is enabled in management and is scope-compatible, it should show
-        // available_values only limits the options dropdown, not filter visibility
-        const scopeCompatibleFilters = filterFields.filter(field => {
-            // Check category/asset_type compatibility only
-            // Metadata fields have category_ids: null (applies to all categories)
-            // So they should be compatible with any selected category
-            const fieldKey = field.field_key || field.key;
-            const compatible = isFilterCompatible(field, visibilityContext);
-            console.log('[AssetGridSecondaryFilters] DEBUG - field compatibility check:', {
-                field_key: fieldKey,
-                isFilterCompatible: compatible,
-                field_category_ids: field.category_ids,
-                field_category_ids_type: typeof field.category_ids,
-                field_asset_types: field.asset_types,
-                field_asset_types_type: typeof field.asset_types,
-                field_is_global: field.is_global,
-                context_category_id: visibilityContext.category_id,
-                context_asset_type: visibilityContext.asset_type,
-                full_field: field,
-            });
-            return compatible;
-        })
-        
-        console.log('[AssetGridSecondaryFilters] DEBUG - scopeCompatibleFilters:', scopeCompatibleFilters)
-        console.log('[AssetGridSecondaryFilters] DEBUG - visibleSecondaryFilters count:', scopeCompatibleFilters.length)
-        
-        // Return all scope-compatible filters (regardless of available_values)
-        // The FilterFieldInput component will handle limiting options based on available_values
-        // This ensures "More filters" button is always clickable when filters are enabled
-        return scopeCompatibleFilters
+        return filterFields.filter(field => isFilterCompatible(field, visibilityContext))
     }, [secondaryFilters, visibilityContext, filterable_schema, selectedCategoryId, available_values])
     
     // Get hidden secondary filter count using existing helper
@@ -370,97 +326,60 @@ export default function AssetGridSecondaryFilters({
         return getHiddenFilterCount(secondaryFilters, visibilityContext)
     }, [secondaryFilters, visibilityContext])
     
-    // UI-only expand/collapse state (not persisted to URL)
+    const filterKeys = useMemo(
+        () => (filterable_schema || []).map(f => f.field_key || f.key).filter(Boolean),
+        [filterable_schema]
+    )
+    
+    // Primary filter keys (is_primary === true) — their applied pills render here, inline with "More filters"
+    const primaryFilterKeys = useMemo(
+        () => new Set((filterable_schema || []).filter(f => f.is_primary === true).map(f => f.field_key || f.key).filter(Boolean)),
+        [filterable_schema]
+    )
+    
+    const getFieldLabel = (fieldKey) => {
+        const field = (filterable_schema || []).find(f => (f.field_key || f.key) === fieldKey)
+        return field?.display_label || field?.label || fieldKey
+    }
+    
+    const page = usePage()
     const [isExpanded, setIsExpanded] = useState(false)
+    const [filters, setFilters] = useState(() => {
+        try {
+            const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : (page.url?.split('?')[1] || ''))
+            return parseFiltersFromUrl(urlParams, filterKeys)
+        } catch (e) { /* ignore */ }
+        return {}
+    })
     
-    // Filter state (stored in URL query params)
-    const [filters, setFilters] = useState({})
-    
-    // Load filters from URL params on mount
     useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search)
-        const filtersParam = urlParams.get('filters')
-        if (filtersParam) {
-            try {
-                setFilters(JSON.parse(decodeURIComponent(filtersParam)))
-            } catch (e) {
-                console.error('[AssetGridSecondaryFilters] Failed to parse filters from URL', e)
-            }
-        }
-    }, [])
+        const search = typeof window !== 'undefined' ? window.location.search : (page.url?.includes('?') ? '?' + (page.url || '').split('?')[1] : '')
+        const urlParams = new URLSearchParams(search)
+        setFilters(parseFiltersFromUrl(urlParams, filterKeys))
+    }, [page.url, filterKeys])
     
-    // Update filter value and immediately update URL
     const handleFilterChange = (fieldKey, operator, value) => {
-        const newFilters = {
-            ...filters,
-            [fieldKey]: { operator, value },
-        }
-        
-        // Remove filter if value is empty/null
+        const newFilters = { ...filters, [fieldKey]: { operator, value } }
         if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
             delete newFilters[fieldKey]
         }
-        
         setFilters(newFilters)
-        
-        // Update URL immediately (no Apply button)
         const urlParams = new URLSearchParams(window.location.search)
-        
-        // Remove existing filters param
-        urlParams.delete('filters')
-        
-        // Add new filters if any
-        const activeFilters = Object.entries(newFilters).filter(([_, filter]) => {
-            return filter && filter.value !== null && filter.value !== '' && 
-                   (!Array.isArray(filter.value) || filter.value.length > 0)
-        })
-        
-        if (activeFilters.length > 0) {
-            const filtersObj = {}
-            activeFilters.forEach(([key, filter]) => {
-                filtersObj[key] = {
-                    operator: filter.operator,
-                    value: filter.value,
-                }
-            })
-            urlParams.set('filters', JSON.stringify(filtersObj))
-        }
-        
-        // Update URL without full page reload
-        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets'], // Only reload assets
+            only: ['assets'],
         })
     }
     
-    // Remove a single filter
     const handleRemoveFilter = (fieldKey) => {
         const newFilters = { ...filters }
         delete newFilters[fieldKey]
         setFilters(newFilters)
-        
-        // Update URL immediately
         const urlParams = new URLSearchParams(window.location.search)
-        urlParams.delete('filters')
-        
-        const activeFilters = Object.entries(newFilters).filter(([_, filter]) => {
-            return filter && filter.value !== null && filter.value !== '' && 
-                   (!Array.isArray(filter.value) || filter.value.length > 0)
-        })
-        
-        if (activeFilters.length > 0) {
-            const filtersObj = {}
-            activeFilters.forEach(([key, filter]) => {
-                filtersObj[key] = {
-                    operator: filter.operator,
-                    value: filter.value,
-                }
-            })
-            urlParams.set('filters', JSON.stringify(filtersObj))
-        }
-        
-        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+        const urlParamsObj = buildUrlParamsWithFlatFilters(urlParams, newFilters, filterKeys)
+        router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
             only: ['assets'],
@@ -478,46 +397,108 @@ export default function AssetGridSecondaryFilters({
     // Show empty state if no filters available for current category
     return (
         <div>
-            {/* Bar: More filters (left) + Sort (right, compact) */}
+            {/* Bar: More filters (left) + active filter pills (center) + Sort (right) */}
             <div
                 className="px-4 py-2 sm:px-6 flex items-center justify-between gap-3 text-left border-b border-gray-200"
                 style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
-                <button
-                    type="button"
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className="flex items-center gap-2 min-w-0 flex-1 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-inset py-1.5 -my-1.5 px-1 text-left"
-                    style={{ ['--tw-ring-color']: brandPrimary }}
-                >
-                    <FunnelIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                    <span className="text-sm font-medium text-gray-700 truncate">
-                        More filters
-                    </span>
-                    {activeFilterCount > 0 && (
-                        <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium text-white rounded-full flex-shrink-0" style={{ backgroundColor: brandPrimary }}>
-                            {activeFilterCount}
+                <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                    <button
+                        type="button"
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="flex items-center gap-2 min-w-0 hover:bg-gray-50 rounded focus:outline-none focus:ring-2 focus:ring-inset py-1.5 -my-1.5 px-1 text-left"
+                        style={{ ['--tw-ring-color']: brandPrimary }}
+                    >
+                        <FunnelIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                        <span className="text-sm font-medium text-gray-700 truncate">
+                            More filters
                         </span>
-                    )}
-                    {visibleSecondaryFilters.length === 0 && selectedCategoryId && (
-                        <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
-                            (No filters available for this category)
-                        </span>
-                    )}
-                    {visibleSecondaryFilters.length === 0 && !selectedCategoryId && (
-                        <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
-                            (No metadata filters for All)
-                        </span>
-                    )}
-                    {visibleSecondaryFilters.length > 0 && (
-                        <span className="flex-shrink-0 text-gray-400 ml-auto">
-                            {isExpanded ? (
-                                <ChevronUpIcon className="h-4 w-4" aria-hidden />
-                            ) : (
-                                <ChevronDownIcon className="h-4 w-4" aria-hidden />
+                        {activeFilterCount > 0 && (
+                            <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium text-white rounded-full flex-shrink-0" style={{ backgroundColor: brandPrimary }}>
+                                {activeFilterCount}
+                            </span>
+                        )}
+                        {visibleSecondaryFilters.length === 0 && selectedCategoryId && (
+                            <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
+                                (No filters available for this category)
+                            </span>
+                        )}
+                        {visibleSecondaryFilters.length === 0 && !selectedCategoryId && (
+                            <span className="text-xs text-gray-500 italic truncate hidden sm:inline">
+                                (No metadata filters for All)
+                            </span>
+                        )}
+                        {visibleSecondaryFilters.length > 0 && (
+                            <span className="flex-shrink-0 text-gray-400">
+                                {isExpanded ? (
+                                    <ChevronUpIcon className="h-4 w-4" aria-hidden />
+                                ) : (
+                                    <ChevronDownIcon className="h-4 w-4" aria-hidden />
+                                )}
+                            </span>
+                        )}
+                    </button>
+                    {/* Active filter pills on the highlighted bar (primary + secondary + lifecycle, etc.) */}
+                    {(activeFilterCount > 0 || Array.from(primaryFilterKeys).some(k => filters[k] && (filters[k].value !== null && filters[k].value !== '') && (!Array.isArray(filters[k].value) || filters[k].value.length > 0))) && (
+                        <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            {/* Primary applied filters (e.g. Photo Type: studio) — inline with More filters */}
+                            {Array.from(primaryFilterKeys).map((fieldKey) => {
+                                const filter = filters[fieldKey]
+                                if (!filter || filter.value === null || filter.value === '') return null
+                                if (Array.isArray(filter.value) && filter.value.length === 0) return null
+                                const valueLabel = Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? '')
+                                return (
+                                    <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                        {getFieldLabel(fieldKey)}: {valueLabel}
+                                        <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}><XMarkIcon className="h-3 w-3" /></button>
+                                    </span>
+                                )
+                            })}
+                            {pendingPublicationFilter && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-yellow-50 text-yellow-700 rounded">
+                                    Pending Publication
+                                    <button type="button" onClick={handlePendingPublicationFilterToggle} className="text-yellow-600 hover:text-yellow-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                </span>
                             )}
-                        </span>
+                            {unpublishedFilter && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-yellow-50 text-yellow-700 rounded">
+                                    Unpublished
+                                    <button type="button" onClick={handleUnpublishedFilterToggle} className="text-yellow-600 hover:text-yellow-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                </span>
+                            )}
+                            {archivedFilter && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-gray-50 text-gray-700 rounded">
+                                    Archived
+                                    <button type="button" onClick={handleArchivedFilterToggle} className="text-gray-600 hover:text-gray-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                </span>
+                            )}
+                            {fileTypeFilter && fileTypeFilter !== 'all' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded">
+                                    File Type: {fileTypeFilter.toUpperCase()}
+                                    <button type="button" onClick={() => handleFileTypeFilterChange('all')} className="text-blue-600 hover:text-blue-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                </span>
+                            )}
+                            {userFilter && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                    Created By: {pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.name || pageProps.uploaded_by_users?.find(u => u.id === parseInt(userFilter))?.email || 'Unknown'}
+                                    <button type="button" onClick={() => handleUserFilterChange(null)} className="text-indigo-600 hover:text-indigo-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                </span>
+                            )}
+                            {Object.entries(filters).map(([fieldKey, filter]) => {
+                                if (!filter || filter.value === null || filter.value === '') return null
+                                const field = visibleSecondaryFilters.find((f) => (f.field_key || f.key) === fieldKey)
+                                if (!field) return null
+                                const valueLabel = Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? '')
+                                return (
+                                    <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                        {field.display_label || field.label}: {valueLabel}
+                                        <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}><XMarkIcon className="h-3 w-3" /></button>
+                                    </span>
+                                )
+                            })}
+                        </div>
                     )}
-                </button>
+                </div>
 
                 {/* Sort: compact dropdown + direction (in filter bar) */}
                 {onSortChange && (
@@ -835,43 +816,28 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     // STEP 2 & 3: Color swatch filters (filter_type === 'color') - no operator dropdown, always equals, OR semantics
     const isColorFilter = field.filter_type === 'color'
-    // C9.2: Collection = single select only, no operator dropdown (no "Contains any")
     const isCollectionFilter = fieldKey === 'collection'
-    // Boolean with display_widget=toggle (e.g. Starred) — render as toggle, no operator dropdown
     const isToggleBoolean = (fieldKey === 'starred' || field.display_widget === 'toggle') && fieldType === 'boolean'
+    const isTagsFilter = fieldKey === 'tags'
+    const isExpirationDateFilter = fieldKey === 'expiration_date'
 
-    // Filter options to only show values that exist in available_values
-    // This ensures users only see options that actually have matching assets
+    // Only show options that exist in available_values (same rule as primary filters).
+    // Exceptions: lifecycle (Pending Publication, Unpublished, Archived) are separate checkboxes and always shown.
     const filteredOptions = useMemo(() => {
         if (!field.options || !Array.isArray(field.options)) {
-            return null // null means "use all options" (no filtering applied)
+            return null
         }
-        
-        // If no available values provided, show all options (fallback)
         if (!availableValues || availableValues.length === 0) {
-            return null // null means "use all options"
+            return []
         }
-        
-        // Filter options to only those with values in available_values
-        // available_values contains the actual values used in assets (e.g., 'action', 'lifestyle')
-        // Options may have value, option_id, or both - check all possible formats
         const filtered = field.options.filter(option => {
             const optionValue = option.value
             const optionId = option.option_id
-            // Check if either the value or option_id matches any available value
-            // Convert to string for comparison to handle number/string mismatches
-            return availableValues.some(av => 
-                String(av) === String(optionValue) || 
-                (optionId !== undefined && String(av) === String(optionId))
+            return availableValues.some(av =>
+                String(av).toLowerCase() === String(optionValue).toLowerCase() ||
+                (optionId !== undefined && String(av).toLowerCase() === String(optionId).toLowerCase())
             )
         })
-        
-        // If filtering resulted in no matches, fall back to all options
-        // This prevents empty dropdowns when there's a value format mismatch
-        if (filtered.length === 0) {
-            return null // null means "use all options" (fallback)
-        }
-        
         return filtered
     }, [field.options, availableValues, fieldKey])
     
@@ -879,25 +845,24 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         onChange(e.target.value, value)
     }
     
-    // STEP 3: For color filters, always use 'equals' operator and ensure value is array (OR semantics)
-    const handleValueChange = (newValue) => {
+    const handleValueChange = (newValueOrOperator, maybeValue) => {
+        if (isTagsFilter && maybeValue !== undefined) {
+            onChange(newValueOrOperator, maybeValue)
+            return
+        }
         if (isColorFilter) {
-            // Color filters: handle both object format { operator, value } and legacy value-only format
-            if (newValue && typeof newValue === 'object' && 'operator' in newValue && 'value' in newValue) {
-                // ColorSwatchFilter emits full payload: { operator: 'equals', value: [...] }
-                onChange(newValue.operator, newValue.value)
+            if (newValueOrOperator && typeof newValueOrOperator === 'object' && 'operator' in newValueOrOperator && 'value' in newValueOrOperator) {
+                onChange(newValueOrOperator.operator, newValueOrOperator.value)
             } else {
-                // Legacy format: just the value
-                const arrayValue = Array.isArray(newValue) ? newValue : (newValue != null ? [newValue] : null)
+                const arrayValue = Array.isArray(newValueOrOperator) ? newValueOrOperator : (newValueOrOperator != null ? [newValueOrOperator] : null)
                 onChange('equals', arrayValue)
             }
         } else if (isCollectionFilter) {
-            // Collection: single select, always use 'equals'
-            onChange('equals', newValue)
+            onChange('equals', newValueOrOperator)
         } else if (isToggleBoolean) {
-            onChange('equals', newValue)
+            onChange('equals', newValueOrOperator)
         } else {
-            onChange(operator, newValue)
+            onChange(operator, newValueOrOperator)
         }
     }
     
@@ -909,7 +874,6 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         ? (Array.isArray(value) ? value : (value != null ? [value] : null))
         : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : (isToggleBoolean ? value : value))
     
-    // Special handling for dominant_colors / color / collection / toggle boolean - hide operator dropdown, show only value control
     const isDominantColors = (fieldKey === 'dominant_colors')
     
     return (
@@ -917,8 +881,7 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
             <label className="block text-xs font-medium text-gray-700">
                 {field.display_label || field.label}
             </label>
-            {/* For dominant_colors, color, collection, or toggle boolean: render value control only (no operator dropdown) */}
-            {(isDominantColors || isColorFilter || isCollectionFilter || isToggleBoolean) ? (
+            {(isDominantColors || isColorFilter || isCollectionFilter || isToggleBoolean || isTagsFilter || isExpirationDateFilter) ? (
                 <FilterValueInput
                     field={field}
                     operator={effectiveOperator}
@@ -930,7 +893,7 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
             ) : (
                 <div className="flex items-center gap-2">
                     {/* STEP 3: Hide operator dropdown for color/collection/toggle boolean filters */}
-                    {!isColorFilter && !isCollectionFilter && !isToggleBoolean && field.operators && field.operators.length > 1 && (
+                    {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isTagsFilter && !isExpirationDateFilter && field.operators && field.operators.length > 1 && (
                         <select
                             value={effectiveOperator}
                             onChange={handleOperatorChange}
@@ -966,7 +929,23 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
 function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, availableValues = [] }) {
     const fieldType = field.type || 'text'
     const fieldKey = field.field_key || field.key
-    
+    const pageProps = usePage().props
+    const tenantId = pageProps.tenant?.id || pageProps.auth?.activeCompany?.id || pageProps.auth?.user?.current_tenant_id
+
+    // Tags: autocomplete, multi-select; label "Tags" only from parent FilterFieldInput
+    if (fieldKey === 'tags') {
+        return (
+            <TagPrimaryFilter
+                value={Array.isArray(value) ? value : (value ? [value] : [])}
+                onChange={onChange}
+                tenantId={tenantId}
+                placeholder="Search..."
+                compact={true}
+                fullWidth={true}
+            />
+        )
+    }
+
     // Boolean with display_widget=toggle (e.g. Starred) — same layout as upload/edit/primary filters
     if (fieldKey === 'starred' || (fieldType === 'boolean' && field.display_widget === 'toggle')) {
         const isOn = value === true || value === 'true'
@@ -986,11 +965,58 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         )
     }
     
+    // Expiration date: preset options (Expired, Expires within X days) — best practice for date filters
+    if (fieldKey === 'expiration_date') {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const toISO = (d) => d.toISOString().slice(0, 10)
+        const addDays = (n) => {
+            const d = new Date(today)
+            d.setDate(d.getDate() + n)
+            return toISO(d)
+        }
+        const todayStr = toISO(today)
+        const presets = [
+            { value: '', label: 'Any' },
+            { value: 'expired', label: 'Expired', operator: 'before', value: todayStr },
+            { value: 'within_7', label: 'Expires within 7 days', operator: 'range', value: [todayStr, addDays(7)] },
+            { value: 'within_30', label: 'Expires within 30 days', operator: 'range', value: [todayStr, addDays(30)] },
+            { value: 'within_60', label: 'Expires within 60 days', operator: 'range', value: [todayStr, addDays(60)] },
+            { value: 'within_90', label: 'Expires within 90 days', operator: 'range', value: [todayStr, addDays(90)] },
+        ]
+        let currentPreset = ''
+        if (operator === 'before' && value === todayStr) currentPreset = 'expired'
+        else if (operator === 'range' && Array.isArray(value) && value.length === 2) {
+            const end = value[1]
+            if (end === addDays(7)) currentPreset = 'within_7'
+            else if (end === addDays(30)) currentPreset = 'within_30'
+            else if (end === addDays(60)) currentPreset = 'within_60'
+            else if (end === addDays(90)) currentPreset = 'within_90'
+        }
+        return (
+            <select
+                value={currentPreset}
+                onChange={(e) => {
+                    const key = e.target.value
+                    if (!key) {
+                        onChange('equals', null)
+                        return
+                    }
+                    const preset = presets.find(p => p.value === key && p.operator)
+                    if (preset) onChange(preset.operator, preset.value)
+                }}
+                className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+            >
+                {presets.map((p) => (
+                    <option key={p.value || 'any'} value={p.value}>{p.label}</option>
+                ))}
+            </select>
+        )
+    }
+
     // C9.2: Collection = single dropdown (not "Contains any" multiselect) in secondary filters too
     if (fieldKey === 'collection') {
-        const opts = (filteredOptions !== null && filteredOptions.length > 0)
-            ? filteredOptions
-            : (field.options || [])
+        const opts = Array.isArray(filteredOptions) ? filteredOptions : (field.options || [])
         const label = (opt) => opt.display_label ?? opt.label ?? opt.value
         return (
             <select
@@ -1039,13 +1065,8 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         )
     }
     
-    // Use filteredOptions if provided and non-empty, otherwise fall back to field.options
-    // filteredOptions is null when not provided (use all options)
-    // filteredOptions is [] when filtering resulted in no matches (still use all options as fallback)
-    // filteredOptions has items when filtering found matches (use filtered list)
-    const options = (filteredOptions !== null && filteredOptions.length > 0) 
-        ? filteredOptions 
-        : (field.options || [])
+    // Only available options: use filteredOptions when array (may be [] or [...])
+    const options = Array.isArray(filteredOptions) ? filteredOptions : (field.options || [])
     
     switch (fieldType) {
         case 'text':
@@ -1105,16 +1126,17 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
             )
         
         case 'select':
+        case 'rating':
             return (
                 <select
-                    value={value || ''}
+                    value={value ?? ''}
                     onChange={(e) => onChange(e.target.value || null)}
                     className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 >
                     <option value="">Any</option>
                     {options.map((option) => (
                         <option key={option.value} value={option.value}>
-                            {option.display_label || option.value}
+                            {option.display_label || option.label || option.value}
                         </option>
                     ))}
                 </select>
