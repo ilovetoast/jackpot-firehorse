@@ -370,9 +370,9 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     const hoverBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
     const activeBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'
     
-    // FINAL FIX: Force page remount via key to prevent multiple instances
-    // This ensures React unmounts the old page instance when props change
-    const pageKey = `deliverables-${selectedCategoryId || 'all'}-${assets?.length || 0}-${remountKey}`
+    // Key only by remountKey so category changes do NOT remount (avoids double flash).
+    // Assets does not use a category-dependent key; matching that here fixes Executions flashing twice.
+    const pageKey = `deliverables-${remountKey}`
     
     // Handle finalize complete - refresh asset grid after successful upload finalize
     // Match Assets/Index behavior: preserve drawer state by only reloading assets prop
@@ -481,7 +481,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     }, [canUpload, handleOpenUploadDialog])
 
     return (
-        <div key={pageKey} className="h-screen flex flex-col overflow-hidden">
+        <div key={pageKey} className="h-screen flex flex-col overflow-hidden" data-category-id={selectedCategoryId ?? 'all'}>
             <AppNav brand={auth.activeBrand} tenant={null} />
             
             <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
