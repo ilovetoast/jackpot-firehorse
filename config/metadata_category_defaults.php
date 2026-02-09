@@ -108,4 +108,10 @@ return [
      * Category slugs that get only tags and collection enabled (e.g. video).
      */
     'tags_and_collection_only_slugs' => ['video'],
+
+    /*
+     * System fields that must never be enabled for any category (upload, quick view, filters).
+     * Seeder sets is_hidden=true for every category so they never appear in category-level config.
+     */
+    'always_hidden_fields' => ['dimensions'],
 ];

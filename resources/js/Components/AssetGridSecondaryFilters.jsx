@@ -837,6 +837,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     const isColorFilter = field.filter_type === 'color'
     // C9.2: Collection = single select only, no operator dropdown (no "Contains any")
     const isCollectionFilter = fieldKey === 'collection'
+    // Boolean with display_widget=toggle (e.g. Starred) — render as toggle, no operator dropdown
+    const isToggleBoolean = (fieldKey === 'starred' || field.display_widget === 'toggle') && fieldType === 'boolean'
 
     // Filter options to only show values that exist in available_values
     // This ensures users only see options that actually have matching assets
@@ -892,6 +894,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         } else if (isCollectionFilter) {
             // Collection: single select, always use 'equals'
             onChange('equals', newValue)
+        } else if (isToggleBoolean) {
+            onChange('equals', newValue)
         } else {
             onChange(operator, newValue)
         }
@@ -899,12 +903,13 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     // STEP 3: For color filters, hardcode operator to 'equals' and normalize value to array
     // C9.2: Collection = single select, no operator dropdown, always 'equals'
-    const effectiveOperator = isColorFilter || isCollectionFilter ? 'equals' : operator
+    // Toggle boolean: no operator dropdown
+    const effectiveOperator = isColorFilter || isCollectionFilter || isToggleBoolean ? 'equals' : operator
     const effectiveValue = isColorFilter
         ? (Array.isArray(value) ? value : (value != null ? [value] : null))
-        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : value)
+        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : (isToggleBoolean ? value : value))
     
-    // Special handling for dominant_colors / color / collection - hide operator dropdown, show only value control
+    // Special handling for dominant_colors / color / collection / toggle boolean - hide operator dropdown, show only value control
     const isDominantColors = (fieldKey === 'dominant_colors')
     
     return (
@@ -912,8 +917,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
             <label className="block text-xs font-medium text-gray-700">
                 {field.display_label || field.label}
             </label>
-            {/* For dominant_colors, color, or collection: render value control only (no operator dropdown) */}
-            {(isDominantColors || isColorFilter || isCollectionFilter) ? (
+            {/* For dominant_colors, color, collection, or toggle boolean: render value control only (no operator dropdown) */}
+            {(isDominantColors || isColorFilter || isCollectionFilter || isToggleBoolean) ? (
                 <FilterValueInput
                     field={field}
                     operator={effectiveOperator}
@@ -924,8 +929,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
                 />
             ) : (
                 <div className="flex items-center gap-2">
-                    {/* STEP 3: Hide operator dropdown for color/collection filters */}
-                    {!isColorFilter && !isCollectionFilter && field.operators && field.operators.length > 1 && (
+                    {/* STEP 3: Hide operator dropdown for color/collection/toggle boolean filters */}
+                    {!isColorFilter && !isCollectionFilter && !isToggleBoolean && field.operators && field.operators.length > 1 && (
                         <select
                             value={effectiveOperator}
                             onChange={handleOperatorChange}
@@ -961,6 +966,25 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
 function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, availableValues = [] }) {
     const fieldType = field.type || 'text'
     const fieldKey = field.field_key || field.key
+    
+    // Boolean with display_widget=toggle (e.g. Starred) — same layout as upload/edit/primary filters
+    if (fieldKey === 'starred' || (fieldType === 'boolean' && field.display_widget === 'toggle')) {
+        const isOn = value === true || value === 'true'
+        return (
+            <label className="flex items-center gap-2 cursor-pointer">
+                <div className="relative inline-flex items-center flex-shrink-0">
+                    <input
+                        type="checkbox"
+                        checked={!!isOn}
+                        onChange={(e) => onChange('equals', e.target.checked ? true : null)}
+                        className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600" />
+                </div>
+                <span className="text-xs text-gray-600">{isOn ? 'Yes' : 'Any'}</span>
+            </label>
+        )
+    }
     
     // C9.2: Collection = single dropdown (not "Contains any" multiselect) in secondary filters too
     if (fieldKey === 'collection') {

@@ -3,7 +3,6 @@ import { router } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import ByCategoryView from './ByCategory'
-import FilterView from './FilterView'
 import MetadataFieldModal from '../../../Components/MetadataFieldModal'
 import {
     EyeIcon,
@@ -15,6 +14,7 @@ import {
     CheckCircleIcon,
     PlusIcon,
     PencilIcon,
+    FunnelIcon,
 } from '@heroicons/react/24/outline'
 
 /**
@@ -38,7 +38,7 @@ import {
  * - Add filter-related toggles or controls
  */
 export default function TenantMetadataRegistryIndex({ registry, brands = [], active_brand_id = null, categories, canManageVisibility, canManageFields, customFieldsLimit = null }) {
-    const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY
+    const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY (Filters tab removed)
     const [expandedField, setExpandedField] = useState(null)
     const [categoryModal, setCategoryModal] = useState({ open: false, field: null, suppressedCategories: [] })
     const [selectedCategoryFilter, setSelectedCategoryFilter] = useState(null) // Category Lens filter
@@ -51,6 +51,10 @@ export default function TenantMetadataRegistryIndex({ registry, brands = [], act
         const ids = brands.map(b => b.id)
         if (selectedBrandId !== null && !ids.includes(selectedBrandId)) setSelectedBrandId(initialBrandId != null && ids.includes(initialBrandId) ? initialBrandId : brands[0].id)
     }, [brands, selectedBrandId, initialBrandId])
+    // Filters tab was removed — normalize any stale 'filters' tab state to 'by-category'
+    useEffect(() => {
+        if (activeTab === 'filters') setActiveTab('by-category')
+    }, [activeTab])
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
     const [modalOpen, setModalOpen] = useState(false)
@@ -534,16 +538,6 @@ export default function TenantMetadataRegistryIndex({ registry, brands = [], act
                                 All Metadata ({manageableFields.length})
                             </button>
                             <button
-                                onClick={() => setActiveTab('filters')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
-                                    activeTab === 'filters'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Filters
-                            </button>
-                            <button
                                 onClick={() => setActiveTab('custom')}
                                 className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
                                     activeTab === 'custom'
@@ -573,10 +567,6 @@ export default function TenantMetadataRegistryIndex({ registry, brands = [], act
                                 customFieldsLimit={customFieldsLimit}
                             />
                         </div>
-                    ) : activeTab === 'filters' ? (
-                        <FilterView
-                            onSwitchToByCategory={() => setActiveTab('by-category')}
-                        />
                     ) : (
                         <>
                             {/* Header with New Field Button for Custom Fields tab */}
@@ -673,7 +663,7 @@ export default function TenantMetadataRegistryIndex({ registry, brands = [], act
                                                 Field
                                             </th>
                                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Appears On
+                                                Visibility · Discovery
                                             </th>
                                             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Category Scope
@@ -696,54 +686,57 @@ export default function TenantMetadataRegistryIndex({ registry, brands = [], act
 
                                             return (
                                                 <>
-                                                    <tr key={field.id} className="hover:bg-gray-50">
+                                                    <tr key={field.id} className={isSystem ? 'hover:bg-gray-50 bg-gray-50/50' : 'hover:bg-gray-50'}>
                                                         <td className="px-4 py-3 align-top">
                                                             <div className="flex items-start gap-2">
                                                                 <span className="text-sm font-medium text-gray-900">
                                                                     {field.label || field.system_label || field.key || 'Unnamed Field'}
                                                                 </span>
                                                                 {isSystem && (
-                                                                    <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                                                                    <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded" title="System field">
                                                                         System
                                                                     </span>
                                                                 )}
                                                                 {!isSystem && (
-                                                                    <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded">
+                                                                    <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 rounded" title="Custom field">
                                                                         Custom
                                                                     </span>
                                                                 )}
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-3 align-top">
-                                                            <div className="flex items-center gap-4">
-                                                                {/* Upload Toggle */}
-                                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={effectiveUpload}
-                                                                        onChange={() => handleVisibilityToggle(field.id, 'upload', effectiveUpload)}
-                                                                        disabled={!canManageVisibility}
-                                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                    />
-                                                                    <span className="text-sm text-gray-700">Upload</span>
-                                                                </label>
-
-                                                                {/* Edit Toggle */}
-                                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={effectiveEdit}
-                                                                        onChange={() => handleVisibilityToggle(field.id, 'edit', effectiveEdit)}
-                                                                        disabled={!canManageVisibility}
-                                                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                    />
-                                                                    <span className="text-sm text-gray-700">Edit</span>
-                                                                </label>
-
-                                                                {/* Filter - Read-only */}
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-sm text-gray-500 italic">
-                                                                        Filter → configured in <button onClick={() => setActiveTab('by-category')} className="text-indigo-600 hover:text-indigo-700 underline">By Category</button>
+                                                            <div className="flex items-center gap-6">
+                                                                {/* Visibility: Upload, Quick View */}
+                                                                <div className="flex items-center gap-3" title="Visibility">
+                                                                    <EyeIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
+                                                                    <label className="flex items-center gap-1.5 cursor-pointer" title="Show on upload">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={effectiveUpload}
+                                                                            onChange={() => handleVisibilityToggle(field.id, 'upload', effectiveUpload)}
+                                                                            disabled={!canManageVisibility}
+                                                                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        />
+                                                                        <span className="text-xs text-gray-600">Upload</span>
+                                                                    </label>
+                                                                    <label className="flex items-center gap-1.5 cursor-pointer" title="Show in quick view">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={effectiveEdit}
+                                                                            onChange={() => handleVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                                                            disabled={!canManageVisibility}
+                                                                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                        />
+                                                                        <span className="text-xs text-gray-600">Quick View</span>
+                                                                    </label>
+                                                                </div>
+                                                                {/* Discovery: Filter (configured in By Category) */}
+                                                                <div className="flex items-center gap-2 text-gray-500" title="Discovery">
+                                                                    <FunnelIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
+                                                                    <span className="text-xs italic">
+                                                                        <button type="button" onClick={() => setActiveTab('by-category')} className="text-indigo-600 hover:text-indigo-700 underline">
+                                                                            By Category
+                                                                        </button>
                                                                     </span>
                                                                 </div>
                                                             </div>

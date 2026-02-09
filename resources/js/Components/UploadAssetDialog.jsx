@@ -35,6 +35,7 @@ import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
+import { supportsThumbnail } from '../utils/thumbnailUtils'
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -3996,7 +3997,17 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const hasFiles = v2UploadManager.hasItems
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
 
-
+    // Files that don't support thumbnails yet (video, SVG, HEIC, etc.) — show info message
+    const filesWithoutThumbnailSupport = useMemo(() => {
+        return v2Files.filter((v2File) => {
+            const file = v2File?.file
+            if (!file) return false
+            const mime = file.type || ''
+            const name = file.name || ''
+            const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+            return !supportsThumbnail(mime, ext)
+        })
+    }, [v2Files])
 
     return (
         <div
@@ -4128,17 +4139,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
 
-                                {/* Category + Collections: half width each on sm+ (col-sm-6 equivalent) — below uploads */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-4 border-t border-gray-200 mt-4">
+                                {filesWithoutThumbnailSupport.length > 0 && (
+                                    <div className="mt-3 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 flex items-start gap-2">
+                                        <svg className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                        </svg>
+                                        <p className="text-sm text-blue-800">
+                                            {filesWithoutThumbnailSupport.length === 1
+                                                ? 'This file type doesn\'t support thumbnails yet. You\'ll see a file-type icon instead of a preview in the grid.'
+                                                : `${filesWithoutThumbnailSupport.length} of your files are types we don't support thumbnails for yet (e.g. video, SVG). You'll see a file-type icon instead of a preview for those assets.`}
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Category + Collections: one row each, inputs constrained width — below uploads */}
+                                <div className="flex flex-col gap-3 pt-4 border-t border-gray-200 mt-4">
                                     <GlobalMetadataPanel
                                         uploadManager={v2UploadManager}
                                         categories={filteredCategories}
                                         onCategoryChange={handleCategoryChangeV2}
                                         disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                         inline
+                                        inputClassName="flex-1 min-w-0 max-w-sm"
                                     />
                                     {collectionFieldVisible && (
-                                        <div className="flex items-center gap-2 min-w-0">
+                                        <div className="flex items-center gap-2 min-w-0 [&_.flex-1]:max-w-sm">
                                             <label className="flex-shrink-0 w-24 text-sm font-medium text-gray-700 whitespace-nowrap">
                                                 Collections:
                                             </label>

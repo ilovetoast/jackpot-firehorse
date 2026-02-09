@@ -469,6 +469,8 @@ class MetadataFilterService
                 'operators' => $operators,
                 'options' => $field['options'] ?? [],
                 'group_key' => $field['group_key'],
+                // display_widget: optional UI hint (e.g. 'toggle') — same layout in upload, edit, filters
+                'display_widget' => $field['display_widget'] ?? (($field['key'] ?? '') === 'starred' ? 'toggle' : null),
                 // Phase H scope properties required for filter visibility rules
                 'is_global' => $isGlobal,
                 'category_ids' => $categoryIds,

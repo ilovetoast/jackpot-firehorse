@@ -71,9 +71,9 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
                     id={`metadata-group-${group.key}`}
                     className="pb-3"
                 >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                    <div className="flex flex-col gap-3 [&_.flex-1]:max-w-sm">
                         {fieldsToRender.map((field) => (
-                            <div key={field.key} className={field.key === 'tags' ? 'sm:col-span-2' : ''}>
+                            <div key={field.key}>
                                 <MetadataFieldInput
                                     field={field}
                                     value={values[field.key]}

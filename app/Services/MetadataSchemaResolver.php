@@ -129,7 +129,7 @@ class MetadataSchemaResolver
                 }
             })
             // Phase B2: Select new attributes with safe defaults
-            ->select([
+            ->select(array_merge([
                 'id',
                 'key',
                 'system_label',
@@ -152,7 +152,7 @@ class MetadataSchemaResolver
                 DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
                 DB::raw("COALESCE(readonly, false) as readonly"),
                 DB::raw("COALESCE(is_primary, false) as is_primary"),
-            ])
+            ], Schema::hasColumn('metadata_fields', 'display_widget') ? ['display_widget'] : []))
             ->get()
             ->keyBy('id');
 
@@ -379,6 +379,7 @@ class MetadataSchemaResolver
             'type' => $field->type,
             'group_key' => $field->group_key,
             'applies_to' => $field->applies_to,
+            'display_widget' => $field->display_widget ?? null,
             'is_visible' => !$isHidden, // Category suppression only (big toggle)
             'is_upload_visible' => !$isUploadHidden,
             'is_filterable' => !$isFilterHidden,

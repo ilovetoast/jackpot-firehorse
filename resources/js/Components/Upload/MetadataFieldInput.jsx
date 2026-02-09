@@ -122,6 +122,28 @@ export default function MetadataFieldInput({ field, value, onChange, disabled = 
             )
 
         case 'boolean':
+            // display_widget=toggle: same layout as filters/edit (stored in DB for consistency everywhere)
+            if (field.display_widget === 'toggle') {
+                return (
+                    <div className="flex items-center gap-2 min-w-0">
+                        <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <div className="relative inline-flex items-center flex-shrink-0">
+                            <input
+                                type="checkbox"
+                                checked={value === true || value === 'true'}
+                                onChange={(e) => handleChange(e.target.checked)}
+                                disabled={isDisabled}
+                                className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                        </div>
+                        {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
+                    </div>
+                )
+            }
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <label className="flex-shrink-0 w-28 text-sm font-medium text-gray-700">

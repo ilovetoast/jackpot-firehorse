@@ -367,7 +367,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
         ]);
         
-        // Update existing starred field to ensure correct configuration
+        // Update existing starred field to ensure correct configuration (display_widget = toggle everywhere)
         DB::table('metadata_fields')
             ->where('key', 'starred')
             ->update([
@@ -376,6 +376,7 @@ class MetadataFieldsSeeder extends Seeder
                 'is_user_editable' => true,
                 'is_internal_only' => false,
                 'is_upload_visible' => true,
+                'display_widget' => 'toggle',
                 'updated_at' => now(),
             ]);
 
@@ -480,6 +481,25 @@ class MetadataFieldsSeeder extends Seeder
                     'show_on_edit' => $showOnEdit, // Visible in drawer with "Auto" label (read-only), except bucket
                     'show_in_filters' => true, // Available in grid filters
                     'readonly' => true, // Read-only for users (system can populate)
+                    'updated_at' => now(),
+                ]);
+        }
+
+        // Dimensions: system field, auto-populated, must NEVER appear in upload, quick view, or filters.
+        // Enforced via field-level config so UI and resolvers exclude it without ad-hoc conditionals.
+        $dimensionsField = DB::table('metadata_fields')->where('key', 'dimensions')->first();
+        if ($dimensionsField) {
+            DB::table('metadata_fields')
+                ->where('key', 'dimensions')
+                ->update([
+                    'scope' => 'system',
+                    'population_mode' => 'automatic',
+                    'show_on_upload' => false,
+                    'show_on_edit' => false,
+                    'show_in_filters' => false,
+                    'readonly' => true,
+                    'is_upload_visible' => false,
+                    'is_internal_only' => true, // Hidden from all metadata UI surfaces
                     'updated_at' => now(),
                 ]);
         }
@@ -677,6 +697,44 @@ class MetadataFieldsSeeder extends Seeder
                     }
                 }
                 
+                // Dimensions (and any always_hidden_fields): never enabled for any category
+                $alwaysHiddenFields = $defaultsConfig['always_hidden_fields'] ?? [];
+                foreach ($alwaysHiddenFields as $fieldKey) {
+                    $field = DB::table('metadata_fields')->where('key', $fieldKey)->first();
+                    if (!$field) {
+                        continue;
+                    }
+                    $allCategoriesForBrand = DB::table('categories')
+                        ->where('tenant_id', $tenant->id)
+                        ->where('brand_id', $brand->id)
+                        ->get();
+                    foreach ($allCategoriesForBrand as $category) {
+                        $visibility = DB::table('metadata_field_visibility')
+                            ->where('metadata_field_id', $field->id)
+                            ->where('tenant_id', $tenant->id)
+                            ->where('brand_id', $brand->id)
+                            ->where('category_id', $category->id)
+                            ->first();
+                        $visibilityData = [
+                            'metadata_field_id' => $field->id,
+                            'tenant_id' => $tenant->id,
+                            'brand_id' => $brand->id,
+                            'category_id' => $category->id,
+                            'is_hidden' => true,
+                            'is_upload_hidden' => true,
+                            'is_filter_hidden' => true,
+                            'is_primary' => null,
+                            'updated_at' => now(),
+                        ];
+                        if ($visibility) {
+                            DB::table('metadata_field_visibility')->where('id', $visibility->id)->update($visibilityData);
+                        } else {
+                            $visibilityData['created_at'] = now();
+                            DB::table('metadata_field_visibility')->insert($visibilityData);
+                        }
+                    }
+                }
+
                 // Configure dominant color fields for all image categories (from metadata_category_defaults)
                 foreach ($dominantColorsVisibility as $fieldKey => $visibilityDefaults) {
                     $field = DB::table('metadata_fields')

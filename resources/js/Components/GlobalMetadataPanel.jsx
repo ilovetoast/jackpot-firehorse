@@ -28,7 +28,8 @@ export default function GlobalMetadataPanel({
     onCategoryChange = null,
     className = '',
     disabled = false,
-    inline = false
+    inline = false,
+    inputClassName = '',
 }) {
     const { 
         hasItems, 
@@ -103,22 +104,24 @@ export default function GlobalMetadataPanel({
                     <label htmlFor="category-select" className="flex-shrink-0 w-24 text-sm font-medium text-gray-700 whitespace-nowrap">
                         Category: <span className="text-red-500">*</span>
                     </label>
-                    <select
-                        id="category-select"
-                        value={context.categoryId || ''}
-                        onChange={(e) => handleCategoryChange(e.target.value)}
-                        disabled={disabled}
-                        className={`flex-1 min-w-0 rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                            disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
-                        }`}
-                    >
+                    <div className={inputClassName || 'flex-1 min-w-0'}>
+                        <select
+                            id="category-select"
+                            value={context.categoryId || ''}
+                            onChange={(e) => handleCategoryChange(e.target.value)}
+                            disabled={disabled}
+                            className={`w-full rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+                                disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
+                            }`}
+                        >
                         <option value="">Select</option>
                         {filteredCategories.map((category) => (
                             <option key={category.id} value={category.id}>
                                 {category.name}
                             </option>
                         ))}
-                    </select>
+                        </select>
+                    </div>
                 </div>
                 {categoryWarnings.length > 0 && (
                     <div className="rounded bg-yellow-50 border border-yellow-200 px-2 py-1 mt-1">

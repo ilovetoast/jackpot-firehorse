@@ -332,6 +332,8 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     const isColorFilter = field.filter_type === 'color'
     // C9.2: Collection = single select only, no operator dropdown (no "Contains any")
     const isCollectionFilter = fieldKey === 'collection'
+    // Boolean with display_widget=toggle (e.g. Starred) — render as toggle, no operator dropdown
+    const isToggleBoolean = (fieldKey === 'starred' || field.display_widget === 'toggle') && fieldType === 'boolean'
 
     // Phase J.2.8: Special rendering for tags field (no label)
     if (fieldKey === 'tags') {
@@ -402,6 +404,9 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
         } else if (isCollectionFilter) {
             // Collection: single select, always use 'equals'
             onChange('equals', newValue)
+        } else if (isToggleBoolean) {
+            // Toggle boolean: value is true or null (off = no filter)
+            onChange('equals', newValue)
         } else {
             onChange(operator, newValue)
         }
@@ -409,18 +414,19 @@ function FilterFieldInput({ field, value, operator, onChange, availableValues = 
     
     // STEP 3: For color filters, hardcode operator to 'equals' and normalize value to array
     // C9.2: Collection = single select, no operator dropdown, always 'equals'
-    const effectiveOperator = isColorFilter || isCollectionFilter ? 'equals' : operator
+    // Toggle boolean: no operator dropdown
+    const effectiveOperator = isColorFilter || isCollectionFilter || isToggleBoolean ? 'equals' : operator
     const effectiveValue = isColorFilter
         ? (Array.isArray(value) ? value : (value != null ? [value] : null))
-        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : value)
+        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : (isToggleBoolean ? value : value))
     
     const displayLabel = field.display_label || field.label || fieldKey
 
     return (
         <div className="flex-shrink-0">
             <div className="flex items-center gap-1.5">
-                {/* STEP 3: Hide operator dropdown for color filters; C9.2: hide for collection (single select only) */}
-                {!isColorFilter && !isCollectionFilter && field.operators && field.operators.length > 1 && (
+                {/* STEP 3: Hide operator dropdown for color filters; C9.2: hide for collection; toggle boolean (e.g. Starred) */}
+                {!isColorFilter && !isCollectionFilter && !isToggleBoolean && field.operators && field.operators.length > 1 && (
                     <select
                         value={effectiveOperator}
                         onChange={handleOperatorChange}
@@ -474,6 +480,27 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                 placeholder="Filter by tags..."
                 compact={true}
             />
+        )
+    }
+
+    // Boolean with display_widget=toggle (e.g. Starred) — same layout as upload/edit
+    if (fieldKey === 'starred' || (fieldType === 'boolean' && field.display_widget === 'toggle')) {
+        const isOn = value === true || value === 'true'
+        return (
+            <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                <span className={`text-xs ${compact ? 'text-gray-600' : 'text-gray-700'}`}>
+                    {labelInDropdown && placeholderLabel ? placeholderLabel : (field.display_label || fieldKey)}
+                </span>
+                <div className="relative inline-flex items-center flex-shrink-0">
+                    <input
+                        type="checkbox"
+                        checked={!!isOn}
+                        onChange={(e) => onChange('equals', e.target.checked ? true : null)}
+                        className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600" />
+                </div>
+            </label>
         )
     }
 

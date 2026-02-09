@@ -125,14 +125,30 @@ export default function AssetMetadataEditModal({ assetId, field, onClose, onSave
                         )}
 
                         <div className="space-y-4">
-                            <MetadataFieldInput
-                                field={field}
-                                value={value}
-                                onChange={setValue}
-                                disabled={saving}
-                                showError={false}
-                                isUploadContext={false}
-                            />
+                            {field.type === 'boolean' && field.display_widget === 'toggle' ? (
+                                <label className="flex items-center justify-between gap-4 cursor-pointer">
+                                    <span className="text-sm font-medium text-gray-700">{field.display_label}</span>
+                                    <div className="relative inline-flex items-center flex-shrink-0">
+                                        <input
+                                            type="checkbox"
+                                            checked={value === true || value === 'true'}
+                                            onChange={(e) => setValue(e.target.checked)}
+                                            disabled={saving}
+                                            className="sr-only peer"
+                                        />
+                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                                    </div>
+                                </label>
+                            ) : (
+                                <MetadataFieldInput
+                                    field={field}
+                                    value={value}
+                                    onChange={setValue}
+                                    disabled={saving}
+                                    showError={false}
+                                    isUploadContext={false}
+                                />
+                            )}
                         </div>
                     </div>
 

@@ -6,6 +6,9 @@ import {
     BookmarkIcon,
     CheckCircleIcon,
     DocumentDuplicateIcon,
+    EyeIcon,
+    FunnelIcon,
+    InformationCircleIcon,
     PencilIcon,
     PlusIcon,
     Squares2X2Icon,
@@ -1534,19 +1537,19 @@ function FieldRow({
 
     return (
         <div 
-            className={`px-6 py-4 transition-colors ${
-                isDragging ? 'opacity-50' : 'hover:bg-gray-50'
+            className={`px-6 py-4 transition-colors rounded ${
+                isDragging ? 'opacity-50' : isSystem ? 'bg-gray-50/70 hover:bg-gray-100/70' : 'hover:bg-gray-50'
             }`}
-            draggable={isDraggable && canManage}
-            onDragStart={isDraggable ? (e) => onDragStart(e, field.id) : undefined}
-            onDragOver={isDraggable ? onDragOver : undefined}
-            onDrop={isDraggable ? (e) => onDrop(e, field.id) : undefined}
-            onDragEnd={isDraggable ? onDragEnd : undefined}
+            draggable={isDraggable && canManage && !isSystem}
+            onDragStart={isDraggable && !isSystem ? (e) => onDragStart(e, field.id) : undefined}
+            onDragOver={isDraggable && !isSystem ? onDragOver : undefined}
+            onDrop={isDraggable && !isSystem ? (e) => onDrop(e, field.id) : undefined}
+            onDragEnd={isDraggable && !isSystem ? onDragEnd : undefined}
         >
             <div className="flex items-start gap-4">
-                {/* Drag Handle (only for enabled fields) */}
+                {/* Drag Handle (only for enabled, non-system fields) */}
                 {isDraggable && canManage && (
-                    <div className="flex-shrink-0 pt-1 cursor-move text-gray-400 hover:text-gray-600">
+                    <div className={`flex-shrink-0 pt-1 text-gray-400 ${isSystem ? 'cursor-not-allowed opacity-60' : 'cursor-move hover:text-gray-600'}`}>
                         <Bars3Icon className="w-5 h-5" />
                     </div>
                 )}
@@ -1558,59 +1561,62 @@ function FieldRow({
                             {field.label || field.system_label || field.key || 'Unnamed Field'}
                         </span>
                         {isSystem ? (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                            <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded" title="System field">
                                 System
                             </span>
                         ) : (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded">
+                            <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 rounded" title="Custom field">
                                 Custom
                             </span>
                         )}
                         {/* AI Suggestions Indicator - show for all AI-eligible fields */}
                         {aiEligible && (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded">
-                                {isTagsField ? 'AI Tagging' : 'AI Suggestions'}
+                            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100/80 text-amber-800 rounded" title="AI suggestions">
+                                {isTagsField ? 'AI Tagging' : 'AI'}
                             </span>
                         )}
                     </div>
 
-                    {/* Upload/Edit/Filter Checkboxes */}
+                    {/* Visibility (Upload, Quick View) · Discovery (Filter, Primary) */}
                     {isEnabled && (
                         <div className="flex items-center gap-6 text-xs text-gray-600">
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={effectiveUpload}
-                                    onChange={() => onVisibilityToggle(field.id, 'upload', effectiveUpload)}
-                                    disabled={!canManage}
-                                    className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                />
-                                <span>Upload</span>
-                            </label>
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={effectiveEdit}
-                                    onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
-                                    disabled={!canManage}
-                                    className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                />
-                                <span>Quick View</span>
-                            </label>
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={effectiveFilter}
-                                    onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
-                                    disabled={!canManage}
-                                    className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                />
-                                <span>Filter</span>
-                            </label>
-                            {/* Primary filter toggle - only visible when field is enabled for filtering */}
-                            {effectiveFilter && (
-                                <div className="flex flex-col gap-1">
-                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                            <div className="flex items-center gap-3" title="Visibility">
+                                <EyeIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
+                                <label className="flex items-center gap-1.5 cursor-pointer" title="Show on upload">
+                                    <input
+                                        type="checkbox"
+                                        checked={effectiveUpload}
+                                        onChange={() => onVisibilityToggle(field.id, 'upload', effectiveUpload)}
+                                        disabled={!canManage}
+                                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    />
+                                    <span>Upload</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 cursor-pointer" title="Show in quick view">
+                                    <input
+                                        type="checkbox"
+                                        checked={effectiveEdit}
+                                        onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                        disabled={!canManage}
+                                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    />
+                                    <span>Quick View</span>
+                                </label>
+                            </div>
+                            <div className="flex items-center gap-2" title="Discovery">
+                                <FunnelIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
+                                <label className="flex items-center gap-1.5 cursor-pointer" title="Show in filters">
+                                    <input
+                                        type="checkbox"
+                                        checked={effectiveFilter}
+                                        onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                                        disabled={!canManage}
+                                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    />
+                                    <span>Filter</span>
+                                </label>
+                                {effectiveFilter && (
+                                    <label className="flex items-center gap-1.5 cursor-pointer" title="Primary filters appear inline in the asset grid; others appear under &quot;More filters&quot;.">
                                         <input
                                             type="checkbox"
                                             checked={effectiveIsPrimary}
@@ -1618,15 +1624,11 @@ function FieldRow({
                                             disabled={!canManage}
                                             className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                         />
-                                        <span className="text-xs text-gray-600">Primary (for this category)</span>
+                                        <span className="text-xs text-gray-600">Primary</span>
+                                        <InformationCircleIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-hidden title="Primary filters appear inline in the asset grid; others appear under More filters." />
                                     </label>
-                                    {effectiveIsPrimary && (
-                                        <p className="text-xs text-gray-500 ml-5 italic">
-                                            Primary filters appear inline in the asset grid; others appear under "More filters".
-                                        </p>
-                                    )}
-                                </div>
-                            )}
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -1694,41 +1696,39 @@ function AutomatedFieldRow({
                     </span>
                 )}
                 
-                {/* Upload/Edit/Filter Checkboxes - Only visible when enabled */}
+                {/* Visibility · Discovery - Only visible when enabled */}
                 {isEnabled && (
-                    <div className="flex items-center gap-3 ml-auto">
-                        {/* Upload - Always disabled/greyed out for automated fields */}
-                        <label className="flex items-center gap-1.5 cursor-not-allowed opacity-50">
-                            <input
-                                type="checkbox"
-                                checked={false}
-                                disabled={true}
-                                className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-not-allowed"
-                            />
-                            <span className="text-xs text-gray-400">Upload</span>
-                        </label>
-                        {/* Show in Quick View - Functional */}
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={effectiveEdit}
-                                onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
-                                disabled={!canManage}
-                                className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                            />
-                            <span className="text-xs text-gray-500">Quick View</span>
-                        </label>
-                        {/* Filter - Functional */}
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={effectiveFilter}
-                                onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
-                                disabled={!canManage}
-                                className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                            />
-                            <span className="text-xs text-gray-500">Filter</span>
-                        </label>
+                    <div className="flex items-center gap-4 ml-auto">
+                        <div className="flex items-center gap-2" title="Visibility">
+                            <EyeIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-hidden />
+                            <label className="flex items-center gap-1.5 cursor-not-allowed opacity-50" title="Upload (disabled for auto fields)">
+                                <input type="checkbox" checked={false} disabled className="h-3 w-3 rounded border-gray-300 cursor-not-allowed" />
+                                <span className="text-xs text-gray-400">Upload</span>
+                            </label>
+                            <label className="flex items-center gap-1.5 cursor-pointer" title="Quick View">
+                                <input
+                                    type="checkbox"
+                                    checked={effectiveEdit}
+                                    onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                    disabled={!canManage}
+                                    className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                                <span className="text-xs text-gray-500">Quick View</span>
+                            </label>
+                        </div>
+                        <div className="flex items-center gap-2" title="Discovery">
+                            <FunnelIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-hidden />
+                            <label className="flex items-center gap-1.5 cursor-pointer" title="Filter">
+                                <input
+                                    type="checkbox"
+                                    checked={effectiveFilter}
+                                    onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                                    disabled={!canManage}
+                                    className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                                <span className="text-xs text-gray-500">Filter</span>
+                            </label>
+                        </div>
                     </div>
                 )}
             </div>
