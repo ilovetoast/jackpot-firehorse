@@ -3,6 +3,12 @@ name: Staging Deploy
 on:
   push:
     branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      fresh:
+        description: 'Run migrate:fresh + seed (STAGING ONLY)'
+        required: false
+        default: 'false'
 
 jobs:
   deploy:
@@ -21,11 +27,16 @@ jobs:
 
       - name: Deploy Web
         run: |
+          if [[ "${{ github.event.inputs.fresh }}" == "true" ]]; then
+            CMD="/var/www/jackpot/deploy/deploy.sh --fresh"
+          else
+            CMD="/var/www/jackpot/deploy/deploy.sh"
+          fi
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=instanceids,Values=i-08219b6e485f830bb" \
             --comment "Staging deploy (web)" \
-            --parameters 'commands=["sudo -u ubuntu /var/www/jackpot/deploy/deploy.sh"]'
+            --parameters "commands=[\"sudo -u ubuntu $CMD\"]"
 
       - name: Deploy Worker
         run: |
