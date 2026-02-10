@@ -160,12 +160,21 @@ class AssetsResetStaging extends Command
                 $bucketDeleted = true;
                 $this->line("  Tenant {$tenant->id}: deleted bucket {$bucketName}.");
             } catch (S3Exception $e) {
-                $this->error("  Failed to delete bucket {$bucketName}: " . $e->getMessage());
-                Log::error('assets:reset-staging deleteBucket failed', [
-                    'tenant_id' => $tenant->id,
-                    'bucket' => $bucketName,
-                    'error' => $e->getMessage(),
-                ]);
+                $isAccessDenied = $e->getAwsErrorCode() === 'AccessDenied' || $e->getStatusCode() === 403;
+                if ($isAccessDenied) {
+                    $this->warn("  Tenant {$tenant->id}: bucket {$bucketName} not deleted (IAM lacks s3:DeleteBucket). Bucket is empty; row will be removed. Run tenants:ensure-buckets to reuse.");
+                    Log::warning('assets:reset-staging deleteBucket skipped (no permission)', [
+                        'tenant_id' => $tenant->id,
+                        'bucket' => $bucketName,
+                    ]);
+                } else {
+                    $this->error("  Failed to delete bucket {$bucketName}: " . $e->getMessage());
+                    Log::error('assets:reset-staging deleteBucket failed', [
+                        'tenant_id' => $tenant->id,
+                        'bucket' => $bucketName,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             if ($bucketRow) {
