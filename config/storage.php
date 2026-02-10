@@ -122,21 +122,21 @@ return [
         'kms_key_id' => env('AWS_KMS_KEY_ID'),
 
         /*
-        | Lifecycle rules for bucket.
+        | Lifecycle rules for bucket (keys must match S3 API: Status, ID, etc.).
         | Set to null to disable lifecycle management.
         */
         'lifecycle_rules' => [
             [
-                'id' => 'delete-old-versions',
-                'status' => 'Enabled',
-                'noncurrentVersionExpiration' => [
+                'ID' => 'delete-old-versions',
+                'Status' => 'Enabled',
+                'NoncurrentVersionExpiration' => [
                     'NoncurrentDays' => 90,
                 ],
             ],
             [
-                'id' => 'abort-incomplete-uploads',
-                'status' => 'Enabled',
-                'abortIncompleteMultipartUpload' => [
+                'ID' => 'abort-incomplete-uploads',
+                'Status' => 'Enabled',
+                'AbortIncompleteMultipartUpload' => [
                     'DaysAfterInitiation' => 7,
                 ],
             ],

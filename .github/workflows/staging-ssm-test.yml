@@ -2,20 +2,26 @@
 #
 # Run from: Actions → Staging SSM Sanity Test → Run workflow
 #
-# Optional: "Run default seeder" = true runs on the WEB instance:
-#   cd /var/www/jackpot/current && php artisan db:seed --force
+# Options (web instance i-08219b6e485f830bb):
+#   Run migrate:fresh + seed = clean DB, migrate, seed (STAGING ONLY)
+#   Run default seeder      = db:seed --force only
 #
-# To run the seeder manually in AWS Systems Manager (Session Manager or Run Command):
-#   Target: instance i-08219b6e485f830bb (web)
-#   Command: sudo -u ubuntu bash -c 'cd /var/www/jackpot/current && php artisan db:seed --force'
+# Manual SSM Run Command (AWS-RunShellScript, target i-08219b6e485f830bb):
+#   Fresh + seed: sudo -u ubuntu bash -c 'cd /var/www/jackpot/current && php artisan migrate:fresh --force && php artisan db:seed --force'
+#   Seed only:    sudo -u ubuntu bash -c 'cd /var/www/jackpot/current && php artisan db:seed --force'
 #
 name: Staging SSM Sanity Test
 
 on:
   workflow_dispatch:
     inputs:
+      run_fresh:
+        description: 'Run migrate:fresh + seed (clean DB, migrate, seed) on web instance'
+        required: false
+        default: false
+        type: boolean
       run_seed:
-        description: 'Run default seeder (db:seed --force) on web instance'
+        description: 'Run default seeder only (db:seed --force) on web instance'
         required: false
         default: false
         type: boolean
@@ -40,7 +46,10 @@ jobs:
 
       - name: Send SSM command to staging EC2
         run: |
-          if [[ "${{ github.event.inputs.run_seed }}" == "true" ]]; then
+          if [[ "${{ github.event.inputs.run_fresh }}" == "true" ]]; then
+            COMMANDS='["cd /var/www/jackpot/current && php artisan migrate:fresh --force && php artisan db:seed --force"]'
+            COMMENT="Staging migrate:fresh + seed (web)"
+          elif [[ "${{ github.event.inputs.run_seed }}" == "true" ]]; then
             COMMANDS='["cd /var/www/jackpot/current && php artisan db:seed --force"]'
             COMMENT="Staging run db:seed (web)"
           else
