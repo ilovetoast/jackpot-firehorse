@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       fresh:
-        description: 'Run migrate:fresh + seed (STAGING ONLY)'
+        description: 'Run migrate:fresh + seed (STAGING ONLY, full DB reset)'
+        required: false
+        default: 'false'
+      seed:
+        description: 'Run default seeder after deploy (db:seed --force)'
         required: false
         default: 'false'
 
@@ -29,6 +33,8 @@ jobs:
         run: |
           if [[ "${{ github.event.inputs.fresh }}" == "true" ]]; then
             CMD="/var/www/jackpot/deploy/deploy.sh --fresh"
+          elif [[ "${{ github.event.inputs.seed }}" == "true" ]]; then
+            CMD="/var/www/jackpot/deploy/deploy.sh --seed"
           else
             CMD="/var/www/jackpot/deploy/deploy.sh"
           fi

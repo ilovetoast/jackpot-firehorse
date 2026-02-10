@@ -1,7 +1,24 @@
+# Staging SSM Sanity Test
+#
+# Run from: Actions → Staging SSM Sanity Test → Run workflow
+#
+# Optional: "Run default seeder" = true runs on the WEB instance:
+#   cd /var/www/jackpot/current && php artisan db:seed --force
+#
+# To run the seeder manually in AWS Systems Manager (Session Manager or Run Command):
+#   Target: instance i-08219b6e485f830bb (web)
+#   Command: sudo -u ubuntu bash -c 'cd /var/www/jackpot/current && php artisan db:seed --force'
+#
 name: Staging SSM Sanity Test
 
 on:
   workflow_dispatch:
+    inputs:
+      run_seed:
+        description: 'Run default seeder (db:seed --force) on web instance'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -23,10 +40,18 @@ jobs:
 
       - name: Send SSM command to staging EC2
         run: |
+          if [[ "${{ github.event.inputs.run_seed }}" == "true" ]]; then
+            COMMANDS='["cd /var/www/jackpot/current && php artisan db:seed --force"]'
+            COMMENT="Staging run db:seed (web)"
+          else
+            COMMANDS='["whoami","uname -a","php -v"]'
+            COMMENT="Staging SSM sanity test"
+          fi
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets "Key=instanceIds,Values=i-08219b6e485f830bb" \
-            --parameters 'commands=["whoami","uname -a","php -v"]' \
+            --targets "Key=instanceids,Values=i-08219b6e485f830bb" \
+            --comment "$COMMENT" \
+            --parameters "commands=$COMMANDS" \
             --query "Command.CommandId" \
             --output text)
 
