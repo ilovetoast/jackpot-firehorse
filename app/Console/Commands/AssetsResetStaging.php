@@ -105,10 +105,28 @@ class AssetsResetStaging extends Command
             ->values()
             ->all();
 
+        $sharedBucketName = config('storage.shared_bucket');
+
         foreach ($bucketNamesToProcess as $bucketName) {
             $bucketRow = $dbBuckets->firstWhere('name', $bucketName);
             $objectsDeleted = 0;
             $bucketDeleted = false;
+
+            // Staging IAM typically has no access to the local/shared bucket (e.g. dam-local-shared).
+            // Skip S3 operations for it; only remove the legacy DB row so tenant is cleaned up.
+            if ($sharedBucketName !== null && $sharedBucketName !== '' && $bucketName === $sharedBucketName) {
+                $this->line("  Tenant {$tenant->id} ({$tenant->name}): skipping S3 for shared/local bucket \"{$bucketName}\" (staging uses per-tenant buckets); row will be removed.");
+                if (! $dryRun && $bucketRow) {
+                    $bucketRow->forceDelete();
+                }
+                $this->perTenantSummary[$tenant->id]['buckets'][] = [
+                    'bucket' => $bucketName,
+                    'objects_deleted' => 0,
+                    'bucket_deleted' => false,
+                    'row_deleted' => (bool) $bucketRow,
+                ];
+                continue;
+            }
 
             if (! $this->bucketExistsInS3($bucketName)) {
                 $this->line("  Tenant {$tenant->id} ({$tenant->name}): bucket {$bucketName} does not exist in S3, skipping S3 steps.");
