@@ -18,7 +18,9 @@ use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Models\SystemCategory;
 use App\Services\MetadataPersistenceService;
+use App\Services\SystemCategoryService;
 use App\Services\TenantBucketService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
@@ -229,6 +231,10 @@ class DevelopmentDataSeeder extends Seeder
             }
         }
         
+        // Seed assets for company 1 / brand 1 (default seed company) with lots of filterable metadata
+        $this->command->info('Seeding assets for company 1 / brand 1 (lots of filters)...');
+        $this->seedAssetsForFirstCompanyBrand($planLimits);
+
         // Create support tickets
         $this->command->info('Creating support tickets...');
         $this->createSupportTickets();
@@ -319,7 +325,13 @@ class DevelopmentDataSeeder extends Seeder
             
             $brands[] = $brand;
         }
-        
+
+        // Sync system categories (Photography, Logos, etc.) so filters and type fields work
+        $systemCategoryService = app(SystemCategoryService::class);
+        foreach ($brands as $brand) {
+            $systemCategoryService->syncToBrand($brand);
+        }
+
         // Determine user count (some companies exceed limits)
         $maxUsers = $planConfig['max_users'] ?? PHP_INT_MAX;
         $shouldExceedLimit = fake()->boolean(self::EXCEED_LIMIT_PERCENT * 100);
@@ -427,23 +439,24 @@ class DevelopmentDataSeeder extends Seeder
             }
         }
         
-        // Create assets with proper metadata fields
+        // Create assets with proper metadata fields (Assets + Executions/deliverables)
         $assetCount = fake()->numberBetween($this->getMinAssetsPerCompany(), $this->getMaxAssetsPerCompany());
-        $categories = Category::where('tenant_id', $company->id)->get();
+        $allCategories = Category::where('tenant_id', $company->id)->get();
+        $assetCategories = $allCategories->filter(fn ($c) => $c->asset_type === AssetType::ASSET)->values();
+        $deliverableCategories = $allCategories->filter(fn ($c) => $c->asset_type === AssetType::DELIVERABLE)->values();
         $companyUsers = $company->users()->get();
-        
-        // Get metadata fields for generating realistic metadata
-        $metadataFields = DB::table('metadata_fields')
-            ->where('is_user_editable', true)
-            ->where('show_on_upload', true)
-            ->get(['id', 'key', 'type']);
-        
+        $metadataFields = $this->getMetadataFieldsForSeeding();
+
         for ($a = 0; $a < $assetCount; $a++) {
             $brand = fake()->randomElement($brands);
             $user = fake()->randomElement($companyUsers);
-            $category = $categories->isNotEmpty() ? fake()->randomElement($categories) : null;
-            
-            $assetType = fake()->randomElement([AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED]);
+            // ~25% deliverables (Executions), rest assets; pick category matching type
+            $assetType = fake()->randomElement([AssetType::ASSET, AssetType::ASSET, AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED]);
+            if ($assetType === AssetType::DELIVERABLE && $deliverableCategories->isEmpty()) {
+                $assetType = AssetType::ASSET;
+            }
+            $categoriesForType = ($assetType === AssetType::DELIVERABLE) ? $deliverableCategories : $assetCategories;
+            $category = $categoriesForType->isNotEmpty() ? $categoriesForType->random() : ($allCategories->isNotEmpty() ? $allCategories->random() : null);
             $mimeTypes = [
                 'image/jpeg', 'image/png', 'image/gif', 'image/webp',
                 'application/pdf', 'video/mp4', 'application/zip',
@@ -465,10 +478,11 @@ class DevelopmentDataSeeder extends Seeder
                 'last_activity_at' => now(),
             ]);
             
-            // Generate realistic metadata fields
-            $metadataFieldsData = $this->generateRealisticMetadataFields($metadataFields);
+            // Generate realistic metadata fields (include type field for system categories)
+            $metadataFieldsData = $this->generateRealisticMetadataFields($metadataFields, $category);
             
-            // Create asset
+            // Most assets are visible and published (public); ~15% stay unpublished for lifecycle testing
+            $isPublished = fake()->boolean(85);
             $asset = Asset::create([
                 'tenant_id' => $company->id,
                 'brand_id' => $brand->id,
@@ -491,6 +505,8 @@ class DevelopmentDataSeeder extends Seeder
                     ThumbnailStatus::PROCESSING,
                     ThumbnailStatus::COMPLETED,
                 ]),
+                'published_at' => $isPublished ? now() : null,
+                'published_by_id' => $isPublished ? $user->id : null,
             ]);
             
             // Persist metadata fields to asset_metadata table if category and fields exist
@@ -517,6 +533,181 @@ class DevelopmentDataSeeder extends Seeder
     }
     
     /**
+     * Number of assets to create for company 1 / brand 1 (lots of filter data).
+     */
+    private const FIRST_COMPANY_ASSETS = [
+        'small' => 80,
+        'medium' => 150,
+        'large' => 250,
+    ];
+
+    /** Number of execution/deliverable assets for company 1 (Executions tab with metadata). */
+    private const FIRST_COMPANY_DELIVERABLES = [
+        'small' => 25,
+        'medium' => 45,
+        'large' => 80,
+    ];
+
+    /**
+     * Seed assets for the first company and its default brand (company 1 / brand 1 from default seed).
+     * Ensures the primary dev tenant has plenty of assets with rich filter metadata.
+     */
+    private function seedAssetsForFirstCompanyBrand(array $planLimits): void
+    {
+        $company = Tenant::orderBy('id')->first();
+        if (!$company) {
+            return;
+        }
+        $brand = $company->defaultBrand ?? $company->brands()->where('is_default', true)->first() ?? $company->brands()->first();
+        if (!$brand) {
+            return;
+        }
+        $bucket = StorageBucket::firstOrCreate(
+            [
+                'tenant_id' => $company->id,
+                'name' => app(TenantBucketService::class)->getBucketName($company),
+            ],
+            [
+                'status' => StorageBucketStatus::ACTIVE,
+                'region' => config('storage.default_region', 'us-east-1'),
+            ]
+        );
+        $categories = Category::where('tenant_id', $company->id)->where('brand_id', $brand->id)->get();
+        if ($categories->isEmpty()) {
+            app(SystemCategoryService::class)->syncToBrand($brand);
+            $categories = Category::where('tenant_id', $company->id)->where('brand_id', $brand->id)->get();
+        }
+        $companyUsers = $company->users()->get();
+        if ($companyUsers->isEmpty()) {
+            return;
+        }
+        $metadataFields = $this->getMetadataFieldsForSeeding();
+        $assetCount = self::FIRST_COMPANY_ASSETS[$this->getSize()] ?? self::FIRST_COMPANY_ASSETS['small'];
+        $deliverableCount = self::FIRST_COMPANY_DELIVERABLES[$this->getSize()] ?? self::FIRST_COMPANY_DELIVERABLES['small'];
+        $assetCategories = $categories->filter(fn ($c) => $c->asset_type === AssetType::ASSET)->values();
+        $deliverableCategories = $categories->filter(fn ($c) => $c->asset_type === AssetType::DELIVERABLE)->values();
+        $systemAssetCategories = $assetCategories->filter(fn ($c) => $c->system_category_id !== null)->values();
+        $systemDeliverableCategories = $deliverableCategories->filter(fn ($c) => $c->system_category_id !== null)->values();
+
+        // 1) Create execution/deliverable assets (Executions tab) with metadata
+        $deliverablesToCreate = $deliverableCategories->isNotEmpty() ? $deliverableCount : 0;
+        for ($d = 0; $d < $deliverablesToCreate; $d++) {
+            $user = $companyUsers->random();
+            $category = $systemDeliverableCategories->isNotEmpty() && fake()->boolean(85)
+                ? $systemDeliverableCategories->random()
+                : $deliverableCategories->random();
+            $this->createSeededAsset(
+                $company,
+                $brand,
+                $bucket,
+                $user,
+                $category,
+                AssetType::DELIVERABLE,
+                $metadataFields,
+                true
+            );
+        }
+
+        // 2) Create remaining assets (Assets tab) with metadata
+        $remaining = $assetCount - $deliverablesToCreate;
+        $preferSystem = $systemAssetCategories->isNotEmpty();
+        for ($a = 0; $a < $remaining; $a++) {
+            $user = $companyUsers->random();
+            $category = $assetCategories->isEmpty() ? $categories->random() : (
+                $preferSystem && fake()->boolean(80) ? $systemAssetCategories->random() : $assetCategories->random()
+            );
+            $assetType = fake()->randomElement([AssetType::ASSET, AssetType::ASSET, AssetType::AI_GENERATED]);
+            $this->createSeededAsset(
+                $company,
+                $brand,
+                $bucket,
+                $user,
+                $category,
+                $assetType,
+                $metadataFields,
+                true
+            );
+        }
+    }
+
+    /**
+     * Create a single asset with metadata (shared by company loop and first-company seed).
+     */
+    private function createSeededAsset(
+        Tenant $company,
+        Brand $brand,
+        StorageBucket $bucket,
+        User $user,
+        Category $category,
+        AssetType $assetType,
+        $metadataFields,
+        bool $highFillRate = false
+    ): void {
+        $mimeTypes = [
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'application/pdf', 'video/mp4', 'application/zip',
+        ];
+        $mimeType = fake()->randomElement($mimeTypes);
+        $extension = $this->getExtensionFromMimeType($mimeType);
+        $sizeBytes = fake()->numberBetween(10000, 50000000);
+        $uploadSession = UploadSession::create([
+            'tenant_id' => $company->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => $sizeBytes,
+            'uploaded_size' => $sizeBytes,
+            'expires_at' => now()->addDays(30),
+            'last_activity_at' => now(),
+        ]);
+        $metadataFieldsData = $this->generateRealisticMetadataFields($metadataFields, $category, $highFillRate);
+        $isPublished = $highFillRate ? fake()->boolean(90) : fake()->boolean(85);
+        $asset = Asset::create([
+            'tenant_id' => $company->id,
+            'brand_id' => $brand->id,
+            'user_id' => $user->id,
+            'upload_session_id' => $uploadSession->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => $assetType,
+            'title' => fake()->sentence(3),
+            'original_filename' => fake()->word() . '.' . $extension,
+            'mime_type' => $mimeType,
+            'size_bytes' => $sizeBytes,
+            'storage_root_path' => 'dev-seeder/assets/' . Str::uuid() . '.' . $extension,
+            'metadata' => [
+                'category_id' => $category->id,
+                'fields' => $metadataFieldsData,
+            ],
+            'thumbnail_status' => fake()->randomElement([
+                ThumbnailStatus::PENDING,
+                ThumbnailStatus::PROCESSING,
+                ThumbnailStatus::COMPLETED,
+            ]),
+            'published_at' => $isPublished ? now() : null,
+            'published_by_id' => $isPublished ? $user->id : null,
+        ]);
+        if (!empty($metadataFieldsData)) {
+            try {
+                app(MetadataPersistenceService::class)->persistMetadata(
+                    $asset,
+                    $category,
+                    $metadataFieldsData,
+                    $user->id,
+                    'image',
+                    true
+                );
+            } catch (\Exception $e) {
+                \Log::warning('[DevelopmentDataSeeder] Persist metadata failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
      * Estimate user count based on company count and plan distribution.
      */
     private function estimateUserCount(int $companiesCount): int
@@ -541,14 +732,16 @@ class DevelopmentDataSeeder extends Seeder
         $companies = Tenant::inRandomOrder()->limit($ticketsCount)->get();
         $users = User::inRandomOrder()->limit($ticketsCount * 2)->get();
         
+        $prefix = 'SUP-DEV-' . Str::random(6) . '-';
         foreach ($companies as $index => $company) {
             if ($index >= $ticketsCount) break;
             
             $createdBy = $users->random();
             $assignedTo = fake()->boolean(60) ? $users->random() : null;
             
-            Ticket::create([
-                'ticket_number' => 'SUP-' . str_pad($index + 1, 4, '0', STR_PAD_LEFT),
+            Ticket::withoutEvents(function () use ($prefix, $index, $company, $createdBy, $assignedTo) {
+                Ticket::create([
+                'ticket_number' => $prefix . str_pad($index + 1, 4, '0', STR_PAD_LEFT),
                 'type' => fake()->randomElement(['tenant', 'tenant_internal', 'internal']),
                 'status' => fake()->randomElement([
                     TicketStatus::OPEN,
@@ -564,7 +757,8 @@ class DevelopmentDataSeeder extends Seeder
                     'subject' => fake()->sentence(),
                     'category' => fake()->word(),
                 ],
-            ]);
+                ]);
+            });
         }
     }
     
@@ -619,18 +813,88 @@ class DevelopmentDataSeeder extends Seeder
     }
     
     /**
-     * Generate realistic metadata fields based on actual metadata field definitions.
+     * Get metadata field definitions for seeding. Includes any field that is user-editable and
+     * visible on upload OR filterable (so type fields and common fields are always included).
      */
-    private function generateRealisticMetadataFields($metadataFields): array
+    private function getMetadataFieldsForSeeding(): \Illuminate\Support\Collection
+    {
+        $query = DB::table('metadata_fields')
+            ->where('is_user_editable', true)
+            ->where('is_internal_only', false)
+            ->whereNull('deprecated_at')
+            ->where(function ($q) {
+                $q->where('is_upload_visible', true)
+                    ->orWhere('is_filterable', true);
+            })
+            ->orderBy('id')
+            ->get(['id', 'key', 'type']);
+        return $query->isEmpty()
+            ? DB::table('metadata_fields')->whereNull('deprecated_at')->get(['id', 'key', 'type'])
+            : $query;
+    }
+
+    /**
+     * System category slug -> type field key (for filterable type fields).
+     */
+    private const SYSTEM_SLUG_TO_TYPE_FIELD = [
+        'photography' => 'photo_type',
+        'logos' => 'logo_type',
+        'graphics' => 'graphic_type',
+        'video' => 'video_type',
+        'templates' => 'template_type',
+        'audio' => 'audio_type',
+        'model-3d' => 'model_3d_type',
+        'print' => 'print_type',
+        'digital-ads' => 'digital_type',
+        'ooh' => 'ooh_type',
+        'events' => 'event_type',
+        'videos' => 'execution_video_type',
+        'sales-collateral' => 'sales_collateral_type',
+        'pr' => 'pr_type',
+        'packaging' => 'packaging_type',
+        'product-renders' => 'product_render_type',
+        'radio' => 'radio_type',
+    ];
+
+    /**
+     * Generate realistic metadata fields based on actual metadata field definitions.
+     * When category is system-linked, sets the corresponding type field so filters return results.
+     *
+     * @param  bool  $highFillRate  When true, populate ~90% of fields (for "lots of filter" data)
+     */
+    private function generateRealisticMetadataFields($metadataFields, ?Category $category = null, bool $highFillRate = false): array
     {
         $fields = [];
-        
-        // Only populate a subset of fields (30-70% chance per field)
-        foreach ($metadataFields as $field) {
-            if (!fake()->boolean(50)) {
-                continue; // Skip 50% of fields randomly
+
+        // If asset is in a system category, set the type field for that category (so filters work)
+        if ($category?->system_category_id) {
+            $systemCategory = SystemCategory::find($category->system_category_id);
+            if ($systemCategory && isset(self::SYSTEM_SLUG_TO_TYPE_FIELD[$systemCategory->slug])) {
+                $typeKey = self::SYSTEM_SLUG_TO_TYPE_FIELD[$systemCategory->slug];
+                $value = $this->getSelectFieldValue($typeKey);
+                if ($value !== null) {
+                    $fields[$typeKey] = $value;
+                }
             }
-            
+        }
+
+        $fillChance = $highFillRate ? 90 : 50;
+        $minFields = ($highFillRate || $category) ? 4 : 1;
+        $remaining = $metadataFields->filter(fn ($f) => !isset($fields[$f->key]))->values();
+        $added = 0;
+        foreach ($remaining as $field) {
+            $needMore = count($fields) < $minFields;
+            $roll = fake()->boolean($fillChance);
+            if (!$needMore && !$roll) {
+                continue;
+            }
+            if ($needMore && !$roll) {
+                $roll = true; // Force add to reach minimum
+            }
+            if (!$roll) {
+                continue;
+            }
+
             $value = match ($field->type) {
                 'select' => $this->getSelectFieldValue($field->key),
                 'multiselect' => $this->getMultiselectFieldValue($field->key),
@@ -640,25 +904,45 @@ class DevelopmentDataSeeder extends Seeder
                 'boolean' => fake()->boolean(),
                 default => fake()->word(),
             };
-            
+
             if ($value !== null) {
                 $fields[$field->key] = $value;
+                $added++;
             }
         }
-        
+
         return $fields;
     }
     
     /**
-     * Get a realistic value for a select field based on common field keys.
+     * Get a realistic value for a select field. Uses seeded option values for type fields so filters work.
      */
     private function getSelectFieldValue(string $fieldKey): ?string
     {
         return match ($fieldKey) {
-            'photo_type' => fake()->randomElement(['action', 'portrait', 'landscape', 'product', 'lifestyle', 'event']),
-            'usage_rights' => fake()->randomElement(['internal', 'external', 'social', 'print', 'web']),
+            // Asset type fields (one per system category)
+            'photo_type' => fake()->randomElement(['studio', 'lifestyle']),
+            'logo_type' => fake()->randomElement(['primary', 'secondary', 'promotional']),
+            'graphic_type' => fake()->randomElement(['icon', 'effect', 'texture']),
+            'video_type' => fake()->randomElement(['b_roll', 'interviews']),
+            'template_type' => fake()->randomElement(['email', 'social']),
+            'audio_type' => null, // No options in seeder
+            'model_3d_type' => null,
+            'product_render_type' => null,
+            // Execution/deliverable type fields
+            'print_type' => fake()->randomElement(['ads', 'brochures', 'posters', 'inserts']),
+            'digital_type' => 'display_ads',
+            'ooh_type' => fake()->randomElement(['billboards', 'signage']),
+            'event_type' => fake()->randomElement(['booths', 'transit', 'experiential']),
+            'execution_video_type' => fake()->randomElement(['broadcast', 'pre_roll', 'brand_video', 'explainer_video', 'product_demos']),
+            'sales_collateral_type' => fake()->randomElement(['catalogs', 'sales_sheets', 'trade_show_materials']),
+            'pr_type' => fake()->randomElement(['press_releases', 'media_kits', 'backgrounders']),
+            'packaging_type' => fake()->randomElement(['flat_art', 'renders_3d']),
+            'radio_type' => fake()->randomElement(['broadcast_spots', 'live_reads']),
+            // Other common fields
+            'usage_rights' => fake()->randomElement(['unrestricted', 'editorial_only', 'internal', 'external', 'social', 'print', 'web']),
             'orientation' => fake()->randomElement(['landscape', 'portrait', 'square']),
-            'color_space' => fake()->randomElement(['RGB', 'CMYK', 'sRGB']),
+            'color_space' => fake()->randomElement(['srgb', 'adobe_rgb', 'cmyk']),
             'resolution_class' => fake()->randomElement(['low', 'medium', 'high', 'ultra']),
             'scene_classification' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'natural']),
             default => fake()->word(),

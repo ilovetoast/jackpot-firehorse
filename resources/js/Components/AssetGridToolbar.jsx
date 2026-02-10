@@ -25,10 +25,10 @@
  * @param {React.ReactNode} props.moreFiltersContent - Optional more filters section content
  * @param {boolean} props.showMoreFilters - Whether to show the more filters section
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
-import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 
@@ -53,16 +53,57 @@ export default function AssetGridToolbar({
     sortBy = 'created', // used when showMoreFilters is false (e.g. Collections)
     sortDirection = 'desc',
     onSortChange = null,
+    searchQuery = '', // ?q= from server; syncs to URL on debounced change
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const brand = auth?.activeBrand
-    
+    const serverQ = (typeof pageProps.q === 'string' ? pageProps.q : searchQuery) || ''
+
     // Lifecycle filters moved to "More filters" section (AssetGridSecondaryFilters)
-    
-    // Static filter chip placeholders (non-functional)
-    const filterChips = ['Nature', 'Space', 'Color-grading', 'Amsterdam', 'Summer']
     const [isSearchFocused, setIsSearchFocused] = useState(false)
+    const [searchInputValue, setSearchInputValue] = useState(serverQ)
+    const searchDebounceRef = useRef(null)
+
+    // Sync local search input from server when URL/props change (e.g. back button, clear)
+    useEffect(() => {
+        setSearchInputValue(serverQ)
+    }, [serverQ])
+
+    const applySearch = useCallback((value) => {
+        const trimmed = value.trim()
+        const urlParams = new URLSearchParams(window.location.search)
+        if (trimmed) {
+            urlParams.set('q', trimmed)
+        } else {
+            urlParams.delete('q')
+        }
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: ['assets', 'q'],
+        })
+    }, [])
+
+    const handleSearchChange = useCallback((e) => {
+        const v = e.target.value
+        setSearchInputValue(v)
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current)
+        }
+        searchDebounceRef.current = setTimeout(() => {
+            searchDebounceRef.current = null
+            applySearch(v)
+        }, 320)
+    }, [applySearch])
+
+    const handleSearchKeyDown = useCallback((e) => {
+        if (e.key === 'Escape') {
+            setSearchInputValue('')
+            applySearch('')
+            e.target.blur()
+        }
+    }, [applySearch])
     
     // Pending assets callout state
     const [pendingAssetsCount, setPendingAssetsCount] = useState(0)
@@ -232,20 +273,23 @@ export default function AssetGridToolbar({
             {/* Primary Toolbar Row */}
             <div className="px-4 py-4 sm:px-6">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    {/* Search Input - Coming Soon */}
+                    {/* Search: filename, title, tags, collections — debounced, syncs to ?q= */}
                     <div className="flex-1 flex items-center gap-3">
-                        <div className={`relative transition-all duration-200 ${isSearchFocused ? 'flex-1 min-w-[200px]' : 'w-48 sm:w-56'}`}>
+                        <div className={`relative transition-all duration-200 ease-out ${isSearchFocused ? 'flex-1 min-w-[200px] max-w-md' : 'w-48 sm:w-56'}`}>
+                            <MagnifyingGlassIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 shrink-0" aria-hidden />
                             <input
-                                type="text"
-                                placeholder="Search assets… (Coming soon)"
-                                className="block w-full px-3 py-2 text-sm bg-gray-50 rounded-lg border border-gray-200 text-gray-400 placeholder-gray-400 focus:outline-none transition-colors cursor-not-allowed"
+                                type="search"
+                                value={searchInputValue}
+                                onChange={handleSearchChange}
+                                onKeyDown={handleSearchKeyDown}
                                 onFocus={() => setIsSearchFocused(true)}
                                 onBlur={() => setIsSearchFocused(false)}
-                                readOnly
-                                disabled
-                                title="Search functionality coming in Phase 6.1"
+                                placeholder="Search filename, title, tags…"
+                                style={{ paddingLeft: '3.25rem' }}
+                                className="block w-full pr-3 py-2 text-sm bg-gray-50 rounded-lg border border-gray-200 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                                aria-label="Search assets"
+                                autoComplete="off"
                             />
-                            {/* TODO: Phase 6.1 — Wire search input to backend filtering */}
                         </div>
                         
                         {/* Primary Metadata Filters - Between search and controls */}

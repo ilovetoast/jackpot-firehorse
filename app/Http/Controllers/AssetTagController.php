@@ -250,8 +250,8 @@ class AssetTagController extends Controller
             return response()->json(['message' => 'Tenant not found'], 404);
         }
 
-        // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'assets.view')) {
+        // Check permission (permission name is asset.view, not assets.view)
+        if (!$user->hasPermissionForTenant($tenant, 'asset.view')) {
             return response()->json(['message' => 'Permission denied'], 403);
         }
 

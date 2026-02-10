@@ -401,7 +401,7 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th scope="col" className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th scope="col" className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[320px] w-[40%]">
                                             Subject
                                         </th>
                                         <th scope="col" className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -441,10 +441,10 @@ export default function AdminTicketsIndex({ tickets, pagination, filterOptions, 
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {tickets.map((ticket) => (
                                         <tr key={ticket.id} className="hover:bg-gray-50">
-                                            <td className="px-5 py-4">
+                                            <td className="px-5 py-4 min-w-[320px] w-[40%] align-top">
                                                 <div className="flex items-center gap-2">
-                                                    <div className="flex-1">
-                                                        <div className="text-sm font-medium text-gray-900">{ticket.subject || '—'}</div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-sm font-medium text-gray-900 break-words">{ticket.subject || '—'}</div>
                                                         <div className="text-xs text-gray-500 mt-0.5">{ticket.ticket_number}</div>
                                                     </div>
                                                     {ticket.has_pending_suggestions && (

@@ -22,7 +22,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [], filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc' }) {
+export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [], filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { hasPermission: canUpload } = usePermission('asset.upload')
@@ -697,12 +697,18 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                     <SparklesIcon className="mx-auto h-16 w-16 text-gray-300" />
                                 </div>
                                 <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                    {selectedCategoryId ? `No ${DELIVERABLES_ITEM_LABEL_PLURAL} in this category yet` : `No ${DELIVERABLES_ITEM_LABEL_PLURAL} yet`}
+                                    {searchQuery?.trim()
+                                        ? 'No results for this search'
+                                        : selectedCategoryId
+                                            ? `No ${DELIVERABLES_ITEM_LABEL_PLURAL} in this category yet`
+                                            : `No ${DELIVERABLES_ITEM_LABEL_PLURAL} yet`}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
-                                    {selectedCategoryId
-                                        ? `Get started by uploading your first ${DELIVERABLES_ITEM_LABEL} to this category. Manage your brand assets with ease and keep everything organized.`
-                                        : `Get started by selecting a category or uploading your first ${DELIVERABLES_ITEM_LABEL}. Manage your brand assets with ease and keep everything in sync.`}
+                                    {searchQuery?.trim()
+                                        ? 'Try different keywords or clear the search to see all executions.'
+                                        : selectedCategoryId
+                                            ? `Get started by uploading your first ${DELIVERABLES_ITEM_LABEL} to this category. Manage your brand assets with ease and keep everything organized.`
+                                            : `Get started by selecting a category or uploading your first ${DELIVERABLES_ITEM_LABEL}. Manage your brand assets with ease and keep everything in sync.`}
                                 </p>
                                 <div className="mt-8">
                                     <AddAssetButton 

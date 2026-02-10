@@ -27,7 +27,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc' }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { hasPermission: canUpload } = usePermission('asset.upload')
@@ -874,6 +874,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                             urlParams.set('sort_direction', newDir)
                                             router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                         }}
+                                        assetResultCount={visibleItems?.length ?? 0}
+                                        totalInCategory={localAssets?.length ?? 0}
                                     />
                                 }
                             />
@@ -914,20 +916,24 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
                                 </div>
                                 <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                    {isPendingPublicationFilter 
+                                    {isPendingPublicationFilter
                                         ? (auth?.user?.brand_role === 'contributor' && !['admin', 'owner'].includes(auth?.user?.tenant_role?.toLowerCase() || ''))
                                             ? "You don't have any assets awaiting review right now."
                                             : 'No assets are currently awaiting review.'
-                                        : selectedCategoryId 
-                                            ? 'No assets in this category yet' 
-                                            : 'No assets yet'}
+                                        : searchQuery?.trim()
+                                            ? 'No results for this search'
+                                            : selectedCategoryId
+                                                ? 'No assets in this category yet'
+                                                : 'No assets yet'}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
                                     {isPendingPublicationFilter
                                         ? 'Assets that require approval will appear here once submitted.'
-                                        : selectedCategoryId
-                                            ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
-                                            : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
+                                        : searchQuery?.trim()
+                                            ? 'Try different keywords or clear the search to see all assets.'
+                                            : selectedCategoryId
+                                                ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
+                                                : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
                                 </p>
                                 {!isPendingPublicationFilter && (
                                     <div className="mt-8">

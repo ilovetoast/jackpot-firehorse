@@ -14,6 +14,7 @@ use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
+use App\Services\AssetSearchService;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
@@ -38,7 +39,8 @@ class AssetController extends Controller
         protected MetadataFilterService $metadataFilterService,
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected AiMetadataConfidenceService $confidenceService,
-        protected LifecycleResolver $lifecycleResolver
+        protected LifecycleResolver $lifecycleResolver,
+        protected AssetSearchService $assetSearchService
     ) {
     }
 
@@ -57,9 +59,10 @@ class AssetController extends Controller
                 'categories' => [],
                 'categories_by_type' => ['all' => []],
                 'selected_category' => null,
-                'assets' => [], // Top-level prop must always be present for frontend
+                'assets' => [],
                 'sort' => 'created',
                 'sort_direction' => 'desc',
+                'q' => '',
             ]);
         }
 
@@ -165,43 +168,42 @@ class AssetController extends Controller
             ['name', 'asc'],
         ])->values();
 
-        // Get asset counts per category (efficient single query)
+        // Category and total counts: use same lifecycle as grid (published by default; unpublished/pending when filter active)
+        $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
         $categoryIds = $allCategories->pluck('id')->filter()->toArray();
         $assetCounts = [];
-        if (!empty($categoryIds)) {
-            // Count assets per category using JSON path (single query with GROUP BY)
-            // Use whereRaw for JSON extraction in WHERE clause
-            $counts = Asset::where('tenant_id', $tenant->id)
+        $totalAssetCount = 0;
+        if (!empty($viewableCategoryIds)) {
+            $countQuery = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::ASSET)
-                ->where('status', AssetStatus::VISIBLE)
                 ->whereNull('deleted_at')
                 ->whereNotNull('metadata')
-                ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) IN (' . implode(',', array_map('intval', $categoryIds)) . ')')
-                ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
-                ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
-                ->get()
-                ->pluck('count', 'category_id')
-                ->toArray();
-            
-            // Map counts by category ID
-            foreach ($counts as $catId => $count) {
-                $assetCounts[$catId] = $count;
+                ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
+            $this->lifecycleResolver->apply(
+                $countQuery,
+                $request->get('lifecycle'),
+                $user,
+                $tenant,
+                $brand
+            );
+            $totalAssetCount = (clone $countQuery)->count();
+            if (!empty($categoryIds)) {
+                $counts = (clone $countQuery)
+                    ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
+                    ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
+                    ->get()
+                    ->pluck('count', 'category_id')
+                    ->toArray();
+                foreach ($counts as $catId => $count) {
+                    $assetCounts[$catId] = $count;
+                }
             }
         }
-        
-        // Get total asset count for "All" button
-        $totalAssetCount = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET)
-            ->where('status', AssetStatus::VISIBLE)
-            ->whereNull('deleted_at')
-            ->count();
-        
         // Add counts to categories
         $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
-            $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']]) 
-                ? $assetCounts[$category['id']] 
+            $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']])
+                ? $assetCounts[$category['id']]
                 : 0;
             return $category;
         });
@@ -226,28 +228,29 @@ class AssetController extends Controller
             }
         }
 
+        // Security: only assets in categories the user can view (private/locked folder visibility)
+        $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
+
         // Query assets for this brand and asset type
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
         // CRITICAL: Do NOT add status filter here - unpublished/archived filters need HIDDEN assets.
-        // Unpublishing sets status=HIDDEN; LifecycleResolver applies correct status per filter.
-        // Processing state is tracked via thumbnail_status, metadata flags, and activity events.
-
         $assetsQuery = Asset::query()
-        ->where('tenant_id', $tenant->id)
-        ->where('brand_id', $brand->id)
-        ->where('type', AssetType::ASSET)
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->whereNull('deleted_at');
 
-        // Exclude soft-deleted assets only
-        ->whereNull('deleted_at');
-
+        // Restrict to viewable categories only (search and grid must not bypass locked/private folders)
+        if (empty($viewableCategoryIds)) {
+            $assetsQuery->whereRaw('0 = 1');
+        } else {
+            $assetsQuery->whereNotNull('metadata')
+                ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
+        }
 
         // Filter by category if provided (check metadata for category_id)
         if ($categoryId) {
-            // Filter assets where metadata->category_id matches the category ID
-            // Use direct JSON path comparison for exact integer match
-            // Cast categoryId to integer to ensure type matching with JSON integer values
-            $assetsQuery->whereNotNull('metadata')
-                ->where('metadata->category_id', (int) $categoryId);
+            $assetsQuery->where('metadata->category_id', (int) $categoryId);
         }
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
@@ -276,7 +279,7 @@ class AssetController extends Controller
         // Schema returns 'fields' (not field_map); derive filter keys from field keys
         if (empty($filters) || ! is_array($filters)) {
             $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
-            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters'];
+            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
             $filters = [];
             foreach ($filterKeys as $key) {
                 if (in_array($key, $reserved, true)) {
@@ -294,6 +297,12 @@ class AssetController extends Controller
                 $filters,
                 $schema
             );
+        }
+
+        // Scoped search: filename, title, tags, collection name only (before order/pagination)
+        $searchQ = $request->input('q') ?? $request->input('search');
+        if (is_string($searchQ) && trim($searchQ) !== '') {
+            $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
         }
 
         // Order by user-selected sort (starred | created | quality) and direction (asc | desc)
@@ -983,6 +992,7 @@ class AssetController extends Controller
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,
             'sort_direction' => $sortDirection,
+            'q' => $request->input('q', ''),
         ]);
     }
 

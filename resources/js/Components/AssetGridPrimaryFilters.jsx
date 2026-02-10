@@ -71,13 +71,13 @@ export default function AssetGridPrimaryFilters({
     const isMountedRef = useRef(false)
     const initialSearchRef = useRef(null)
     
-    // Get search query from URL on mount
+    // Get search query from URL on mount (backend uses ?q=)
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search)
-        const search = urlParams.get('search') || ''
-        setSearchQuery(search)
-        setDebouncedSearch(search)
-        initialSearchRef.current = search
+        const q = urlParams.get('q') || (typeof pageProps.q === 'string' ? pageProps.q : '') || ''
+        setSearchQuery(q)
+        setDebouncedSearch(q)
+        initialSearchRef.current = q
         isMountedRef.current = true
     }, [])
     
@@ -98,18 +98,15 @@ export default function AssetGridPrimaryFilters({
         }
         
         const urlParams = new URLSearchParams(window.location.search)
-        
         if (debouncedSearch.trim()) {
-            urlParams.set('search', debouncedSearch.trim())
+            urlParams.set('q', debouncedSearch.trim())
         } else {
-            urlParams.delete('search')
+            urlParams.delete('q')
         }
-        
-        // Update URL without full page reload
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets'], // Only reload assets
+            only: ['assets', 'q'],
         })
     }, [debouncedSearch])
     
@@ -124,12 +121,11 @@ export default function AssetGridPrimaryFilters({
         setDebouncedSearch('')
         
         const urlParams = new URLSearchParams(window.location.search)
-        urlParams.delete('search')
-        
+        urlParams.delete('q')
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets'],
+            only: ['assets', 'q'],
         })
     }, [])
     

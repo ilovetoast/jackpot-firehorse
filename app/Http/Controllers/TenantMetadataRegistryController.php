@@ -271,6 +271,15 @@ class TenantMetadataRegistryController extends Controller
             $isEditHidden = isset($validated['show_on_edit']) ? !filter_var($validated['show_on_edit'], FILTER_VALIDATE_BOOLEAN) : null;
             $isFilterHidden = isset($validated['show_in_filters']) ? !filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
             $isPrimary = isset($validated['is_primary']) ? filter_var($validated['is_primary'], FILTER_VALIDATE_BOOLEAN) : null;
+
+            // Fields in always_hidden_fields (e.g. dimensions, dominant_color_bucket) must never appear in filters
+            $fieldKey = \DB::table('metadata_fields')->where('id', $field)->value('key');
+            $alwaysHiddenFields = config('metadata_category_defaults.always_hidden_fields', []);
+            if ($fieldKey && in_array($fieldKey, $alwaysHiddenFields, true)) {
+                $isFilterHidden = true;
+                $isPrimary = false;
+            }
+
             // NOTE: is_hidden is NOT set here - it's only set by category suppression toggle (toggleCategoryField)
             
             \Log::info('[TenantMetadataRegistryController] Converted visibility flags', [

@@ -520,40 +520,38 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'abstract', 'system_label' => 'Abstract'],
         ]);
 
-        // Dominant Colors (system automated field - multiselect with JSON values)
-        // Stores rich color data: [{hex, rgb, coverage}, ...]
-        // No predefined options - colors are dynamically extracted
+        // Dominant Colors (system automated) — drawer only, never in More filters
+        // Stores rich color data: [{hex, rgb, coverage}, ...]. Visible in asset drawer; not filterable.
         $this->getOrCreateField([
             'key' => 'dominant_colors',
             'system_label' => 'Dominant Colors',
-            'type' => 'multiselect', // Multi-value field for color array
-            'applies_to' => 'image', // Only applies to image assets
+            'type' => 'multiselect',
+            'applies_to' => 'image',
             'scope' => 'system',
             'group_key' => 'technical',
-            'is_filterable' => true, // Filterable via color tiles
-            'is_user_editable' => false, // Read-only (system populated)
+            'is_filterable' => false, // Never in More filters (drawer only)
+            'is_user_editable' => false,
             'is_ai_trainable' => false,
-            'is_upload_visible' => false, // Hidden from upload form
-            'is_internal_only' => false, // Visible in UI
-            'ai_eligible' => false, // Not AI eligible (system calculated)
+            'is_upload_visible' => false,
+            'is_internal_only' => false, // Visible in drawer
+            'ai_eligible' => false,
         ]);
 
-        // Dominant Color Bucket (system automated field - for filtering only)
-        // Stores quantized LAB bucket: "L{L}_A{A}_B{B}" format
-        // Never shown in asset views, only used for filtering
+        // Dominant Color Bucket (system automated) — drawer only, never in More filters
+        // Stores quantized LAB bucket: "L{L}_A{A}_B{B}" format. Visible in asset drawer; not filterable.
         $this->getOrCreateField([
             'key' => 'dominant_color_bucket',
             'system_label' => 'Dominant Color Bucket',
             'type' => 'text', // String field for bucket value
-            'applies_to' => 'image', // Only applies to image assets
+            'applies_to' => 'image',
             'scope' => 'system',
             'group_key' => 'technical',
-            'is_filterable' => true, // Used for filtering
-            'is_user_editable' => false, // Read-only (system populated)
+            'is_filterable' => false, // Never in More filters (drawer only)
+            'is_user_editable' => false,
             'is_ai_trainable' => false,
-            'is_upload_visible' => false, // Hidden from upload form
-            'is_internal_only' => true, // Hidden from asset views (filtering only)
-            'ai_eligible' => false, // Not AI eligible (system calculated)
+            'is_upload_visible' => false,
+            'is_internal_only' => false, // Visible in drawer
+            'ai_eligible' => false,
         ]);
 
         // --- Execution / Deliverables type fields (exactly these 10; no others) ---
@@ -787,18 +785,20 @@ class MetadataFieldsSeeder extends Seeder
         ];
 
         foreach ($automaticFields as $fieldKey) {
-            // Most automatic fields should be visible in edit/drawer view (read-only display)
-            // Exception: dominant_color_bucket is hidden from asset views (filtering only)
-            $showOnEdit = ($fieldKey !== 'dominant_color_bucket');
-            
+            // Dominant color fields: visible in drawer, never in More filters (always_hidden_fields in config)
+            $isDominantColor = in_array($fieldKey, ['dominant_color_bucket', 'dominant_colors'], true);
+            $showOnEdit = true; // All automatic fields visible in drawer (read-only)
+            $showInFilters = !$isDominantColor; // Dominant colors never in filters
+
             DB::table('metadata_fields')
                 ->where('key', $fieldKey)
                 ->update([
                     'population_mode' => 'automatic',
-                    'show_on_upload' => false, // Hidden from upload form
-                    'show_on_edit' => $showOnEdit, // Visible in drawer with "Auto" label (read-only), except bucket
-                    'show_in_filters' => true, // Available in grid filters
-                    'readonly' => true, // Read-only for users (system can populate)
+                    'show_on_upload' => false,
+                    'show_on_edit' => $showOnEdit,
+                    'show_in_filters' => $showInFilters,
+                    'readonly' => true,
+                    'is_filterable' => $showInFilters,
                     'updated_at' => now(),
                 ]);
         }
@@ -1017,13 +1017,17 @@ class MetadataFieldsSeeder extends Seeder
                     }
                 }
                 
-                // Behind-the-scenes fields (e.g. dimensions): never in upload, quick view, or More filters
+                // always_hidden_fields: never in More filters (getFilterableFields excludes them).
+                // Dimensions: fully hidden (upload, quick view, drawer, filters).
+                // Dominant color fields: visible in drawer (is_hidden=false), never in filters (is_filter_hidden=true).
                 $alwaysHiddenFields = $defaultsConfig['always_hidden_fields'] ?? [];
+                $drawerOnlyFilterHidden = ['dominant_color_bucket', 'dominant_colors']; // In filters: never; in drawer: yes
                 foreach ($alwaysHiddenFields as $fieldKey) {
                     $field = DB::table('metadata_fields')->where('key', $fieldKey)->first();
                     if (!$field) {
                         continue;
                     }
+                    $isDrawerOnly = in_array($fieldKey, $drawerOnlyFilterHidden, true);
                     $allCategoriesForBrand = DB::table('categories')
                         ->where('tenant_id', $tenant->id)
                         ->where('brand_id', $brand->id)
@@ -1040,9 +1044,9 @@ class MetadataFieldsSeeder extends Seeder
                             'tenant_id' => $tenant->id,
                             'brand_id' => $brand->id,
                             'category_id' => $category->id,
-                            'is_hidden' => true,
+                            'is_hidden' => !$isDrawerOnly, // drawer-only fields stay enabled so they show in drawer
                             'is_upload_hidden' => true,
-                            'is_filter_hidden' => true,
+                            'is_filter_hidden' => true, // never in More filters
                             'is_primary' => null,
                             'updated_at' => now(),
                         ];

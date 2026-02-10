@@ -9,6 +9,7 @@ use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AssetEligibilityService;
+use App\Services\AssetSearchService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
 use App\Services\FeatureGate;
@@ -28,7 +29,8 @@ class CollectionController extends Controller
         protected CollectionAssetQueryService $collectionAssetQueryService,
         protected CollectionAssetService $collectionAssetService,
         protected FeatureGate $featureGate,
-        protected AssetEligibilityService $assetEligibilityService
+        protected AssetEligibilityService $assetEligibilityService,
+        protected AssetSearchService $assetSearchService
     ) {
     }
 
@@ -52,6 +54,7 @@ class CollectionController extends Controller
                 'can_add_to_collection' => false,
                 'can_remove_from_collection' => false,
                 'public_collections_enabled' => false,
+                'q' => '',
             ]);
         }
 
@@ -91,10 +94,14 @@ class CollectionController extends Controller
             if ($collection && Gate::forUser($user)->allows('view', $collection)) {
                 try {
                     $query = $this->collectionAssetQueryService->query($user, $collection);
+                    // Scoped search: only within this collection's assets (query already scoped via asset_collections)
+                    $searchQ = $request->input('q');
+                    if (is_string($searchQ) && trim($searchQ) !== '') {
+                        $this->assetSearchService->applyScopedSearch($query, trim($searchQ));
+                    }
                     $sort = $request->input('sort', 'created');
                     $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
                     if ($sort === 'starred') {
-                        // Robust starred check: JSON true, unquoted 'true', or '1' (MySQL JSON boolean handling varies)
                         $query->orderByRaw("CASE WHEN JSON_EXTRACT(metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1') THEN 1 ELSE 0 END " . $sortDirection);
                         $query->orderBy('created_at', $sortDirection);
                     } elseif ($sort === 'quality') {
@@ -164,6 +171,7 @@ class CollectionController extends Controller
             'public_collections_enabled' => $publicCollectionsEnabled,
             'sort' => $sort,
             'sort_direction' => $sortDirection,
+            'q' => $request->input('q', ''),
         ]);
     }
 

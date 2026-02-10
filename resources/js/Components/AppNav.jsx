@@ -810,21 +810,27 @@ export default function AppNav({ brand, tenant }) {
                                         </div>
 
                                         {/* Phase AG-7.1: Agency Section — show only when tenant is agency */}
-                                        {auth.activeCompany?.is_agency && (
-                                            <div className="px-4 py-2 border-b border-gray-200">
-                                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Agency</p>
-                                                <Link
-                                                    href="/app/agency/dashboard"
-                                                    className="flex items-center justify-between px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
-                                                    onClick={() => setUserMenuOpen(false)}
-                                                >
-                                                    <span>Agency Dashboard</span>
-                                                    {auth.activeCompany?.agency_tier && (
-                                                        <span className="text-xs text-gray-500">{auth.activeCompany.agency_tier}</span>
-                                                    )}
-                                                </Link>
-                                            </div>
-                                        )}
+                                        {auth.activeCompany?.is_agency && (() => {
+                                            const tier = (auth.activeCompany?.agency_tier || 'silver').toLowerCase()
+                                            const tierBg = tier === 'gold' ? 'bg-amber-500' : tier === 'platinum' ? 'bg-slate-500' : 'bg-gray-400'
+                                            return (
+                                                <div className="px-4 py-2 border-b border-gray-200">
+                                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Agency</p>
+                                                    <Link
+                                                        href="/app/agency/dashboard"
+                                                        className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"
+                                                        onClick={() => setUserMenuOpen(false)}
+                                                    >
+                                                        <span className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-full ${tierBg} text-white mr-2`}>
+                                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                                                            </svg>
+                                                        </span>
+                                                        <span>Agency Dashboard</span>
+                                                    </Link>
+                                                </div>
+                                            )
+                                        })()}
 
                                         {/* Admin Section */}
                                         {isSiteOwner && (

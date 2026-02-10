@@ -221,6 +221,9 @@ return [
      * System fields that are behind-the-scenes only: never shown in upload, quick view, or filters.
      * Seeder sets is_hidden=true, is_upload_hidden=true, is_filter_hidden=true for every category.
      * Dimensions: auto-populated from file; must not appear in More filters or filterable schema.
+     *
+     * Dominant color fields: visible in asset drawer (show_on_edit=true) but never in More filters.
+     * They cannot be selected to appear in filters; drawer visibility is configurable per category.
      */
-    'always_hidden_fields' => ['dimensions'],
+    'always_hidden_fields' => ['dimensions', 'dominant_color_bucket', 'dominant_colors'],
 ];

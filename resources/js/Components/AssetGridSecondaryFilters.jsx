@@ -53,6 +53,8 @@ import UserSelect from './UserSelect'
  * @param {string} [props.sortBy] - Current sort field (starred | created | quality)
  * @param {string} [props.sortDirection] - asc | desc
  * @param {Function} [props.onSortChange] - (sortBy, sortDirection) => void
+ * @param {number} [props.assetResultCount] - Number of assets in current result (search + filters)
+ * @param {number} [props.totalInCategory] - Total assets in selected category (or All)
  */
 export default function AssetGridSecondaryFilters({
     filterable_schema = [],
@@ -64,6 +66,8 @@ export default function AssetGridSecondaryFilters({
     sortBy = 'created',
     sortDirection = 'desc',
     onSortChange = null,
+    assetResultCount = null,
+    totalInCategory = null,
 }) {
     const pageProps = usePage().props
     const { auth, available_file_types = [] } = pageProps
@@ -499,6 +503,18 @@ export default function AssetGridSecondaryFilters({
                         </div>
                     )}
                 </div>
+
+                {/* Indicator: result count and filter count in selected category (before Sort) */}
+                {(assetResultCount != null || activeFilterCount > 0) && (
+                    <div className="flex-shrink-0 text-xs text-gray-500">
+                        {[
+                            assetResultCount != null
+                                ? (totalInCategory != null && totalInCategory > 0 ? `${assetResultCount} of ${totalInCategory}` : String(assetResultCount))
+                                : '',
+                            activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}` : '',
+                        ].filter(Boolean).join(' · ')}
+                    </div>
+                )}
 
                 {/* Sort: compact dropdown + direction (in filter bar) */}
                 {onSortChange && (

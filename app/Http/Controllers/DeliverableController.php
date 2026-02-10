@@ -9,11 +9,13 @@ use App\Models\Asset;
 use App\Models\Category;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\Lifecycle\LifecycleResolver;
+use App\Services\AssetSearchService;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
@@ -27,7 +29,8 @@ class DeliverableController extends Controller
         protected MetadataFilterService $metadataFilterService,
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected AiMetadataConfidenceService $confidenceService,
-        protected LifecycleResolver $lifecycleResolver
+        protected LifecycleResolver $lifecycleResolver,
+        protected AssetSearchService $assetSearchService
     ) {
     }
 
@@ -44,9 +47,10 @@ class DeliverableController extends Controller
             return Inertia::render('Deliverables/Index', [
                 'categories' => [],
                 'selected_category' => null,
-                'assets' => [], // Top-level prop must always be present for frontend
+                'assets' => [],
                 'sort' => 'created',
                 'sort_direction' => 'desc',
+                'q' => '',
             ]);
         }
 
@@ -71,11 +75,12 @@ class DeliverableController extends Controller
         }
 
         // Filter out private categories that the user doesn't have access to
-        // Use CategoryPolicy to check access for each category
         $categories = $categories->filter(function ($category) use ($user) {
-            // Use the policy to check if user can view this category
             return $user ? Gate::forUser($user)->allows('view', $category) : false;
         });
+
+        // Security: only assets in categories the user can view (locked/private folder visibility)
+        $viewableCategoryIds = $categories->pluck('id')->filter()->values()->toArray();
 
         // Get deliverable system category templates
         $systemTemplates = $this->systemCategoryService->getTemplatesByAssetType(AssetType::DELIVERABLE)
@@ -187,25 +192,25 @@ class DeliverableController extends Controller
         }
 
         // Query deliverables - match Assets page behavior with lifecycle filters
-        // Note: assets must be top-level prop for Inertia to pass to frontend component
         $assetsQuery = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', AssetType::DELIVERABLE)
-            ->whereNull('deleted_at'); // Exclude soft-deleted assets
-        
-        // HARD TERMINAL STATE: Check for stuck assets and repair them
-        // This prevents infinite processing states by automatically failing
-        // assets that have been processing longer than the timeout threshold
-        $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
+            ->whereNull('deleted_at');
 
-        // Filter by category if provided (check metadata for category_id)
-        if ($categoryId) {
-            // Filter assets where metadata->category_id matches the category ID
-            // Use direct JSON path comparison for exact integer match
-            // Cast categoryId to integer to ensure type matching with JSON integer values
+        // Restrict to viewable categories only (search and grid must not bypass locked/private folders)
+        if (empty($viewableCategoryIds)) {
+            $assetsQuery->whereRaw('0 = 1');
+        } else {
             $assetsQuery->whereNotNull('metadata')
-                ->where('metadata->category_id', (int) $categoryId);
+                ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
         }
+
+        // Filter by category if provided
+        if ($categoryId) {
+            $assetsQuery->where('metadata->category_id', (int) $categoryId);
+        }
+
+        $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
         // This is the SINGLE SOURCE OF TRUTH for lifecycle logic
@@ -219,6 +224,12 @@ class DeliverableController extends Controller
             $tenant,
             $brand
         );
+
+        // Scoped search: filename, title, tags, collection name only (before order/pagination)
+        $searchQ = $request->input('q') ?? $request->input('search');
+        if (is_string($searchQ) && trim($searchQ) !== '') {
+            $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
+        }
 
         // Order by user-selected sort (starred | created | quality) and direction (asc | desc) — match AssetController
         $sort = $request->input('sort', 'created');
@@ -773,6 +784,7 @@ class DeliverableController extends Controller
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,
             'sort_direction' => $sortDirection,
+            'q' => $request->input('q', ''),
         ]);
     }
 }

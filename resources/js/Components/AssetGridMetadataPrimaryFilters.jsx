@@ -519,12 +519,12 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         }
         const todayStr = toISO(today)
         const presets = [
-            { value: '', label: 'Any' },
-            { value: 'expired', label: 'Expired', operator: 'before', value: todayStr },
-            { value: 'within_7', label: 'Expires within 7 days', operator: 'range', value: [todayStr, addDays(7)] },
-            { value: 'within_30', label: 'Expires within 30 days', operator: 'range', value: [todayStr, addDays(30)] },
-            { value: 'within_60', label: 'Expires within 60 days', operator: 'range', value: [todayStr, addDays(60)] },
-            { value: 'within_90', label: 'Expires within 90 days', operator: 'range', value: [todayStr, addDays(90)] },
+            { preset: '', label: 'Any' },
+            { preset: 'expired', label: 'Expired', operator: 'before', value: todayStr },
+            { preset: 'within_7', label: 'Expires within 7 days', operator: 'range', value: [todayStr, addDays(7)] },
+            { preset: 'within_30', label: 'Expires within 30 days', operator: 'range', value: [todayStr, addDays(30)] },
+            { preset: 'within_60', label: 'Expires within 60 days', operator: 'range', value: [todayStr, addDays(60)] },
+            { preset: 'within_90', label: 'Expires within 90 days', operator: 'range', value: [todayStr, addDays(90)] },
         ]
         let currentPreset = ''
         if (operator === 'before' && value === todayStr) currentPreset = 'expired'
@@ -545,13 +545,13 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                         onChange('equals', null)
                         return
                     }
-                    const preset = presets.find(p => p.value === key && p.operator)
-                    if (preset) onChange(preset.operator, preset.value)
+                    const presetEntry = presets.find(p => p.preset === key && p.operator)
+                    if (presetEntry) onChange(presetEntry.operator, presetEntry.value)
                 }}
                 className={`px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${compact ? 'min-w-[80px]' : 'min-w-[100px]'}`}
             >
                 {presets.map((p) => (
-                    <option key={p.value || 'any'} value={p.value}>{p.label}</option>
+                    <option key={p.preset || 'any'} value={p.preset}>{p.label}</option>
                 ))}
             </select>
         )
