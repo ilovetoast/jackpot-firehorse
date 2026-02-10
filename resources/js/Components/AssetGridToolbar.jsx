@@ -28,7 +28,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
-import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import AssetGridSearchInput from './AssetGridSearchInput'
+import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 
@@ -60,18 +61,13 @@ export default function AssetGridToolbar({
     const brand = auth?.activeBrand
     const serverQ = (typeof pageProps.q === 'string' ? pageProps.q : searchQuery) || ''
 
-    // Lifecycle filters moved to "More filters" section (AssetGridSecondaryFilters)
-    const [isSearchFocused, setIsSearchFocused] = useState(false)
-    const [searchInputValue, setSearchInputValue] = useState(serverQ)
-    const searchDebounceRef = useRef(null)
+    // Search loading: in-flight request feedback (no layout shift, typing uninterrupted)
+    const [searchLoading, setSearchLoading] = useState(false)
+    const searchInputRef = useRef(null)
+    const searchHadFocusRef = useRef(false)
 
-    // Sync local search input from server when URL/props change (e.g. back button, clear)
-    useEffect(() => {
-        setSearchInputValue(serverQ)
-    }, [serverQ])
-
-    const applySearch = useCallback((value) => {
-        const trimmed = value.trim()
+    const applySearch = useCallback((trimmed, hadFocus = false) => {
+        searchHadFocusRef.current = hadFocus
         const urlParams = new URLSearchParams(window.location.search)
         if (trimmed) {
             urlParams.set('q', trimmed)
@@ -82,28 +78,23 @@ export default function AssetGridToolbar({
             preserveState: true,
             preserveScroll: true,
             only: ['assets', 'q'],
+            onStart: () => setSearchLoading(true),
+            onFinish: () => {
+                setSearchLoading(false)
+                if (searchHadFocusRef.current) {
+                    searchHadFocusRef.current = false
+                    const el = searchInputRef.current
+                    const doFocus = () => {
+                        if (el?.focus) el.focus()
+                    }
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(doFocus)
+                    })
+                }
+            },
         })
     }, [])
 
-    const handleSearchChange = useCallback((e) => {
-        const v = e.target.value
-        setSearchInputValue(v)
-        if (searchDebounceRef.current) {
-            clearTimeout(searchDebounceRef.current)
-        }
-        searchDebounceRef.current = setTimeout(() => {
-            searchDebounceRef.current = null
-            applySearch(v)
-        }, 320)
-    }, [applySearch])
-
-    const handleSearchKeyDown = useCallback((e) => {
-        if (e.key === 'Escape') {
-            setSearchInputValue('')
-            applySearch('')
-            e.target.blur()
-        }
-    }, [applySearch])
     
     // Pending assets callout state
     const [pendingAssetsCount, setPendingAssetsCount] = useState(0)
@@ -245,7 +236,7 @@ export default function AssetGridToolbar({
         <div className={`bg-white ${showMoreFilters ? 'border-b border-gray-200' : 'border-b border-gray-200'}`}>
             {/* Pending Assets Callout - Above search bar */}
             {canApprove && approvalsEnabled && selectedCategoryId && (pendingAssetsCount > 0 || pendingTagsCount > 0) && (
-                <div className="px-4 pt-3 pb-2 sm:px-6">
+                <div className="px-3 pt-2 pb-1.5 sm:px-4">
                     <div className="flex items-center gap-2 flex-wrap">
                         {pendingAssetsCount > 0 && (
                             <button
@@ -271,24 +262,18 @@ export default function AssetGridToolbar({
             )}
             
             {/* Primary Toolbar Row */}
-            <div className="px-4 py-4 sm:px-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    {/* Search: filename, title, tags, collections — debounced, syncs to ?q= */}
-                    <div className="flex-1 flex items-center gap-3">
-                        <div className={`relative transition-all duration-200 ease-out ${isSearchFocused ? 'flex-1 min-w-[200px] max-w-md' : 'w-48 sm:w-56'}`}>
-                            <MagnifyingGlassIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 shrink-0" aria-hidden />
-                            <input
-                                type="search"
-                                value={searchInputValue}
-                                onChange={handleSearchChange}
-                                onKeyDown={handleSearchKeyDown}
-                                onFocus={() => setIsSearchFocused(true)}
-                                onBlur={() => setIsSearchFocused(false)}
+            <div className="px-3 py-3 sm:px-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    {/* Search: decoupled component keeps focus across Inertia reloads; stable key */}
+                    <div className="flex-1 flex items-center gap-2">
+                        <div className="flex-1 min-w-[180px] max-w-md">
+                            <AssetGridSearchInput
+                                key="asset-grid-search"
+                                serverQuery={serverQ}
+                                onSearchApply={applySearch}
+                                isSearchPending={searchLoading}
                                 placeholder="Search filename, title, tags…"
-                                style={{ paddingLeft: '3.25rem' }}
-                                className="block w-full pr-3 py-2 text-sm bg-gray-50 rounded-lg border border-gray-200 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                                aria-label="Search assets"
-                                autoComplete="off"
+                                inputRef={searchInputRef}
                             />
                         </div>
                         
@@ -335,7 +320,7 @@ export default function AssetGridToolbar({
                     </div>
 
                     {/* Controls - Right Side on Desktop */}
-                    <div className="flex items-center gap-4 flex-shrink-0">
+                    <div className="flex items-center gap-3 flex-shrink-0">
                         {/* Phase 2 – Step 7: Bulk Actions */}
                         {onToggleBulkMode && (
                             <>

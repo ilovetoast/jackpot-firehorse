@@ -403,7 +403,7 @@ export default function AssetGridSecondaryFilters({
         <div>
             {/* Bar: More filters (left) + active filter pills (center) + Sort (right) */}
             <div
-                className="px-4 py-2 sm:px-6 flex items-center justify-between gap-3 text-left border-b border-gray-200"
+                className="px-3 py-1.5 sm:px-4 flex items-center justify-between gap-2 text-left border-b border-gray-200"
                 style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
                 <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
@@ -549,14 +549,18 @@ export default function AssetGridSecondaryFilters({
                 )}
             </div>
             
-            {/* Expandable Container (inline expansion - pushes content down) */}
-            {isExpanded && (
-                <div className="px-4 py-4 sm:px-6 border-t border-gray-200">
+            {/* Expandable Container: smooth height animation (grid 0fr → 1fr) to avoid layout glitch */}
+            <div
+                className="grid transition-[grid-template-rows] duration-200 ease-out"
+                style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
+            >
+                <div className="min-h-0 overflow-hidden">
+                    <div className="px-3 py-3 sm:px-4 border-t border-gray-200">
                     {/* Phase L.5.1: Lifecycle Filters - All three filters */}
                     {/* SECURITY: Only available to users with appropriate permissions */}
                     {(canPublish || canBypassApproval || canArchive) && (
-                        <div className="mb-4 pb-4 border-b border-gray-200">
-                            <label className="text-xs font-medium text-gray-700 mb-3 block" style={{ paddingLeft: '0' }}>Lifecycle</label>
+                        <div className="mb-3 pb-3 border-b border-gray-200">
+                            <label className="text-xs font-medium text-gray-700 mb-2 block" style={{ paddingLeft: '0' }}>Lifecycle</label>
                             <div className="flex flex-col gap-2">
                                 {/* Pending Publication filter - requires asset.publish */}
                                 {/* Phase J.3.1: Uses pending_publication (not pending_approval) to match dashboard links and backend */}
@@ -610,7 +614,7 @@ export default function AssetGridSecondaryFilters({
                     
                     {/* File Type Filter */}
                     {available_file_types && available_file_types.length > 0 && (
-                        <div className="mb-4 pb-4 border-b border-gray-200">
+                        <div className="mb-3 pb-3 border-b border-gray-200">
                             <label className="block text-xs font-medium text-gray-700 mb-1">
                                 File Type
                             </label>
@@ -631,7 +635,7 @@ export default function AssetGridSecondaryFilters({
                     
                     {/* User Filter - Created By */}
                     {pageProps.uploaded_by_users && pageProps.uploaded_by_users.length > 0 && (
-                        <div className="mb-4 pb-4 border-b border-gray-200">
+                        <div className="mb-3 pb-3 border-b border-gray-200">
                             <UserSelect
                                 users={pageProps.uploaded_by_users}
                                 value={userFilter}
@@ -644,7 +648,7 @@ export default function AssetGridSecondaryFilters({
                     
                     {/* Active Filters (if any) */}
                     {activeFilterCount > 0 && (
-                        <div className="mb-4">
+                        <div className="mb-3">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-medium text-gray-700">Active Filters</span>
                             </div>
@@ -809,8 +813,9 @@ export default function AssetGridSecondaryFilters({
                             </Link>
                         </div>
                     )}
+                    </div>
                 </div>
-            )}
+            </div>
         </div>
     )
 }

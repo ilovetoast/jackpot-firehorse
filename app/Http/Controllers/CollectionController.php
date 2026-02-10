@@ -10,6 +10,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AssetEligibilityService;
 use App\Services\AssetSearchService;
+use App\Services\AssetSortService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
 use App\Services\FeatureGate;
@@ -30,7 +31,8 @@ class CollectionController extends Controller
         protected CollectionAssetService $collectionAssetService,
         protected FeatureGate $featureGate,
         protected AssetEligibilityService $assetEligibilityService,
-        protected AssetSearchService $assetSearchService
+        protected AssetSearchService $assetSearchService,
+        protected AssetSortService $assetSortService
     ) {
     }
 
@@ -99,17 +101,9 @@ class CollectionController extends Controller
                     if (is_string($searchQ) && trim($searchQ) !== '') {
                         $this->assetSearchService->applyScopedSearch($query, trim($searchQ));
                     }
-                    $sort = $request->input('sort', 'created');
-                    $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
-                    if ($sort === 'starred') {
-                        $query->orderByRaw("CASE WHEN JSON_EXTRACT(metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1') THEN 1 ELSE 0 END " . $sortDirection);
-                        $query->orderBy('created_at', $sortDirection);
-                    } elseif ($sort === 'quality') {
-                        $query->orderByRaw('COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.quality_rating\')), 0) ' . $sortDirection);
-                        $query->orderBy('created_at', $sortDirection);
-                    } else {
-                        $query->orderBy('created_at', $sortDirection);
-                    }
+                    $sort = $this->assetSortService->normalizeSort($request->input('sort'));
+                    $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
+                    $this->assetSortService->applySort($query, $sort, $sortDirection);
                     $assetModels = $query->get();
                     $assets = $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
                     $brand = $collection->brand;

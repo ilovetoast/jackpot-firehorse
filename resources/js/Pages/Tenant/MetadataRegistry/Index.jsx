@@ -37,7 +37,7 @@ import {
  * - Configure primary/secondary placement (is_primary)
  * - Add filter-related toggles or controls
  */
-export default function TenantMetadataRegistryIndex({ registry, brands = [], active_brand_id = null, categories, canManageVisibility, canManageFields, customFieldsLimit = null }) {
+export default function TenantMetadataRegistryIndex({ registry, brands = [], active_brand_id = null, categories, canManageVisibility, canManageFields, customFieldsLimit = null, metadata_field_families = {} }) {
     const [activeTab, setActiveTab] = useState('by-category') // Phase G.2: Category-first is PRIMARY (Filters tab removed)
     const [expandedField, setExpandedField] = useState(null)
     const [categoryModal, setCategoryModal] = useState({ open: false, field: null, suppressedCategories: [] })
@@ -565,6 +565,7 @@ export default function TenantMetadataRegistryIndex({ registry, brands = [], act
                                 canManageVisibility={canManageVisibility}
                                 canManageFields={canManageFields}
                                 customFieldsLimit={customFieldsLimit}
+                                metadataFieldFamilies={metadata_field_families}
                             />
                         </div>
                     ) : (

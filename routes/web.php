@@ -482,6 +482,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/collections/{collection}/grants/{collection_user}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'revoke'])->name('collections.grants.revoke');
             Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
+            Route::get('/brand-guidelines', [\App\Http\Controllers\BrandGuidelinesController::class, 'index'])->name('brand-guidelines.index');
             Route::post('/downloads/{download}/revoke', [\App\Http\Controllers\DownloadController::class, 'revoke'])->name('downloads.revoke');
             Route::post('/downloads/{download}/extend', [\App\Http\Controllers\DownloadController::class, 'extend'])->name('downloads.extend');
             Route::post('/downloads/{download}/change-access', [\App\Http\Controllers\DownloadController::class, 'changeAccess'])->name('downloads.change-access');

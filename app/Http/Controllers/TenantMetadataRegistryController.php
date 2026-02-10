@@ -130,6 +130,7 @@ class TenantMetadataRegistryController extends Controller
                 'current' => $currentCustomFieldsCount,
                 'can_create' => $canCreateCustomField,
             ],
+            'metadata_field_families' => config('metadata_field_families', []),
         ]);
     }
 

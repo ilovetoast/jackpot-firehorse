@@ -13,6 +13,7 @@ use App\Enums\UploadType;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
+use App\Models\Collection;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\Ticket;
@@ -28,40 +29,31 @@ use Illuminate\Support\Str;
 
 /**
  * Development Data Seeder
- * 
+ *
  * ⚠️ DEVELOPMENT ONLY - DO NOT RUN IN PRODUCTION ⚠️
- * 
+ *
  * Generates large datasets for performance testing, memory leak detection, and UI stress testing.
- * 
+ *
  * Usage:
  *   php artisan db:seed --class=DevelopmentDataSeeder
- * 
- * Or explicitly:
- *   php artisan db:seed --class=DevelopmentDataSeeder --force
- * 
- * Size Options (set via SEEDER_SIZE environment variable):
- *   - small:  ~20 companies, ~100 users, 10-50 assets per company
- *   - medium: ~100 companies, ~500 users, 50-500 assets per company
- *   - large:  ~1000 companies, ~10k users, 100-1000 assets per company (default)
- * 
- * Example:
- *   SEEDER_SIZE=small php artisan db:seed --class=DevelopmentDataSeeder --force
- * 
+ *   sail artisan development:seed --size=small --force
+ *
+ * Size Options (SEEDER_SIZE or --size=small|medium|large):
+ *   - small:  5 companies, fewer users, 50+ assorted assets for company 1 (assets + executions)
+ *   - medium: ~100 companies, 50-500 assets per company
+ *   - large:  ~1000 companies, 100-1000 assets per company
+ *
+ * Best practice – metadata and drawer:
+ * - The asset details drawer shows only approved metadata (asset_metadata.approved_at set).
+ * - This seeder writes approved rows for every seeded field (ensureApprovedMetadataForAsset)
+ *   so drawer and filters show values without requiring approval workflow.
+ *
  * This seeder:
- * - Creates companies with dummy data (count depends on size)
- * - Each company has an owner (user with 'owner' role)
- * - Users are associated with companies and brands
- * - Assigns random plans (some with plans, some without)
- * - Generates users based on plan limits (some companies exceed limits)
- * - Creates categories and assets (counts depend on size)
- * - Fills in brand data (colors, logos, icons)
- * - Creates support tickets (count depends on size)
- * - Assigns special roles to some users (support, site admin, engineering)
- * 
- * S3 Images:
- * - Uses placeholder paths (no actual S3 uploads)
- * - Paths like: dev-seeder/placeholder.jpg
- * - Prevents gigabytes of S3 storage usage
+ * - Creates companies, brands, users, categories (system + custom), assets and deliverables
+ * - Syncs system categories so filters (Photo Type, Logo Type, Print Type, etc.) have data
+ * - Persists metadata to asset_metadata with approved_at so the drawer displays it
+ * - Adds tags (asset_tags) and collections (collections + asset_collections) for company 1
+ * - Uses placeholder S3 paths (no real uploads)
  */
 class DevelopmentDataSeeder extends Seeder
 {
@@ -69,17 +61,17 @@ class DevelopmentDataSeeder extends Seeder
     // Can be overridden via SEEDER_SIZE environment variable
     private const SIZE = 'large'; // Default to large
     
-    // Size configurations
+    // Size configurations (small: fewer companies/users, but at least 50 assorted assets for company 1)
     private const SIZE_CONFIG = [
         'small' => [
-            'companies' => 20,
-            'tickets' => 5,
+            'companies' => 5,
+            'tickets' => 2,
             'min_assets' => 10,
-            'max_assets' => 50,
+            'max_assets' => 30,
             'min_categories' => 3,
             'max_categories' => 10,
             'min_brands' => 1,
-            'max_brands' => 3,
+            'max_brands' => 2,
         ],
         'medium' => [
             'companies' => 100,
@@ -509,7 +501,7 @@ class DevelopmentDataSeeder extends Seeder
                 'published_by_id' => $isPublished ? $user->id : null,
             ]);
             
-            // Persist metadata fields to asset_metadata table if category and fields exist
+            // Persist metadata and ensure approved rows so drawer shows values; add tags
             if ($category && !empty($metadataFieldsData)) {
                 try {
                     $persistenceService = app(MetadataPersistenceService::class);
@@ -518,34 +510,39 @@ class DevelopmentDataSeeder extends Seeder
                         $category,
                         $metadataFieldsData,
                         $user->id,
-                        'image', // Default to image for metadata schema resolution
-                        true // Auto-approve seeder metadata
+                        'image',
+                        true
                     );
                 } catch (\Exception $e) {
-                    // Log but don't fail - metadata in JSON is still valid
                     \Log::warning('[DevelopmentDataSeeder] Failed to persist metadata', [
                         'asset_id' => $asset->id,
                         'error' => $e->getMessage(),
                     ]);
                 }
+                $this->ensureApprovedMetadataForAsset($asset, $metadataFieldsData, $user->id);
             }
+            $this->addTagsToAsset($asset, 1, 3);
         }
     }
     
-    /**
-     * Number of assets to create for company 1 / brand 1 (lots of filter data).
-     */
+    /** Company 1: at least 50 assorted assets (assets + executions) with metadata, tags, collections. */
     private const FIRST_COMPANY_ASSETS = [
-        'small' => 80,
-        'medium' => 150,
+        'small' => 50,
+        'medium' => 120,
         'large' => 250,
     ];
 
     /** Number of execution/deliverable assets for company 1 (Executions tab with metadata). */
     private const FIRST_COMPANY_DELIVERABLES = [
-        'small' => 25,
-        'medium' => 45,
+        'small' => 15,
+        'medium' => 40,
         'large' => 80,
+    ];
+
+    /** Tag pool for seeded assets (so tags repeat and filters work). */
+    private const SEEDER_TAG_POOL = [
+        'campaign', 'hero', 'product', 'lifestyle', 'studio', 'social', 'print', 'web',
+        'approved', 'final', 'draft', '2025', 'q1', 'launch', 'brand',
     ];
 
     /**
@@ -589,6 +586,29 @@ class DevelopmentDataSeeder extends Seeder
         $systemAssetCategories = $assetCategories->filter(fn ($c) => $c->system_category_id !== null)->values();
         $systemDeliverableCategories = $deliverableCategories->filter(fn ($c) => $c->system_category_id !== null)->values();
 
+        // Create 2–3 collections for this brand (so "Collection" in drawer shows data)
+        $collectionNames = ['Campaign assets', 'Approved finals', 'Social & web'];
+        $collections = [];
+        $firstUser = $companyUsers->first();
+        foreach (array_slice($collectionNames, 0, 3) as $name) {
+            $slug = Str::slug($name . '-' . $brand->id);
+            if (Collection::where('brand_id', $brand->id)->where('slug', $slug)->exists()) {
+                continue;
+            }
+            $collections[] = Collection::create([
+                'tenant_id' => $company->id,
+                'brand_id' => $brand->id,
+                'name' => $name,
+                'slug' => $slug,
+                'description' => 'Seeded collection for testing.',
+                'visibility' => 'brand',
+                'is_public' => false,
+                'created_by' => $firstUser?->id,
+            ]);
+        }
+
+        $createdAssets = [];
+
         // 1) Create execution/deliverable assets (Executions tab) with metadata
         $deliverablesToCreate = $deliverableCategories->isNotEmpty() ? $deliverableCount : 0;
         for ($d = 0; $d < $deliverablesToCreate; $d++) {
@@ -596,7 +616,7 @@ class DevelopmentDataSeeder extends Seeder
             $category = $systemDeliverableCategories->isNotEmpty() && fake()->boolean(85)
                 ? $systemDeliverableCategories->random()
                 : $deliverableCategories->random();
-            $this->createSeededAsset(
+            $createdAssets[] = $this->createSeededAsset(
                 $company,
                 $brand,
                 $bucket,
@@ -617,7 +637,7 @@ class DevelopmentDataSeeder extends Seeder
                 $preferSystem && fake()->boolean(80) ? $systemAssetCategories->random() : $assetCategories->random()
             );
             $assetType = fake()->randomElement([AssetType::ASSET, AssetType::ASSET, AssetType::AI_GENERATED]);
-            $this->createSeededAsset(
+            $createdAssets[] = $this->createSeededAsset(
                 $company,
                 $brand,
                 $bucket,
@@ -628,10 +648,28 @@ class DevelopmentDataSeeder extends Seeder
                 true
             );
         }
+
+        // Attach 40–60% of assets to 1–2 collections so "Collection" shows in drawer
+        if (count($collections) > 0) {
+            foreach ($createdAssets as $asset) {
+                if (!fake()->boolean(50)) {
+                    continue;
+                }
+                $attachTo = fake()->randomElements($collections, min(2, count($collections)));
+                foreach ($attachTo as $coll) {
+                    if (!$asset->collections()->where('collection_id', $coll->id)->exists()) {
+                        $asset->collections()->attach($coll->id);
+                    }
+                }
+            }
+        }
     }
 
     /**
      * Create a single asset with metadata (shared by company loop and first-company seed).
+     * Ensures approved asset_metadata rows so the drawer shows values; adds tags.
+     *
+     * @return Asset The created asset (for attaching to collections when needed).
      */
     private function createSeededAsset(
         Tenant $company,
@@ -642,7 +680,7 @@ class DevelopmentDataSeeder extends Seeder
         AssetType $assetType,
         $metadataFields,
         bool $highFillRate = false
-    ): void {
+    ): Asset {
         $mimeTypes = [
             'image/jpeg', 'image/png', 'image/gif', 'image/webp',
             'application/pdf', 'video/mp4', 'application/zip',
@@ -702,6 +740,79 @@ class DevelopmentDataSeeder extends Seeder
                 \Log::warning('[DevelopmentDataSeeder] Persist metadata failed', [
                     'asset_id' => $asset->id,
                     'error' => $e->getMessage(),
+                ]);
+            }
+            // Best practice: drawer only shows approved metadata. Ensure every seeded value has an approved row.
+            $this->ensureApprovedMetadataForAsset($asset, $metadataFieldsData, $user->id);
+        }
+        // Add 1–3 tags so Tags and filters show data
+        $this->addTagsToAsset($asset, 1, 3);
+        return $asset;
+    }
+
+    /**
+     * Ensure each seeded metadata key has an approved asset_metadata row so the drawer displays it.
+     * Best practice: the drawer only shows approved metadata; non-approvers see only rows with approved_at set.
+     */
+    private function ensureApprovedMetadataForAsset(Asset $asset, array $metadataFieldsData, int $userId): void
+    {
+        $fieldIds = DB::table('metadata_fields')
+            ->whereIn('key', array_keys($metadataFieldsData))
+            ->pluck('id', 'key');
+        foreach ($metadataFieldsData as $key => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $fieldId = $fieldIds[$key] ?? null;
+            if ($fieldId === null) {
+                continue;
+            }
+            $existing = DB::table('asset_metadata')
+                ->where('asset_id', $asset->id)
+                ->where('metadata_field_id', $fieldId)
+                ->whereNotNull('approved_at')
+                ->first();
+            if ($existing) {
+                continue;
+            }
+            DB::table('asset_metadata')->insert([
+                'asset_id' => $asset->id,
+                'metadata_field_id' => $fieldId,
+                'value_json' => json_encode($value),
+                'source' => 'user',
+                'confidence' => 1.0,
+                'producer' => 'user',
+                'approved_at' => now(),
+                'approved_by' => $userId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+    }
+
+    /**
+     * Add random tags from SEEDER_TAG_POOL to an asset (for Tags in drawer and filter).
+     */
+    private function addTagsToAsset(Asset $asset, int $min = 1, int $max = 3): void
+    {
+        $count = fake()->numberBetween($min, $max);
+        $tags = fake()->randomElements(self::SEEDER_TAG_POOL, min($count, count(self::SEEDER_TAG_POOL)));
+        foreach (array_unique($tags) as $tag) {
+            $tag = strtolower(trim($tag));
+            if ($tag === '') {
+                continue;
+            }
+            $exists = DB::table('asset_tags')
+                ->where('asset_id', $asset->id)
+                ->where('tag', $tag)
+                ->exists();
+            if (!$exists) {
+                DB::table('asset_tags')->insert([
+                    'asset_id' => $asset->id,
+                    'tag' => $tag,
+                    'source' => 'manual',
+                    'confidence' => null,
+                    'created_at' => now(),
                 ]);
             }
         }

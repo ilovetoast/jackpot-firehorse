@@ -13,6 +13,7 @@ export default function AppNav({ brand, tenant }) {
     const [userMenuOpen, setUserMenuOpen] = useState(false)
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
+    const [mobileNavOpen, setMobileNavOpen] = useState(false)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
@@ -284,6 +285,22 @@ export default function AppNav({ brand, tenant }) {
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                 <div className="flex h-20 justify-between">
                     <div className="flex flex-1 items-center">
+                        {/* Mobile: hamburger to open main nav drawer (main nav links hidden below sm) */}
+                        {isAppPage && (
+                            <div className="flex flex-shrink-0 mr-2 sm:mr-0 sm:hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setMobileNavOpen(true)}
+                                    className="inline-flex items-center justify-center rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+                                    style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)' }}
+                                    aria-label="Open menu"
+                                >
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
                         {/* Brand Logo Component (C12: show collection name when collection-only) */}
                         <div className="flex flex-shrink-0 items-center">
                             {isAppPage ? (isCollectionOnlyNav && effectiveCollection?.brand ? (
@@ -397,16 +414,6 @@ export default function AppNav({ brand, tenant }) {
                                 >
                                     Generative
                                 </span>
-                                <Link
-                                    href="/app/downloads"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700"
-                                    style={{
-                                        borderBottomColor: currentUrl.startsWith('/app/downloads') ? '#4f46e5' : 'transparent',
-                                        color: currentUrl.startsWith('/app/downloads') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
-                                    }}
-                                >
-                                    Downloads
-                                </Link>
                             </div>
                         ) : (
                             <div className="app-nav-main-links hidden sm:flex sm:space-x-8 absolute" style={{ left: '18rem' }}>
@@ -479,20 +486,6 @@ export default function AppNav({ brand, tenant }) {
                                     }}
                                 >
                                     Generative
-                                </Link>
-                                <Link
-                                    href="/app/downloads"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
-                                    style={{
-                                        color: currentUrl.startsWith('/app/downloads')
-                                            ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/downloads')
-                                            ? (activeBrand?.primary_color || '#6366f1')
-                                            : 'transparent'
-                                    }}
-                                >
-                                    Downloads
                                 </Link>
                             </div>
                         )) : (
@@ -567,20 +560,6 @@ export default function AppNav({ brand, tenant }) {
                                 >
                                     Generative
                                 </Link>
-                                <Link
-                                    href="/app/downloads"
-                                    className="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium border-transparent"
-                                    style={{
-                                        color: currentUrl.startsWith('/app/downloads')
-                                            ? textColor
-                                            : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
-                                        borderBottomColor: currentUrl.startsWith('/app/downloads')
-                                            ? (activeBrand?.primary_color || '#6366f1')
-                                            : 'transparent'
-                                    }}
-                                >
-                                    Downloads
-                                </Link>
                             </div>
                         )}
                     </div>
@@ -596,6 +575,35 @@ export default function AppNav({ brand, tenant }) {
                             >
                                 Collection access
                             </Link>
+                        )}
+                        {/* Right-side nav: Downloads + Brand Guidelines (app pages only), then Notifications */}
+                        {isAppPage && (
+                            <>
+                                <Link
+                                    href="/app/downloads"
+                                    className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    style={{
+                                        color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
+                                    }}
+                                >
+                                    <span className="hidden md:inline">Downloads</span>
+                                    <svg className="h-5 w-5 md:hidden" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                    </svg>
+                                </Link>
+                                <Link
+                                    href="/app/brand-guidelines"
+                                    className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    style={{
+                                        color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
+                                    }}
+                                >
+                                    <span className="hidden md:inline">Brand Guidelines</span>
+                                    <svg className="h-5 w-5 md:hidden" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                                    </svg>
+                                </Link>
+                            </>
                         )}
                         {/* Phase AF-3: Notification Bell */}
                         <NotificationBell textColor={textColor} />
@@ -889,6 +897,64 @@ export default function AppNav({ brand, tenant }) {
                     </div>
                 </div>
             </div>
+
+            {/* Mobile main nav drawer: slide-in from left (below sm breakpoint) */}
+            {isAppPage && mobileNavOpen && (
+                <>
+                    <div
+                        className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm sm:hidden"
+                        aria-hidden="true"
+                        onClick={() => setMobileNavOpen(false)}
+                    />
+                    <div
+                        className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white shadow-xl sm:hidden flex flex-col transition-transform duration-300 ease-out"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Main navigation"
+                    >
+                        <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
+                            <span className="text-sm font-semibold text-gray-900">Menu</span>
+                            <button
+                                type="button"
+                                onClick={() => setMobileNavOpen(false)}
+                                className="rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                                aria-label="Close menu"
+                            >
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <nav className="flex-1 overflow-y-auto py-4 px-3" aria-label="Primary">
+                            <div className="space-y-0.5">
+                                {[
+                                    { href: '/app/dashboard', label: 'Dashboard' },
+                                    { href: '/app/assets', label: 'Assets' },
+                                    { href: '/app/deliverables', label: DELIVERABLES_PAGE_LABEL },
+                                    { href: '/app/collections', label: 'Collections' },
+                                    { href: '/app/generative', label: 'Generative' },
+                                ].map(({ href, label }) => {
+                                    const isActive = href === '/app/dashboard' ? currentUrl === href : currentUrl.startsWith(href) && (href !== '/app/assets' || !currentUrl.startsWith('/app/deliverables'))
+                                    return (
+                                        <Link
+                                            key={href}
+                                            href={href}
+                                            onClick={() => setMobileNavOpen(false)}
+                                            className={`flex items-center px-3 py-3 rounded-lg text-sm font-medium transition-colors ${
+                                                isActive
+                                                    ? 'bg-indigo-50 text-indigo-700'
+                                                    : 'text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            {label}
+                                        </Link>
+                                    )
+                                })}
+                            </div>
+                        </nav>
+                    </div>
+                </>
+            )}
             </nav>
         </div>
     )

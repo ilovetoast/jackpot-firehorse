@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
 import { router } from '@inertiajs/react'
 import {
     ArrowPathIcon,
     Bars3Icon,
     BookmarkIcon,
     CheckCircleIcon,
+    ChevronDownIcon,
+    ChevronRightIcon,
     DocumentDuplicateIcon,
     EyeIcon,
     FunnelIcon,
@@ -47,9 +49,11 @@ export default function ByCategoryView({
     categories, 
     canManageVisibility,
     canManageFields = false,
-    customFieldsLimit = null
+    customFieldsLimit = null,
+    metadataFieldFamilies = {}
 }) {
     const [selectedCategoryId, setSelectedCategoryId] = useState(null)
+    const [expandedFamilies, setExpandedFamilies] = useState({})
     const selectedCategoryIdRef = useRef(null) // Persist selected category across reloads
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [loadingFields, setLoadingFields] = useState(new Set())
@@ -583,6 +587,26 @@ export default function ByCategoryView({
 
         return { enabled, available, enabledAutomated, availableAutomated }
     }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData, fieldOrder, previewOverlay])
+
+    // Phase K: Field families — split enabled/available by family (only "type" family for now)
+    const typeFamilyConfig = (metadataFieldFamilies && typeof metadataFieldFamilies === 'object' && metadataFieldFamilies.type) ? metadataFieldFamilies.type : null
+    const typeFamilyFieldKeys = useMemo(() => {
+        if (!typeFamilyConfig || !Array.isArray(typeFamilyConfig.fields)) return []
+        return typeFamilyConfig.fields
+    }, [typeFamilyConfig])
+
+    const fieldsByFamily = useMemo(() => {
+        const { enabled, available } = getFieldsForCategory
+        const typeEnabled = typeFamilyFieldKeys.length > 0 ? enabled.filter(f => typeFamilyFieldKeys.includes(f.key)) : []
+        const typeAvailable = typeFamilyFieldKeys.length > 0 ? available.filter(f => typeFamilyFieldKeys.includes(f.key)) : []
+        const otherEnabled = typeFamilyFieldKeys.length > 0 ? enabled.filter(f => !typeFamilyFieldKeys.includes(f.key)) : enabled
+        const otherAvailable = typeFamilyFieldKeys.length > 0 ? available.filter(f => !typeFamilyFieldKeys.includes(f.key)) : available
+        return { typeFamilyEnabled: typeEnabled, typeFamilyAvailable: typeAvailable, otherEnabled, otherAvailable }
+    }, [getFieldsForCategory, typeFamilyFieldKeys])
+
+    const toggleFamilyExpanded = useCallback((familyKey) => {
+        setExpandedFamilies(prev => ({ ...prev, [familyKey]: !prev[familyKey] }))
+    }, [])
 
     // Drag handlers
     const handleDragStart = (e, fieldId) => {
@@ -1212,30 +1236,53 @@ export default function ByCategoryView({
                                 )}
                             </div>
                             <div className="divide-y divide-gray-200">
-                                {getFieldsForCategory.enabled.length > 0 ? (
-                                    getFieldsForCategory.enabled.map((field, index) => (
-                                        <FieldRow
-                                            key={field.id}
-                                            field={field}
-                                            categoryId={selectedCategoryId}
-                                            isEnabled={true}
-                                            onToggle={toggleCategoryField}
-                                            onVisibilityToggle={toggleVisibility}
-                                            onPrimaryToggle={togglePrimary}
-                                            onAiEligibleToggle={toggleAiEligible}
-                                            onEdit={canManageFields ? handleEditField : null}
-                                            canManage={canManageVisibility && !previewProfileName}
-                                            canManageFields={canManageFields}
-                                            systemFields={systemFields}
-                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                            isDraggable={true}
-                                            onDragStart={handleDragStart}
-                                            onDragOver={handleDragOver}
-                                            onDrop={handleDrop}
-                                            onDragEnd={handleDragEnd}
-                                            isDragging={draggedFieldId === field.id}
-                                        />
-                                    ))
+                                {getFieldsForCategory.enabled.length > 0 || (fieldsByFamily.typeFamilyEnabled.length + fieldsByFamily.typeFamilyAvailable.length) > 0 ? (
+                                    <>
+                                        {typeFamilyConfig && (fieldsByFamily.typeFamilyEnabled.length > 0 || fieldsByFamily.typeFamilyAvailable.length > 0) && (
+                                            <FamilyRow
+                                                familyKey="type"
+                                                familyConfig={typeFamilyConfig}
+                                                enabledMembers={fieldsByFamily.typeFamilyEnabled}
+                                                availableMembers={fieldsByFamily.typeFamilyAvailable}
+                                                categoryId={selectedCategoryId}
+                                                expanded={!!expandedFamilies['type']}
+                                                onToggleExpand={() => toggleFamilyExpanded('type')}
+                                                onToggle={toggleCategoryField}
+                                                onVisibilityToggle={toggleVisibility}
+                                                onPrimaryToggle={togglePrimary}
+                                                onAiEligibleToggle={toggleAiEligible}
+                                                onEdit={canManageFields ? handleEditField : null}
+                                                canManage={canManageVisibility && !previewProfileName}
+                                                canManageFields={canManageFields}
+                                                systemFields={systemFields}
+                                                fieldCategoryData={fieldCategoryData}
+                                                previewOverlay={previewOverlay}
+                                            />
+                                        )}
+                                        {fieldsByFamily.otherEnabled.map((field) => (
+                                            <FieldRow
+                                                key={field.id}
+                                                field={field}
+                                                categoryId={selectedCategoryId}
+                                                isEnabled={true}
+                                                onToggle={toggleCategoryField}
+                                                onVisibilityToggle={toggleVisibility}
+                                                onPrimaryToggle={togglePrimary}
+                                                onAiEligibleToggle={toggleAiEligible}
+                                                onEdit={canManageFields ? handleEditField : null}
+                                                canManage={canManageVisibility && !previewProfileName}
+                                                canManageFields={canManageFields}
+                                                systemFields={systemFields}
+                                                fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
+                                                isDraggable={true}
+                                                onDragStart={handleDragStart}
+                                                onDragOver={handleDragOver}
+                                                onDrop={handleDrop}
+                                                onDragEnd={handleDragEnd}
+                                                isDragging={draggedFieldId === field.id}
+                                            />
+                                        ))}
+                                    </>
                                 ) : (
                                     <div className="px-6 py-8 text-center text-sm text-gray-500">
                                         No fields enabled for this category yet.
@@ -1302,19 +1349,19 @@ export default function ByCategoryView({
                             </div>
                         )}
 
-                        {/* Available Fields */}
-                        {getFieldsForCategory.available.length > 0 && (
+                        {/* Available Fields (excludes type family members — those appear under Type when expanded) */}
+                        {fieldsByFamily.otherAvailable.length > 0 && (
                             <div className="bg-white rounded-lg border border-gray-200">
                                 <div className="px-6 py-4 border-b border-gray-200">
                                     <h3 className="text-sm font-semibold text-gray-900">
-                                        Available for this category ({getFieldsForCategory.available.length})
+                                        Available for this category ({fieldsByFamily.otherAvailable.length})
                                     </h3>
                                     <p className="mt-1 text-xs text-gray-500">
                                         Enable these fields to make them visible for this category
                                     </p>
                                 </div>
                                 <div className="divide-y divide-gray-200">
-                                    {getFieldsForCategory.available.map(field => (
+                                    {fieldsByFamily.otherAvailable.map(field => (
                                         <FieldRow
                                             key={field.id}
                                             field={field}
@@ -1463,6 +1510,192 @@ export default function ByCategoryView({
                 customFieldsLimit={customFieldsLimit}
                 onSuccess={handleModalSuccess}
             />
+        </div>
+    )
+}
+
+/**
+ * Family Row Component (Phase K)
+ *
+ * Collapsible row for a field family. Shows family label, system badge, shared visibility toggles.
+ * When expanded, shows member fields (enabled then available) as individual FieldRows.
+ * Family-level toggle applies to all member fields.
+ */
+function FamilyRow({
+    familyKey,
+    familyConfig,
+    enabledMembers,
+    availableMembers,
+    categoryId,
+    expanded,
+    onToggleExpand,
+    onToggle,
+    onVisibilityToggle,
+    onPrimaryToggle,
+    onAiEligibleToggle,
+    onEdit,
+    canManage,
+    canManageFields,
+    systemFields,
+    fieldCategoryData,
+    previewOverlay,
+}) {
+    const label = familyConfig?.label || familyKey
+    const members = [...enabledMembers, ...availableMembers]
+    const uploadRef = useRef(null)
+    const editRef = useRef(null)
+    const filterRef = useRef(null)
+
+    const getEffective = (field, context) => {
+        const categoryData = previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]
+        const override = categoryId && categoryData?.overrides?.[categoryId]
+        if (context === 'upload') return override?.show_on_upload !== undefined ? override.show_on_upload : (field.effective_show_on_upload ?? field.show_on_upload ?? true)
+        if (context === 'edit') return override?.show_on_edit !== undefined ? override.show_on_edit : (field.effective_show_on_edit ?? field.show_on_edit ?? true)
+        if (context === 'filter') return override?.show_in_filters !== undefined ? override.show_in_filters : (field.effective_show_in_filters ?? field.show_in_filters ?? true)
+        return true
+    }
+
+    const uploads = members.map(f => getEffective(f, 'upload'))
+    const edits = members.map(f => getEffective(f, 'edit'))
+    const filters = members.map(f => getEffective(f, 'filter'))
+    const allUpload = uploads.length > 0 && uploads.every(Boolean)
+    const noUpload = uploads.length > 0 && uploads.every(v => !v)
+    const allEdit = edits.length > 0 && edits.every(Boolean)
+    const noEdit = edits.length > 0 && edits.every(v => !v)
+    const allFilter = filters.length > 0 && filters.every(Boolean)
+    const noFilter = filters.length > 0 && filters.every(v => !v)
+    const mixedUpload = uploads.length > 0 && !allUpload && !noUpload
+    const mixedEdit = edits.length > 0 && !allEdit && !noEdit
+    const mixedFilter = filters.length > 0 && !allFilter && !noFilter
+
+    useLayoutEffect(() => {
+        if (uploadRef.current) uploadRef.current.indeterminate = mixedUpload
+        if (editRef.current) editRef.current.indeterminate = mixedEdit
+        if (filterRef.current) filterRef.current.indeterminate = mixedFilter
+    }, [mixedUpload, mixedEdit, mixedFilter])
+
+    const handleFamilyVisibility = (context, currentCommon) => {
+        const newVal = !currentCommon
+        members.forEach(field => {
+            const cur = getEffective(field, context)
+            if (cur !== newVal) {
+                const key = context === 'upload' ? 'upload' : context === 'edit' ? 'edit' : 'filter'
+                onVisibilityToggle(field.id, key, cur)
+            }
+        })
+    }
+
+    return (
+        <div className="bg-gray-50/70 rounded border border-gray-200 overflow-hidden">
+            <div
+                className="px-6 py-4 flex items-center gap-3 cursor-pointer hover:bg-gray-100/70 transition-colors"
+                onClick={onToggleExpand}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand() } }}
+                aria-expanded={expanded}
+            >
+                <span className="flex-shrink-0 text-gray-500">
+                    {expanded ? <ChevronDownIcon className="w-5 h-5" /> : <ChevronRightIcon className="w-5 h-5" />}
+                </span>
+                <span className="text-sm font-medium text-gray-900">{label}</span>
+                <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded">System</span>
+                <span className="text-xs text-gray-500" title={`${enabledMembers.length} enabled in this category; ${availableMembers.length} available for this category`}>
+                    {enabledMembers.length} enabled in this category · {availableMembers.length} available for this category
+                </span>
+                <div className="flex-1" />
+                <div className="flex items-center gap-6 text-xs text-gray-600" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-3">
+                        <EyeIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
+                        <label className="flex items-center gap-1.5 cursor-pointer" title={mixedUpload ? 'Some fields differ' : undefined} onClick={e => e.stopPropagation()}>
+                            <input
+                                ref={uploadRef}
+                                type="checkbox"
+                                checked={allUpload}
+                                onChange={() => handleFamilyVisibility('upload', allUpload)}
+                                disabled={!canManage || members.length === 0}
+                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                                aria-label={mixedUpload ? 'Upload: some fields differ' : 'Upload'}
+                            />
+                            <span>Upload</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer" title={mixedEdit ? 'Some fields differ' : undefined} onClick={e => e.stopPropagation()}>
+                            <input
+                                ref={editRef}
+                                type="checkbox"
+                                checked={allEdit}
+                                onChange={() => handleFamilyVisibility('edit', allEdit)}
+                                disabled={!canManage || members.length === 0}
+                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                                aria-label={mixedEdit ? 'Quick view: some fields differ' : 'Quick view'}
+                            />
+                            <span>Quick View</span>
+                        </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <FunnelIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
+                        <label className="flex items-center gap-1.5 cursor-pointer" title={mixedFilter ? 'Some fields differ' : undefined} onClick={e => e.stopPropagation()}>
+                            <input
+                                ref={filterRef}
+                                type="checkbox"
+                                checked={allFilter}
+                                onChange={() => handleFamilyVisibility('filter', allFilter)}
+                                disabled={!canManage || members.length === 0}
+                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                                aria-label={mixedFilter ? 'Filter: some fields differ' : 'Filter'}
+                            />
+                            <span>Filter</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            {members.length > 1 && canManage && (
+                <p className="px-6 pb-3 pt-0 text-xs text-gray-500" onClick={e => e.stopPropagation()} role="presentation">
+                    Changes apply to all {members.length} {label} fields in this category.
+                </p>
+            )}
+            {expanded && (
+                <div className="border-t border-gray-200 divide-y divide-gray-200">
+                    {enabledMembers.map(field => (
+                        <div key={field.id} className="bg-white">
+                            <FieldRow
+                                field={field}
+                                categoryId={categoryId}
+                                isEnabled={true}
+                                onToggle={onToggle}
+                                onVisibilityToggle={onVisibilityToggle}
+                                onPrimaryToggle={onPrimaryToggle}
+                                onAiEligibleToggle={onAiEligibleToggle}
+                                onEdit={onEdit}
+                                canManage={canManage}
+                                canManageFields={canManageFields}
+                                systemFields={systemFields}
+                                fieldCategoryData={previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]}
+                                isDraggable={false}
+                            />
+                        </div>
+                    ))}
+                    {availableMembers.map(field => (
+                        <div key={field.id} className="bg-white">
+                            <FieldRow
+                                field={field}
+                                categoryId={categoryId}
+                                isEnabled={false}
+                                onToggle={onToggle}
+                                onVisibilityToggle={onVisibilityToggle}
+                                onPrimaryToggle={onPrimaryToggle}
+                                onAiEligibleToggle={onAiEligibleToggle}
+                                onEdit={onEdit}
+                                canManage={canManage}
+                                canManageFields={canManageFields}
+                                systemFields={systemFields}
+                                fieldCategoryData={previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]}
+                                isDraggable={false}
+                            />
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     )
 }

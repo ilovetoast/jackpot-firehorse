@@ -15,6 +15,7 @@ use App\Services\AssetPublicationService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\AssetSearchService;
+use App\Services\AssetSortService;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
@@ -40,7 +41,8 @@ class AssetController extends Controller
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected AiMetadataConfidenceService $confidenceService,
         protected LifecycleResolver $lifecycleResolver,
-        protected AssetSearchService $assetSearchService
+        protected AssetSearchService $assetSearchService,
+        protected AssetSortService $assetSortService
     ) {
     }
 
@@ -305,19 +307,10 @@ class AssetController extends Controller
             $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
         }
 
-        // Order by user-selected sort (starred | created | quality) and direction (asc | desc)
-        $sort = $request->input('sort', 'created');
-        $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
-        if ($sort === 'starred') {
-            // Robust starred check: JSON true, unquoted 'true', or '1' (MySQL JSON boolean handling varies)
-            $assetsQuery->orderByRaw("CASE WHEN JSON_EXTRACT(metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1') THEN 1 ELSE 0 END " . $sortDirection);
-            $assetsQuery->orderBy('created_at', $sortDirection);
-        } elseif ($sort === 'quality') {
-            $assetsQuery->orderByRaw('COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.quality_rating\')), 0) ' . $sortDirection);
-            $assetsQuery->orderBy('created_at', $sortDirection);
-        } else {
-            $assetsQuery->orderBy('created_at', $sortDirection);
-        }
+        // Phase L: Centralized sort (after search/filters, before pagination)
+        $sort = $this->assetSortService->normalizeSort($request->input('sort'));
+        $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
+        $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
         $assets = $assetsQuery->get();
         
         // HARD TERMINAL STATE: Check for stuck assets and repair them

@@ -29,6 +29,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
+    const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState(false)
     
     // FINAL FIX: Remount key to force page remount after finalize
     const [remountKey, setRemountKey] = useState(0)
@@ -570,10 +571,51 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                     </div>
                 </div>
 
+                {/* Mobile: Categories slide-out (visible when lg:hidden) */}
+                {mobileCategoriesOpen && (
+                    <>
+                        <div className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm lg:hidden" aria-hidden="true" onClick={() => setMobileCategoriesOpen(false)} />
+                        <div className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] flex flex-col shadow-xl lg:hidden" style={{ backgroundColor: sidebarColor, top: '5rem' }} role="dialog" aria-modal="true" aria-label="Categories">
+                            <div className="flex items-center justify-between h-14 px-4 border-b shrink-0" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)' }}>
+                                <span className="text-sm font-semibold" style={{ color: textColor }}>Categories</span>
+                                <button type="button" onClick={() => setMobileCategoriesOpen(false)} className="rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/50" style={{ color: textColor }} aria-label="Close categories">
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto py-4 px-2">
+                                {auth?.user && (
+                                    <div className="px-2 py-2 mb-3">
+                                        <AddAssetButton defaultAssetType="deliverable" className="w-full" onClick={() => { handleOpenUploadDialog(); setMobileCategoriesOpen(false) }} />
+                                    </div>
+                                )}
+                                <div className="space-y-0.5">
+                                    {show_all_button && (
+                                        <button onClick={() => { handleCategorySelect(null); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent', color: textColor }}>
+                                            <TagIcon className="mr-3 h-5 w-5 opacity-60" style={{ color: textColor }} /><span className="flex-1">All</span>
+                                        </button>
+                                    )}
+                                    {categories.length > 0 && categories.filter(c => !(c.is_hidden === true || c.is_hidden === 1 || c.is_hidden === '1' || c.is_hidden === 'true')).map((category) => (
+                                        <button key={category.id || `template-${category.slug}-${category.asset_type}`} onClick={() => { handleCategorySelect(category); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent', color: textColor }}>
+                                            <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-60" style={{ color: textColor }} /><span className="flex-1">{category.name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
+
                 {/* Main Content - Full Height with Scroll */}
-                <div className="flex-1 overflow-hidden bg-gray-50 h-full relative">
+                <div className="flex-1 overflow-hidden bg-gray-50 h-full relative flex flex-col">
+                    <div className="lg:hidden flex items-center gap-2 py-2 px-4 sm:px-6 border-b border-gray-200 bg-white/80 backdrop-blur-sm shrink-0">
+                        <button type="button" onClick={() => setMobileCategoriesOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-white border border-gray-300 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+                            <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+                            <span>Categories</span>
+                            {selectedCategoryId != null && categories.find(c => c.id === selectedCategoryId) && <span className="text-gray-500 truncate max-w-[120px]">— {categories.find(c => c.id === selectedCategoryId).name}</span>}
+                        </button>
+                    </div>
                     <div 
-                        className={`h-full overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
+                        className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
                         style={{ 
                             // Freeze grid layout during drawer animation to prevent mid-animation reflow
                             // CSS Grid recalculates columns immediately on width change
@@ -669,6 +711,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                             const urlParams = new URLSearchParams(window.location.search)
                                             urlParams.set('sort', newSort)
                                             urlParams.set('sort_direction', newDir)
+                                            urlParams.delete('page')
                                             router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                         }}
                                     />
