@@ -62,8 +62,8 @@ class AssetController extends Controller
                 'categories_by_type' => ['all' => []],
                 'selected_category' => null,
                 'assets' => [],
-                'sort' => 'created',
-                'sort_direction' => 'desc',
+                'sort' => AssetSortService::DEFAULT_SORT,
+                'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'q' => '',
             ]);
         }

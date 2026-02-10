@@ -24,6 +24,10 @@ class AssetSortService
     public const DIRECTION_ASC = 'asc';
     public const DIRECTION_DESC = 'desc';
 
+    /** Default sort when none specified. Use everywhere (controllers, UI, reset) so they never drift. */
+    public const DEFAULT_SORT = self::SORT_CREATED;
+    public const DEFAULT_DIRECTION = self::DIRECTION_DESC;
+
     /**
      * Apply sort to the asset query. Call after scoping, search, and filters; before pagination.
      *
@@ -98,7 +102,7 @@ class AssetSortService
     {
         $allowed = [self::SORT_STARRED, self::SORT_CREATED, self::SORT_QUALITY];
         $sort = $sort ? strtolower(trim($sort)) : '';
-        return in_array($sort, $allowed, true) ? $sort : self::SORT_CREATED;
+        return in_array($sort, $allowed, true) ? $sort : self::DEFAULT_SORT;
     }
 
     /**
@@ -107,6 +111,6 @@ class AssetSortService
     public function normalizeSortDirection(?string $sortDirection): string
     {
         $d = $sortDirection ? strtolower(trim($sortDirection)) : '';
-        return $d === self::DIRECTION_ASC ? self::DIRECTION_ASC : self::DIRECTION_DESC;
+        return $d === self::DIRECTION_ASC ? self::DIRECTION_ASC : self::DEFAULT_DIRECTION;
     }
 }

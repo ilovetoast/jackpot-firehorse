@@ -17,9 +17,9 @@ use RuntimeException;
 /**
  * Assets Reset Staging
  *
- * STAGING-ONLY. Similar in spirit to assets:reset-dev but for staging:
- * - Empties all objects in each tenant's S3 bucket(s)
- * - Deletes the bucket(s) from S3
+ * STAGING-ONLY. Uses tenant staging buckets per docs/s3-bucket-strategy.md:
+ * - Expected bucket name from TenantBucketService (STORAGE_BUCKET_NAME_PATTERN, e.g. jackpot-staging-{company_slug})
+ * - Empties and deletes that bucket in S3 (and any legacy tenant bucket rows)
  * - Deletes StorageBucket row(s) for the tenant so tenants:ensure-buckets can recreate them
  * - Optional --wipe-db: deletes assets and upload sessions for the tenant (for clean seeding)
  *
@@ -90,29 +90,37 @@ class AssetsResetStaging extends Command
 
     protected function processTenant(TenantBucketService $bucketService, Tenant $tenant, bool $dryRun, bool $wipeDb): void
     {
-        $buckets = StorageBucket::where('tenant_id', $tenant->id)->get();
         $this->perTenantSummary[$tenant->id] = [
             'tenant_name' => $tenant->name ?? (string) $tenant->id,
             'buckets' => [],
             'db_wipe' => 0,
         ];
 
-        foreach ($buckets as $bucket) {
+        // Use tenant staging bucket from config (docs/s3-bucket-strategy.md): STORAGE_BUCKET_NAME_PATTERN → e.g. jackpot-staging-{company_slug}
+        $expectedBucketName = $bucketService->getBucketName($tenant);
+        $dbBuckets = StorageBucket::where('tenant_id', $tenant->id)->get();
+        $bucketNamesToProcess = collect([$expectedBucketName])
+            ->merge($dbBuckets->pluck('name'))
+            ->unique()
+            ->values()
+            ->all();
+
+        foreach ($bucketNamesToProcess as $bucketName) {
+            $bucketRow = $dbBuckets->firstWhere('name', $bucketName);
             $objectsDeleted = 0;
             $bucketDeleted = false;
-            $bucketName = $bucket->name;
 
             if (! $this->bucketExistsInS3($bucketName)) {
                 $this->line("  Tenant {$tenant->id} ({$tenant->name}): bucket {$bucketName} does not exist in S3, skipping S3 steps.");
-                if (! $dryRun) {
-                    $bucket->forceDelete();
-                    $this->perTenantSummary[$tenant->id]['buckets'][] = [
-                        'bucket' => $bucketName,
-                        'objects_deleted' => 0,
-                        'bucket_deleted' => false,
-                        'row_deleted' => true,
-                    ];
+                if (! $dryRun && $bucketRow) {
+                    $bucketRow->forceDelete();
                 }
+                $this->perTenantSummary[$tenant->id]['buckets'][] = [
+                    'bucket' => $bucketName,
+                    'objects_deleted' => 0,
+                    'bucket_deleted' => false,
+                    'row_deleted' => $bucketRow ? true : false,
+                ];
                 continue;
             }
 
@@ -144,13 +152,24 @@ class AssetsResetStaging extends Command
                 ]);
             }
 
-            $bucket->forceDelete();
+            if ($bucketRow) {
+                $bucketRow->forceDelete();
+            }
             $this->perTenantSummary[$tenant->id]['buckets'][] = [
                 'bucket' => $bucketName,
                 'objects_deleted' => $objectsDeleted,
                 'bucket_deleted' => $bucketDeleted,
-                'row_deleted' => true,
+                'row_deleted' => (bool) $bucketRow,
             ];
+        }
+
+        // Remove any remaining StorageBucket rows for this tenant (e.g. legacy names we didn't find in S3)
+        if (! $dryRun) {
+            $remaining = StorageBucket::where('tenant_id', $tenant->id)->count();
+            if ($remaining > 0) {
+                StorageBucket::where('tenant_id', $tenant->id)->forceDelete();
+                $this->line("  Tenant {$tenant->id}: removed {$remaining} remaining storage bucket row(s).");
+            }
         }
 
         if ($wipeDb && ! $dryRun) {
