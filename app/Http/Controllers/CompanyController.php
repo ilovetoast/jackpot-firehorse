@@ -110,7 +110,7 @@ class CompanyController extends Controller
             'brand_id' => $defaultBrand->id,
         ]);
 
-        return redirect()->intended('/app/dashboard');
+        return $this->redirectToIntendedApp('/app/dashboard');
     }
 
     /**

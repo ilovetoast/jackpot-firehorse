@@ -58,7 +58,7 @@ class LoginController extends Controller
                     'tenant_id' => $tenant->id,
                     'brand_id' => $defaultBrand->id,
                 ]);
-                return redirect()->intended('/app/dashboard');
+                return $this->redirectToIntendedApp('/app/dashboard');
             }
 
             // User has no tenants - redirect to no companies error page

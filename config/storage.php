@@ -129,6 +129,7 @@ return [
             [
                 'ID' => 'delete-old-versions',
                 'Status' => 'Enabled',
+                'Filter' => ['Prefix' => ''],
                 'NoncurrentVersionExpiration' => [
                     'NoncurrentDays' => 90,
                 ],
@@ -136,6 +137,7 @@ return [
             [
                 'ID' => 'abort-incomplete-uploads',
                 'Status' => 'Enabled',
+                'Filter' => ['Prefix' => ''],
                 'AbortIncompleteMultipartUpload' => [
                     'DaysAfterInitiation' => 7,
                 ],
