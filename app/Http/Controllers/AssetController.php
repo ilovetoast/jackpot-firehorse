@@ -48,8 +48,9 @@ class AssetController extends Controller
 
     /**
      * Display a listing of assets.
+     * Returns JsonResponse for load_more (page 2+) so the client can append without Inertia; otherwise Inertia Response.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -282,9 +283,12 @@ class AssetController extends Controller
             ? $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, $categoryId, $fileType)
             : $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, null, $fileType);
         // If no filters JSON, build from flat query params (e.g. photo_type=action&scene_classification=product)
-        // Schema returns 'fields' (not field_map); derive filter keys from field keys
+        // Schema returns 'fields' (not field_map); derive filter keys from field keys.
+        // Include special keys (tags, collection) so load_more and any GET with flat params apply all filters.
         if (empty($filters) || ! is_array($filters)) {
             $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
+            $specialFilterKeys = ['tags', 'collection']; // Applied from asset_tags/asset_collections; may be missing from schema
+            $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
             $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
             $filters = [];
             foreach ($filterKeys as $key) {
@@ -318,40 +322,48 @@ class AssetController extends Controller
         $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
 
         // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
+        // Eager load relations used in the map to avoid N+1 and lazy-load errors on load_more (page 2+)
         $perPage = 36;
-        $paginator = $assetsQuery->paginate($perPage);
+        $paginator = $assetsQuery->with(['user', 'publishedBy', 'archivedBy'])->paginate($perPage);
         $assetModels = $paginator->getCollection();
 
-        // HARD TERMINAL STATE: Check for stuck assets and repair them
-        // This prevents infinite processing states by automatically failing
-        // assets that have been processing longer than the timeout threshold
-        $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
-        foreach ($assetModels as $asset) {
-            if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
-                $timeoutGuard->checkAndRepair($asset);
-                // Reload asset to get updated status if it was repaired
-                $asset->refresh();
-            }
+        // Build next_page_url from current request query so category, sort, filters, q, etc. are always preserved
+        $nextPageUrl = null;
+        if ($paginator->hasMorePages()) {
+            $query = array_merge($request->query(), ['page' => $paginator->currentPage() + 1]);
+            $nextPageUrl = $request->url() . '?' . http_build_query($query);
         }
-        
-        // AUDIT: Log query results and sample asset brand_ids for comparison
-        if ($assetModels->count() > 0) {
-            $sampleAssetBrandIds = $assetModels->take(5)->pluck('brand_id')->unique()->values()->toArray();
-            Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results', [
-                'query_tenant_id' => $tenant->id,
-                'query_brand_id' => $brand->id,
-                'assets_count' => $assetModels->count(),
-                'sample_asset_brand_ids' => $sampleAssetBrandIds,
-                'brand_id_mismatch_count' => $assetModels->filter(fn($a) => $a->brand_id != $brand->id)->count(),
-                'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
-            ]);
-        } else {
-            Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results (empty)', [
-                'query_tenant_id' => $tenant->id,
-                'query_brand_id' => $brand->id,
-                'assets_count' => 0,
-                'note' => 'No assets found - cannot compare brand_ids',
-            ]);
+
+        $isLoadMore = $request->boolean('load_more');
+
+        if (! $isLoadMore) {
+            // HARD TERMINAL STATE: Check for stuck assets and repair them (first page only)
+            $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
+            foreach ($assetModels as $asset) {
+                if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
+                    $timeoutGuard->checkAndRepair($asset);
+                    $asset->refresh();
+                }
+            }
+            // AUDIT: Log query results (first page only)
+            if ($assetModels->count() > 0) {
+                $sampleAssetBrandIds = $assetModels->take(5)->pluck('brand_id')->unique()->values()->toArray();
+                Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results', [
+                    'query_tenant_id' => $tenant->id,
+                    'query_brand_id' => $brand->id,
+                    'assets_count' => $assetModels->count(),
+                    'sample_asset_brand_ids' => $sampleAssetBrandIds,
+                    'brand_id_mismatch_count' => $assetModels->filter(fn($a) => $a->brand_id != $brand->id)->count(),
+                    'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
+                ]);
+            } else {
+                Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results (empty)', [
+                    'query_tenant_id' => $tenant->id,
+                    'query_brand_id' => $brand->id,
+                    'assets_count' => 0,
+                    'note' => 'No assets found - cannot compare brand_ids',
+                ]);
+            }
         }
 
         // STARRED CANONICAL: Prefer assets.metadata.starred; fallback to asset_metadata so grid star icon
@@ -369,7 +381,7 @@ class AssetController extends Controller
                     ->whereIn('asset_id', $assetIds)
                     ->where('metadata_field_id', $starredFieldId)
                     ->whereNotNull('value_json')
-                    ->orderByRaw('approved_at IS NULL ASC')
+                    ->orderByRaw('approved_at IS NULL DESC')
                     ->orderByDesc('id')
                     ->get(['asset_id', 'value_json']);
                 foreach ($rows as $row) {
@@ -381,7 +393,9 @@ class AssetController extends Controller
             }
         }
 
-        $mappedAssets = $assetModels->map(function ($asset) use ($tenant, $brand, $starredFromTable) {
+        try {
+            $mappedAssets = $assetModels->map(function ($asset) use ($tenant, $brand, $starredFromTable) {
+                try {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -455,6 +469,7 @@ class AssetController extends Controller
                 // Get category name if category_id exists in metadata
                 $categoryName = null;
                 $categoryId = null;
+                $categorySlug = null;
                 if ($asset->metadata && isset($asset->metadata['category_id'])) {
                     $categoryId = $asset->metadata['category_id'];
                     $category = Category::where('id', $categoryId)
@@ -463,23 +478,22 @@ class AssetController extends Controller
                         ->first();
                     if ($category) {
                         $categoryName = $category->name;
+                        $categorySlug = $category->slug ?? null;
                     }
                 }
 
-                // Get user who uploaded the asset
+                // Get user who uploaded the asset (eager-loaded via ->with(['user', ...]) to avoid N+1 / 500 on load_more)
                 $uploadedBy = null;
-                if ($asset->user_id) {
-                    $user = \App\Models\User::find($asset->user_id);
-                    if ($user) {
-                        $uploadedBy = [
-                            'id' => $user->id,
-                            'name' => $user->name,
-                            'first_name' => $user->first_name,
-                            'last_name' => $user->last_name,
-                            'email' => $user->email,
-                            'avatar_url' => $user->avatar_url,
-                        ];
-                    }
+                if ($asset->user) {
+                    $uploader = $asset->user;
+                    $uploadedBy = [
+                        'id' => $uploader->id,
+                        'name' => $uploader->name,
+                        'first_name' => $uploader->first_name,
+                        'last_name' => $uploader->last_name,
+                        'email' => $uploader->email,
+                        'avatar_url' => $uploader->avatar_url,
+                    ];
                 }
 
                 // Step 6: Generate distinct thumbnail URLs for preview and final
@@ -535,7 +549,7 @@ class AssetController extends Controller
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
-                        'slug' => $category->slug ?? null,
+                        'slug' => $categorySlug,
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
                     // Thumbnail URLs - distinct paths prevent cache confusion
@@ -570,6 +584,37 @@ class AssetController extends Controller
                     // Phase V-1: Video quick preview on hover (grid and drawer)
                     'video_preview_url' => $asset->video_preview_url,
                 ];
+                } catch (\Throwable $e) {
+                    Log::error('[AssetController::index] map asset failed', [
+                        'asset_id' => $asset->id ?? null,
+                        'message' => $e->getMessage(),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                    ]);
+                    return [
+                        'id' => $asset->id,
+                        'title' => $asset->original_filename ?? 'Asset',
+                        'original_filename' => $asset->original_filename,
+                        'mime_type' => $asset->mime_type,
+                        'file_extension' => null,
+                        'status' => 'visible',
+                        'metadata' => $asset->metadata ?? [],
+                        'starred' => false,
+                        'category' => null,
+                        'uploaded_by' => null,
+                        'preview_thumbnail_url' => null,
+                        'final_thumbnail_url' => null,
+                        'thumbnail_url' => null,
+                        'thumbnail_status' => 'pending',
+                        'thumbnail_error' => null,
+                        'published_at' => null,
+                        'is_published' => false,
+                        'published_by' => null,
+                        'archived_at' => null,
+                        'archived_by' => null,
+                        'video_preview_url' => null,
+                    ];
+                }
             })
             ->values()
             ->all();
@@ -579,11 +624,23 @@ class AssetController extends Controller
 
         // Load-more: return JSON only so the client can append without Inertia replacing the list.
         // Do this before filterableSchema/availableValues so page 2+ never runs that heavy logic.
-        if ($request->boolean('load_more')) {
+        if ($isLoadMore) {
             return response()->json([
                 'data' => $mappedAssets,
-                'next_page_url' => $paginator->nextPageUrl(),
+                'next_page_url' => $nextPageUrl,
             ]);
+        }
+
+        } catch (\Throwable $e) {
+            if ($isLoadMore) {
+                Log::error('[LOAD_MORE_500] AssetController::index load_more exception', [
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+            }
+            throw $e;
         }
 
         // Phase 2 – Step 8: Get filterable schema for frontend
@@ -1045,7 +1102,7 @@ class AssetController extends Controller
             'show_all_button' => $showAllButton,
             'total_asset_count' => $totalAssetCount, // Total count for "All" button
             'assets' => $mappedAssets,
-            'next_page_url' => $paginator->nextPageUrl(),
+            'next_page_url' => $nextPageUrl,
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,

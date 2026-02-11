@@ -362,7 +362,7 @@ export default function CollectionsIndex({
                                             bucketAssetIds={bucketAssetIds}
                                             onBucketToggle={handleBucketToggle}
                                         />
-                                        <div ref={loadMoreRef} className="h-10" aria-hidden="true" />
+                                        {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
                                         {loading && (
                                             <div className="flex justify-center py-6">
                                                 <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">

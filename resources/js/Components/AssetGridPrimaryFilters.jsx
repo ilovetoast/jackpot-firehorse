@@ -106,7 +106,7 @@ export default function AssetGridPrimaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'q'],
+            only: ['assets', 'next_page_url', 'q'],
         })
     }, [debouncedSearch])
     
@@ -125,7 +125,7 @@ export default function AssetGridPrimaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'q'],
+            only: ['assets', 'next_page_url', 'q'],
         })
     }, [])
     

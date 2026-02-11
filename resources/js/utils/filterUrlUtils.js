@@ -19,14 +19,20 @@ const RESERVED_PARAMS = new Set([
   'filters',
 ])
 
+/** Keys that must be included in URL for load_more / infinite scroll to respect filters (backend applies these even if not in schema). */
+const SPECIAL_FILTER_KEYS = ['tags', 'collection']
+
+/** Keys that support multiple values in the URL (repeated param: tags=hero&tags=campaign). Backend accepts array for these. */
+const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection'])
+
 /**
  * @param {Record<string, { operator?: string, value?: unknown }>} filters
  * @param {string[]} [filterKeys] - If provided, only include these keys (e.g. from filterable_schema)
- * @returns {Record<string, string>} Flat params for URL (key → string value)
+ * @returns {Record<string, string | string[]>} Flat params for URL (key → string or string[] for multi-value)
  */
 export function filtersToFlatParams(filters, filterKeys = null) {
   if (!filters || typeof filters !== 'object') return {}
-  const keys = filterKeys || Object.keys(filters)
+  const keys = filterKeys ? [...new Set([...filterKeys, ...SPECIAL_FILTER_KEYS])] : Object.keys(filters)
   const out = {}
   for (const key of keys) {
     if (RESERVED_PARAMS.has(key)) continue
@@ -34,7 +40,11 @@ export function filtersToFlatParams(filters, filterKeys = null) {
     if (!def || (def.value === undefined && def.value === null)) continue
     const v = def.value
     if (Array.isArray(v)) {
-      if (v.length > 0) out[key] = String(v[0])
+      const nonEmpty = v.filter(x => x !== '' && x !== null && x !== undefined).map(String)
+      if (nonEmpty.length > 0) {
+        // Multi-value: keep all so URL gets e.g. tags=hero&tags=campaign (or single value as array of one)
+        out[key] = MULTI_VALUE_FILTER_KEYS.has(key) ? nonEmpty : [nonEmpty[0]]
+      }
     } else if (v !== '' && v !== null && v !== undefined) {
       out[key] = String(v)
     }
@@ -45,19 +55,25 @@ export function filtersToFlatParams(filters, filterKeys = null) {
 /**
  * @param {URLSearchParams|Record<string, string>} params - URL params or object
  * @param {string[]} filterKeys - Allowed filter keys (e.g. from filterable_schema); only these are read
- * @returns {Record<string, { operator: string, value: string }>} filters object
+ * @returns {Record<string, { operator: string, value: string | string[] }>} filters object (multi-value keys get value as string[])
  */
 export function flatParamsToFilters(params, filterKeys = []) {
-  if (!filterKeys || filterKeys.length === 0) return {}
+  const keySet = new Set([...(filterKeys || []), ...SPECIAL_FILTER_KEYS])
+  if (keySet.size === 0) return {}
   const entries = params instanceof URLSearchParams
     ? Array.from(params.entries())
     : Object.entries(params || {})
-  const keySet = new Set(filterKeys)
   const out = {}
   for (const [key, value] of entries) {
     if (RESERVED_PARAMS.has(key) || !keySet.has(key)) continue
     if (value === '' || value === null || value === undefined) continue
-    out[key] = { operator: 'equals', value: value }
+    const isMulti = MULTI_VALUE_FILTER_KEYS.has(key)
+    if (isMulti && key in out) {
+      const existing = out[key].value
+      out[key] = { operator: 'equals', value: Array.isArray(existing) ? [...existing, value] : [existing, value] }
+    } else {
+      out[key] = { operator: 'equals', value: value }
+    }
   }
   return out
 }
@@ -88,7 +104,7 @@ export function parseFiltersFromUrl(urlParams, filterKeys = []) {
  * @param {URLSearchParams} urlParams - Current URL params (for category, sort, etc.)
  * @param {Record<string, { operator?: string, value?: unknown }>} filters
  * @param {string[]} filterKeys
- * @returns {Record<string, string>} All query params as object
+ * @returns {Record<string, string | string[]>} All query params (values may be string[] for multi-value filters)
  */
 export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = []) {
   const obj = Object.fromEntries(urlParams.entries())

@@ -110,7 +110,7 @@ class CollectionController extends Controller
                     $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
                     $this->assetSortService->applySort($query, $sort, $sortDirection);
                     $perPage = 36;
-                    $paginator = $query->paginate($perPage);
+                    $paginator = $query->paginate($perPage)->withQueryString();
                     $assets = collect($paginator->items())->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
                     $brand = $collection->brand;
                     $selectedCollection = [

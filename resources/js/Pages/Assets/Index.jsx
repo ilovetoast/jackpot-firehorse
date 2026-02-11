@@ -81,7 +81,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         const ac = new AbortController()
         loadMoreAbortRef.current = ac
         try {
-            const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
+            // Preserve all query params from next_page_url; append load_more=1 with correct separator (no ? if URL has none)
+            const separator = nextPageUrl.includes('?') ? '&' : '?'
+            const url = nextPageUrl + separator + 'load_more=1'
             const response = await axios.get(url, { signal: ac.signal })
             const data = response.data?.data ?? []
             setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
@@ -89,6 +91,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         } catch (e) {
             if (e.name === 'CanceledError' || e.code === 'ERR_CANCELED') return
             console.error('Infinite scroll failed', e)
+            if (e.response?.status === 500) setNextPageUrl(null)
         } finally {
             if (loadMoreAbortRef.current === ac) loadMoreAbortRef.current = null
             setLoading(false)
@@ -316,7 +319,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             router.get(window.location.pathname, Object.fromEntries(urlParams), {
                 preserveState: true,
                 preserveScroll: true,
-                only: ['assets'], // Only reload assets
+                only: ['assets', 'next_page_url'],
             })
         }
     }, [selectedCategoryId])
@@ -334,7 +337,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Grid thumbnail polling: Async updates for fade-in (same as drawer)
     // No view refreshes - only local state updates
     const handleThumbnailUpdate = useCallback((updatedAsset) => {
-        setLocalAssets(prevAssets => {
+        setAssetsList(prevAssets => {
             return prevAssets.map(asset => {
                 if (asset.id === updatedAsset.id) {
                     // Merge updated asset data (async, no refresh)
@@ -348,7 +351,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Handle lifecycle updates (publish/unpublish) - updates local state without full reload
     // This preserves drawer state and grid scroll position
     const handleLifecycleUpdate = useCallback((updatedAsset) => {
-        setLocalAssets(prevAssets => {
+        setAssetsList(prevAssets => {
             return prevAssets.map(asset => {
                 if (asset.id === updatedAsset.id) {
                     // Merge updated asset data (preserves thumbnail state, updates lifecycle fields)
@@ -472,7 +475,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             {
                 preserveState: true,
                 preserveScroll: true,
-                only: ['filterable_schema', 'available_values', 'assets', 'selected_category', 'selected_category_slug']
+                only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug']
             }
         )
     }, [])
@@ -988,7 +991,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                             urlParams.set('sort', newSort)
                                             urlParams.set('sort_direction', newDir)
                                             urlParams.delete('page')
-                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction'] })
                                         }}
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}
@@ -1054,10 +1057,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     isPendingPublicationFilter={isPendingPublicationFilter}
                                     onAssetApproved={(assetId) => {
                                         // Remove approved asset from local state
-                                        setLocalAssets((prev) => prev.filter(a => a.id !== assetId))
+                                        setAssetsList((prev) => prev.filter(a => a.id !== assetId))
                                     }}
                                 />
-                                <div ref={loadMoreRef} className="h-10" aria-hidden="true" />
+                                {/* Only mount sentinel when there is a next page — avoids observer firing when assets < page size */}
+                                {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
                                 {loading && (
                                     <div className="flex justify-center py-6">
                                         <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
@@ -1161,7 +1165,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                     }}
                     onComplete={() => {
                         // Refresh assets after bulk edit
-                        router.reload({ only: ['assets'] })
+                        router.reload({ only: ['assets', 'next_page_url'] })
                         setBulkSelectedAssetIds([])
                         setIsBulkMode(false)
                     }}

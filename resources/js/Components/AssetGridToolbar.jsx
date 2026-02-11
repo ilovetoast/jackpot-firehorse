@@ -77,7 +77,7 @@ export default function AssetGridToolbar({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'q'],
+            only: ['assets', 'next_page_url', 'q'],
             onStart: () => setSearchLoading(true),
             onFinish: () => {
                 setSearchLoading(false)

@@ -89,6 +89,18 @@ class MetadataFilterService
                 continue;
             }
 
+            // C9.2: Collection filter uses asset_collections pivot, not asset_metadata. Apply even if not in fieldMap (e.g. load_more).
+            if ($fieldKey === 'collection') {
+                $this->applyCollectionFilter($query, $value);
+                continue;
+            }
+
+            // Tags filter: stored in asset_tags table, not asset_metadata (see TAGS_AS_METADATA_FIELD.md). Apply even if not in fieldMap.
+            if ($fieldKey === 'tags') {
+                $this->applyTagsFilter($query, $value);
+                continue;
+            }
+
             if (!isset($fieldMap[$fieldKey])) {
                 continue; // Skip invalid fields
             }
@@ -96,12 +108,6 @@ class MetadataFilterService
             $field = $fieldMap[$fieldKey];
             $fieldId = $field['field_id'];
             $fieldType = $field['type'] ?? 'text';
-
-            // C9.2: Collection filter uses asset_collections pivot, not asset_metadata
-            if ($fieldKey === 'collection') {
-                $this->applyCollectionFilter($query, $value);
-                continue;
-            }
 
             // Normalize select: frontend may send single value as string or as single-element array
             if ($fieldType === 'select' && is_array($value) && count($value) === 1) {
@@ -137,6 +143,33 @@ class MetadataFilterService
                 ->from('asset_collections')
                 ->whereColumn('asset_collections.asset_id', 'assets.id')
                 ->whereIn('asset_collections.collection_id', $ids);
+        });
+    }
+
+    /**
+     * Apply filter for tags field. Tags are stored in asset_tags table, not asset_metadata.
+     * Value can be a single tag string or array of tag strings (e.g. ['social']).
+     * Matches assets that have at least one of the given tags.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param mixed $value Single tag or array of tags
+     */
+    protected function applyTagsFilter($query, $value): void
+    {
+        $tags = is_array($value) ? array_values($value) : [$value];
+        $tags = array_filter(array_map(function ($v) {
+            return is_string($v) ? trim($v) : null;
+        }, $tags));
+
+        if (empty($tags)) {
+            return;
+        }
+
+        $query->whereExists(function ($q) use ($tags) {
+            $q->select(DB::raw(1))
+                ->from('asset_tags')
+                ->whereColumn('asset_tags.asset_id', 'assets.id')
+                ->whereIn('asset_tags.tag', $tags);
         });
     }
 

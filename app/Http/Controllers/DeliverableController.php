@@ -283,7 +283,7 @@ class DeliverableController extends Controller
 
         // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
         $perPage = 36;
-        $paginator = $assetsQuery->paginate($perPage);
+        $paginator = $assetsQuery->paginate($perPage)->withQueryString();
         $assetModels = $paginator->getCollection();
 
         // HARD TERMINAL STATE: Check for stuck assets and repair them
