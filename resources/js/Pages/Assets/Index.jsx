@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
@@ -127,10 +127,19 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         }
     }, [bucketAssetIds, bucketAdd, bucketRemove])
 
-    const handleSelectAllForDownload = useCallback(() => {
-        const ids = (localAssets || []).map((a) => a.id).filter(Boolean)
-        bucketAddBatch(ids)
-    }, [localAssets, bucketAddBatch])
+    const visibleIds = useMemo(() => (localAssets || []).map((a) => a.id).filter(Boolean), [localAssets])
+    const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
+
+    const handleSelectAllToggle = useCallback(async () => {
+        if (visibleIds.length === 0) return
+        if (allVisibleInBucket) {
+            for (const id of visibleIds) {
+                await bucketRemove(id)
+            }
+        } else {
+            await bucketAddBatch(visibleIds)
+        }
+    }, [visibleIds, allVisibleInBucket, bucketAddBatch, bucketRemove])
 
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
@@ -909,7 +918,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     }
                                 }}
                                 isBulkMode={isBulkMode}
-                                onSelectAllForDownload={handleSelectAllForDownload}
+                                onSelectAllForDownload={handleSelectAllToggle}
                                 bucketCount={bucketAssetIds.length}
                                 showSelectAllForDownload={!isBulkMode && localAssets?.length > 0}
                                 filterable_schema={filterable_schema}
@@ -964,6 +973,38 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         }}
                                         assetResultCount={visibleItems?.length ?? 0}
                                         totalInCategory={localAssets?.length ?? 0}
+                                        barTrailingContent={
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setIsBulkMode((prev) => !prev)
+                                                        if (isBulkMode) setBulkSelectedAssetIds([])
+                                                    }}
+                                                    className={`px-2 py-1 text-xs font-medium rounded transition-colors ${isBulkMode ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'}`}
+                                                >
+                                                    {isBulkMode ? 'Cancel Selection' : 'Select Multiple'}
+                                                </button>
+                                                {isBulkMode && bulkSelectedAssetIds.length > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowBulkEditModal(true)}
+                                                        className="px-2 py-1 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+                                                    >
+                                                        Edit Metadata ({bulkSelectedAssetIds.length})
+                                                    </button>
+                                                )}
+                                                {!isBulkMode && localAssets?.length > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSelectAllToggle}
+                                                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                                                    >
+                                                        {allVisibleInBucket ? 'Deselect all' : 'Select all'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        }
                                     />
                                 }
                             />

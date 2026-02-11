@@ -76,25 +76,26 @@ class MetadataFilterService
 
         // Apply each filter
         foreach ($filters as $fieldKey => $filterDef) {
-            if (!isset($fieldMap[$fieldKey])) {
-                continue; // Skip invalid fields
-            }
-
-            $field = $fieldMap[$fieldKey];
-            $fieldId = $field['field_id'];
-
-            // Get filter operator and value
             $operator = $filterDef['operator'] ?? 'equals';
             $value = $filterDef['value'] ?? null;
 
             if ($value === null || $value === '') {
                 continue; // Skip empty filters
             }
-            // Normalize select: frontend may send single value as string or as single-element array
-            $fieldType = $field['type'] ?? 'text';
-            if ($fieldKey !== 'collection' && $fieldType === 'select' && is_array($value) && count($value) === 1) {
-                $value = reset($value);
+
+            // Starred: apply even if not in fieldMap (e.g. schema/visibility). Value normalized in applyStarredFilter.
+            if ($fieldKey === 'starred') {
+                $this->applyStarredFilter($query, $value);
+                continue;
             }
+
+            if (!isset($fieldMap[$fieldKey])) {
+                continue; // Skip invalid fields
+            }
+
+            $field = $fieldMap[$fieldKey];
+            $fieldId = $field['field_id'];
+            $fieldType = $field['type'] ?? 'text';
 
             // C9.2: Collection filter uses asset_collections pivot, not asset_metadata
             if ($fieldKey === 'collection') {
@@ -102,15 +103,13 @@ class MetadataFilterService
                 continue;
             }
 
-            // Starred (and quality_rating) are stored at assets.metadata top level; filter by that column only
-            // (same source as sort) so filtering works regardless of asset_metadata rows.
-            if ($fieldKey === 'starred') {
-                $this->applyStarredFilter($query, $value);
-                continue;
+            // Normalize select: frontend may send single value as string or as single-element array
+            if ($fieldType === 'select' && is_array($value) && count($value) === 1) {
+                $value = reset($value);
             }
 
             // Apply filter based on field type
-            $this->applyFieldFilter($query, $fieldId, $field['type'], $operator, $value);
+            $this->applyFieldFilter($query, $fieldId, $fieldType, $operator, $value);
         }
     }
 
@@ -143,7 +142,8 @@ class MetadataFilterService
 
     /**
      * Apply starred filter using assets.metadata only (same storage as sort).
-     * Starred is synced to metadata->starred; match the same robust check as sort.
+     * Starred is stored as boolean in metadata->starred (see docs/STARRED_CANONICAL.md); we still
+     * accept 'true'/'1' and 'false'/'0' for legacy JSON.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
      * @param mixed $value true, 'true', 1 for "starred only"; false, 'false', 0 for "not starred"
@@ -582,6 +582,128 @@ class MetadataFilterService
         });
 
         return $filterable;
+    }
+
+    /**
+     * Phase M: Return filter field keys that have at least one value in the scoped asset set.
+     * Used to hide empty filters (zero matching values) without changing schema or search/sort.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $baseQuery Scoped query (tenant, brand, category, lifecycle, search); MUST NOT include request metadata filters
+     * @param array $filterableSchema Result of getFilterableFields() (entries with field_key, field_id)
+     * @return array List of field_key that have at least one non-null/non-empty value in scope
+     */
+    public function getFieldKeysWithValuesInScope($baseQuery, array $filterableSchema): array
+    {
+        $fieldKeys = [];
+        foreach ($filterableSchema as $field) {
+            $key = $field['field_key'] ?? $field['field_id'] ?? null;
+            if (is_string($key)) {
+                $fieldKeys[$key] = true;
+            }
+        }
+        if (empty($fieldKeys)) {
+            return [];
+        }
+
+        $scopeIds = (clone $baseQuery)->select('assets.id');
+        $hasAnyInScope = (clone $baseQuery)->exists();
+        if (! $hasAnyInScope) {
+            return [];
+        }
+
+        $keysWithValues = [];
+
+        // 1) Metadata fields: asset_metadata (approved or automatic) for assets in scope
+        $automaticFieldIds = DB::table('metadata_fields')
+            ->where('population_mode', 'automatic')
+            ->pluck('id')
+            ->toArray();
+        $bucketField = DB::table('metadata_fields')->where('key', 'dominant_color_bucket')->first();
+        if ($bucketField && ! in_array($bucketField->id, $automaticFieldIds, true)) {
+            $automaticFieldIds[] = (int) $bucketField->id;
+        }
+
+        $metadataKeys = DB::table('asset_metadata')
+            ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+            ->whereIn('asset_metadata.asset_id', $scopeIds)
+            ->whereIn('metadata_fields.key', array_keys($fieldKeys))
+            ->whereNotNull('asset_metadata.value_json')
+            ->where(function ($q) use ($automaticFieldIds) {
+                if (! empty($automaticFieldIds)) {
+                    $q->whereIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                        ->orWhere(function ($q2) use ($automaticFieldIds) {
+                            $q2->whereNotIn('asset_metadata.metadata_field_id', $automaticFieldIds)
+                                ->whereNotNull('asset_metadata.approved_at');
+                        });
+                } else {
+                    $q->whereNotNull('asset_metadata.approved_at');
+                }
+            })
+            ->distinct()
+            ->pluck('metadata_fields.key')
+            ->all();
+        foreach ($metadataKeys as $k) {
+            $keysWithValues[$k] = true;
+        }
+
+        // 2) Collection: at least one asset in scope in a collection
+        if (isset($fieldKeys['collection'])) {
+            if (DB::table('asset_collections')->whereIn('asset_id', $scopeIds)->exists()) {
+                $keysWithValues['collection'] = true;
+            }
+        }
+
+        // 3) Tags: at least one asset in scope has a tag
+        if (isset($fieldKeys['tags'])) {
+            if (DB::table('asset_tags')->whereIn('asset_id', $scopeIds)->whereNotNull('tag')->where('tag', '!=', '')->exists()) {
+                $keysWithValues['tags'] = true;
+            }
+        }
+
+        // 4) Starred / quality_rating: top-level metadata
+        foreach (['starred', 'quality_rating'] as $topKey) {
+            if (! isset($fieldKeys[$topKey])) {
+                continue;
+            }
+            $path = $topKey === 'starred' ? '$.starred' : '$.quality_rating';
+            $exists = (clone $baseQuery)
+                ->whereNotNull(DB::raw("JSON_EXTRACT(metadata, '{$path}')"))
+                ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '{$path}')) != ''")
+                ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '{$path}')) IS NOT NULL")
+                ->exists();
+            if ($exists) {
+                $keysWithValues[$topKey] = true;
+            }
+        }
+
+        // 5) Fields that may only have values in metadata->fields (legacy): one EXISTS per remaining key.
+        // Scale note: This adds one EXISTS subquery per JSON-only field. Fine at 10–100k assets;
+        // if you add many more metadata fields long-term, consider batching or a materialized view.
+        $driver = DB::connection()->getDriverName();
+        foreach (array_keys($fieldKeys) as $key) {
+            if (isset($keysWithValues[$key])) {
+                continue;
+            }
+            if (in_array($key, ['collection', 'tags', 'starred', 'quality_rating'], true)) {
+                continue;
+            }
+            $jsonPath = '$.fields.' . $key;
+            if ($driver === 'pgsql') {
+                $exists = (clone $baseQuery)
+                    ->whereRaw("(metadata->'fields')->>? IS NOT NULL AND (metadata->'fields')->>? != ''", [$key, $key])
+                    ->exists();
+            } else {
+                $exists = (clone $baseQuery)
+                    ->whereNotNull(DB::raw("JSON_EXTRACT(metadata, '{$jsonPath}')"))
+                    ->whereRaw("TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '{$jsonPath}')), '')) != ''")
+                    ->exists();
+            }
+            if ($exists) {
+                $keysWithValues[$key] = true;
+            }
+        }
+
+        return array_keys($keysWithValues);
     }
 
     /**

@@ -2,6 +2,8 @@
  * Asset Metadata Edit Modal Component
  *
  * Phase 2 – Step 6: Modal for editing a single metadata field.
+ * When field has display_widget === 'toggle' (or key === 'starred'), shows a toggle using
+ * primaryColor so custom boolean fields render consistently with brand.
  */
 
 import { useState, useEffect } from 'react'
@@ -9,7 +11,8 @@ import { XMarkIcon, LockClosedIcon } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
 import { isFieldSatisfied } from '../utils/metadataValidation'
 
-export default function AssetMetadataEditModal({ assetId, field, onClose, onSave }) {
+export default function AssetMetadataEditModal({ assetId, field, primaryColor, onClose, onSave }) {
+    const brandPrimary = primaryColor || '#6366f1'
     const [value, setValue] = useState(field.current_value ?? null)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
@@ -125,7 +128,8 @@ export default function AssetMetadataEditModal({ assetId, field, onClose, onSave
                         )}
 
                         <div className="space-y-4">
-                            {field.type === 'boolean' && field.display_widget === 'toggle' ? (
+                            {/* Boolean with display_widget=toggle (or starred): toggle in modal using brand primary color */}
+                            {(field.type === 'boolean' && (field.display_widget === 'toggle' || field.key === 'starred' || field.field_key === 'starred')) ? (
                                 <label className="flex items-center justify-between gap-4 cursor-pointer">
                                     <span className="text-sm font-medium text-gray-700">{field.display_label}</span>
                                     <div className="relative inline-flex items-center flex-shrink-0">
@@ -136,7 +140,13 @@ export default function AssetMetadataEditModal({ assetId, field, onClose, onSave
                                             disabled={saving}
                                             className="sr-only peer"
                                         />
-                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                                        <div
+                                            className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-focus:outline-none peer-focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            style={{
+                                                ['--tw-ring-color']: brandPrimary,
+                                                ...(value === true || value === 'true' ? { backgroundColor: brandPrimary } : {}),
+                                            }}
+                                        />
                                     </div>
                                 </label>
                             ) : (
@@ -166,7 +176,8 @@ export default function AssetMetadataEditModal({ assetId, field, onClose, onSave
                             type="button"
                             onClick={handleSave}
                             disabled={saving || !isValid() || field.readonly || field.population_mode === 'automatic'}
-                            className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-4 py-2 text-sm font-medium text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ backgroundColor: brandPrimary, ['--tw-ring-color']: brandPrimary }}
                         >
                             {saving ? 'Saving...' : 'Save'}
                         </button>

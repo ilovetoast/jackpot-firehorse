@@ -260,7 +260,12 @@ export default function AssetGridMetadataPrimaryFilters({
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className="text-xs text-gray-500 font-medium">Applied:</span>
                     {appliedPrimaryFiltersList.map(([fieldKey, def]) => {
-                        const valueLabel = Array.isArray(def.value) ? (def.value[0] ?? '') : String(def.value ?? '')
+                        const field = filterable_schema.find((f) => (f.field_key || f.key) === fieldKey)
+                        const isBooleanToggle = fieldKey === 'starred' || (field?.type === 'boolean' && field?.display_widget === 'toggle')
+                        const rawVal = Array.isArray(def.value) ? def.value[0] : def.value
+                        const valueLabel = isBooleanToggle
+                            ? (rawVal === true || rawVal === 'true' || rawVal === 1 || rawVal === '1' ? 'Yes' : 'No')
+                            : (Array.isArray(def.value) ? (def.value[0] ?? '') : String(def.value ?? ''))
                         return (
                             <span
                                 key={fieldKey}

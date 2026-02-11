@@ -268,6 +268,10 @@ class AssetController extends Controller
             $brand
         );
 
+        // Phase M: Base query for "has values" check (tenant, brand, category, lifecycle only; search applied below)
+        // Must NOT include request metadata filters so empty filters are hidden by value presence, not by current selection
+        $baseQueryForFilterVisibility = (clone $assetsQuery);
+
         // Apply metadata filters from request (JSON 'filters' or readable flat params)
         $filters = $request->input('filters', []);
         if (is_string($filters)) {
@@ -305,6 +309,7 @@ class AssetController extends Controller
         $searchQ = $request->input('q') ?? $request->input('search');
         if (is_string($searchQ) && trim($searchQ) !== '') {
             $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
+            $this->assetSearchService->applyScopedSearch($baseQueryForFilterVisibility, trim($searchQ));
         }
 
         // Phase L: Centralized sort (after search/filters, before pagination)
@@ -344,7 +349,10 @@ class AssetController extends Controller
                 'note' => 'No assets found - cannot compare brand_ids',
             ]);
         }
-        
+
+        // STARRED CANONICAL: Single source for grid/sort/filter is assets.metadata.starred (boolean).
+        // Synced on every save via AssetMetadataController::syncSortFieldToAsset. Run
+        // php artisan metadata:sync-sort-to-assets to backfill legacy data.
         $assets = $assets->map(function ($asset) use ($tenant, $brand) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
@@ -495,6 +503,7 @@ class AssetController extends Controller
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
                     'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
+                    'starred' => $this->assetIsStarred($metadata['starred'] ?? null), // boolean; source: assets.metadata.starred only
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
@@ -573,7 +582,16 @@ class AssetController extends Controller
             // Pass null category to mark system fields as global
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
         }
-        
+
+        // Phase M: Hide filters with zero values in scoped dataset (before pagination)
+        if (! empty($filterableSchema)) {
+            $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
+            $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
+                $key = $field['field_key'] ?? $field['key'] ?? null;
+                return $key && in_array($key, $keysWithValues, true);
+            }));
+        }
+
         // available_values is required by Phase H filter visibility rules
         // Do not remove without updating Phase H contract
         // Compute distinct metadata values for the current asset grid result set

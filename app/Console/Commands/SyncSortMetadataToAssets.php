@@ -78,9 +78,14 @@ class SyncSortMetadataToAssets extends Command
                 if (!isset($values[$key])) {
                     continue;
                 }
+                $v = $values[$key];
+                // STARRED CANONICAL: Store starred as strict boolean in assets.metadata
+                if ($key === 'starred') {
+                    $v = ($v === true || $v === 'true' || $v === 1 || $v === '1') ? true : false;
+                }
                 $current = $meta[$key] ?? null;
-                if ($current !== $values[$key]) {
-                    $meta[$key] = $values[$key];
+                if ($current !== $v) {
+                    $meta[$key] = $v;
                     $changed = true;
                 }
             }

@@ -520,8 +520,45 @@ class DevelopmentDataSeeder extends Seeder
                     ]);
                 }
                 $this->ensureApprovedMetadataForAsset($asset, $metadataFieldsData, $user->id);
+                $this->syncSortFieldsToAssetRoot($asset, $metadataFieldsData);
             }
             $this->addTagsToAsset($asset, 1, 3);
+        }
+    }
+
+    /**
+     * Sync sort fields (starred, quality_rating) from metadata.fields to assets.metadata root.
+     * Grid/sort/filter read from assets.metadata.starred (and quality_rating); drawer shows from asset_metadata.
+     * Without this, seeded assets show "Starred: Yes" in the drawer but no star icon on the tile.
+     *
+     * @see docs/STARRED_CANONICAL.md
+     */
+    private function syncSortFieldsToAssetRoot(Asset $asset, array $metadataFieldsData): void
+    {
+        $asset->refresh();
+        $meta = $asset->metadata ?? [];
+        $changed = false;
+        foreach (['starred', 'quality_rating'] as $key) {
+            if (!array_key_exists($key, $metadataFieldsData)) {
+                continue;
+            }
+            $value = $metadataFieldsData[$key];
+            if ($key === 'starred') {
+                $normalized = $value === true || $value === 'true' || $value === 1 || $value === '1';
+                if (($meta[$key] ?? null) !== $normalized) {
+                    $meta[$key] = $normalized;
+                    $changed = true;
+                }
+            } else {
+                if (($meta[$key] ?? null) !== $value) {
+                    $meta[$key] = $value;
+                    $changed = true;
+                }
+            }
+        }
+        if ($changed) {
+            $asset->metadata = $meta;
+            $asset->save();
         }
     }
     
@@ -744,6 +781,7 @@ class DevelopmentDataSeeder extends Seeder
             }
             // Best practice: drawer only shows approved metadata. Ensure every seeded value has an approved row.
             $this->ensureApprovedMetadataForAsset($asset, $metadataFieldsData, $user->id);
+            $this->syncSortFieldsToAssetRoot($asset, $metadataFieldsData);
         }
         // Add 1–3 tags so Tags and filters show data
         $this->addTagsToAsset($asset, 1, 3);

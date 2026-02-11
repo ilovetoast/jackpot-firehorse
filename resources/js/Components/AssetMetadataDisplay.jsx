@@ -201,7 +201,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             const fieldHasValue = hasValue(field.current_value)
                             const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
                             const isRating = field.type === 'rating' || field.key === 'quality_rating' || field.field_key === 'quality_rating'
-                            
                             // For dominant_colors, check if we have a valid array
                             let dominantColorsArray = null
                             if (isDominantColors && field.current_value) {
@@ -242,8 +241,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             // Show fields if:
                             // 1. They have a value (displayValue or dominantColorsArray)
                             // 2. They are rating fields (so users can add ratings)
-                            // 3. They are not automatic/readonly fields (automatic fields only show if they have values)
-                            // For editable fields, show them even without values so users can add them
+                            // 3. They are not automatic/readonly (editable fields show even without values)
                             const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly)
                             
                             if (!shouldShow) {
@@ -265,7 +263,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                         {/* Show the value if there is one, or nothing if no value */}
                                         {(displayValue || dominantColorsArray || isRating) ? (
                                             <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                                {/* Special handling for rating fields - show star rating with direct save */}
+                                                {/* Rating: inline control. Starred/other booleans with display_widget=toggle use Edit → modal (brand-colored toggle). */}
                                                 {isRating ? (
                                                     <StarRating
                                                         value={field.current_value}
@@ -316,7 +314,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                         ) : null}
                                     </div>
                                     {/* Show "Auto" badge where edit button would be for readonly/automatic fields */}
-                                    {/* For rating fields, don't show edit button - rating is clickable directly */}
+                                    {/* For rating only, no edit button - inline control; starred uses Edit → modal */}
                                     {/* Only show edit button if user has edit permission (can_edit/is_user_editable) */}
                                     {isRating ? null : (field.readonly || field.population_mode === 'automatic') ? (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 inline-flex items-center gap-1 text-xs text-gray-500">
@@ -401,11 +399,12 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 )}
             </div>
 
-            {/* Edit Modal */}
+            {/* Edit Modal: pass brand primary so toggle widgets use it (display_widget=toggle / starred) */}
             {editingField && (
                 <AssetMetadataEditModal
                     assetId={assetId}
                     field={editingField}
+                    primaryColor={brandPrimary}
                     onClose={() => {
                         setEditingFieldId(null)
                         setEditingField(null)

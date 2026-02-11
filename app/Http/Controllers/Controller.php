@@ -22,4 +22,14 @@ abstract class Controller
         }
         return redirect()->to($intended);
     }
+
+    /**
+     * STARRED CANONICAL (reading): Normalize any legacy/API value to boolean for "is starred?".
+     * Write path: we always store strict boolean in assets.metadata.starred (see syncSortFieldToAsset).
+     * Read path: when reading from DB/JSON we may still see true|'true'|1|'1' until backfilled.
+     */
+    protected function assetIsStarred(mixed $value): bool
+    {
+        return $value === true || $value === 'true' || $value === 1 || $value === '1';
+    }
 }

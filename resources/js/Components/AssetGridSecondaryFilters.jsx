@@ -50,11 +50,12 @@ import UserSelect from './UserSelect'
  * @param {Object} props.available_values - Map of field_key to available values
  * @param {boolean} props.canManageFields - Whether user has permission to manage metadata fields
  * @param {string} props.assetType - Current asset type (defaults to 'asset')
- * @param {string} [props.sortBy] - Current sort field (starred | created | quality)
+ * @param {string} [props.sortBy] - Current sort field (featured | created | quality | modified | alphabetical)
  * @param {string} [props.sortDirection] - asc | desc
  * @param {Function} [props.onSortChange] - (sortBy, sortDirection) => void
  * @param {number} [props.assetResultCount] - Number of assets in current result (search + filters)
  * @param {number} [props.totalInCategory] - Total assets in selected category (or All)
+ * @param {React.ReactNode} [props.barTrailingContent] - Optional content on the right of the bar (same line as count and Sort), e.g. Select Multiple / Select all
  */
 export default function AssetGridSecondaryFilters({
     filterable_schema = [],
@@ -68,6 +69,7 @@ export default function AssetGridSecondaryFilters({
     onSortChange = null,
     assetResultCount = null,
     totalInCategory = null,
+    barTrailingContent = null,
 }) {
     const pageProps = usePage().props
     const { auth, available_file_types = [] } = pageProps
@@ -492,7 +494,12 @@ export default function AssetGridSecondaryFilters({
                                 if (!filter || filter.value === null || filter.value === '') return null
                                 const field = visibleSecondaryFilters.find((f) => (f.field_key || f.key) === fieldKey)
                                 if (!field) return null
-                                const valueLabel = Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? '')
+                                // Boolean/toggle (e.g. Starred): show "Yes"/"No" instead of "true"/"false"; never show operator like "equals"
+                                const isBooleanToggle = fieldKey === 'starred' || ((field.type === 'boolean') && (field.display_widget === 'toggle'))
+                                const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
+                                const valueLabel = isBooleanToggle
+                                    ? (rawVal === true || rawVal === 'true' || rawVal === 1 || rawVal === '1' ? 'Yes' : 'No')
+                                    : (Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? ''))
                                 return (
                                     <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
                                         {field.display_label || field.label}: {valueLabel}
@@ -504,20 +511,22 @@ export default function AssetGridSecondaryFilters({
                     )}
                 </div>
 
-                {/* Indicator: result count and filter count in selected category (before Sort) */}
-                {(assetResultCount != null || activeFilterCount > 0) && (
-                    <div className="flex-shrink-0 text-xs text-gray-500">
-                        {[
-                            assetResultCount != null
-                                ? (totalInCategory != null && totalInCategory > 0 ? `${assetResultCount} of ${totalInCategory}` : String(assetResultCount))
-                                : '',
-                            activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}` : '',
-                        ].filter(Boolean).join(' · ')}
-                    </div>
-                )}
-
-                {/* Sort: compact dropdown + direction (in filter bar) */}
-                {onSortChange && (
+                {/* Right: optional trailing content (e.g. Select Multiple, Select all) + count + Sort — same pane */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    {barTrailingContent != null && barTrailingContent}
+                    {/* Indicator: result count and filter count in selected category */}
+                    {(assetResultCount != null || activeFilterCount > 0) && (
+                        <span className="text-xs text-gray-500">
+                            {[
+                                assetResultCount != null
+                                    ? (totalInCategory != null && totalInCategory > 0 ? `${assetResultCount} of ${totalInCategory}` : String(assetResultCount))
+                                    : '',
+                                activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}` : '',
+                            ].filter(Boolean).join(' · ')}
+                        </span>
+                    )}
+                    {/* Sort: compact dropdown + direction (in filter bar) */}
+                    {onSortChange && (
                     <div className="flex items-center gap-1 flex-shrink-0">
                         <span className="text-xs font-medium text-gray-500 hidden sm:inline">Sort</span>
                         <label htmlFor="more-filters-sort-by" className="sr-only">Sort by</label>
@@ -528,9 +537,11 @@ export default function AssetGridSecondaryFilters({
                             className="rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             aria-label="Sort by"
                         >
-                            <option value="starred">Starred</option>
+                            <option value="featured">Featured</option>
                             <option value="created">Created</option>
                             <option value="quality">Quality</option>
+                            <option value="modified">Modified</option>
+                            <option value="alphabetical">Alphabetical</option>
                         </select>
                         <button
                             type="button"
@@ -546,7 +557,8 @@ export default function AssetGridSecondaryFilters({
                             )}
                         </button>
                     </div>
-                )}
+                    )}
+                </div>
             </div>
             
             {/* Expandable Container: smooth height animation (grid 0fr → 1fr) to avoid layout glitch */}

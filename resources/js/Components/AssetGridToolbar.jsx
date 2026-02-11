@@ -43,7 +43,7 @@ export default function AssetGridToolbar({
     onBulkEdit = null, // Phase 2 – Step 7
     onToggleBulkMode = null, // Phase 2 – Step 7
     isBulkMode = false, // Phase 2 – Step 7
-    onSelectAllForDownload = null, // Phase D1: Select all on screen for download bucket
+    onSelectAllForDownload = null, // Phase D1: Select all for download bucket
     bucketCount = 0, // Phase D1: Download bucket count
     showSelectAllForDownload = false, // Phase D1: Show "Select all" when not in bulk mode
     filterable_schema = [], // Primary metadata filters
@@ -298,9 +298,11 @@ export default function AssetGridToolbar({
                                     className="rounded border border-gray-300 bg-white py-1.5 pl-2 pr-6 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                     aria-label="Sort by"
                                 >
-                                    <option value="starred">Starred</option>
+                                    <option value="featured">Featured</option>
                                     <option value="created">Created</option>
                                     <option value="quality">Quality</option>
+                                    <option value="modified">Modified</option>
+                                    <option value="alphabetical">Alphabetical</option>
                                 </select>
                                 <button
                                     type="button"
@@ -321,8 +323,8 @@ export default function AssetGridToolbar({
 
                     {/* Controls - Right Side on Desktop */}
                     <div className="flex items-center gap-3 flex-shrink-0">
-                        {/* Phase 2 – Step 7: Bulk Actions */}
-                        {onToggleBulkMode && (
+                        {/* Phase 2 – Step 7: Bulk Actions (only in main row when no More filters bar, e.g. Collections) */}
+                        {onToggleBulkMode && !showMoreFilters && (
                             <>
                                 <button
                                     type="button"
@@ -346,14 +348,14 @@ export default function AssetGridToolbar({
                                 )}
                             </>
                         )}
-                        {/* Phase D1: Select all on screen for download bucket */}
-                        {showSelectAllForDownload && onSelectAllForDownload && (
+                        {/* Phase D1: Select all (only in main row when no More filters bar) */}
+                        {showSelectAllForDownload && onSelectAllForDownload && !showMoreFilters && (
                             <button
                                 type="button"
                                 onClick={onSelectAllForDownload}
                                 className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                             >
-                                Select all on screen
+                                Select all
                             </button>
                         )}
 
@@ -428,7 +430,7 @@ export default function AssetGridToolbar({
                 </div>
             </div>
 
-            {/* More Filters Section - Integrated into toolbar */}
+            {/* More Filters Section — More filters stays far left; selection buttons live in bar right (via barTrailingContent from parent) */}
             {showMoreFilters && moreFiltersContent && (
                 <div className="border-t border-gray-200">
                     {moreFiltersContent}

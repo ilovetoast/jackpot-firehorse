@@ -63,6 +63,11 @@
 }
 
 
+/* Inertia/NProgress page-load bar: use active brand primary color (--primary is set by BrandThemeProvider) */
+#nprogress .bar {
+    background: var(--primary, #6366f1) !important;
+}
+
 .gap-7{
     gap: 1.7rem;
 }

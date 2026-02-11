@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
@@ -118,7 +118,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     }, [activeAssetId, localAssets])
 
     // Phase D1: Download bucket from app-level context so the bar does not remount on category change (no flash)
-    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, clearIfEmpty } = useBucket()
+    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
 
     useEffect(() => {
         clearIfEmpty(pageProps.download_bucket_count ?? 0)
@@ -128,6 +128,19 @@ export default function DeliverablesIndex({ categories, selected_category, show_
         if (bucketAssetIds.includes(assetId)) bucketRemove(assetId)
         else bucketAdd(assetId)
     }, [bucketAssetIds, bucketAdd, bucketRemove])
+
+    const visibleIds = useMemo(() => (localAssets || []).map((a) => a.id).filter(Boolean), [localAssets])
+    const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
+    const handleSelectAllToggle = useCallback(async () => {
+        if (visibleIds.length === 0) return
+        if (allVisibleInBucket) {
+            for (const id of visibleIds) {
+                await bucketRemove(id)
+            }
+        } else {
+            await bucketAddBatch(visibleIds)
+        }
+    }, [visibleIds, allVisibleInBucket, bucketAddBatch, bucketRemove])
 
     // Category switches should reset the drawer selection
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -714,6 +727,21 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                             urlParams.delete('page')
                                             router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                         }}
+                                        assetResultCount={visibleItems?.length ?? 0}
+                                        totalInCategory={localAssets?.length ?? 0}
+                                        barTrailingContent={
+                                            localAssets?.length > 0 ? (
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleSelectAllToggle}
+                                                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                                                    >
+                                                        {allVisibleInBucket ? 'Deselect all' : 'Select all'}
+                                                    </button>
+                                                </div>
+                                            ) : null
+                                        }
                                     />
                                 }
                             />

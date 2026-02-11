@@ -2,7 +2,7 @@
  * Collections Index (C4 read-only UI; C5 create + add/remove assets).
  * Uses CollectionAssetQueryService for asset data; C5 adds create and assign UI.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
@@ -11,6 +11,7 @@ import CreateCollectionModal from '../../Components/Collections/CreateCollection
 import EditCollectionModal from '../../Components/Collections/EditCollectionModal'
 import AssetGrid from '../../Components/AssetGrid'
 import AssetGridToolbar from '../../Components/AssetGridToolbar'
+import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import { useBucket } from '../../contexts/BucketContext'
 import { RectangleStackIcon, PlusIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
@@ -74,7 +75,7 @@ export default function CollectionsIndex({
     }, [selectedCollectionId])
 
     // Phase D1: Download bucket from app-level context so the bar does not remount on collection/category change (no flash)
-    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, clearIfEmpty } = useBucket()
+    const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
 
     useEffect(() => {
         clearIfEmpty(download_bucket_count ?? 0)
@@ -84,6 +85,19 @@ export default function CollectionsIndex({
         if (bucketAssetIds.includes(assetId)) bucketRemove(assetId)
         else bucketAdd(assetId)
     }, [bucketAssetIds, bucketAdd, bucketRemove])
+
+    const visibleIds = useMemo(() => (localAssets || []).map((a) => a.id).filter(Boolean), [localAssets])
+    const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
+    const handleSelectAllToggle = useCallback(async () => {
+        if (visibleIds.length === 0) return
+        if (allVisibleInBucket) {
+            for (const id of visibleIds) {
+                await bucketRemove(id)
+            }
+        } else {
+            await bucketAddBatch(visibleIds)
+        }
+    }, [visibleIds, allVisibleInBucket, bucketAddBatch, bucketRemove])
 
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220
@@ -265,7 +279,40 @@ export default function CollectionsIndex({
                                                 urlParams.set('sort_direction', newDir)
                                                 router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                             }}
-                                            showMoreFilters={false}
+                                            showMoreFilters={true}
+                                            moreFiltersContent={
+                                                <AssetGridSecondaryFilters
+                                                    filterable_schema={[]}
+                                                    selectedCategoryId={null}
+                                                    available_values={{}}
+                                                    canManageFields={false}
+                                                    assetType="image"
+                                                    primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                                    sortBy={sort}
+                                                    sortDirection={sort_direction}
+                                                    onSortChange={(newSort, newDir) => {
+                                                        const urlParams = new URLSearchParams(window.location.search)
+                                                        urlParams.set('sort', newSort)
+                                                        urlParams.set('sort_direction', newDir)
+                                                        router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
+                                                    }}
+                                                    assetResultCount={visibleItems?.length ?? 0}
+                                                    totalInCategory={localAssets?.length ?? 0}
+                                                    barTrailingContent={
+                                                        hasAssets ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={handleSelectAllToggle}
+                                                                    className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                                                                >
+                                                                    {allVisibleInBucket ? 'Deselect all' : 'Select all'}
+                                                                </button>
+                                                            </div>
+                                                        ) : null
+                                                    }
+                                                />
+                                            }
                                         />
                                     </div>
 

@@ -233,6 +233,9 @@ class DeliverableController extends Controller
             $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
         }
 
+        // Phase M: Base query for "has values" check (same scope as grid: tenant, brand, category, lifecycle, search)
+        $baseQueryForFilterVisibility = (clone $assetsQuery);
+
         // Phase L: Centralized sort (after search/filters, before pagination)
         $sort = $this->assetSortService->normalizeSort($request->input('sort'));
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
@@ -289,7 +292,8 @@ class DeliverableController extends Controller
                 'note' => 'No deliverables found - check status, type, brand_id, tenant_id, and category filter',
             ]);
         }
-        
+
+        // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
         $assets = $assets
             ->map(function ($asset) use ($tenant, $brand) {
                 // Derive file extension from original_filename, with mime_type fallback
@@ -453,6 +457,7 @@ class DeliverableController extends Controller
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
                     'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
+                    'starred' => $this->assetIsStarred($metadata['starred'] ?? null), // boolean; source: assets.metadata.starred only
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
@@ -515,7 +520,16 @@ class DeliverableController extends Controller
             // Pass null category to mark system fields as global
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
         }
-        
+
+        // Phase M: Hide filters with zero values in scoped dataset (before pagination)
+        if (! empty($filterableSchema)) {
+            $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
+            $filterableSchema = array_values(array_filter($filterableSchema, function ($field) use ($keysWithValues) {
+                $key = $field['field_key'] ?? $field['key'] ?? null;
+                return $key && in_array($key, $keysWithValues, true);
+            }));
+        }
+
         // available_values is required by Phase H filter visibility rules
         // Do not remove without updating Phase H contract
         // Compute distinct metadata values for the current asset grid result set

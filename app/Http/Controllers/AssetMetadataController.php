@@ -903,6 +903,10 @@ class AssetMetadataController extends Controller
             // Get current value(s) for this field
             // For approvers, show pending values if no approved value exists
             $currentValue = $fieldValues[$field['field_id']] ?? null;
+            // STARRED CANONICAL: Return strict boolean for starred so UI (toggle, filters, sort) is consistent
+            if (($field['key'] ?? null) === 'starred') {
+                $currentValue = $this->assetIsStarred($currentValue) ? true : false;
+            }
             $fieldOverrideInfo = $fieldOverrideState[$field['field_id']] ?? [];
             $isValuePending = $fieldOverrideInfo['is_pending'] ?? false;
 
@@ -3965,6 +3969,9 @@ class AssetMetadataController extends Controller
      * Sync a sort-relevant metadata field (starred, quality_rating) to assets.metadata
      * so grid sort by starred/quality sees the value. Display reads from asset_metadata;
      * sort reads from assets.metadata JSON.
+     *
+     * STARRED CANONICAL: For "starred" we always write a strict boolean (true/false) to
+     * assets.metadata so sort, filter, and grid payload have one consistent representation.
      */
     protected function syncSortFieldToAsset(Asset $asset, string $fieldKey, $value): void
     {
@@ -3973,7 +3980,7 @@ class AssetMetadataController extends Controller
         }
         $asset->refresh();
         $meta = $asset->metadata ?? [];
-        $meta[$fieldKey] = $value;
+        $meta[$fieldKey] = $fieldKey === 'starred' ? ($this->assetIsStarred($value) ? true : false) : $value;
         $asset->metadata = $meta;
         $asset->save();
     }

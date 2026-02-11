@@ -14,6 +14,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { EyeSlashIcon } from '@heroicons/react/24/outline'
+import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
@@ -306,6 +307,10 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                                 {fileExtension}
                             </span>
+                            {/* Starred: backend sends asset.starred as boolean only (see STARRED_CANONICAL in backend); color uses active brand primary */}
+                            {asset.starred === true && (
+                                <StarIcon className="h-3.5 w-3.5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" style={{ color: primaryColor }} aria-label="Starred" />
+                            )}
                             {/* Subtle unpublished icon */}
                             {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
                             {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
