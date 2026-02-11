@@ -18,8 +18,8 @@ import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
-import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import axios from 'axios'
 import {
     FolderIcon,
     TagIcon,
@@ -27,7 +27,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
+export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { hasPermission: canUpload } = usePermission('asset.upload')
@@ -51,41 +51,53 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Prevent reopening dialog during auto-close timeout (400-700ms delay)
     const [isAutoClosing, setIsAutoClosing] = useState(false)
     
-    // Local asset state
-    const [localAssets, setLocalAssets] = useState(assets)
-    
-    // Update local assets when props change (e.g., after Inertia reload)
-    // Guard: Protect completed thumbnails from being overwritten on refresh
+    // Server-driven pagination: assets list and next page URL (single source of truth)
+    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
+    const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
+    const [loading, setLoading] = useState(false)
+    const loadMoreRef = useRef(null)
+
+    // Sync from Inertia props when page context changes (category, filters, search, sort)
     useEffect(() => {
-        setLocalAssets(prevAssets => {
-            // If no previous assets, use new assets as-is
-            if (!prevAssets || prevAssets.length === 0) {
-                return assets
-            }
-            
-            // Merge new assets with field-level protection
-            return assets.map(newAsset => {
-                const prevAsset = prevAssets.find(a => a.id === newAsset.id)
-                if (!prevAsset) {
-                    return newAsset
-                }
-                
-                // Dev warning if attempting to overwrite completed thumbnail
-                warnIfOverwritingCompletedThumbnail(prevAsset, newAsset, 'refresh-sync')
-                
-                // Field-level merge: protects thumbnail fields but allows title, filename, metadata updates
-                return mergeAsset(prevAsset, newAsset)
-            })
-        })
-        
-        // Clear staleness flag when assets prop is reloaded (grid is now synced)
+        setAssetsList(Array.isArray(assets) ? assets : [])
+        setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
             window.__assetGridStaleness.hasStaleAssetGrid = false
-            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
-                detail: { hasStaleAssetGrid: false }
-            }))
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', { detail: { hasStaleAssetGrid: false } }))
         }
-    }, [assets])
+    }, [assets, next_page_url])
+
+    // Load next page (append to list)
+    const loadMore = useCallback(async () => {
+        if (!nextPageUrl || loading) return
+        setLoading(true)
+        try {
+            const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
+            const response = await axios.get(url)
+            const data = response.data?.data ?? []
+            setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
+            setNextPageUrl(response.data?.next_page_url ?? null)
+        } catch (e) {
+            console.error('Infinite scroll failed', e)
+        } finally {
+            setLoading(false)
+        }
+    }, [nextPageUrl, loading])
+
+    // IntersectionObserver: load more when sentinel enters viewport
+    useEffect(() => {
+        if (!loadMoreRef.current) return
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting && nextPageUrl && !loading) {
+                    loadMore()
+                }
+            },
+            { rootMargin: '200px' }
+        )
+        observer.observe(loadMoreRef.current)
+        return () => observer.disconnect()
+    }, [nextPageUrl, loading, loadMore])
     
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
@@ -127,7 +139,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         }
     }, [bucketAssetIds, bucketAdd, bucketRemove])
 
-    const visibleIds = useMemo(() => (localAssets || []).map((a) => a.id).filter(Boolean), [localAssets])
+    const visibleIds = useMemo(() => (assetsList || []).map((a) => a.id).filter(Boolean), [assetsList])
     const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
 
     const handleSelectAllToggle = useCallback(async () => {
@@ -144,20 +156,20 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
-    const activeAsset = activeAssetId ? localAssets.find(asset => asset.id === activeAssetId) : null
+    const activeAsset = activeAssetId ? assetsList.find(asset => asset.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
     // This check is robust against temporary nulls during async updates
     // We check for ID existence, not object reference equality
     useEffect(() => {
         if (activeAssetId) {
-            const assetExists = localAssets.some(asset => asset.id === activeAssetId)
+            const assetExists = assetsList.some(asset => asset.id === activeAssetId)
             if (!assetExists) {
                 // Asset ID no longer exists in array - close drawer
                 setActiveAssetId(null)
             }
         }
-    }, [activeAssetId, localAssets])
+    }, [activeAssetId, assetsList])
 
     // Category switches should reset the drawer selection,
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -189,8 +201,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             const assetId = urlParams.get('asset')
             const editMetadataFieldId = urlParams.get('edit_metadata')
             
-            if (assetId && localAssets.length > 0) {
-                const asset = localAssets.find(a => a.id === assetId)
+            if (assetId && assetsList.length > 0) {
+                const asset = assetsList.find(a => a.id === assetId)
                 if (asset) {
                     setActiveAssetId(assetId)
                     // If edit_metadata param is present, the drawer will handle it
@@ -198,7 +210,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 }
             }
         }
-    }, [localAssets]) // Re-check when assets load
+    }, [assetsList]) // Re-check when assets load
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
@@ -337,7 +349,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     }, [])
     
     useThumbnailSmartPoll({
-        assets: localAssets,
+        assets: assetsList,
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
     })
@@ -351,7 +363,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         const appliedFilterValues = Object.fromEntries(
             Object.entries(filters).map(([k, def]) => [k, def?.value])
         )
-        const sample = (localAssets || []).slice(0, 3).map((a) => {
+        const sample = (assetsList || []).slice(0, 3).map((a) => {
             const fields = a.metadata?.fields || {}
             const sampleFields = {}
             Object.keys(appliedFilterValues).forEach((key) => {
@@ -362,14 +374,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         console.log('[filters] troubleshooting (set window.__DEBUG_FILTERS__ = false to disable)', {
             appliedFilters: appliedFilterValues,
             category_id: selectedCategoryId,
-            assetCount: (localAssets || []).length,
+            assetCount: (assetsList || []).length,
             sampleAssets: sample,
         })
-    }, [localAssets, selectedCategoryId, filterable_schema])
-
-    // Incremental load: show 24 initially, load more on scroll or button click
-    const infiniteResetDeps = [selectedCategoryId, typeof window !== 'undefined' ? window.location.search : '']
-    const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)
+    }, [assetsList, selectedCategoryId, filterable_schema])
 
     // Track drawer animation state to freeze grid layout during animation
     // CSS Grid recalculates columns immediately on width change, causing mid-animation reflow
@@ -920,7 +928,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 isBulkMode={isBulkMode}
                                 onSelectAllForDownload={handleSelectAllToggle}
                                 bucketCount={bucketAssetIds.length}
-                                showSelectAllForDownload={!isBulkMode && localAssets?.length > 0}
+                                showSelectAllForDownload={!isBulkMode && assetsList?.length > 0}
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={availableValues}
@@ -971,8 +979,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                             urlParams.delete('page')
                                             router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                         }}
-                                        assetResultCount={visibleItems?.length ?? 0}
-                                        totalInCategory={localAssets?.length ?? 0}
+                                        assetResultCount={assetsList?.length ?? 0}
+                                        totalInCategory={assetsList?.length ?? 0}
+                                        hasMoreAvailable={!!nextPageUrl}
                                         barTrailingContent={
                                             <div className="flex items-center gap-2">
                                                 <button
@@ -994,7 +1003,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                                         Edit Metadata ({bulkSelectedAssetIds.length})
                                                     </button>
                                                 )}
-                                                {!isBulkMode && localAssets?.length > 0 && (
+                                                {!isBulkMode && assetsList?.length > 0 && (
                                                     <button
                                                         type="button"
                                                         onClick={handleSelectAllToggle}
@@ -1011,10 +1020,10 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         </div>
                             
                             {/* Assets Grid or Empty State */}
-                            {localAssets && localAssets.length > 0 ? (
+                            {assetsList && assetsList.length > 0 ? (
                                 <>
                                 <AssetGrid 
-                                    assets={visibleItems} 
+                                    assets={assetsList} 
                                     onAssetClick={handleAssetClick}
                                     cardSize={cardSize}
                                     showInfo={showInfo}
@@ -1037,7 +1046,18 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                         setLocalAssets((prev) => prev.filter(a => a.id !== assetId))
                                     }}
                                 />
-                                <LoadMoreFooter onLoadMore={loadMore} hasMore={hasMore} />
+                                <div ref={loadMoreRef} className="h-10" aria-hidden="true" />
+                                {loading && (
+                                    <div className="flex justify-center py-6">
+                                        <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                        </svg>
+                                    </div>
+                                )}
+                                {nextPageUrl && (
+                                    <LoadMoreFooter onLoadMore={loadMore} hasMore={!!nextPageUrl} isLoading={loading} />
+                                )}
                                 </>
                             ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
@@ -1088,8 +1108,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                                 asset={activeAsset} // May be undefined temporarily during async updates
                                 onClose={() => setActiveAssetId(null)}
-                                assets={localAssets}
-                                currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
+                                assets={assetsList}
+                                currentAssetIndex={activeAsset ? assetsList.findIndex(a => a.id === activeAsset.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
@@ -1110,8 +1130,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                             asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => setActiveAssetId(null)}
-                            assets={localAssets}
-                            currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
+                            assets={assetsList}
+                            currentAssetIndex={activeAsset ? assetsList.findIndex(a => a.id === activeAsset.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}

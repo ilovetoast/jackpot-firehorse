@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
@@ -50,6 +51,7 @@ class CollectionController extends Controller
             return Inertia::render('Collections/Index', [
                 'collections' => [],
                 'assets' => [],
+                'next_page_url' => null,
                 'selected_collection' => null,
                 'can_update_collection' => false,
                 'can_create_collection' => false,
@@ -61,11 +63,13 @@ class CollectionController extends Controller
         }
 
         // Collections: tenant + brand, then filter by CollectionPolicy::view (C6: visibility + membership)
-        // C11: Include assets_count for sidebar signals (presentation only; no schema change)
+        // C11: Include assets_count for sidebar — count only VISIBLE, non-deleted (same as grid) so sidebar matches grid
         $collectionsQuery = Collection::query()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->withCount('assets')
+            ->withCount(['assets as assets_count' => function ($q) {
+                $q->where('assets.status', AssetStatus::VISIBLE)->whereNull('assets.deleted_at');
+            }])
             ->with(['brand', 'members'])
             ->orderBy('name');
 
@@ -84,6 +88,7 @@ class CollectionController extends Controller
 
         $collectionIdParam = $request->query('collection');
         $assets = [];
+        $paginator = null;
         $selectedCollection = null;
 
         if ($collectionIdParam !== null && $collectionIdParam !== '') {
@@ -104,8 +109,9 @@ class CollectionController extends Controller
                     $sort = $this->assetSortService->normalizeSort($request->input('sort'));
                     $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
                     $this->assetSortService->applySort($query, $sort, $sortDirection);
-                    $assetModels = $query->get();
-                    $assets = $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
+                    $perPage = 36;
+                    $paginator = $query->paginate($perPage);
+                    $assets = collect($paginator->items())->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
                     $brand = $collection->brand;
                     $selectedCollection = [
                         'id' => $collection->id,
@@ -154,9 +160,18 @@ class CollectionController extends Controller
         $sort = $request->input('sort', 'created');
         $sortDirection = strtolower((string) $request->input('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
 
+        // Load-more: return JSON only so the client can append without Inertia replacing the list
+        if ($request->boolean('load_more') && $selectedCollection !== null && isset($paginator)) {
+            return response()->json([
+                'data' => $assets,
+                'next_page_url' => $paginator->nextPageUrl(),
+            ]);
+        }
+
         return Inertia::render('Collections/Index', [
             'collections' => $collections,
             'assets' => $assets,
+            'next_page_url' => isset($paginator) ? $paginator->nextPageUrl() : null,
             'selected_collection' => $selectedCollection,
             'can_update_collection' => $canUpdateCollection,
             'can_create_collection' => Gate::forUser($user)->allows('create', $brand),

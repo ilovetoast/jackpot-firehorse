@@ -3,8 +3,8 @@ import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { usePermission } from '../../hooks/usePermission'
-import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import axios from 'axios'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
 import UploadAssetDialog from '../../Components/UploadAssetDialog'
@@ -22,7 +22,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function DeliverablesIndex({ categories, selected_category, show_all_button = false, assets = [], filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
+export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { hasPermission: canUpload } = usePermission('asset.upload')
@@ -41,59 +41,48 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     // Prevent reopening dialog during auto-close timeout (400-700ms delay)
     const [isAutoClosing, setIsAutoClosing] = useState(false)
     
-    // Local asset state (same pattern as Assets/Index)
-    const [localAssets, setLocalAssets] = useState(assets)
-    
-    // Track previous category ID to detect category changes
-    // When category changes, we should replace assets entirely (not merge incompatible sets)
-    const prevCategoryIdForAssetsRef = useRef(selectedCategoryId)
-    
-    // Update local assets when props change (e.g., after Inertia reload)
-    // Guard: Protect completed thumbnails from being overwritten on refresh
+    // Server-driven pagination
+    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
+    const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
+    const [loading, setLoading] = useState(false)
+    const loadMoreRef = useRef(null)
+
     useEffect(() => {
-        const prevCategoryId = prevCategoryIdForAssetsRef.current
-        const currentCategoryId = selectedCategoryId
-        const categoryChanged = prevCategoryId !== currentCategoryId
-        
-        // Update ref for next comparison
-        prevCategoryIdForAssetsRef.current = currentCategoryId
-        
-        setLocalAssets(prevAssets => {
-            // If no previous assets, use new assets as-is
-            if (!prevAssets || prevAssets.length === 0) {
-                return assets
-            }
-            
-            // CRITICAL: If category changed, replace assets entirely (don't merge)
-            // This prevents merging incompatible asset sets from different categories
-            // which would cause a double flash (old assets briefly visible before new ones)
-            if (categoryChanged) {
-                return assets
-            }
-            
-            // Category didn't change - merge new assets with field-level protection
-            return assets.map(newAsset => {
-                const prevAsset = prevAssets.find(a => a.id === newAsset.id)
-                if (!prevAsset) {
-                    return newAsset
-                }
-                
-                // Dev warning if attempting to overwrite completed thumbnail
-                warnIfOverwritingCompletedThumbnail(prevAsset, newAsset, 'refresh-sync')
-                
-                // Field-level merge: protects thumbnail fields but allows title, filename, metadata updates
-                return mergeAsset(prevAsset, newAsset)
-            })
-        })
-        
-        // Clear staleness flag when assets prop is reloaded (grid is now synced)
+        setAssetsList(Array.isArray(assets) ? assets : [])
+        setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
             window.__assetGridStaleness.hasStaleAssetGrid = false
-            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', {
-                detail: { hasStaleAssetGrid: false }
-            }))
+            window.dispatchEvent(new CustomEvent('assetGridStalenessChanged', { detail: { hasStaleAssetGrid: false } }))
         }
-    }, [assets, selectedCategoryId])
+    }, [assets, next_page_url])
+
+    const loadMore = useCallback(async () => {
+        if (!nextPageUrl || loading) return
+        setLoading(true)
+        try {
+            const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
+            const response = await axios.get(url)
+            const data = response.data?.data ?? []
+            setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
+            setNextPageUrl(response.data?.next_page_url ?? null)
+        } catch (e) {
+            console.error('Infinite scroll failed', e)
+        } finally {
+            setLoading(false)
+        }
+    }, [nextPageUrl, loading])
+
+    useEffect(() => {
+        if (!loadMoreRef.current) return
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting && nextPageUrl && !loading) loadMore()
+            },
+            { rootMargin: '200px' }
+        )
+        observer.observe(loadMoreRef.current)
+        return () => observer.disconnect()
+    }, [nextPageUrl, loading, loadMore])
     
     // Store only asset ID to prevent stale object references after Inertia reloads
     // The active asset is derived from the current assets array, ensuring it always reflects fresh data
@@ -102,20 +91,18 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
-    const activeAsset = activeAssetId ? localAssets.find(asset => asset.id === activeAssetId) : null
+    const activeAsset = activeAssetId ? assetsList.find(asset => asset.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
-    // This check is robust against temporary nulls during async updates
-    // We check for ID existence, not object reference equality
     useEffect(() => {
         if (activeAssetId) {
-            const assetExists = localAssets.some(asset => asset.id === activeAssetId)
+            const assetExists = assetsList.some(asset => asset.id === activeAssetId)
             if (!assetExists) {
                 // Asset ID no longer exists in array - close drawer
                 setActiveAssetId(null)
             }
         }
-    }, [activeAssetId, localAssets])
+    }, [activeAssetId, assetsList])
 
     // Phase D1: Download bucket from app-level context so the bar does not remount on category change (no flash)
     const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
@@ -129,7 +116,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
         else bucketAdd(assetId)
     }, [bucketAssetIds, bucketAdd, bucketRemove])
 
-    const visibleIds = useMemo(() => (localAssets || []).map((a) => a.id).filter(Boolean), [localAssets])
+    const visibleIds = useMemo(() => (assetsList || []).map((a) => a.id).filter(Boolean), [assetsList])
     const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
     const handleSelectAllToggle = useCallback(async () => {
         if (visibleIds.length === 0) return
@@ -174,8 +161,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
             const assetId = urlParams.get('asset')
             const editMetadataFieldId = urlParams.get('edit_metadata')
             
-            if (assetId && localAssets.length > 0) {
-                const asset = localAssets.find(a => a.id === assetId)
+            if (assetId && assetsList.length > 0) {
+                const asset = assetsList.find(a => a.id === assetId)
                 if (asset) {
                     setActiveAssetId(assetId)
                     // If edit_metadata param is present, the drawer will handle it
@@ -183,17 +170,9 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                 }
             }
         }
-    }, [localAssets]) // Re-check when assets load
-    
-    // Phase 3.1: Background Asset Reconciliation
-    // DISABLED: useThumbnailSmartPoll handles async updates without reloads
-    // useAssetReconciliation uses router.reload() which causes grid remounts
-    // Async processing (thumbnails, AI, video posters) must NEVER call router.reload
-    // Incremental load: show 24 initially, load more on scroll or button click
-    const infiniteResetDeps = [selectedCategoryId, typeof window !== 'undefined' ? window.location.search : '']
-    const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)
+    }, [assetsList])
 
-    // useThumbnailSmartPoll updates localAssets in-place via handleThumbnailUpdate callback
+    // useThumbnailSmartPoll updates assetsList in-place via handleThumbnailUpdate callback
     // This matches Assets/Index behavior - reconciliation is disabled there too
     // useAssetReconciliation({
     //     assets,
@@ -230,7 +209,7 @@ export default function DeliverablesIndex({ categories, selected_category, show_
     }, [])
     
     useThumbnailSmartPoll({
-        assets: localAssets,
+        assets: assetsList,
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
     })
@@ -492,9 +471,14 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                                         e.currentTarget.style.backgroundColor = 'transparent'
                                                     }
                                                 }}
-                                            >
+                                                >
                                                 <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} />
-                                                All
+                                                <span className="flex-1">All</span>
+                                                {total_asset_count > 0 && (
+                                                    <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                        {total_asset_count}
+                                                    </span>
+                                                )}
                                             </button>
                                         )}
                                         {categories.length > 0 ? (
@@ -533,6 +517,11 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                                         style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
                                                     />
                                                     <span className="flex-1">{category.name}</span>
+                                                    {category.asset_count !== undefined && category.asset_count > 0 && (
+                                                        <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                            {category.asset_count}
+                                                        </span>
+                                                    )}
                                                     {category.is_private && (
                                                         <div className="relative ml-2 group">
                                                             <LockClosedIcon 
@@ -605,11 +594,13 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                     {show_all_button && (
                                         <button onClick={() => { handleCategorySelect(null); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent', color: textColor }}>
                                             <TagIcon className="mr-3 h-5 w-5 opacity-60" style={{ color: textColor }} /><span className="flex-1">All</span>
+                                            {total_asset_count > 0 && <span className="text-xs opacity-50">{total_asset_count}</span>}
                                         </button>
                                     )}
                                     {categories.length > 0 && categories.filter(c => !(c.is_hidden === true || c.is_hidden === 1 || c.is_hidden === '1' || c.is_hidden === 'true')).map((category) => (
                                         <button key={category.id || `template-${category.slug}-${category.asset_type}`} onClick={() => { handleCategorySelect(category); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent', color: textColor }}>
                                             <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-60" style={{ color: textColor }} /><span className="flex-1">{category.name}</span>
+                                            {category.asset_count > 0 && <span className="text-xs opacity-50">{category.asset_count}</span>}
                                         </button>
                                     ))}
                                 </div>
@@ -727,10 +718,11 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                             urlParams.delete('page')
                                             router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                         }}
-                                        assetResultCount={visibleItems?.length ?? 0}
-                                        totalInCategory={localAssets?.length ?? 0}
+                                        assetResultCount={assetsList?.length ?? 0}
+                                        totalInCategory={assetsList?.length ?? 0}
+                                        hasMoreAvailable={!!nextPageUrl}
                                         barTrailingContent={
-                                            localAssets?.length > 0 ? (
+                                            assetsList?.length > 0 ? (
                                                 <div className="flex items-center gap-2">
                                                     <button
                                                         type="button"
@@ -748,10 +740,10 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                         </div>
                         
                         {/* Executions Grid or Empty State */}
-                        {localAssets && localAssets.length > 0 ? (
+                        {assetsList && assetsList.length > 0 ? (
                             <>
                             <AssetGrid 
-                                assets={visibleItems} 
+                                assets={assetsList} 
                                 onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
                                 cardSize={cardSize}
                                 showInfo={showInfo}
@@ -760,7 +752,16 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
                             />
-                            <LoadMoreFooter onLoadMore={loadMore} hasMore={hasMore} />
+                            <div ref={loadMoreRef} className="h-10" aria-hidden="true" />
+                            {loading && (
+                                <div className="flex justify-center py-6">
+                                    <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                </div>
+                            )}
+                            {nextPageUrl && <LoadMoreFooter onLoadMore={loadMore} hasMore={!!nextPageUrl} isLoading={loading} />}
                             </>
                         ) : (
                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
@@ -798,8 +799,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
-                                assets={localAssets}
-                                currentAssetIndex={localAssets.findIndex(a => a.id === activeAsset.id)}
+                                assets={assetsList}
+                                currentAssetIndex={assetsList.findIndex(a => a.id === activeAsset.id)}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
@@ -822,8 +823,8 @@ export default function DeliverablesIndex({ categories, selected_category, show_
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                             asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => setActiveAssetId(null)}
-                            assets={localAssets}
-                            currentAssetIndex={activeAsset ? localAssets.findIndex(a => a.id === activeAsset.id) : -1}
+                            assets={assetsList}
+                            currentAssetIndex={activeAsset ? assetsList.findIndex(a => a.id === activeAsset.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}

@@ -2,7 +2,7 @@
  * Collections Index (C4 read-only UI; C5 create + add/remove assets).
  * Uses CollectionAssetQueryService for asset data; C5 adds create and assign UI.
  */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
@@ -15,12 +15,13 @@ import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilter
 import AssetDrawer from '../../Components/AssetDrawer'
 import { useBucket } from '../../contexts/BucketContext'
 import { RectangleStackIcon, PlusIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
-import { useInfiniteLoad } from '../../hooks/useInfiniteLoad'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import axios from 'axios'
 
 export default function CollectionsIndex({
     collections = [],
     assets = [],
+    next_page_url = null,
     selected_collection = null,
     can_update_collection = false,
     can_create_collection = false,
@@ -29,6 +30,7 @@ export default function CollectionsIndex({
     public_collections_enabled = false,
     sort = 'created',
     sort_direction = 'desc',
+    q: searchQuery = '',
 }) {
     const { auth, download_bucket_count } = usePage().props
     const selectedCollectionId = selected_collection?.id ?? null
@@ -45,30 +47,59 @@ export default function CollectionsIndex({
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
 
-    const [localAssets, setLocalAssets] = useState(assets)
-    useEffect(() => {
-        setLocalAssets(assets)
-    }, [assets])
+    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
+    const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
+    const [loading, setLoading] = useState(false)
+    const loadMoreRef = useRef(null)
 
-    // Incremental load: show 24 initially, load more on scroll or button click
-    const infiniteResetDeps = [selectedCollectionId, typeof window !== 'undefined' ? window.location.search : '']
-    const { visibleItems, loadMore, hasMore } = useInfiniteLoad(localAssets, 24, infiniteResetDeps)
+    useEffect(() => {
+        setAssetsList(Array.isArray(assets) ? assets : [])
+        setNextPageUrl(next_page_url ?? null)
+    }, [assets, next_page_url])
+
+    const loadMore = useCallback(async () => {
+        if (!nextPageUrl || loading) return
+        setLoading(true)
+        try {
+            const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
+            const response = await axios.get(url)
+            const data = response.data?.data ?? []
+            setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
+            setNextPageUrl(response.data?.next_page_url ?? null)
+        } catch (e) {
+            console.error('Infinite scroll failed', e)
+        } finally {
+            setLoading(false)
+        }
+    }, [nextPageUrl, loading])
+
+    useEffect(() => {
+        if (!loadMoreRef.current) return
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting && nextPageUrl && !loading) loadMore()
+            },
+            { rootMargin: '200px' }
+        )
+        observer.observe(loadMoreRef.current)
+        return () => observer.disconnect()
+    }, [nextPageUrl, loading, loadMore])
 
     const [showCreateModal, setShowCreateModal] = useState(false)
     const [showEditModal, setShowEditModal] = useState(false)
     const [mobileCollectionsOpen, setMobileCollectionsOpen] = useState(false)
     const [activeAssetId, setActiveAssetId] = useState(null)
-    const activeAsset = activeAssetId ? localAssets.find((a) => a.id === activeAssetId) : null
+    const activeAsset = activeAssetId ? assetsList.find((a) => a.id === activeAssetId) : null
 
     const handleCollectionCreated = (newCollection) => {
         router.get('/app/collections', { collection: newCollection.id }, { preserveState: false })
     }
 
     useEffect(() => {
-        if (activeAssetId && !localAssets.some((a) => a.id === activeAssetId)) {
+        if (activeAssetId && !assetsList.some((a) => a.id === activeAssetId)) {
             setActiveAssetId(null)
         }
-    }, [activeAssetId, localAssets])
+    }, [activeAssetId, assetsList])
 
     useEffect(() => {
         setActiveAssetId(null)
@@ -86,7 +117,7 @@ export default function CollectionsIndex({
         else bucketAdd(assetId)
     }, [bucketAssetIds, bucketAdd, bucketRemove])
 
-    const visibleIds = useMemo(() => (localAssets || []).map((a) => a.id).filter(Boolean), [localAssets])
+    const visibleIds = useMemo(() => (assetsList || []).map((a) => a.id).filter(Boolean), [assetsList])
     const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
     const handleSelectAllToggle = useCallback(async () => {
         if (visibleIds.length === 0) return
@@ -125,7 +156,7 @@ export default function CollectionsIndex({
     }
 
     const showGrid = selectedCollectionId != null
-    const hasAssets = localAssets && localAssets.length > 0
+    const hasAssets = assetsList && assetsList.length > 0
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
@@ -249,7 +280,7 @@ export default function CollectionsIndex({
                                         <CollectionPublicBar
                                             collection={selected_collection}
                                             publicCollectionsEnabled={public_collections_enabled}
-                                            assetCount={localAssets.length}
+                                            assetCount={assetsList.length}
                                             canUpdateCollection={can_update_collection}
                                             onEditClick={() => setShowEditModal(true)}
                                             onPublicChange={() => {
@@ -296,8 +327,9 @@ export default function CollectionsIndex({
                                                         urlParams.set('sort_direction', newDir)
                                                         router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
                                                     }}
-                                                    assetResultCount={visibleItems?.length ?? 0}
-                                                    totalInCategory={localAssets?.length ?? 0}
+                                                    assetResultCount={assetsList?.length ?? 0}
+                                                    totalInCategory={assetsList?.length ?? 0}
+                                                    hasMoreAvailable={!!nextPageUrl}
                                                     barTrailingContent={
                                                         hasAssets ? (
                                                             <div className="flex items-center gap-2">
@@ -319,7 +351,7 @@ export default function CollectionsIndex({
                                     {hasAssets ? (
                                         <>
                                         <AssetGrid
-                                            assets={visibleItems}
+                                            assets={assetsList}
                                             onAssetClick={(asset) => setActiveAssetId(asset?.id ?? null)}
                                             cardSize={cardSize}
                                             showInfo={showInfo}
@@ -330,7 +362,16 @@ export default function CollectionsIndex({
                                             bucketAssetIds={bucketAssetIds}
                                             onBucketToggle={handleBucketToggle}
                                         />
-                                        <LoadMoreFooter onLoadMore={loadMore} hasMore={hasMore} />
+                                        <div ref={loadMoreRef} className="h-10" aria-hidden="true" />
+                                        {loading && (
+                                            <div className="flex justify-center py-6">
+                                                <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                        {nextPageUrl && <LoadMoreFooter onLoadMore={loadMore} hasMore={!!nextPageUrl} isLoading={loading} />}
                                         </>
                                     ) : (
                                         /* Empty state: collection selected but no assets */
@@ -358,8 +399,8 @@ export default function CollectionsIndex({
                                 key={activeAssetId}
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
-                                assets={localAssets}
-                                currentAssetIndex={activeAsset ? localAssets.findIndex((a) => a.id === activeAsset.id) : -1}
+                                assets={assetsList}
+                                currentAssetIndex={activeAsset ? assetsList.findIndex((a) => a.id === activeAsset.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
@@ -391,8 +432,8 @@ export default function CollectionsIndex({
                         key={activeAssetId}
                         asset={activeAsset}
                         onClose={() => setActiveAssetId(null)}
-                        assets={localAssets}
-                        currentAssetIndex={activeAsset ? localAssets.findIndex((a) => a.id === activeAsset.id) : -1}
+                        assets={assetsList}
+                        currentAssetIndex={activeAsset ? assetsList.findIndex((a) => a.id === activeAsset.id) : -1}
                         onAssetUpdate={handleLifecycleUpdate}
                         bucketAssetIds={bucketAssetIds}
                         onBucketToggle={handleBucketToggle}

@@ -1245,11 +1245,139 @@ export default function AssetDetailPanel({
                             </section>
                         )}
 
-                        {/* Section 3 — File Information (expanded by default) */}
+                        {/* Section 3 — File Information (at least quick-view parity: status + tooltip, publish/who, filename editable) */}
                         <section className="border-t border-gray-200 mb-6" aria-labelledby="section-file">
                             <CollapsibleSection title="File information" defaultExpanded={true}>
                                 <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                                        {/* Filename (editable when permission) */}
+                                        <div className="sm:col-span-2">
+                                            <dt className="font-semibold text-gray-700 mb-1">Filename</dt>
+                                            <dd className="text-sm text-gray-900">
+                                                {editingFilename ? (
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={filenameEditValue}
+                                                            onChange={(e) => setFilenameEditValue(e.target.value)}
+                                                            className="text-sm text-gray-800 border border-gray-300 rounded px-2 py-1 flex-1 min-w-0 max-w-md font-mono focus:ring-2 focus:ring-offset-1"
+                                                            placeholder="Filename"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={async () => {
+                                                                if (filenameEditValue.trim() && asset?.id) {
+                                                                    try {
+                                                                        const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+                                                                        const res = await fetch(`/app/assets/${asset.id}/filename`, {
+                                                                            method: 'PATCH',
+                                                                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf || '' },
+                                                                            credentials: 'same-origin',
+                                                                            body: JSON.stringify({ original_filename: filenameEditValue.trim() }),
+                                                                        })
+                                                                        if (res.ok) {
+                                                                            setEditingFilename(false)
+                                                                            router.reload({ preserveState: true, preserveScroll: true })
+                                                                        }
+                                                                    } catch {
+                                                                        setEditingFilename(false)
+                                                                        setFilenameEditValue(asset?.original_filename || '')
+                                                                    }
+                                                                } else {
+                                                                    setEditingFilename(false)
+                                                                    setFilenameEditValue(asset?.original_filename || '')
+                                                                }
+                                                            }}
+                                                            className="text-xs font-medium text-white rounded px-2 py-1"
+                                                            style={{ backgroundColor: brandPrimary }}
+                                                        >
+                                                            Save
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(false) }}
+                                                            className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <span className="font-mono break-all">
+                                                        {asset?.original_filename || '—'}
+                                                        {canEditMetadata && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(true) }}
+                                                                className="ml-2 inline-flex items-center gap-1 text-xs font-medium rounded focus:outline-none focus:ring-2 focus:ring-offset-1"
+                                                                style={{ color: brandPrimary }}
+                                                            >
+                                                                <PencilIcon className="h-3.5 w-3.5" />
+                                                                Edit
+                                                            </button>
+                                                        )}
+                                                    </span>
+                                                )}
+                                            </dd>
+                                        </div>
+                                        {/* Status (thumbnail/visibility) with tooltip */}
+                                        <dt className="font-semibold text-gray-700">Status</dt>
+                                        <dd className="text-sm text-gray-900">
+                                            {(() => {
+                                                const status = (asset?.thumbnail_status ?? asset?.status ?? '').toString().toLowerCase()
+                                                const label = status === 'completed' ? 'Completed' : status === 'processing' ? 'Processing' : status === 'failed' ? 'Failed' : status === 'skipped' ? 'Skipped' : status === 'pending' ? 'Pending' : (asset?.thumbnail_status ?? asset?.status ?? '—')
+                                                const tooltip = status === 'completed' ? 'Thumbnail and preview generation completed.' : status === 'processing' ? 'Thumbnail or preview is being generated.' : status === 'failed' ? (asset?.thumbnail_error ? `Thumbnail generation failed: ${asset.thumbnail_error}` : 'Thumbnail generation failed.') : status === 'skipped' ? (asset?.metadata?.thumbnail_skip_reason ? `Preview skipped: ${asset.metadata.thumbnail_skip_reason}` : 'Preview not generated for this file type.') : 'Thumbnail or preview is pending.'
+                                                return (
+                                                    <span
+                                                        title={tooltip}
+                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${status === 'completed' ? 'bg-green-100 text-green-800' : status === 'processing' ? 'bg-amber-100 text-amber-800' : status === 'failed' ? 'bg-red-100 text-red-800' : status === 'skipped' ? 'bg-gray-100 text-gray-700' : 'bg-gray-100 text-gray-600'}`}
+                                                    >
+                                                        {label}
+                                                    </span>
+                                                )
+                                            })()}
+                                        </dd>
+                                        {/* Category (grid sends asset.category; metadata may have category object) */}
+                                        {(asset?.category?.name || metadata?.category?.name) && (
+                                            <>
+                                                <dt className="font-semibold text-gray-700">Category</dt>
+                                                <dd className="text-sm text-gray-900">{asset?.category?.name || metadata?.category?.name}</dd>
+                                            </>
+                                        )}
+                                        {/* Uploaded (created_at) */}
+                                        {asset?.created_at && (
+                                            <>
+                                                <dt className="font-semibold text-gray-700">Uploaded</dt>
+                                                <dd className="text-sm text-gray-900">{new Date(asset.created_at).toLocaleString()}</dd>
+                                            </>
+                                        )}
+                                        {/* Published (date + by) when not redundant with Overview lifecycle */}
+                                        {asset?.published_at && (
+                                            <>
+                                                <dt className="font-semibold text-gray-700">Published</dt>
+                                                <dd className="text-sm text-gray-900">
+                                                    {new Date(asset.published_at).toLocaleString()}
+                                                    {asset.published_by && (
+                                                        <span className="ml-1 text-gray-500">
+                                                            by {asset.published_by.name || [asset.published_by.first_name, asset.published_by.last_name].filter(Boolean).join(' ') || '—'}
+                                                        </span>
+                                                    )}
+                                                </dd>
+                                            </>
+                                        )}
+                                        {/* Archived (date + by) */}
+                                        {asset?.archived_at && (
+                                            <>
+                                                <dt className="font-semibold text-gray-700">Archived</dt>
+                                                <dd className="text-sm text-gray-900">
+                                                    {new Date(asset.archived_at).toLocaleString()}
+                                                    {asset.archived_by && (
+                                                        <span className="ml-1 text-gray-500">
+                                                            by {asset.archived_by.name || [asset.archived_by.first_name, asset.archived_by.last_name].filter(Boolean).join(' ') || '—'}
+                                                        </span>
+                                                    )}
+                                                </dd>
+                                            </>
+                                        )}
                                         <dt className="font-semibold text-gray-700">File type</dt>
                                         <dd className="text-sm text-gray-900">{asset?.mime_type || '—'}</dd>
                                         <dt className="font-semibold text-gray-700">File size</dt>
@@ -1264,10 +1392,15 @@ export default function AssetDetailPanel({
                                                 })()
                                                 : '—'}
                                         </dd>
-                                        {asset?.width != null && asset?.height != null && (
+                                        {((asset?.width != null && asset?.height != null) || (asset?.metadata?.image_width && asset?.metadata?.image_height)) && (
                                             <>
                                                 <dt className="font-semibold text-gray-700">Dimensions</dt>
-                                                <dd className="text-sm text-gray-900">{asset.width} × {asset.height}</dd>
+                                                <dd className="text-sm text-gray-900">
+                                                    {asset?.width != null && asset?.height != null
+                                                        ? `${asset.width} × ${asset.height}`
+                                                        : `${asset.metadata?.image_width} × ${asset.metadata?.image_height}`}
+                                                    {asset?.metadata?.dimensions && typeof asset.metadata.dimensions === 'string' && asset.metadata.dimensions.match(/px/i) && ` (${asset.metadata.dimensions})`}
+                                                </dd>
                                             </>
                                         )}
                                         <dt className="font-semibold text-gray-700">Thumbnail status</dt>

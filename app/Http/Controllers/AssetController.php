@@ -316,13 +316,17 @@ class AssetController extends Controller
         $sort = $this->assetSortService->normalizeSort($request->input('sort'));
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
         $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
-        $assets = $assetsQuery->get();
-        
+
+        // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
+        $perPage = 36;
+        $paginator = $assetsQuery->paginate($perPage);
+        $assetModels = $paginator->getCollection();
+
         // HARD TERMINAL STATE: Check for stuck assets and repair them
         // This prevents infinite processing states by automatically failing
         // assets that have been processing longer than the timeout threshold
         $timeoutGuard = app(\App\Services\ThumbnailTimeoutGuard::class);
-        foreach ($assets as $asset) {
+        foreach ($assetModels as $asset) {
             if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
                 $timeoutGuard->checkAndRepair($asset);
                 // Reload asset to get updated status if it was repaired
@@ -331,14 +335,14 @@ class AssetController extends Controller
         }
         
         // AUDIT: Log query results and sample asset brand_ids for comparison
-        if ($assets->count() > 0) {
-            $sampleAssetBrandIds = $assets->take(5)->pluck('brand_id')->unique()->values()->toArray();
+        if ($assetModels->count() > 0) {
+            $sampleAssetBrandIds = $assetModels->take(5)->pluck('brand_id')->unique()->values()->toArray();
             Log::info('[ASSET_QUERY_AUDIT] AssetController::index() query results', [
                 'query_tenant_id' => $tenant->id,
                 'query_brand_id' => $brand->id,
-                'assets_count' => $assets->count(),
+                'assets_count' => $assetModels->count(),
                 'sample_asset_brand_ids' => $sampleAssetBrandIds,
-                'brand_id_mismatch_count' => $assets->filter(fn($a) => $a->brand_id != $brand->id)->count(),
+                'brand_id_mismatch_count' => $assetModels->filter(fn($a) => $a->brand_id != $brand->id)->count(),
                 'note' => 'If brand_id_mismatch_count > 0, query brand_id does not match stored asset brand_id',
             ]);
         } else {
@@ -352,7 +356,7 @@ class AssetController extends Controller
 
         // STARRED CANONICAL: Prefer assets.metadata.starred; fallback to asset_metadata so grid star icon
         // shows even when sync was skipped (e.g. approval required) or backfill not run.
-        $assetIds = $assets->pluck('id')->all();
+        $assetIds = $assetModels->pluck('id')->all();
         $starredFromTable = [];
         if (! empty($assetIds)) {
             $starredFieldId = DB::table('metadata_fields')
@@ -377,7 +381,7 @@ class AssetController extends Controller
             }
         }
 
-        $assets = $assets->map(function ($asset) use ($tenant, $brand, $starredFromTable) {
+        $mappedAssets = $assetModels->map(function ($asset) use ($tenant, $brand, $starredFromTable) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -567,7 +571,11 @@ class AssetController extends Controller
                     'video_preview_url' => $asset->video_preview_url,
                 ];
             })
-            ->values();
+            ->values()
+            ->all();
+
+        // Keep collection for availableValues block (expects $assets as collection of arrays)
+        $assets = collect($mappedAssets);
 
         // Phase 2 – Step 8: Get filterable schema for frontend
         // Note: asset_type in category is organizational (asset/marketing/ai_generated),
@@ -646,9 +654,11 @@ class AssetController extends Controller
             }
         }
         
-        if (!empty($filterableSchema) && $assets->count() > 0) {
-            // Get asset IDs from the current grid result set
-            $assetIds = $assets->pluck('id')->toArray();
+        // Use current page asset IDs for filter options (initial request only; load_more does not run this block)
+        $assetIdsForAvailableValues = $assetModels->pluck('id')->toArray();
+        if (!empty($filterableSchema) && count($assetIdsForAvailableValues) > 0) {
+            // Get asset IDs from the current grid result set (or first page when loading page > 1)
+            $assetIds = $assetIdsForAvailableValues;
             
             // Build map of filterable field keys for quick lookup
             // Note: filterableSchema from getFilterableFields() already contains only filterable fields,
@@ -802,12 +812,14 @@ class AssetController extends Controller
                 
                 // Source 2: Query metadata JSON column (legacy/fallback)
                 // Extract values from metadata->fields structure for assets not in asset_metadata
-                $assetsWithMetadata = $assets->filter(function ($asset) {
-                    return !empty($asset->metadata) && isset($asset->metadata['fields']);
+                // Note: $assets here is the mapped collection (arrays), not Asset models
+                $assetsWithMetadata = $assets->filter(function ($item) {
+                    $meta = $item['metadata'] ?? null;
+                    return !empty($meta) && isset($meta['fields']);
                 });
                 
-                foreach ($assetsWithMetadata as $asset) {
-                    $fields = $asset->metadata['fields'] ?? [];
+                foreach ($assetsWithMetadata as $item) {
+                    $fields = ($item['metadata'] ?? [])['fields'] ?? [];
                     foreach ($fields as $fieldKey => $value) {
                         // Only include if field is filterable
                         if (isset($filterableFieldKeys[$fieldKey]) && $value !== null) {
@@ -830,7 +842,7 @@ class AssetController extends Controller
                                 }
                                 // For dominant_color_bucket, keep first asset's dominant_colors for swatch display
                                 if ($fieldKey === 'dominant_color_bucket' && !isset($bucketToDominantColors[$value])) {
-                                    $bucketToDominantColors[$value] = $fields['dominant_colors'] ?? null;
+                                    $bucketToDominantColors[$value] = ($item['metadata'] ?? [])['dominant_colors'] ?? null;
                                 }
                             }
                         }
@@ -839,8 +851,8 @@ class AssetController extends Controller
 
                 // Source 2b: Top-level metadata (starred, quality_rating) — synced to metadata root, not metadata.fields
                 $topLevelFilterKeys = ['starred', 'quality_rating'];
-                foreach ($assets as $asset) {
-                    $meta = $asset->metadata ?? [];
+                foreach ($assets as $item) {
+                    $meta = $item['metadata'] ?? [];
                     foreach ($topLevelFilterKeys as $key) {
                         if (! isset($filterableFieldKeys[$key])) {
                             continue;
@@ -1013,6 +1025,14 @@ class AssetController extends Controller
         }
         unset($field);
 
+        // Load-more: return JSON only so the client can append without Inertia replacing the list
+        if ($request->boolean('load_more')) {
+            return response()->json([
+                'data' => $mappedAssets,
+                'next_page_url' => $paginator->nextPageUrl(),
+            ]);
+        }
+
         return Inertia::render('Assets/Index', [
             'tenant' => $tenant ? ['id' => $tenant->id] : null, // For Tags filter autocomplete
             'categories' => $allCategories,
@@ -1023,7 +1043,8 @@ class AssetController extends Controller
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'total_asset_count' => $totalAssetCount, // Total count for "All" button
-            'assets' => $assets, // Top-level prop for frontend AssetGrid component
+            'assets' => $mappedAssets,
+            'next_page_url' => $paginator->nextPageUrl(),
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,
@@ -1818,6 +1839,42 @@ class AssetController extends Controller
             Log::error('[AssetController::restore]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to restore asset'], 500);
         }
+    }
+
+    /**
+     * Update the asset's original filename (display name).
+     *
+     * PATCH /assets/{asset}/filename
+     *
+     * Requires view access and metadata.edit_post_upload permission.
+     */
+    public function updateFilename(Request $request, Asset $asset): JsonResponse
+    {
+        Gate::authorize('view', $asset);
+
+        $tenant = app('tenant');
+        $user = auth()->user();
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload')) {
+            return response()->json(['message' => 'You do not have permission to edit this asset.'], 403);
+        }
+
+        $validated = $request->validate([
+            'original_filename' => ['required', 'string', 'max:512'],
+        ]);
+
+        $asset->original_filename = $validated['original_filename'];
+        $asset->save();
+
+        return response()->json([
+            'message' => 'Filename updated',
+            'original_filename' => $asset->original_filename,
+        ], 200);
     }
 
     /**

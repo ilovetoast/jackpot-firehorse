@@ -40,14 +40,14 @@ export default function AssetTagManager({
 
     // Handle tag added
     const handleTagAdded = (newTag) => {
-        // Trigger refresh to ensure consistency
         setRefreshTrigger(prev => prev + 1)
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('tags-updated'))
     }
 
     // Handle tag removed
     const handleTagRemoved = (removedTag) => {
-        // Trigger refresh to ensure consistency
         setRefreshTrigger(prev => prev + 1)
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('tags-updated'))
     }
 
     // Handle tags loaded (just track count to avoid state loops)

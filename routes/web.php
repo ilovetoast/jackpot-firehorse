@@ -459,6 +459,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/assets/{asset}/publish', [\App\Http\Controllers\AssetController::class, 'publish'])->name('assets.publish');
             Route::post('/assets/{asset}/unpublish', [\App\Http\Controllers\AssetController::class, 'unpublish'])->name('assets.unpublish');
             // Phase J.3.1: File replacement for rejected contributor assets
+            Route::patch('/assets/{asset}/filename', [\App\Http\Controllers\AssetController::class, 'updateFilename'])->name('assets.filename.update');
             Route::post('/assets/{asset}/replace-file', [\App\Http\Controllers\AssetController::class, 'initiateReplaceFile'])->name('assets.replace-file');
             // Phase L.3: Asset archive & restore actions
             Route::post('/assets/{asset}/archive', [\App\Http\Controllers\AssetController::class, 'archive'])->name('assets.archive');

@@ -203,6 +203,10 @@ class ColorAnalysisService
                 if ($a < self::ALPHA_THRESHOLD) {
                     continue;
                 }
+                // Exclude synthetic thumbnail backdrop (gray-300) so dominant color comes from content only
+                if ($this->isSyntheticBackdropGray($r, $g, $b)) {
+                    continue;
+                }
                 $kept++;
                 $labRows[] = $this->rgbToLab($r, $g, $b);
             }
@@ -213,6 +217,16 @@ class ColorAnalysisService
         $ignored = $total > 0 ? 1.0 - ($kept / $total) : 1.0;
 
         return ['lab' => $labRows, 'ignored_pixels' => $ignored];
+    }
+
+    /**
+     * Detect pixels that are the synthetic thumbnail backdrop (gray-300: 209,213,219).
+     * Excluding these ensures dominant color is taken from image content, not the added backdrop.
+     */
+    private function isSyntheticBackdropGray(int $r, int $g, int $b): bool
+    {
+        $tolerance = 25;
+        return abs($r - 209) <= $tolerance && abs($g - 213) <= $tolerance && abs($b - 219) <= $tolerance;
     }
 
     /**

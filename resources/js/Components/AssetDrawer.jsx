@@ -1720,11 +1720,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 assetId={displayAsset.id} 
                                 onPendingCountChange={setPendingMetadataCount}
                                 primaryColor={brandPrimary}
-                                collectionDisplay={collectionFieldVisible ? {
+                                collectionDisplay={{
                                     collections: assetCollections,
                                     loading: assetCollectionsLoading,
                                     onEdit: () => setShowCollectionsModal(true),
-                                } : null}
+                                    showEditButton: collectionFieldVisible,
+                                }}
                             />
                             
                             {/* C9.1: Old inline Collections section removed - now integrated into AssetMetadataDisplay after Scene Classification */}

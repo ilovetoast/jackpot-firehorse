@@ -14,7 +14,7 @@
  * but provides tag-specific UX for Primary filter placement.
  */
 
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { XMarkIcon, TagIcon } from '@heroicons/react/24/outline'
 
 export default function TagPrimaryFilter({
@@ -30,53 +30,93 @@ export default function TagPrimaryFilter({
     const [suggestions, setSuggestions] = useState([])
     const [showSuggestions, setShowSuggestions] = useState(false)
     const [selectedIndex, setSelectedIndex] = useState(-1)
+    const [loadingSuggestions, setLoadingSuggestions] = useState(false)
     const inputRef = useRef(null)
 
     // Ensure value is always an array (memoized to prevent recreation)
     const selectedTags = useMemo(() => Array.isArray(value) ? value : [], [value])
 
-    // Debounced autocomplete for existing canonical tags
-    useEffect(() => {
+    // Fetch tag suggestions (used tags when q is empty, search when q has 2+ chars)
+    const fetchSuggestions = useCallback(async (q) => {
         const tid = tenantId ?? undefined
-        if (!inputValue.trim() || inputValue.length < 2 || !tid) {
-            setSuggestions([])
-            setShowSuggestions(false)
+        if (!tid) return []
+        setLoadingSuggestions(true)
+        try {
+            const url = `/app/api/tenants/${tid}/tags/autocomplete?q=${encodeURIComponent(q)}`
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                },
+                credentials: 'same-origin',
+            })
+            if (!response.ok) return []
+            const data = await response.json()
+            const list = Array.isArray(data.suggestions) ? data.suggestions : []
+            return list.filter(suggestion => suggestion && !selectedTags.includes(suggestion.tag))
+        } catch (error) {
+            console.error('[TagPrimaryFilter] Autocomplete failed:', error)
+            return []
+        } finally {
+            setLoadingSuggestions(false)
+        }
+    }, [tenantId, selectedTags])
+
+    // On focus with empty input: show list of used tags
+    const handleFocus = useCallback(() => {
+        const trimmed = inputValue.trim()
+        if (trimmed.length >= 2) {
+            if (suggestions.length > 0) setShowSuggestions(true)
+            return
+        }
+        if (loadingSuggestions) return
+        const tid = tenantId ?? undefined
+        if (!tid) return
+        setLoadingSuggestions(true)
+        fetch(`/app/api/tenants/${tid}/tags/autocomplete?q=`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+            credentials: 'same-origin',
+        })
+            .then((res) => res.ok ? res.json() : { suggestions: [] })
+            .then((data) => {
+                const list = Array.isArray(data.suggestions) ? data.suggestions : []
+                const filtered = list.filter(s => s && !selectedTags.includes(s.tag))
+                setSuggestions(filtered)
+                setShowSuggestions(true)
+                setSelectedIndex(-1)
+            })
+            .catch(() => setSuggestions([]))
+            .finally(() => setLoadingSuggestions(false))
+    }, [inputValue, tenantId, selectedTags, suggestions.length, loadingSuggestions])
+
+    // Debounced autocomplete when user types (2+ chars)
+    useEffect(() => {
+        const trimmed = inputValue.trim()
+        if (trimmed.length < 2) {
+            if (trimmed.length === 0) {
+                setSuggestions([])
+                setShowSuggestions(false)
+            }
             return
         }
 
-        const timeoutId = setTimeout(async () => {
-            try {
-                const url = `/app/api/tenants/${tid}/tags/autocomplete?q=${encodeURIComponent(inputValue.trim())}`
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
-                    },
-                    credentials: 'same-origin',
-                })
-
-                if (response.ok) {
-                    const data = await response.json()
-                    const list = Array.isArray(data.suggestions) ? data.suggestions : []
-                    const filteredSuggestions = list.filter(
-                        suggestion => suggestion && !selectedTags.includes(suggestion.tag)
-                    )
-                    setSuggestions(filteredSuggestions)
-                    setShowSuggestions(true)
-                    setSelectedIndex(-1)
-                } else {
-                    setSuggestions([])
-                }
-            } catch (error) {
-                console.error('[TagPrimaryFilter] Autocomplete failed:', error)
-                setSuggestions([])
-            }
+        const timeoutId = setTimeout(() => {
+            fetchSuggestions(trimmed).then((filteredSuggestions) => {
+                setSuggestions(filteredSuggestions)
+                setShowSuggestions(true)
+                setSelectedIndex(-1)
+            })
         }, 200)
 
         return () => clearTimeout(timeoutId)
-    }, [inputValue, tenantId, selectedTags])
+    }, [inputValue, tenantId, selectedTags, fetchSuggestions])
 
     // Add tag to filter
     const addTag = (tagValue) => {
@@ -199,11 +239,7 @@ export default function TagPrimaryFilter({
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyDown={handleKeyDown}
                         onBlur={handleBlur}
-                        onFocus={() => {
-                            if (suggestions.length > 0) {
-                                setShowSuggestions(true)
-                            }
-                        }}
+                        onFocus={handleFocus}
                         placeholder={selectedTags.length > 0 ? "Add more..." : placeholder}
                         className="flex-1 min-w-[3rem] bg-transparent text-xs placeholder-gray-400 border-none outline-none ring-0 focus:border-none focus:outline-none focus:ring-0 focus:ring-offset-0 appearance-none"
                         style={{ boxShadow: 'none', minWidth: '3rem' }}
@@ -214,10 +250,15 @@ export default function TagPrimaryFilter({
                 </div>
             </div>
 
-            {/* Autocomplete suggestions - width matches input container */}
-            {showSuggestions && suggestions.length > 0 && (
+            {/* Autocomplete suggestions - width matches input container; show loading when fetching used tags */}
+            {showSuggestions && (
                 <div className={`absolute z-50 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-auto ${fullWidth ? 'w-full min-w-0' : 'w-[200px] min-w-[140px]'}`}>
-                    {suggestions.map((suggestion, index) => (
+                    {loadingSuggestions && suggestions.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">Loading tags...</div>
+                    ) : suggestions.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">No tags in use yet</div>
+                    ) : (
+                        suggestions.map((suggestion, index) => (
                         <button
                             key={`${suggestion.tag}-${index}`}
                             id={`tag-primary-suggestion-${index}`}
@@ -241,7 +282,8 @@ export default function TagPrimaryFilter({
                                 </div>
                             </div>
                         </button>
-                    ))}
+                    ))
+                    )}
                 </div>
             )}
 

@@ -256,12 +256,37 @@ class AssetTagController extends Controller
         }
 
         $query = $request->input('q', '');
-        
-        if (strlen($query) < 2) {
-            return response()->json(['suggestions' => []]);
+        $queryTrimmed = is_string($query) ? trim($query) : '';
+
+        // Empty or short query: return list of used tags (for filter dropdown "show on focus")
+        if (strlen($queryTrimmed) < 2) {
+            $suggestions = DB::table('asset_tags')
+                ->select('tag', DB::raw('COUNT(*) as usage_count'))
+                ->whereIn('asset_id', function ($subQuery) use ($tenant) {
+                    $subQuery->select('id')
+                        ->from('assets')
+                        ->where('tenant_id', $tenant->id);
+                })
+                ->groupBy('tag')
+                ->orderByDesc('usage_count')
+                ->orderBy('tag')
+                ->limit(30)
+                ->get()
+                ->map(function ($suggestion) {
+                    return [
+                        'tag' => $suggestion->tag,
+                        'usage_count' => (int) $suggestion->usage_count,
+                        'type' => 'existing',
+                    ];
+                });
+
+            return response()->json([
+                'suggestions' => $suggestions,
+                'query' => $queryTrimmed,
+            ]);
         }
 
-        // Get existing canonical tags across all tenant assets
+        // Get existing canonical tags matching search
         $suggestions = DB::table('asset_tags')
             ->select('tag', DB::raw('COUNT(*) as usage_count'))
             ->whereIn('asset_id', function ($subQuery) use ($tenant) {
@@ -269,7 +294,7 @@ class AssetTagController extends Controller
                     ->from('assets')
                     ->where('tenant_id', $tenant->id);
             })
-            ->where('tag', 'LIKE', '%' . $query . '%')
+            ->where('tag', 'LIKE', '%' . $queryTrimmed . '%')
             ->groupBy('tag')
             ->orderByDesc('usage_count')
             ->orderBy('tag')
@@ -278,14 +303,14 @@ class AssetTagController extends Controller
             ->map(function ($suggestion) {
                 return [
                     'tag' => $suggestion->tag,
-                    'usage_count' => $suggestion->usage_count,
+                    'usage_count' => (int) $suggestion->usage_count,
                     'type' => 'existing',
                 ];
             });
 
         // If no exact matches, suggest normalized version
         if ($suggestions->isEmpty()) {
-            $normalizedSuggestion = $this->normalizationService->normalize($query, $tenant);
+            $normalizedSuggestion = $this->normalizationService->normalize($queryTrimmed, $tenant);
             if ($normalizedSuggestion !== null) {
                 $suggestions->push([
                     'tag' => $normalizedSuggestion,
@@ -297,7 +322,7 @@ class AssetTagController extends Controller
 
         return response()->json([
             'suggestions' => $suggestions,
-            'query' => $query,
+            'query' => $queryTrimmed,
         ]);
     }
 

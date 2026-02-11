@@ -53,8 +53,9 @@ import UserSelect from './UserSelect'
  * @param {string} [props.sortBy] - Current sort field (featured | created | quality | modified | alphabetical)
  * @param {string} [props.sortDirection] - asc | desc
  * @param {Function} [props.onSortChange] - (sortBy, sortDirection) => void
- * @param {number} [props.assetResultCount] - Number of assets in current result (search + filters)
- * @param {number} [props.totalInCategory] - Total assets in selected category (or All)
+ * @param {number} [props.assetResultCount] - Number of assets currently visible (e.g. revealed by infinite scroll)
+ * @param {number} [props.totalInCategory] - Total assets loaded so far (for "x of y" display)
+ * @param {boolean} [props.hasMoreAvailable] - If true, show "x of y+" when more can be loaded
  * @param {React.ReactNode} [props.barTrailingContent] - Optional content on the right of the bar (same line as count and Sort), e.g. Select Multiple / Select all
  */
 export default function AssetGridSecondaryFilters({
@@ -69,6 +70,7 @@ export default function AssetGridSecondaryFilters({
     onSortChange = null,
     assetResultCount = null,
     totalInCategory = null,
+    hasMoreAvailable = false,
     barTrailingContent = null,
 }) {
     const pageProps = usePage().props
@@ -519,7 +521,9 @@ export default function AssetGridSecondaryFilters({
                         <span className="text-xs text-gray-500">
                             {[
                                 assetResultCount != null
-                                    ? (totalInCategory != null && totalInCategory > 0 ? `${assetResultCount} of ${totalInCategory}` : String(assetResultCount))
+                                    ? (totalInCategory != null
+                                        ? `${assetResultCount} of ${totalInCategory}${hasMoreAvailable ? '+' : ''}`
+                                        : String(assetResultCount))
                                     : '',
                                 activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''}` : '',
                             ].filter(Boolean).join(' · ')}

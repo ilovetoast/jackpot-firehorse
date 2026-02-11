@@ -72,20 +72,33 @@ class AssetSortService
 
     /**
      * Featured: starred assets first, then non-starred. Within each group, created_at (asc/desc).
-     * We store strict boolean in assets.metadata.starred (see docs/STARRED_CANONICAL.md).
+     * Uses assets.metadata.starred when present; falls back to latest asset_metadata value for
+     * "starred" so sort matches display (assets with starred only in asset_metadata still sort first).
      */
     private function applyFeaturedSort(Builder $query, string $direction, string $driver): void
     {
-        if ($driver === 'pgsql') {
-            $query->orderByRaw(
-                "CASE WHEN (metadata->>'starred')::text IN ('true', '1') THEN 1 ELSE 0 END DESC"
-            );
-        } else {
-            $query->orderByRaw(
-                "CASE WHEN JSON_EXTRACT(metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.starred')) IN ('true', '1') THEN 1 ELSE 0 END DESC"
-            );
-        }
+        $starredExpr = $this->featuredStarredExpression($driver);
+        $query->orderByRaw($starredExpr);
         $query->orderBy('created_at', $direction);
+    }
+
+    /**
+     * SQL expression: 1 if asset is starred (metadata or asset_metadata), 0 otherwise.
+     */
+    private function featuredStarredExpression(string $driver): string
+    {
+        $joinWhere = 'am.asset_id = assets.id AND mf.id = am.metadata_field_id AND mf.key = \'starred\' AND (mf.tenant_id IS NULL OR mf.tenant_id = assets.tenant_id)';
+        $order = 'ORDER BY mf.tenant_id IS NULL ASC, am.approved_at IS NULL ASC, am.id DESC LIMIT 1';
+
+        if ($driver === 'pgsql') {
+            $fromMeta = "(metadata->>'starred')::text IN ('true', '1', 'yes')";
+            $fallback = "(SELECT CASE WHEN (am.value_json)::text IN ('true', 't', '1') OR LOWER(TRIM((am.value_json)::text, '\"')) IN ('true', '1', 'yes') THEN 1 ELSE 0 END FROM asset_metadata am INNER JOIN metadata_fields mf ON {$joinWhere} {$order})";
+            return "CASE WHEN {$fromMeta} OR ({$fallback}) = 1 THEN 1 ELSE 0 END DESC";
+        }
+
+        $fromMeta = "JSON_EXTRACT(assets.metadata, '$.starred') = true OR JSON_UNQUOTE(JSON_EXTRACT(assets.metadata, '$.starred')) IN ('true', '1', 'yes')";
+        $fallback = "(SELECT CASE WHEN JSON_UNQUOTE(am.value_json) IN ('true', '1', 'yes') THEN 1 ELSE 0 END FROM asset_metadata am INNER JOIN metadata_fields mf ON {$joinWhere} {$order})";
+        return "CASE WHEN {$fromMeta} OR {$fallback} = 1 THEN 1 ELSE 0 END DESC";
     }
 
     /**

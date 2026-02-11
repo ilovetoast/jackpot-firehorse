@@ -2184,97 +2184,76 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Detect if image has white content on transparent background.
-     * 
-     * Samples pixels from the image to determine if visible content is mostly white.
-     * This helps identify logos/text that would be invisible on white/transparent backgrounds.
-     * 
-     * Uses a more aggressive detection strategy:
-     * - Lower white threshold (RGB > 220 instead of 240) to catch more white content
-     * - Lower ratio threshold (40% instead of 60%) to be more inclusive
-     * - Also checks if average brightness is high (bright images likely need dark bg)
+     * Detect if image has white content on transparent background (e.g. white logo).
+     *
+     * Only add a dark backdrop when the image is effectively a white/near-white logo or graphic
+     * on transparency. We never add backdrop for photography or images with large transparent
+     * areas where the visible content is not mostly white.
+     *
+     * Criteria (all required):
+     * - At least 15% of pixels are transparent (so it's "content on transparent", not opaque photo).
+     * - Among visible (opaque) pixels, at least 75% are white/near-white (entirely or nearly entirely white).
      *
      * @param resource $imageResource GD image resource
      * @param int $width Image width
      * @param int $height Image height
-     * @return bool True if image appears to have white content on transparent background
+     * @return bool True only when image appears to be a white logo/graphic on transparent background
      */
     protected function hasWhiteContentOnTransparent($imageResource, int $width, int $height): bool
     {
-        // Sample more pixels for better detection (especially for small images)
-        $sampleSize = min(50, max(10, min($width, $height) / 5)); // Sample 10-50 points
-        $stepX = max(1, (int)($width / $sampleSize));
-        $stepY = max(1, (int)($height / $sampleSize));
-        
+        $sampleSize = min(50, max(10, (int) min($width, $height) / 5));
+        $stepX = max(1, (int) ($width / $sampleSize));
+        $stepY = max(1, (int) ($height / $sampleSize));
+
         $whitePixelCount = 0;
         $visiblePixelCount = 0;
-        $totalBrightness = 0;
+        $transparentPixelCount = 0;
         $totalSampled = 0;
-        
-        // Sample pixels across the image
+
         for ($y = 0; $y < $height; $y += $stepY) {
             for ($x = 0; $x < $width; $x += $stepX) {
                 $totalSampled++;
                 $color = imagecolorat($imageResource, $x, $y);
-                
-                // Extract RGBA components
-                $alpha = ($color >> 24) & 0x7F; // Alpha channel (0 = opaque, 127 = transparent)
+                $alpha = ($color >> 24) & 0x7F;
                 $red = ($color >> 16) & 0xFF;
                 $green = ($color >> 8) & 0xFF;
                 $blue = $color & 0xFF;
-                
-                // Only consider visible pixels (not fully transparent)
-                if ($alpha < 127) {
-                    $visiblePixelCount++;
-                    
-                    // Calculate brightness (luminance formula)
-                    $brightness = (0.299 * $red + 0.587 * $green + 0.114 * $blue);
-                    $totalBrightness += $brightness;
-                    
-                    // Check if pixel is white or near-white
-                    // More aggressive threshold: RGB values all > 200 (catches off-white, cream, light gray)
-                    // Also check if any channel is very high (>230) - catches mostly-white pixels
-                    // This catches white logos/text on transparent backgrounds more reliably
-                    $isWhite = ($red > 200 && $green > 200 && $blue > 200) || 
-                               ($red > 230 || $green > 230 || $blue > 230);
-                    if ($isWhite) {
-                        $whitePixelCount++;
-                    }
+
+                if ($alpha >= 100) {
+                    $transparentPixelCount++;
+                    continue;
+                }
+                $visiblePixelCount++;
+                $isWhite = ($red > 220 && $green > 220 && $blue > 220);
+                if ($isWhite) {
+                    $whitePixelCount++;
                 }
             }
         }
-        
-        // If we have visible pixels, check if most are white
+
         if ($visiblePixelCount === 0) {
-            return false; // No visible content, can't determine
+            return false;
         }
-        
-        // Calculate average brightness
-        $avgBrightness = $totalBrightness / $visiblePixelCount;
-        
-        // If more than 30% of visible pixels are white, likely white content on transparent
-        // Very aggressive threshold (30% instead of 40%) to catch more cases
+
+        $transparentRatio = $transparentPixelCount / $totalSampled;
         $whiteRatio = $whitePixelCount / $visiblePixelCount;
-        
-        // Also check if average brightness is high (bright images likely need dark bg)
-        // Average brightness > 180 indicates a bright image (lowered from 200)
-        $isBrightImage = $avgBrightness > 180;
-        
-        // Very aggressive detection: white content OR bright image
-        // If >30% white OR (>15% white AND bright), use dark background
-        $isWhiteContent = $whiteRatio > 0.3 || ($whiteRatio > 0.15 && $isBrightImage);
-        
+
+        // Only add backdrop when: (1) significant transparency, (2) visible content is nearly entirely white
+        $hasSignificantTransparency = $transparentRatio >= 0.15;
+        $isNearlyAllWhiteContent = $whiteRatio >= 0.75;
+        $needsDarkBackground = $hasSignificantTransparency && $isNearlyAllWhiteContent;
+
         Log::debug('[ThumbnailGenerationService] White content detection', [
             'total_sampled' => $totalSampled,
             'visible_pixels' => $visiblePixelCount,
+            'transparent_pixels' => $transparentPixelCount,
+            'transparent_ratio' => round($transparentRatio, 2),
             'white_pixels' => $whitePixelCount,
             'white_ratio' => round($whiteRatio, 2),
-            'avg_brightness' => round($avgBrightness, 2),
-            'is_bright_image' => $isBrightImage,
-            'needs_dark_background' => $isWhiteContent,
+            'needs_dark_background' => $needsDarkBackground,
         ]);
-        
-        return $isWhiteContent;
+
+        return $needsDarkBackground;
     }
 
     /**

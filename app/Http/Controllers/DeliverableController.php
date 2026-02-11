@@ -48,8 +48,10 @@ class DeliverableController extends Controller
         if (!$tenant || !$brand) {
             return Inertia::render('Deliverables/Index', [
                 'categories' => [],
+                'total_asset_count' => 0,
                 'selected_category' => null,
                 'assets' => [],
+                'next_page_url' => null,
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'q' => '',
@@ -157,6 +159,44 @@ class DeliverableController extends Controller
             ['name', 'asc'],
         ])->values();
 
+        // Per-category and total deliverable counts (match Assets page; apply same lifecycle so counts reflect visible list)
+        $categoryIds = $allCategories->pluck('id')->filter()->toArray();
+        $assetCounts = [];
+        $totalDeliverableCount = 0;
+        if (! empty($viewableCategoryIds)) {
+            $countQuery = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::DELIVERABLE)
+                ->whereNull('deleted_at')
+                ->whereNotNull('metadata')
+                ->whereIn(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'), array_map('intval', $viewableCategoryIds));
+            $this->lifecycleResolver->apply(
+                $countQuery,
+                $request->get('lifecycle'),
+                $user,
+                $tenant,
+                $brand
+            );
+            $totalDeliverableCount = (clone $countQuery)->count();
+            if (! empty($categoryIds)) {
+                $counts = (clone $countQuery)
+                    ->selectRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) as category_id, COUNT(*) as count')
+                    ->groupBy(DB::raw('CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED)'))
+                    ->get()
+                    ->pluck('count', 'category_id')
+                    ->toArray();
+                foreach ($counts as $catId => $count) {
+                    $assetCounts[$catId] = $count;
+                }
+            }
+        }
+        $allCategories = $allCategories->map(function ($category) use ($assetCounts) {
+            $category['asset_count'] = isset($category['id']) && isset($assetCounts[$category['id']])
+                ? $assetCounts[$category['id']]
+                : 0;
+            return $category;
+        });
+
         // Check if plan is not free (to show "All" button)
         $currentPlan = $this->planService->getCurrentPlan($tenant);
         $showAllButton = $currentPlan !== 'free';
@@ -240,12 +280,16 @@ class DeliverableController extends Controller
         $sort = $this->assetSortService->normalizeSort($request->input('sort'));
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
         $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
-        $assets = $assetsQuery->get();
-        
+
+        // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
+        $perPage = 36;
+        $paginator = $assetsQuery->paginate($perPage);
+        $assetModels = $paginator->getCollection();
+
         // HARD TERMINAL STATE: Check for stuck assets and repair them
         // This prevents infinite processing states by automatically failing
         // assets that have been processing longer than the timeout threshold
-        foreach ($assets as $asset) {
+        foreach ($assetModels as $asset) {
             if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
                 $timeoutGuard->checkAndRepair($asset);
                 // Reload asset to get updated status if it was repaired
@@ -254,7 +298,7 @@ class DeliverableController extends Controller
         }
         
         // Enhanced logging for debugging missing assets
-        if ($assets->count() === 0) {
+        if ($assetModels->count() === 0) {
             $totalDeliverables = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::DELIVERABLE)
@@ -294,7 +338,7 @@ class DeliverableController extends Controller
         }
 
         // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
-        $assets = $assets
+        $mappedAssets = $assetModels
             ->map(function ($asset) use ($tenant, $brand) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
@@ -485,7 +529,11 @@ class DeliverableController extends Controller
                     'url' => null, // Reserved for future download endpoint
                 ];
             })
-            ->values();
+            ->values()
+            ->all();
+
+        // Keep collection for availableValues block
+        $assets = collect($mappedAssets);
 
         // Phase L.5.1: Enable filters in "All Categories" view
         // Resolve schema even when categoryId is null to allow system-level filters
@@ -536,9 +584,11 @@ class DeliverableController extends Controller
         $availableValues = [];
         $bucketToDominantColors = []; // bucket -> dominant_colors for swatch display (first occurrence wins)
         
-        if (!empty($filterableSchema) && $assets->count() > 0) {
-            // Get asset IDs from the current grid result set
-            $assetIds = $assets->pluck('id')->toArray();
+        // When page > 1, use first page's asset IDs for filter options so dropdowns stay consistent
+        $assetIdsForAvailableValues = $assetModels->pluck('id')->toArray();
+        if (!empty($filterableSchema) && count($assetIdsForAvailableValues) > 0) {
+            // Get asset IDs from the current grid result set (or first page when loading page > 1)
+            $assetIds = $assetIdsForAvailableValues;
             
             // Build map of filterable field keys for quick lookup
             // Note: filterableSchema from getFilterableFields() already contains only filterable fields,
@@ -781,12 +831,22 @@ class DeliverableController extends Controller
         }
         unset($field);
 
+        // Load-more: return JSON only so the client can append without Inertia replacing the list
+        if ($request->boolean('load_more')) {
+            return response()->json([
+                'data' => $mappedAssets,
+                'next_page_url' => $paginator->nextPageUrl(),
+            ]);
+        }
+
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
+            'total_asset_count' => $totalDeliverableCount, // Total count for "All" and sidebar parity with Assets
             'selected_category' => $categoryId ? (int)$categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
-            'assets' => $assets, // Top-level prop for frontend AssetGrid component
+            'assets' => $mappedAssets,
+            'next_page_url' => $paginator->nextPageUrl(),
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,
