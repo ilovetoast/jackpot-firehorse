@@ -180,6 +180,13 @@ return [
             'custom_download_permissions' => true,
             'share_downloads_with_permissions' => true,
         ],
+        // D11/D12: Base download policy; tenant overrides in settings['download_policy'] merge over this
+        'download_policy' => [
+            'disable_single_asset_downloads' => false,
+            'require_password_for_public' => false,
+            'force_expiration_days' => null,
+            'disallow_non_expiring' => false,
+        ],
         'notes' => [
             '"All" button in Assets/Executions category sidebar to view all assets across categories',
             'Unlimited download links',

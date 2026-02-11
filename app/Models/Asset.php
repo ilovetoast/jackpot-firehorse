@@ -582,10 +582,15 @@ class Asset extends Model
             return $value;
         }
 
-        // Value is an S3 path - generate presigned URL on-demand
+        // Value is an S3 path - generate presigned URL using the asset's storage bucket
+        // (preview is stored in the same bucket as the asset; default disk may be a different bucket on staging)
         try {
-            // Generate presigned URL with maximum allowed expiration (7 days)
-            // AWS S3 presigned URLs have a maximum expiration of 7 days
+            $bucket = $this->storageBucket;
+            if ($bucket) {
+                $bucketService = app(\App\Services\TenantBucketService::class);
+                return $bucketService->getPresignedGetUrl($bucket, $value, 7 * 24 * 60); // 7 days in minutes
+            }
+            // Fallback: legacy assets without storage_bucket_id use default disk
             return \Illuminate\Support\Facades\Storage::disk('s3')
                 ->temporaryUrl($value, now()->addDays(7));
         } catch (\Exception $e) {
@@ -623,10 +628,15 @@ class Asset extends Model
             return $value;
         }
 
-        // Value is an S3 path - generate presigned URL on-demand
+        // Value is an S3 path - generate presigned URL using the asset's storage bucket
+        // (poster is stored in the same bucket as the asset; default disk may be a different bucket on staging)
         try {
-            // Generate presigned URL with maximum allowed expiration (7 days)
-            // AWS S3 presigned URLs have a maximum expiration of 7 days
+            $bucket = $this->storageBucket;
+            if ($bucket) {
+                $bucketService = app(\App\Services\TenantBucketService::class);
+                return $bucketService->getPresignedGetUrl($bucket, $value, 7 * 24 * 60); // 7 days in minutes
+            }
+            // Fallback: legacy assets without storage_bucket_id use default disk
             return \Illuminate\Support\Facades\Storage::disk('s3')
                 ->temporaryUrl($value, now()->addDays(7));
         } catch (\Exception $e) {

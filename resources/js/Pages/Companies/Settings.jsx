@@ -16,8 +16,9 @@ const DEFAULT_DOWNLOAD_POLICY = {
     disallow_non_expiring: false,
 }
 
-export default function CompanySettings({ tenant, billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
-    const { auth } = usePage().props
+export default function CompanySettings({ tenant, company_url_domain = 'jackpot.local', billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
+    const page = usePage()
+    const { auth, errors: pageErrors = {}, flash = {} } = page.props
     const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
     const { hasPermission: canEditViaPermission } = usePermission('companies.settings.edit')
     // Company owners should always be able to edit settings
@@ -235,6 +236,7 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
         }, {
             preserveScroll: true,
             onFinish: () => setDownloadPolicySaving(false),
+            onSuccess: () => router.reload({ preserveScroll: true, only: ['tenant', 'enterprise_download_policy', 'billing'] }),
         })
     }
 
@@ -507,7 +509,7 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                                 placeholder="your-company-name"
                                             />
                                             <span className="inline-flex items-center rounded-r-md border border-l-0 border-gray-300 bg-gray-50 px-3 text-gray-500 sm:text-sm">
-                                                .jackpot.local
+                                                .{company_url_domain}
                                             </span>
                                         </div>
                                         
@@ -815,6 +817,16 @@ export default function CompanySettings({ tenant, billing, team_members_count, b
                                 </div>
                                 {/* Right: All policy options */}
                                 <div className="lg:col-span-2 px-6 py-6">
+                                    {pageErrors.download_policy && (
+                                        <div className="mb-4 rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
+                                            {pageErrors.download_policy}
+                                        </div>
+                                    )}
+                                    {flash.download_policy_saved && (
+                                        <div className="mb-4 rounded-md bg-green-50 p-4 text-sm text-green-800 border border-green-200">
+                                            Download policy updated.
+                                        </div>
+                                    )}
                                     <div className="space-y-6">
                                         {/* Delivery Controls */}
                                         <div>

@@ -40,6 +40,8 @@ import AssetTagManager from './AssetTagManager'
 import AssetTimeline from './AssetTimeline'
 import CollapsibleSection from './CollapsibleSection'
 import PermissionGate from './PermissionGate'
+import StarRating from './StarRating'
+import CollectionSelector from './Collections/CollectionSelector'
 import { usePermission } from '../hooks/usePermission'
 import { router, usePage } from '@inertiajs/react'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
@@ -106,6 +108,9 @@ export default function AssetDetailPanel({
     const [error, setError] = useState(null)
     const [assetCollections, setAssetCollections] = useState([])
     const [assetCollectionsLoading, setAssetCollectionsLoading] = useState(false)
+    const [dropdownCollections, setDropdownCollections] = useState([])
+    const [dropdownCollectionsLoading, setDropdownCollectionsLoading] = useState(false)
+    const [syncCollectionsLoading, setSyncCollectionsLoading] = useState(false)
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
 
@@ -190,6 +195,19 @@ export default function AssetDetailPanel({
             .then((res) => setAssetCollections(res.data?.collections ?? []))
             .catch(() => setAssetCollections([]))
             .finally(() => setAssetCollectionsLoading(false))
+    }, [isOpen, asset?.id])
+
+    useEffect(() => {
+        if (!isOpen || !asset?.id) {
+            setDropdownCollections([])
+            return
+        }
+        setDropdownCollectionsLoading(true)
+        window.axios
+            .get('/app/collections/list', { headers: { Accept: 'application/json' } })
+            .then((res) => setDropdownCollections(res.data?.collections ?? []))
+            .catch(() => setDropdownCollections([]))
+            .finally(() => setDropdownCollectionsLoading(false))
     }, [isOpen, asset?.id])
 
     useEffect(() => {
@@ -985,6 +1003,13 @@ export default function AssetDetailPanel({
                                                         fieldKey === 'dominant_colors' &&
                                                         Array.isArray(field.current_value) &&
                                                         field.current_value.some((c) => c?.hex)
+                                                    const isRating =
+                                                        field.type === 'rating' ||
+                                                        fieldKey === 'quality_rating' ||
+                                                        field.display_widget === 'stars'
+                                                    const isToggleBoolean =
+                                                        field.type === 'boolean' &&
+                                                        (fieldKey === 'starred' || field.display_widget === 'toggle')
                                                     const editValue =
                                                         isEditing && isEditableField && metadataDirty[groupKey]?.[metadataFieldId] !== undefined
                                                             ? metadataDirty[groupKey][metadataFieldId]
@@ -1009,7 +1034,34 @@ export default function AssetDetailPanel({
                                                                 <span className="text-sm font-semibold text-gray-700">{field.display_label}</span>
                                                                 {isEditing && isEditableField ? (
                                                                     <div className="mt-1">
-                                                                        {field.type === 'boolean' ? (
+                                                                        {isRating ? (
+                                                                            <StarRating
+                                                                                value={Number(editValue) || 0}
+                                                                                onChange={(v) => setDirtyValue(v)}
+                                                                                editable
+                                                                                maxStars={5}
+                                                                                size="md"
+                                                                            />
+                                                                        ) : isToggleBoolean ? (
+                                                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                                                <div className="relative inline-flex items-center flex-shrink-0">
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        checked={editValue === true || editValue === 'true'}
+                                                                                        onChange={(e) => setDirtyValue(e.target.checked)}
+                                                                                        className="sr-only peer"
+                                                                                    />
+                                                                                    <div
+                                                                                        className="relative w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-focus:outline-none peer-focus:ring-4"
+                                                                                        style={{
+                                                                                            ['--tw-ring-color']: brandPrimary,
+                                                                                            ...(editValue === true || editValue === 'true' ? { backgroundColor: brandPrimary } : {}),
+                                                                                        }}
+                                                                                    />
+                                                                                </div>
+                                                                                <span className="text-sm text-gray-700">{editValue === true || editValue === 'true' ? 'Yes' : 'No'}</span>
+                                                                            </label>
+                                                                        ) : field.type === 'boolean' ? (
                                                                             <label className="flex items-center gap-2">
                                                                                 <input
                                                                                     type="checkbox"
@@ -1062,6 +1114,19 @@ export default function AssetDetailPanel({
                                                                             />
                                                                         )}
                                                                     </div>
+                                                                ) : isRating ? (
+                                                                    <span className="inline-flex items-center mt-1">
+                                                                        <StarRating
+                                                                            value={Number(field.current_value) || 0}
+                                                                            editable={false}
+                                                                            maxStars={5}
+                                                                            size="md"
+                                                                        />
+                                                                    </span>
+                                                                ) : isToggleBoolean ? (
+                                                                    <span className="text-sm text-gray-900 mt-1">
+                                                                        {field.current_value === true || field.current_value === 'true' ? 'Yes' : 'No'}
+                                                                    </span>
                                                                 ) : (displayValue || dominantColorsArray) ? (
                                                                     <>
                                                                         <span className="text-gray-400 mx-1">:</span>
@@ -1099,13 +1164,49 @@ export default function AssetDetailPanel({
                                             {metadata.fields.some((f) => (f.key || f.field_key) === 'collection') && groupKey === 'general' && (
                                                 <div className="flex items-start justify-between gap-2 py-3 border-b border-gray-100 last:border-b-0 px-3">
                                                     <span className="text-sm font-semibold text-gray-700">Collection</span>
-                                                    <span className="text-sm text-gray-900">
-                                                        {assetCollectionsLoading
-                                                            ? 'Loading…'
-                                                            : assetCollections.length > 0
-                                                              ? assetCollections.map((c) => c.name).join(', ')
-                                                              : 'None'}
-                                                    </span>
+                                                    <div className="min-w-0 flex-1 flex justify-end">
+                                                        {isEditing && canEdit ? (
+                                                            <div className="w-full max-w-sm">
+                                                                {dropdownCollectionsLoading ? (
+                                                                    <p className="text-sm text-gray-500">Loading collections…</p>
+                                                                ) : (
+                                                                    <CollectionSelector
+                                                                        collections={dropdownCollections}
+                                                                        selectedIds={assetCollections.map((c) => c.id)}
+                                                                        onChange={async (newCollectionIds) => {
+                                                                            if (!asset?.id || syncCollectionsLoading) return
+                                                                            setSyncCollectionsLoading(true)
+                                                                            try {
+                                                                                await window.axios.put(
+                                                                                    `/app/assets/${asset.id}/collections`,
+                                                                                    { collection_ids: newCollectionIds },
+                                                                                    { headers: { Accept: 'application/json' } }
+                                                                                )
+                                                                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                            } catch (err) {
+                                                                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
+                                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                            } finally {
+                                                                                setSyncCollectionsLoading(false)
+                                                                            }
+                                                                        }}
+                                                                        disabled={syncCollectionsLoading}
+                                                                        placeholder="Select collections…"
+                                                                        maxHeight="320px"
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-sm text-gray-900">
+                                                                {assetCollectionsLoading
+                                                                    ? 'Loading…'
+                                                                    : assetCollections.length > 0
+                                                                      ? assetCollections.map((c) => c.name).join(', ')
+                                                                      : 'None'}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             )}
                                             {isEditing && canEdit && (

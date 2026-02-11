@@ -307,9 +307,9 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                                 {fileExtension}
                             </span>
-                            {/* Starred: backend sends asset.starred as boolean only (see STARRED_CANONICAL in backend); color uses active brand primary */}
+                            {/* Starred: gold for visibility on varied image backgrounds (brand primary was too dark) */}
                             {asset.starred === true && (
-                                <StarIcon className="h-3.5 w-3.5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" style={{ color: primaryColor }} aria-label="Starred" />
+                                <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />
                             )}
                             {/* Subtle unpublished icon */}
                             {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}

@@ -30,13 +30,13 @@ class EnterpriseDownloadPolicy
             return null;
         }
         $plan = config("plans.{$planName}");
-        $base = $plan['download_policy'] ?? null;
-        if ($base === null) {
-            return null;
+        $base = $plan['download_policy'] ?? [];
+        if (! is_array($base)) {
+            $base = [];
         }
         $overrides = $tenant->settings['download_policy'] ?? [];
         if (! is_array($overrides) || empty($overrides)) {
-            return $base;
+            return $base ?: null;
         }
         return array_merge($base, $overrides);
     }

@@ -1018,29 +1018,32 @@ class AssetMetadataController extends Controller
                         ->where('is_active', true);
                 });
             })
-            ->select([
-                'id',
-                'key',
-                'system_label',
-                'type',
-                'applies_to',
-                'scope',
-                'is_filterable',
-                'is_user_editable',
-                'is_ai_trainable',
-                'is_upload_visible',
-                'is_internal_only',
-                'group_key',
-                'plan_gate',
-                'deprecated_at',
-                'replacement_field_id',
-                DB::raw("COALESCE(population_mode, 'manual') as population_mode"),
-                DB::raw("COALESCE(show_on_upload, true) as show_on_upload"),
-                DB::raw("COALESCE(show_on_edit, true) as show_on_edit"),
-                DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
-                DB::raw("COALESCE(readonly, false) as readonly"),
-                DB::raw("COALESCE(is_primary, false) as is_primary"),
-            ])
+            ->select(array_merge(
+                [
+                    'id',
+                    'key',
+                    'system_label',
+                    'type',
+                    'applies_to',
+                    'scope',
+                    'is_filterable',
+                    'is_user_editable',
+                    'is_ai_trainable',
+                    'is_upload_visible',
+                    'is_internal_only',
+                    'group_key',
+                    'plan_gate',
+                    'deprecated_at',
+                    'replacement_field_id',
+                    DB::raw("COALESCE(population_mode, 'manual') as population_mode"),
+                    DB::raw("COALESCE(show_on_upload, true) as show_on_upload"),
+                    DB::raw("COALESCE(show_on_edit, true) as show_on_edit"),
+                    DB::raw("COALESCE(show_in_filters, true) as show_in_filters"),
+                    DB::raw("COALESCE(readonly, false) as readonly"),
+                    DB::raw("COALESCE(is_primary, false) as is_primary"),
+                ],
+                \Illuminate\Support\Facades\Schema::hasColumn('metadata_fields', 'display_widget') ? ['display_widget'] : []
+            ))
             ->get()
             ->keyBy('id');
         
@@ -1138,6 +1141,7 @@ class AssetMetadataController extends Controller
                 'display_label' => $displayLabel,
                 'type' => $field->type,
                 'group_key' => $field->group_key,
+                'display_widget' => $field->display_widget ?? null,
                 'applies_to' => $field->applies_to,
                 'is_visible' => true, // Always visible in modal (source of truth)
                 'is_upload_visible' => (bool) $field->is_upload_visible,

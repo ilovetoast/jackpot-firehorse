@@ -213,6 +213,9 @@ class CompanyController extends Controller
             ];
         }
 
+        // Domain for company URL slug display (from APP_URL so staging/production show correct host)
+        $companyUrlDomain = config('subdomain.main_domain') ?: parse_url(config('app.url'), PHP_URL_HOST) ?: 'jackpot.local';
+
         // Phase M-2: Include tenant settings
         return Inertia::render('Companies/Settings', [
             'tenant' => [
@@ -223,6 +226,7 @@ class CompanyController extends Controller
                 'settings' => $tenant->settings ?? [],
                 'default_brand_name' => $defaultBrand?->name ?? null,
             ],
+            'company_url_domain' => $companyUrlDomain,
             'billing' => [
                 'current_plan' => $currentPlan,
                 'subscription_status' => $subscription ? $subscription->stripe_status : 'none',
@@ -375,14 +379,16 @@ class CompanyController extends Controller
             'disallow_non_expiring' => 'nullable|boolean',
         ]);
 
-        $overrides = array_filter($validated, fn ($v) => $v !== null);
+        // Merge all validated keys (including null) so clearing "Enforce expiration" persists
         $currentSettings = $tenant->settings ?? [];
         $currentPolicy = $currentSettings['download_policy'] ?? [];
-        $mergedPolicy = is_array($currentPolicy) ? array_merge($currentPolicy, $overrides) : $overrides;
+        $mergedPolicy = is_array($currentPolicy) ? array_merge($currentPolicy, $validated) : $validated;
         $currentSettings['download_policy'] = $mergedPolicy;
         $tenant->update(['settings' => $currentSettings]);
 
-        return redirect()->back()->with('success', 'Download policy updated.');
+        return redirect()->back()
+            ->with('success', 'Download policy updated.')
+            ->with('download_policy_saved', true);
     }
 
     /**

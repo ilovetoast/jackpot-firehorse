@@ -389,6 +389,7 @@ class HandleInertiaRequests extends Middleware
                 'warning' => $request->session()->get('warning'),
                 'info' => $request->session()->get('info'),
                 'status' => $request->session()->get('status'), // For password reset status messages
+                'download_policy_saved' => $request->session()->get('download_policy_saved'),
             ],
             // Phase 2.5: Environment detection for dev-only features
             'env' => [
