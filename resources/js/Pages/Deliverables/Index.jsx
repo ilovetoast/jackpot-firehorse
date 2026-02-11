@@ -60,7 +60,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         if (!nextPageUrl || loading) return
         setLoading(true)
         try {
-            const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
+            const separator = nextPageUrl.includes('?') ? '&' : '?'
+            const url = nextPageUrl + separator + 'load_more=1'
             const response = await axios.get(url)
             const data = response.data?.data ?? []
             setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
@@ -295,7 +296,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             { 
                 preserveState: true, 
                 preserveScroll: true,
-                only: ['filterable_schema', 'available_values', 'assets', 'selected_category', 'selected_category_slug']
+                only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug']
             }
         )
     }
@@ -716,7 +717,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                             urlParams.set('sort', newSort)
                                             urlParams.set('sort_direction', newDir)
                                             urlParams.delete('page')
-                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'sort', 'sort_direction'] })
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction'] })
                                         }}
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}

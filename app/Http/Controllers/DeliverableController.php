@@ -267,24 +267,60 @@ class DeliverableController extends Controller
             $brand
         );
 
+        // Phase M: Base query for "has values" check (tenant, brand, category, lifecycle only; filters/search applied below)
+        $baseQueryForFilterVisibility = (clone $assetsQuery);
+
+        // Apply metadata filters from request (same as AssetController: JSON 'filters' or flat params; tags/collection preserved for load_more)
+        $fileType = 'image';
+        $schema = $categoryId && $category
+            ? $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, $categoryId, $fileType)
+            : $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, null, $fileType);
+        $filters = $request->input('filters', []);
+        if (is_string($filters)) {
+            $filters = json_decode($filters, true) ?? [];
+        }
+        if (empty($filters) || ! is_array($filters)) {
+            $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
+            $specialFilterKeys = ['tags', 'collection'];
+            $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
+            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
+            $filters = [];
+            foreach ($filterKeys as $key) {
+                if (in_array($key, $reserved, true)) {
+                    continue;
+                }
+                $val = $request->input($key);
+                if ($val !== null && $val !== '') {
+                    $filters[$key] = ['operator' => 'equals', 'value' => $val];
+                }
+            }
+        }
+        if (! empty($filters) && is_array($filters)) {
+            $this->metadataFilterService->applyFilters($assetsQuery, $filters, $schema);
+        }
+
         // Scoped search: filename, title, tags, collection name only (before order/pagination)
         $searchQ = $request->input('q') ?? $request->input('search');
         if (is_string($searchQ) && trim($searchQ) !== '') {
             $this->assetSearchService->applyScopedSearch($assetsQuery, trim($searchQ));
+            $this->assetSearchService->applyScopedSearch($baseQueryForFilterVisibility, trim($searchQ));
         }
-
-        // Phase M: Base query for "has values" check (same scope as grid: tenant, brand, category, lifecycle, search)
-        $baseQueryForFilterVisibility = (clone $assetsQuery);
 
         // Phase L: Centralized sort (after search/filters, before pagination)
         $sort = $this->assetSortService->normalizeSort($request->input('sort'));
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
         $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
 
-        // Paginate: server-driven pagination (36 per page); infinite scroll loads next via next_page_url
+        // Paginate: server-driven pagination (36 per page); next_page_url built from request query so filters/category/sort preserved (match AssetController)
         $perPage = 36;
-        $paginator = $assetsQuery->paginate($perPage)->withQueryString();
+        $paginator = $assetsQuery->paginate($perPage);
         $assetModels = $paginator->getCollection();
+
+        $nextPageUrl = null;
+        if ($paginator->hasMorePages()) {
+            $query = array_merge($request->query(), ['page' => $paginator->currentPage() + 1]);
+            $nextPageUrl = $request->url() . '?' . http_build_query($query);
+        }
 
         // HARD TERMINAL STATE: Check for stuck assets and repair them
         // This prevents infinite processing states by automatically failing
@@ -535,39 +571,8 @@ class DeliverableController extends Controller
         // Keep collection for availableValues block
         $assets = collect($mappedAssets);
 
-        // Phase L.5.1: Enable filters in "All Categories" view
-        // Resolve schema even when categoryId is null to allow system-level filters
-        $filterableSchema = [];
-        if ($categoryId && $category) {
-            // Use 'image' as default file type for metadata schema resolution
-            // Category's asset_type is organizational, not a file type
-            $fileType = 'image'; // Default file type for metadata schema resolution
-            
-            $schema = $this->metadataSchemaResolver->resolve(
-                $tenant->id,
-                $brand->id,
-                $categoryId,
-                $fileType
-            );
-            
-            // Phase C2/C4: Pass category and tenant models for suppression check (via MetadataVisibilityResolver)
-            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
-        } elseif (!$categoryId) {
-            // "All Categories" view: Resolve schema without category context
-            // This enables system-level metadata fields (orientation, color_space, resolution_class, dimensions)
-            // that are computed from assets themselves, not category-specific
-            $fileType = 'image'; // Default file type for metadata schema resolution
-            
-            $schema = $this->metadataSchemaResolver->resolve(
-                $tenant->id,
-                $brand->id,
-                null, // No category context
-                $fileType
-            );
-            
-            // Pass null category to mark system fields as global
-            $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, null, $tenant);
-        }
+        // Phase L.5.1: Enable filters in "All Categories" view (reuse $schema resolved above for applyFilters)
+        $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
 
         // Phase M: Hide filters with zero values in scoped dataset (before pagination)
         if (! empty($filterableSchema)) {
@@ -835,7 +840,7 @@ class DeliverableController extends Controller
         if ($request->boolean('load_more')) {
             return response()->json([
                 'data' => $mappedAssets,
-                'next_page_url' => $paginator->nextPageUrl(),
+                'next_page_url' => $nextPageUrl,
             ]);
         }
 
@@ -846,7 +851,7 @@ class DeliverableController extends Controller
             'selected_category_slug' => $categorySlug, // Category slug for URL state
             'show_all_button' => $showAllButton,
             'assets' => $mappedAssets,
-            'next_page_url' => $paginator->nextPageUrl(),
+            'next_page_url' => $nextPageUrl,
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,
