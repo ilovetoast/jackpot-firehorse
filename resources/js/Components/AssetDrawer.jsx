@@ -54,7 +54,7 @@ import PendingMetadataList from './PendingMetadataList'
 import MetadataCandidateReview from './MetadataCandidateReview'
 import ThumbnailPreview from './ThumbnailPreview'
 import ReplaceFileModal from './ReplaceFileModal'
-import AssetDetailsModal from './AssetDetailsModal'
+import AssetDetailPanel from './AssetDetailPanel'
 import CollapsibleSection from './CollapsibleSection'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
@@ -2649,12 +2649,16 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                 </div>
             )}
 
-            {/* Asset Details Modal */}
+            {/* Asset Detail Panel (full-height slide panel, 80% width) */}
             {displayAsset && (
-                <AssetDetailsModal
+                <AssetDetailPanel
                     asset={displayAsset}
                     isOpen={showDetailsModal}
                     onClose={() => setShowDetailsModal(false)}
+                    activityEvents={activityEvents}
+                    activityLoading={activityLoading}
+                    onReplaceFile={() => setShowReplaceFileModal(true)}
+                    primaryColor={brandPrimary}
                 />
             )}
             
