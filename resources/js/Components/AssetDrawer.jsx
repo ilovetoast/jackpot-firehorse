@@ -1627,16 +1627,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                         setTimeout(() => setToastMessage(null), 4000)
                                                         return
                                                     }
-                                                    const downloadUrl = data?.download_url
-                                                    const filename = data?.filename || displayAsset?.original_filename || 'download'
-                                                    if (downloadUrl) {
-                                                        const iframe = document.createElement('iframe')
-                                                        iframe.style.display = 'none'
-                                                        iframe.setAttribute('aria-hidden', 'true')
-                                                        document.body.appendChild(iframe)
-                                                        iframe.src = downloadUrl
-                                                        setTimeout(() => document.body.removeChild(iframe), 60000)
-                                                        setToastMessage('Download started')
+                                                    const fileUrl = data?.file_url || data?.public_url || data?.download_url
+                                                    if (fileUrl) {
+                                                        window.location.href = fileUrl
                                                     } else {
                                                         setToastMessage('Download started')
                                                     }

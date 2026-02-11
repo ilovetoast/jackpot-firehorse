@@ -477,6 +477,7 @@ class DownloadController extends Controller
             return response()->json([
                 'download_id' => $download->id,
                 'public_url' => route('downloads.public', ['download' => $download->id]),
+                'file_url' => route('downloads.public.file', ['download' => $download->id]),
                 'expires_at' => $expiresAt?->toIso8601String(),
             ]);
         }
