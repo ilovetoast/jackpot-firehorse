@@ -63,21 +63,30 @@ class AssetDownloadMetricService
     /**
      * Record one download metric for an asset (append-only asset_metrics row).
      * Aligns with Dashboard / asset stats that count MetricType::DOWNLOAD rows.
+     * Uses download creator when the person hitting the link is not authenticated (e.g. public link).
      */
     private function recordOne(Asset $asset, Download $download): void
     {
         try {
+            $userId = Auth::id() ?? $download->created_by_user_id;
+
             AssetMetric::create([
                 'tenant_id' => $download->tenant_id,
                 'brand_id' => $download->brand_id,
                 'asset_id' => $asset->id,
-                'user_id' => Auth::id(),
+                'user_id' => $userId,
                 'metric_type' => MetricType::DOWNLOAD,
                 'metadata' => [
                     'download_id' => $download->id,
                     'context' => $download->source === DownloadSource::SINGLE_ASSET ? 'single_asset' : 'zip',
                 ],
                 'created_at' => now(),
+            ]);
+
+            Log::info('[AssetDownloadMetricService] Recorded download metric', [
+                'asset_id' => $asset->id,
+                'download_id' => $download->id,
+                'context' => $download->source === DownloadSource::SINGLE_ASSET ? 'single_asset' : 'zip',
             ]);
         } catch (\Throwable $e) {
             Log::warning('[AssetDownloadMetricService] Failed to record asset download metric', [

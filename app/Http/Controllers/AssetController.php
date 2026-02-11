@@ -531,6 +531,7 @@ class AssetController extends Controller
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,
+                        'slug' => $category->slug ?? null,
                     ] : null,
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
                     // Thumbnail URLs - distinct paths prevent cache confusion

@@ -1254,8 +1254,14 @@ export default function AssetDetailPanel({
                                         <dd className="text-sm text-gray-900">{asset?.mime_type || '—'}</dd>
                                         <dt className="font-semibold text-gray-700">File size</dt>
                                         <dd className="text-sm text-gray-900">
-                                            {asset?.file_size != null
-                                                ? `${(Number(asset.file_size) / 1024).toFixed(1)} KB`
+                                            {asset?.size_bytes != null && asset.size_bytes > 0
+                                                ? (() => {
+                                                    const b = Number(asset.size_bytes)
+                                                    if (b < 1024) return `${b} B`
+                                                    if (b < 1024 * 1024) return `${(b / 1024).toFixed(2)} KB`
+                                                    if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(2)} MB`
+                                                    return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                                                })()
                                                 : '—'}
                                         </dd>
                                         {asset?.width != null && asset?.height != null && (
