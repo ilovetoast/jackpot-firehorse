@@ -70,12 +70,12 @@ export default function BrandAvatar({
                     </div>
                 )
             }
-            // Show uploaded icon without background
+            // Show uploaded icon without background (contain so full icon is visible)
             return (
                 <img
                     src={iconPath}
                     alt={name || 'Brand'}
-                    className={`${baseClasses} ${sizeClass} ${className} object-cover`}
+                    className={`${baseClasses} ${sizeClass} ${className} object-contain`}
                 />
             )
         }
@@ -110,14 +110,14 @@ export default function BrandAvatar({
         }
     }
     
-    // Show logo if available (when NOT using icon mode)
+    // Show logo if available (when NOT using icon mode). Use contain so full logo is visible (same as graphics).
     // IMPORTANT: Do NOT add icon background color to logos
     if (logoPath) {
         return (
             <img
                 src={logoPath}
                 alt={name || 'Brand'}
-                className={`${baseClasses} ${sizeClass} ${className} object-cover`}
+                className={`${baseClasses} ${sizeClass} ${className} object-contain`}
             />
         )
     }

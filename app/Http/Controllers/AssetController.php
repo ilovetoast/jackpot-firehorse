@@ -350,10 +350,34 @@ class AssetController extends Controller
             ]);
         }
 
-        // STARRED CANONICAL: Single source for grid/sort/filter is assets.metadata.starred (boolean).
-        // Synced on every save via AssetMetadataController::syncSortFieldToAsset. Run
-        // php artisan metadata:sync-sort-to-assets to backfill legacy data.
-        $assets = $assets->map(function ($asset) use ($tenant, $brand) {
+        // STARRED CANONICAL: Prefer assets.metadata.starred; fallback to asset_metadata so grid star icon
+        // shows even when sync was skipped (e.g. approval required) or backfill not run.
+        $assetIds = $assets->pluck('id')->all();
+        $starredFromTable = [];
+        if (! empty($assetIds)) {
+            $starredFieldId = DB::table('metadata_fields')
+                ->where('key', 'starred')
+                ->where(fn ($q) => $q->whereNull('tenant_id')->orWhere('tenant_id', $tenant->id))
+                ->orderByRaw('tenant_id IS NOT NULL DESC')
+                ->value('id');
+            if ($starredFieldId) {
+                $rows = DB::table('asset_metadata')
+                    ->whereIn('asset_id', $assetIds)
+                    ->where('metadata_field_id', $starredFieldId)
+                    ->whereNotNull('value_json')
+                    ->orderByRaw('approved_at IS NULL ASC')
+                    ->orderByDesc('id')
+                    ->get(['asset_id', 'value_json']);
+                foreach ($rows as $row) {
+                    if (! array_key_exists($row->asset_id, $starredFromTable)) {
+                        $decoded = json_decode($row->value_json, true);
+                        $starredFromTable[$row->asset_id] = $decoded;
+                    }
+                }
+            }
+        }
+
+        $assets = $assets->map(function ($asset) use ($tenant, $brand, $starredFromTable) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -503,7 +527,7 @@ class AssetController extends Controller
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
                     'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
-                    'starred' => $this->assetIsStarred($metadata['starred'] ?? null), // boolean; source: assets.metadata.starred only
+                    'starred' => $this->assetIsStarred($metadata['starred'] ?? $starredFromTable[$asset->id] ?? null), // prefer assets.metadata; fallback asset_metadata for display
                     'category' => $categoryName ? [
                         'id' => $categoryId,
                         'name' => $categoryName,

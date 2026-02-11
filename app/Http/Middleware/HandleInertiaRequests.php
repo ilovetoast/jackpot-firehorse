@@ -511,6 +511,8 @@ class HandleInertiaRequests extends Middleware
             'processing_assets' => $processingAssets, // Assets currently processing (for upload tray)
             // Phase D1: Download bucket count (session-based) for sticky bar
             'download_bucket_count' => $user && $tenant ? app(\App\Services\DownloadBucketService::class)->count() : 0,
+            // D11/D12: Enterprise download policy — disable single-asset download button in quick view/drawer
+            'download_policy_disable_single_asset' => $tenant ? app(\App\Services\EnterpriseDownloadPolicy::class)->disableSingleAssetDownloads($tenant) : false,
         ];
         
         // Add pending items counts for notification bell (simple, lightweight)

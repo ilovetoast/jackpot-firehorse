@@ -109,8 +109,17 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         $this->assertSame(0, $this->downloadCountForAsset($asset->id));
 
         $response = $this->post(route('assets.download.single', ['asset' => $asset->id]));
-
         $response->assertRedirect();
+
+        // Metrics are recorded when the file is actually delivered (GET /file), not on the redirect to the ready page
+        $download = Download::where('tenant_id', $this->tenant->id)->whereNotNull('direct_asset_path')->latest()->first();
+        $this->assertNotNull($download);
+        $mockBucket = \Mockery::mock(\App\Services\TenantBucketService::class);
+        $mockBucket->shouldReceive('resolveActiveBucketOrFail')->with(\Mockery::type(\App\Models\Tenant::class))->andReturn($this->bucket);
+        $mockBucket->shouldReceive('getPresignedGetUrl')->andReturn('https://example.com/signed-asset');
+        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
+
+        $this->get(route('downloads.public.file', ['download' => $download->id]))->assertRedirect('https://example.com/signed-asset');
         $this->assertSame(1, $this->downloadCountForAsset($asset->id));
     }
 
@@ -138,13 +147,15 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         ]);
         $download->assets()->attach([$asset1->id => ['is_primary' => true], $asset2->id => ['is_primary' => false], $asset3->id => ['is_primary' => false]]);
 
-        $mockDisk = \Mockery::mock(\Illuminate\Contracts\Filesystem\Cloud::class);
-        $mockDisk->shouldReceive('temporaryUrl')->with(\Mockery::type('string'), \Mockery::type(\DateTimeInterface::class))->andReturn('https://example.com/signed.zip');
-        Storage::shouldReceive('disk')->with('s3')->andReturn($mockDisk);
+        // Metrics are recorded when the file is delivered (GET /file), not when viewing the landing page
+        $mockBucket = \Mockery::mock(\App\Services\TenantBucketService::class);
+        $mockBucket->shouldReceive('resolveActiveBucketOrFail')->with(\Mockery::type(\App\Models\Tenant::class))->andReturn($this->bucket);
+        $mockBucket->shouldReceive('getPresignedGetUrl')->andReturn('https://example.com/signed.zip');
+        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
 
-        $response = $this->get(route('downloads.public', ['download' => $download->id]));
+        $response = $this->get(route('downloads.public.file', ['download' => $download->id]));
 
-        $response->assertRedirect();
+        $response->assertRedirect('https://example.com/signed.zip');
         $this->assertSame(1, $this->downloadCountForAsset($asset1->id));
         $this->assertSame(1, $this->downloadCountForAsset($asset2->id));
         $this->assertSame(1, $this->downloadCountForAsset($asset3->id));
@@ -173,12 +184,14 @@ class DownloadDeliveryMetricsD91Test extends TestCase
         ]);
         $download->assets()->attach([$asset1->id => ['is_primary' => true], $asset2->id => ['is_primary' => false]]);
 
-        $mockDisk = \Mockery::mock(\Illuminate\Contracts\Filesystem\Cloud::class);
-        $mockDisk->shouldReceive('temporaryUrl')->with(\Mockery::type('string'), \Mockery::type(\DateTimeInterface::class))->andReturn('https://example.com/signed.zip');
-        Storage::shouldReceive('disk')->with('s3')->andReturn($mockDisk);
+        $mockBucket = \Mockery::mock(\App\Services\TenantBucketService::class);
+        $mockBucket->shouldReceive('resolveActiveBucketOrFail')->with(\Mockery::type(\App\Models\Tenant::class))->andReturn($this->bucket);
+        $mockBucket->shouldReceive('getPresignedGetUrl')->andReturn('https://example.com/signed.zip');
 
-        $this->get(route('downloads.public', ['download' => $download->id]));
-        $this->get(route('downloads.public', ['download' => $download->id]));
+        $this->app->instance(\App\Services\TenantBucketService::class, $mockBucket);
+
+        $this->get(route('downloads.public.file', ['download' => $download->id]));
+        $this->get(route('downloads.public.file', ['download' => $download->id]));
 
         $this->assertSame(2, $this->downloadCountForAsset($asset1->id));
         $this->assertSame(2, $this->downloadCountForAsset($asset2->id));

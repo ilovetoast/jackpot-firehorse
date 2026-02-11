@@ -1658,7 +1658,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             Download
                                         </button>
                                         {singleAssetDisabledByPolicy && (
-                                            <p className="text-xs text-slate-500">Enforced by your organization&apos;s download policy.</p>
+                                            <p className="text-xs text-slate-500">Your organization&apos;s policy does not permit downloading individual assets. Use &quot;Add to download&quot; to create a packaged download.</p>
                                         )}
                                     </div>
                                 )

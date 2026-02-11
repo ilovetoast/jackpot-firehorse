@@ -22,6 +22,7 @@ use App\Services\EnterpriseDownloadPolicy;
 use App\Services\DownloadManagementService;
 use App\Services\DownloadZipEstimateService;
 use App\Services\ActivityRecorder;
+use App\Services\AssetDownloadMetricService;
 use App\Services\DownloadNameResolver;
 use App\Services\PlanService;
 use App\Services\StreamingZipService;
@@ -397,6 +398,93 @@ class DownloadController extends Controller
     }
 
     /**
+     * UX-R2: Create a single-asset download (POST /app/assets/{asset}/download).
+     * Creates a Download with source SINGLE_ASSET and direct_asset_path; redirects to public download page.
+     */
+    public function downloadSingleAsset(Asset $asset): RedirectResponse|JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+        if (! $tenant || ! $user) {
+            if (request()->expectsJson()) {
+                return response()->json(['message' => 'Unauthorized.'], 403);
+            }
+            return redirect()->route('login');
+        }
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            if (request()->expectsJson()) {
+                return response()->json(['message' => 'You do not have access to this asset.'], 403);
+            }
+            abort(403, 'You do not have access to this asset.');
+        }
+        if ($asset->tenant_id !== $tenant->id) {
+            if (request()->expectsJson()) {
+                return response()->json(['message' => 'This asset is not available for download.'], 403);
+            }
+            abort(403, 'This asset is not available for download.');
+        }
+
+        $enterprisePolicy = app(EnterpriseDownloadPolicy::class);
+        if ($enterprisePolicy->disableSingleAssetDownloads($tenant)) {
+            if (request()->expectsJson()) {
+                return response()->json(['message' => 'Your organization requires downloads to be packaged.'], 403);
+            }
+            return redirect()->back()->withErrors(['download' => 'Your organization requires downloads to be packaged.']);
+        }
+
+        if (! $asset->published_at || $asset->archived_at) {
+            if (request()->expectsJson()) {
+                return response()->json(['message' => 'This asset is not available for download.'], 403);
+            }
+            return redirect()->back()->withErrors(['download' => 'This asset is not available for download.']);
+        }
+
+        $planService = app(PlanService::class);
+        $expirationPolicy = app(DownloadExpirationPolicy::class);
+        $expiresAt = $planService->canCreateNonExpiringDownload($tenant)
+            ? null
+            : now()->addDays($planService->getMaxDownloadExpirationDays($tenant));
+        $forceDays = $enterprisePolicy->forceExpirationDays($tenant);
+        if ($forceDays !== null) {
+            $expiresAt = now()->addDays($forceDays);
+        }
+
+        $download = new Download();
+        $download->tenant_id = $tenant->id;
+        $download->brand_id = $asset->brand_id;
+        $download->created_by_user_id = $user->id;
+        $download->download_type = DownloadType::SNAPSHOT;
+        $download->source = DownloadSource::SINGLE_ASSET;
+        $download->title = null;
+        $download->slug = Str::random(12);
+        $download->version = 1;
+        $download->status = DownloadStatus::READY;
+        $download->zip_status = ZipStatus::NONE;
+        $download->direct_asset_path = $asset->storage_root_path;
+        $download->zip_size_bytes = $asset->size_bytes ?? 0;
+        $download->expires_at = $expiresAt;
+        $download->access_mode = DownloadAccessMode::COMPANY;
+        $download->allow_reshare = true;
+        $download->save();
+
+        $download->update([
+            'hard_delete_at' => $expirationPolicy->calculateHardDeleteAt($download, $expiresAt),
+        ]);
+
+        $download->assets()->attach($asset->id, ['is_primary' => true]);
+
+        if (request()->expectsJson()) {
+            return response()->json([
+                'download_id' => $download->id,
+                'public_url' => route('downloads.public', ['download' => $download->id]),
+                'expires_at' => $expiresAt?->toIso8601String(),
+            ]);
+        }
+
+        return redirect()->route('downloads.public', ['download' => $download->id]);
+    }
+
+    /**
      * Create a download from the session bucket (POST /app/downloads).
      * Validates bucket not empty, plan/policy (password, expiration, access), then creates Download and dispatches BuildDownloadZipJob.
      */
@@ -750,6 +838,24 @@ class DownloadController extends Controller
             return $this->publicPage($download, 'password_required', 'Enter the password to continue.', true);
         }
 
+        // UX-R2: Single-asset download — no ZIP; show ready page with file_url to deliver direct_asset_path
+        if (! empty($download->direct_asset_path)) {
+            $branding = app(DownloadPublicPageBrandingResolver::class)->resolve($download, '');
+            $firstAsset = $download->assets()->first();
+            $downloadTitle = $firstAsset?->original_filename ?? basename($download->direct_asset_path);
+
+            return $this->publicPage($download, 'ready', '', false, null, 200, null, [
+                'download_title' => $downloadTitle,
+                'asset_count' => 1,
+                'zip_size_bytes' => $download->zip_size_bytes,
+                'expires_at' => $download->expires_at?->toIso8601String(),
+                'file_url' => route('downloads.public.file', ['download' => $download->id]),
+                'share_email_url' => route('downloads.public.share-email', ['download' => $download->id]),
+                'show_jackpot_promo' => $branding['show_jackpot_promo'] ?? false,
+                'footer_promo' => $branding['footer_promo'] ?? [],
+            ]);
+        }
+
         if ($download->zip_status !== ZipStatus::READY) {
             // Phase D-4: If streaming enabled and over threshold, stream instead of waiting for build
             $estimatedBytes = (int) ($download->download_options['estimated_bytes'] ?? $download->assets()->sum('size_bytes'));
@@ -972,6 +1078,26 @@ class DownloadController extends Controller
             return redirect()->route('downloads.public', ['download' => $download->id]);
         }
 
+        // UX-R2: Single-asset download — deliver direct_asset_path with asset filename
+        if (! empty($download->direct_asset_path)) {
+            $firstAsset = $download->assets()->first();
+            $filename = $firstAsset?->original_filename ?? basename($download->direct_asset_path);
+            $download->increment('access_count');
+            app(AssetDownloadMetricService::class)->recordFromDownload($download, 'single_asset');
+            $bucketService = app(TenantBucketService::class);
+            $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
+            $signedUrl = $bucketService->getPresignedGetUrl(
+                $bucket,
+                $download->direct_asset_path,
+                10,
+                'attachment; filename="' . addcslashes($filename, '"\\') . '"'
+            );
+            DownloadEventEmitter::emitDownloadZipRequested($download);
+            DownloadEventEmitter::emitDownloadZipCompleted($download);
+
+            return redirect($signedUrl);
+        }
+
         if ($download->zip_status !== ZipStatus::READY) {
             $estimatedBytes = (int) ($download->download_options['estimated_bytes'] ?? $download->assets()->sum('size_bytes'));
             $streamingEnabled = config('features.streaming_downloads', false);
@@ -987,6 +1113,7 @@ class DownloadController extends Controller
         }
 
         $download->increment('access_count');
+        app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
         $filename = $this->getDownloadZipFilename($download);
         $bucketService = app(TenantBucketService::class);
         $bucket = $bucketService->resolveActiveBucketOrFail($download->tenant);
@@ -1093,6 +1220,7 @@ class DownloadController extends Controller
     protected function streamZipResponse(Download $download): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         $download->increment('access_count');
+        app(AssetDownloadMetricService::class)->recordFromDownload($download, 'zip');
 
         $filename = $this->getDownloadZipFilename($download);
         DownloadEventEmitter::emitDownloadZipRequested($download);

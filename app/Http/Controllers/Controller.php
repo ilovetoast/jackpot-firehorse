@@ -30,6 +30,13 @@ abstract class Controller
      */
     protected function assetIsStarred(mixed $value): bool
     {
-        return $value === true || $value === 'true' || $value === 1 || $value === '1';
+        if ($value === true || $value === 1) {
+            return true;
+        }
+        if (is_string($value)) {
+            $v = strtolower(trim($value));
+            return in_array($v, ['true', '1', 'yes'], true);
+        }
+        return false;
     }
 }

@@ -432,9 +432,10 @@ export default function AssetDetailPanel({
 
     const metadataByGroup = useMemo(() => {
         if (!metadata?.fields) return []
-        const filtered = metadata.fields.filter(
-            (f) => (f.key || f.field_key) !== 'tags' && (f.key || f.field_key) !== 'collection'
-        )
+        const filtered = metadata.fields.filter((f) => {
+            const key = f.key || f.field_key
+            return key !== 'tags' && key !== 'collection' && key !== 'dominant_color_bucket'
+        })
         const byGroup = {}
         filtered.forEach((f) => {
             const key = f.group_key || 'general'
