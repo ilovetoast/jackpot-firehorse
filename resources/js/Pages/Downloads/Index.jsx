@@ -823,6 +823,11 @@ export default function DownloadsIndex({
                         </div>
                         <span className="text-sm font-medium text-slate-900 truncate">{displayTitle}</span>
                         <span className="text-sm text-slate-500">Expires {formatDate(d.expires_at)}</span>
+                        {filters.scope === 'all' && d.created_by?.name && (
+                          <span className="text-sm text-slate-500" title="Who created this download">
+                            Created by {d.created_by.name}
+                          </span>
+                        )}
                         <span className="text-sm text-slate-500" title="Number of times this download was accessed">
                           {d.access_count != null && d.access_count > 0
                             ? `Accessed ${d.access_count} time${d.access_count !== 1 ? 's' : ''}`

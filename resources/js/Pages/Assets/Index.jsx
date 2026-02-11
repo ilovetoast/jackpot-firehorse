@@ -56,9 +56,16 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
+    const loadMoreAbortRef = useRef(null)
 
-    // Sync from Inertia props when page context changes (category, filters, search, sort)
+    // Sync from Inertia props when page context changes (initial load, category, filters, search, sort).
+    // Safe: load_more is pure axios and never triggers Inertia reload, so props.assets/next_page_url
+    // do not change on append — this effect only runs on real navigation/filter changes.
     useEffect(() => {
+        if (loadMoreAbortRef.current) {
+            loadMoreAbortRef.current.abort()
+            loadMoreAbortRef.current = null
+        }
         setAssetsList(Array.isArray(assets) ? assets : [])
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -71,15 +78,19 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const loadMore = useCallback(async () => {
         if (!nextPageUrl || loading) return
         setLoading(true)
+        const ac = new AbortController()
+        loadMoreAbortRef.current = ac
         try {
             const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
-            const response = await axios.get(url)
+            const response = await axios.get(url, { signal: ac.signal })
             const data = response.data?.data ?? []
             setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
+            if (e.name === 'CanceledError' || e.code === 'ERR_CANCELED') return
             console.error('Infinite scroll failed', e)
         } finally {
+            if (loadMoreAbortRef.current === ac) loadMoreAbortRef.current = null
             setLoading(false)
         }
     }, [nextPageUrl, loading])

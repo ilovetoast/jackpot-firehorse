@@ -577,6 +577,15 @@ class AssetController extends Controller
         // Keep collection for availableValues block (expects $assets as collection of arrays)
         $assets = collect($mappedAssets);
 
+        // Load-more: return JSON only so the client can append without Inertia replacing the list.
+        // Do this before filterableSchema/availableValues so page 2+ never runs that heavy logic.
+        if ($request->boolean('load_more')) {
+            return response()->json([
+                'data' => $mappedAssets,
+                'next_page_url' => $paginator->nextPageUrl(),
+            ]);
+        }
+
         // Phase 2 – Step 8: Get filterable schema for frontend
         // Note: asset_type in category is organizational (asset/marketing/ai_generated),
         // but MetadataSchemaResolver expects file type (image/video/document)
@@ -1024,14 +1033,6 @@ class AssetController extends Controller
             }
         }
         unset($field);
-
-        // Load-more: return JSON only so the client can append without Inertia replacing the list
-        if ($request->boolean('load_more')) {
-            return response()->json([
-                'data' => $mappedAssets,
-                'next_page_url' => $paginator->nextPageUrl(),
-            ]);
-        }
 
         return Inertia::render('Assets/Index', [
             'tenant' => $tenant ? ['id' => $tenant->id] : null, // For Tags filter autocomplete
