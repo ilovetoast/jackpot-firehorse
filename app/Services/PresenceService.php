@@ -75,13 +75,10 @@ class PresenceService
     }
 
     /**
-     * Redis keys are automatically prefixed (e.g. jackpot-database-).
-     * SCAN must include the prefix or keys will not match.
+     * Pattern for SCAN. Laravel adds the configured Redis prefix internally.
      */
     protected function pattern($tenantId, $brandId): string
     {
-        $prefix = config('database.redis.options.prefix') ?? '';
-
-        return $prefix.'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
+        return 'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
     }
 }
