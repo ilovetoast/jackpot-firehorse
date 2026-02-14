@@ -75,10 +75,13 @@ class PresenceService
     }
 
     /**
-     * Pattern for SCAN. Laravel adds the configured Redis prefix internally.
+     * Pattern for SCAN. Use runtime prefix from connection (not config) — connection may override.
      */
     protected function pattern($tenantId, $brandId): string
     {
-        return 'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
+        $redis = Redis::connection();
+        $prefix = $redis->client()->getOption(\Redis::OPT_PREFIX) ?? '';
+
+        return $prefix.'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
     }
 }
