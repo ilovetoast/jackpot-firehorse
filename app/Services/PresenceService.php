@@ -47,7 +47,7 @@ class PresenceService
             do {
                 $result = $redis->scan($cursor, $pattern, 100);
 
-                if (! is_array($result) || count($result) < 2) {
+                if ($result === false) {
                     break;
                 }
 
