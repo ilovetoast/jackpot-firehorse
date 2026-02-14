@@ -38,21 +38,19 @@ class PresenceService
     public function online($tenant, $brand = null): array
     {
         try {
-            $pattern = 'presence:'.$tenant->id.':'.($brand?->id ?? 'all').':*';
+            $pattern = '*presence:'.$tenant->id.':'.($brand?->id ?? 'all').':*';
 
             $redis = Redis::connection();
-            $prefix = $redis->client()->getOption(\Redis::OPT_PREFIX) ?: '';
             $cursor = 0;
             $results = [];
 
             do {
-                [$cursor, $keys] = $redis->scan($cursor, [
-                    'match' => $pattern,
-                    'count' => 100,
-                ]);
+                [$cursor, $keys] = $redis->scan($cursor, $pattern, 100);
 
                 if (! empty($keys)) {
                     foreach ($keys as $key) {
+                        $prefix = $redis->getOptions()['prefix'] ?? '';
+
                         if ($prefix && str_starts_with($key, $prefix)) {
                             $key = substr($key, strlen($prefix));
                         }
