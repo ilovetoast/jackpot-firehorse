@@ -45,7 +45,14 @@ class PresenceService
             $results = [];
 
             do {
-                [$cursor, $keys] = $redis->scan($cursor, $pattern, 100);
+                $result = $redis->scan($cursor, $pattern, 100);
+
+                if (! is_array($result) || count($result) < 2) {
+                    break;
+                }
+
+                $cursor = $result[0];
+                $keys = $result[1];
 
                 if (! empty($keys)) {
                     foreach ($keys as $key) {
@@ -56,6 +63,7 @@ class PresenceService
                         }
 
                         $data = $redis->get($key);
+
                         if ($data) {
                             $decoded = json_decode($data, true);
                             if (is_array($decoded)) {
