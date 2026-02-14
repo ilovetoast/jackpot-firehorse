@@ -1,5 +1,4 @@
 import { usePermission } from '../hooks/usePermission'
-import { usePage } from '@inertiajs/react'
 
 /**
  * Component that conditionally renders children based on permission check
@@ -9,17 +8,15 @@ import { usePage } from '@inertiajs/react'
  * @param {React.ReactNode} children - Content to render if permission is granted
  */
 export default function PermissionGate({ permission, requireAll = true, fallback = null, children }) {
-    // Get auth props - this ensures component re-renders when auth props change
-    const { auth } = usePage().props
-    // Call usePermission hook - it will recalculate when auth props change
-    const { hasPermission } = usePermission(permission, requireAll)
-    
-    // The hook will automatically recalculate when auth.tenant_role or auth.role_permissions change
-    // because usePage() is reactive to prop changes in Inertia
-    
+    const { can } = usePermission()
+    const perms = Array.isArray(permission) ? permission : [permission]
+    const hasPermission = requireAll
+        ? perms.every((p) => can(p))
+        : perms.some((p) => can(p))
+
     if (!hasPermission) {
         return fallback
     }
-    
+
     return children
 }

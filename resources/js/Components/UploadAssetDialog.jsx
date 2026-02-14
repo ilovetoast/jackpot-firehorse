@@ -72,7 +72,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
 
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
-    const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
+    const { can } = usePermission()
+    const canApproveMetadata = can('metadata.bypass_approval')
     const isContributor = !canApproveMetadata
     
     // Phase J.3.1: Check if brand requires contributor approval

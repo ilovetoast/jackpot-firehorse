@@ -29,8 +29,9 @@ export default function AiMetadataSuggestionsInline({ assetId }) {
     const hasCheckedUsage = useRef(false) // Prevent multiple checks per component instance
     const hasFetchedSuggestions = useRef(false) // Prevent multiple fetches per component instance
     
-    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
-    const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
+    const { can } = usePermission()
+    const canView = can('metadata.suggestions.view')
+    const canViewAiUsage = can('ai.usage.view')
 
     // Check AI usage status to see if suggestions are paused (only once, only if user has BOTH permissions)
     // IMPORTANT: Only check if user has BOTH permissions to avoid 404 errors

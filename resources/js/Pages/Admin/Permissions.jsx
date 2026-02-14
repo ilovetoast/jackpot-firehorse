@@ -27,6 +27,15 @@ export default function AdminPermissions({
         ticketActions: false,
         ticketEngineering: false,
         aiDashboard: false,
+        // Tenant permission groups
+        companySettings: false,
+        companyManagement: false,
+        assetManagement: false,
+        metadataManagement: false,
+        categoryManagement: false,
+        ticketManagementTenant: false,
+        governance: false,
+        tagManagement: false,
     })
     const [showTenantInfo, setShowTenantInfo] = useState(false)
 
@@ -80,12 +89,10 @@ export default function AdminPermissions({
                 })
                 setBrandRolePermissions(brandPerms)
 
-                // Merge API permissions into state (for display, backend props take precedence for actual values)
-                setCompanyPermissionsState(prev => ({
-                    ...prev,
-                    ...tenantPerms,
-                    ...brandPerms,
-                }))
+                // NOTE: Do NOT overwrite companyPermissionsState with API data.
+                // The API returns PermissionMap defaults; the actual DB state comes from
+                // company_role_permissions (backend props). Merging brandPerms would overwrite
+                // tenant roles (e.g. 'admin') with brand permissions, hiding team.manage etc.
 
                 setLoadingRoles(false)
             } catch (error) {
@@ -167,11 +174,82 @@ export default function AdminPermissions({
         ],
     }
 
+    // Company permission groups (collapsible, like system permissions)
+    const companyPermissionGroups = {
+        companySettings: {
+            title: 'Company Settings',
+            permissions: [
+                'company_settings.view',
+                'company_settings.edit',
+                'company_settings.manage_download_policy',
+                'company_settings.manage_dashboard_widgets',
+                'company_settings.manage_ai_settings',
+                'company_settings.view_tag_quality',
+                'company_settings.ownership_transfer',
+                'company_settings.delete_company',
+            ],
+        },
+        companyManagement: {
+            title: 'Company Management',
+            permissions: ['team.manage', 'billing.view', 'billing.manage', 'activity_logs.view', 'brand_settings.manage'],
+        },
+        assetManagement: {
+            title: 'Asset Management',
+            permissions: ['asset.view', 'asset.download', 'asset.upload', 'assets.retry_thumbnails', 'asset.publish', 'asset.unpublish', 'asset.archive', 'asset.restore'],
+        },
+        metadataManagement: {
+            title: 'Metadata Management',
+            permissions: [
+                'metadata.set_on_upload',
+                'metadata.edit_post_upload',
+                'metadata.bypass_approval',
+                'metadata.override_automatic',
+                'metadata.review_candidates',
+                'metadata.bulk_edit',
+                'metadata.suggestions.view',
+                'metadata.suggestions.apply',
+                'metadata.suggestions.dismiss',
+                'assets.ai_metadata.regenerate',
+                'metadata.fields.manage',
+                'metadata.fields.values.manage',
+                'ai.usage.view',
+            ],
+        },
+        categoryManagement: {
+            title: 'Category Management',
+            permissions: ['brand_categories.manage', 'view.restricted.categories'],
+        },
+        ticketManagementTenant: {
+            title: 'Tickets',
+            permissions: ['tickets.create', 'tickets.reply', 'tickets.view_tenant', 'tickets.view_any'],
+        },
+        governance: {
+            title: 'Metadata Governance',
+            permissions: [
+                'metadata.registry.view',
+                'metadata.tenant.visibility.manage',
+                'metadata.tenant.field.create',
+                'metadata.tenant.field.manage',
+            ],
+        },
+        tagManagement: {
+            title: 'Tag Management',
+            permissions: ['assets.tags.create', 'assets.tags.delete'],
+        },
+    }
+
     const defaultCompanyRolePermissions = {
         owner: [
             'billing.view',
             'billing.manage',
             'company_settings.view',
+            'company_settings.edit',
+            'company_settings.manage_download_policy',
+            'company_settings.manage_dashboard_widgets',
+            'company_settings.manage_ai_settings',
+            'company_settings.view_tag_quality',
+            'company_settings.ownership_transfer',
+            'company_settings.delete_company',
             'team.manage',
             'activity_logs.view',
             'brand_settings.manage',
@@ -186,6 +264,11 @@ export default function AdminPermissions({
             'billing.view',
             'billing.manage',
             'company_settings.view',
+            'company_settings.edit',
+            'company_settings.manage_download_policy',
+            'company_settings.manage_dashboard_widgets',
+            'company_settings.manage_ai_settings',
+            'company_settings.view_tag_quality',
             'team.manage',
             'activity_logs.view',
             'brand_settings.manage',
@@ -380,12 +463,14 @@ export default function AdminPermissions({
                 permissions: sitePermissionsState[role.id] || {},
             }, {
                 preserveScroll: true,
-                onFinish: () => {
-                    // Continue to next role
+                onSuccess: () => {
                     saveNext()
                 },
-                onError: () => {
+                onError: (errors) => {
                     setSaving(false)
+                    if (Object.keys(errors || {}).length > 0) {
+                        console.error('Failed to save site permissions for role:', role.id, errors)
+                    }
                 }
             })
         }
@@ -431,12 +516,17 @@ export default function AdminPermissions({
                 permissions: companyPermissionsState[role.id] || {},
             }, {
                 preserveScroll: true,
-                onFinish: () => {
-                    // Continue to next role
+                onSuccess: () => {
                     saveNext()
                 },
-                onError: () => {
+                onError: (errors) => {
                     setSaving(false)
+                    if (Object.keys(errors || {}).length > 0) {
+                        console.error('Failed to save permissions for role:', role.id, errors)
+                    }
+                },
+                onFinish: () => {
+                    // If we errored, onError already set saving=false
                 }
             })
         }
@@ -444,8 +534,28 @@ export default function AdminPermissions({
         saveNext()
     }
 
-    const formatPermissionName = (permission) => {
-        // Handle both underscore and dot notation
+    // Map permission slugs to display names (align with Company Settings section names)
+    const permissionLabels = {
+        'company_settings.view': 'View Company Settings Page',
+        'company_settings.edit': 'Company Information',
+        'company_settings.manage_download_policy': 'Enterprise Download Policy',
+        'company_settings.manage_dashboard_widgets': 'Dashboard Widgets',
+        'company_settings.manage_ai_settings': 'AI Settings',
+        'company_settings.view_tag_quality': 'Tag Quality',
+        'company_settings.ownership_transfer': 'Ownership Transfer',
+        'company_settings.delete_company': 'Delete Company',
+        'team.manage': 'Team Members',
+        'billing.view': 'Plan & Billing (View)',
+        'billing.manage': 'Plan & Billing (Manage)',
+        'brand_settings.manage': 'Brands Settings',
+        'activity_logs.view': 'Activity Logs',
+        'ai.usage.view': 'AI Usage',
+    }
+
+    const formatPermissionName = (permission, isCompany = false) => {
+        if (isCompany && permissionLabels[permission]) {
+            return permissionLabels[permission]
+        }
         return permission
             .replace(/[._]/g, ' ')
             .split(' ')
@@ -834,8 +944,62 @@ export default function AdminPermissions({
         )
     }
 
+    const renderCompanyPermissionGroup = (sectionKey, group, rolesToDisplay) => {
+        // Show all permissions in the group (don't filter by company_permissions - user may need to run seeder)
+        const permissions = group.permissions || []
+        if (permissions.length === 0) return null
+
+        const isCollapsed = collapsedSections[sectionKey] ?? false
+        return (
+            <>
+                <tr className="bg-gray-50">
+                    <td colSpan={rolesToDisplay.length + 1} className="px-4 py-2">
+                        <button
+                            type="button"
+                            onClick={() => toggleSection(sectionKey)}
+                            className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600"
+                        >
+                            {isCollapsed ? (
+                                <ChevronRightIcon className="h-5 w-5" />
+                            ) : (
+                                <ChevronDownIcon className="h-5 w-5" />
+                            )}
+                            {group.title}
+                        </button>
+                    </td>
+                </tr>
+                {!isCollapsed && permissions.map((permission) => (
+                    <tr key={permission}>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                            {formatPermissionName(permission, true)}
+                        </td>
+                        {rolesToDisplay.map((role) => {
+                            const isChecked = companyPermissionsState[role.id]?.[permission] ?? false
+                            const isDefault = isDefaultPermission(role.id, permission, false)
+                            return (
+                                <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                    <div className="flex items-center justify-center gap-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => handleCompanyPermissionChange(role.id, permission)}
+                                            disabled={role.id === 'owner'}
+                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                        />
+                                        {isDefault && (
+                                            <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                        )}
+                                    </div>
+                                </td>
+                            )
+                        })}
+                    </tr>
+                ))}
+            </>
+        )
+    }
+
     const renderCompanyPermissionsTable = () => {
-        // Filter out owner and site roles, use API-loaded roles
         const rolesToDisplay = allCompanyRoles.filter(r => 
             r.id !== 'owner' && 
             !r.id.startsWith('site_')
@@ -844,6 +1008,9 @@ export default function AdminPermissions({
         if (loadingRoles) {
             return <div className="text-center py-8 text-gray-500">Loading roles...</div>
         }
+
+        const groupedPermissionNames = Object.values(companyPermissionGroups).flatMap(g => g.permissions)
+        const otherPermissions = (company_permissions || []).filter(p => !groupedPermissionNames.includes(p))
 
         return (
             <div className="overflow-x-auto">
@@ -862,31 +1029,45 @@ export default function AdminPermissions({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
-                        {(company_permissions || []).map((permission) => (
-                            <tr key={permission}>
-                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900">{formatPermissionName(permission)}</td>
-                                {rolesToDisplay.map((role) => {
-                                    const isChecked = companyPermissionsState[role.id]?.[permission] ?? false
-                                    const isDefault = isDefaultPermission(role.id, permission, false)
-                                    return (
-                                        <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
-                                            <div className="flex items-center justify-center gap-1">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={() => handleCompanyPermissionChange(role.id, permission)}
-                                                    disabled={role.id === 'owner'}
-                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                />
-                                                {isDefault && (
-                                                    <span className="text-xs text-gray-400" title="Default permission">●</span>
-                                                )}
-                                            </div>
+                        {Object.entries(companyPermissionGroups).map(([sectionKey, group]) =>
+                            renderCompanyPermissionGroup(sectionKey, group, rolesToDisplay)
+                        )}
+                        {otherPermissions.length > 0 && (
+                            <>
+                                <tr className="bg-gray-50">
+                                    <td colSpan={rolesToDisplay.length + 1} className="px-4 py-2">
+                                        <span className="text-sm font-semibold text-gray-900">Other Permissions</span>
+                                    </td>
+                                </tr>
+                                {otherPermissions.map((permission) => (
+                                    <tr key={permission}>
+                                        <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 pl-8">
+                                            {formatPermissionName(permission, true)}
                                         </td>
-                                    )
-                                })}
-                            </tr>
-                        ))}
+                                        {rolesToDisplay.map((role) => {
+                                            const isChecked = companyPermissionsState[role.id]?.[permission] ?? false
+                                            const isDefault = isDefaultPermission(role.id, permission, false)
+                                            return (
+                                                <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            onChange={() => handleCompanyPermissionChange(role.id, permission)}
+                                                            disabled={role.id === 'owner'}
+                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                        />
+                                                        {isDefault && (
+                                                            <span className="text-xs text-gray-400" title="Default permission">●</span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            )
+                                        })}
+                                    </tr>
+                                ))}
+                            </>
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -1040,7 +1221,7 @@ export default function AdminPermissions({
                                             <div>
                                                 <h2 className="text-lg font-semibold text-gray-900">Company Roles & Permissions (Tenant-Level)</h2>
                                                 <p className="mt-1 text-sm text-gray-500">Manage which permissions each tenant-level role has. These permissions apply to company-wide features.</p>
-                                                <p className="mt-1 text-xs text-gray-400">Note: The same role names are used for brand-level roles, but brand roles are assigned per-brand when adding users. ● indicates default permissions.</p>
+                                                <p className="mt-1 text-xs text-gray-400">Note: The same role names are used for brand-level roles, but brand roles are assigned per-brand when adding users. ● indicates default permissions. Use the Company Settings group to control which roles can access each section on the Company Settings page (e.g. Tag Quality, AI Settings). If permissions are missing, run: <code className="rounded bg-gray-100 px-1">php artisan db:seed --class=PermissionSeeder</code></p>
                                             </div>
                                         </div>
                                         <button

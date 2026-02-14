@@ -12,7 +12,8 @@ import { usePermission } from '../hooks/usePermission'
 
 export default function PendingAiSuggestionsTile({ pendingCount = 0 }) {
     const [isModalOpen, setIsModalOpen] = useState(false)
-    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
+    const { can } = usePermission()
+    const canView = can('metadata.suggestions.view')
 
     // Don't show tile if user doesn't have view permission or no pending suggestions
     if (!canView || pendingCount === 0) {

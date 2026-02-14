@@ -25,8 +25,9 @@ export default function AiTagSuggestionsInline({ assetId }) {
     const [showConfirmDismiss, setShowConfirmDismiss] = useState(null) // {id, tag} for dismiss confirmation
     const hasFetchedSuggestions = useRef(false) // Prevent multiple fetches per component instance
     
-    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
-    const { hasPermission: canApply } = usePermission('metadata.suggestions.apply')
+    const { can } = usePermission()
+    const canView = can('metadata.suggestions.view')
+    const canApply = can('metadata.suggestions.apply')
 
     // Fetch AI tag suggestions (only once per asset, with caching)
     useEffect(() => {

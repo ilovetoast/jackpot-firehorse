@@ -44,8 +44,11 @@ export default function AppNav({ brand, tenant }) {
     }
 
     const activeCompany = auth.companies?.find((c) => c.is_active)
-    const permissions = Array.isArray(auth.permissions) ? auth.permissions : []
-    const isSiteOwner = auth.user?.id === 1 || permissions.includes('site admin') || permissions.includes('site owner')
+    const effectivePermissions = Array.isArray(auth.effective_permissions) ? auth.effective_permissions : []
+    const can = (p) => effectivePermissions.includes(p)
+    const siteRoles = Array.isArray(auth.user?.site_roles) ? auth.user.site_roles : []
+    const isSiteAdminOrOwner = siteRoles.includes('site_admin') || siteRoles.includes('site_owner')
+    const isSiteOwner = auth.user?.id === 1 || can('company.manage') || can('permissions.manage') || isSiteAdminOrOwner
     const brands = collectionOnly ? [] : (auth.brands || [])
     // C12: In collection-only mode there is no active brand
     const activeBrand = collectionOnly ? null : auth.activeBrand
@@ -68,28 +71,25 @@ export default function AppNav({ brand, tenant }) {
         ? collectionOnlyCollections
         : (effectiveCollection ? [effectiveCollection] : [])
     
-    // Check if user has admin or owner role (not member) for company/brand settings access
-    // Use tenant_role from auth (tenant-scoped) instead of filtering roles
-    const tenantRole = auth.tenant_role || null
-    const hasAdminOrOwnerRole = tenantRole && ['admin', 'owner'].includes(tenantRole.toLowerCase())
-    const hasBrandManagerRole = tenantRole && tenantRole.toLowerCase() === 'brand_manager'
-    const hasManageUsersPermission = permissions.includes('manage users')
-    const hasManageBrandsPermission = permissions.includes('manage brands')
-    // Team management and activity logs require admin/owner OR manage users permission OR manage brands permission
+    // Admin/owner: have team.manage (backend effective_permissions)
+    const hasAdminOrOwnerRole = can('team.manage')
+    const hasBrandManagerRole = can('metadata.bypass_approval') && can('brand_settings.manage')
+    const hasManageUsersPermission = can('manage users')
+    const hasManageBrandsPermission = can('manage brands')
     const canAccessTeamManagement = hasAdminOrOwnerRole || hasManageUsersPermission || hasManageBrandsPermission
 
     // Check if user has access to any company menu items
     const hasCompanies = auth.companies && auth.companies.length > 0
-    const hasCompanySettingsAccess = permissions.includes('company_settings.view')
-    const hasTeamManageAccess = permissions.includes('team.manage')
-    const hasActivityLogsAccess = permissions.includes('activity_logs.view')
+    const hasCompanySettingsAccess = can('company_settings.view')
+    const hasTeamManageAccess = can('team.manage')
+    const hasActivityLogsAccess = can('activity_logs.view')
     const hasMultipleCompanies = auth.companies && auth.companies.length > 1
     // Only show Company section if user has at least one company AND has access to at least one menu item
     const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess || hasTeamManageAccess || hasActivityLogsAccess || hasAdminOrOwnerRole)
 
     // Check if user has access to any brand menu items
     const hasBrands = brands && brands.length > 0
-    const hasBrandSettingsAccess = permissions.includes('brand_settings.manage')
+    const hasBrandSettingsAccess = can('brand_settings.manage')
     const hasMultipleBrands = brands && brands.length > 1
     // Show Brands section if user has at least one brand AND (is owner/admin OR has multiple brands OR has brand settings access)
     // Owners/admins should always see brand management regardless of other conditions
@@ -788,7 +788,7 @@ export default function AppNav({ brand, tenant }) {
                                                         Brand Settings
                                                     </Link>
                                                 </PermissionGate>
-                                                {permissions.some(p => p === 'metadata.registry.view' || p === 'metadata.tenant.visibility.manage') && (
+                                                {(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) && (
                                                     <Link
                                                         href="/app/tenant/metadata/registry"
                                                         className="flex items-center px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-md"

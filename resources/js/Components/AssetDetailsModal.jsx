@@ -35,12 +35,14 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     // Permission checks and brand primary for tag/UI branding
     const { auth } = usePage().props
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
-    const { hasPermission: canRegenerateAiMetadata } = usePermission('assets.ai_metadata.regenerate')
-    const { hasPermission: canRegenerateThumbnailsAdmin } = usePermission('assets.regenerate_thumbnails_admin')
-    const { hasPermission: canPublish } = usePermission('asset.publish')
-    const { hasPermission: canUnpublish } = usePermission('asset.unpublish')
-    const { hasPermission: canArchive } = usePermission('asset.archive')
-    const { hasPermission: canRestore } = usePermission('asset.restore')
+    const { can } = usePermission()
+    const canRegenerateAiMetadata = can('assets.ai_metadata.regenerate')
+    const canRegenerateThumbnailsAdmin = can('assets.regenerate_thumbnails_admin')
+    const canPublish = can('asset.publish')
+    const canUnpublish = can('asset.unpublish')
+    const canArchive = can('asset.archive')
+    const canRestore = can('asset.restore')
+    const canApproveMetadata = can('metadata.bypass_approval')
     
     // For troubleshooting: Also allow owners/admins even if permission check fails
     const tenantRole = auth?.tenant_role || null
@@ -114,7 +116,6 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const actionsDropdownRef = useRef(null)
     
     // Check if user can approve metadata (for display purposes only - approval happens in drawer)
-    const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
     const metadataApprovalEnabled = auth?.metadata_approval_features?.metadata_approval_enabled === true
     
     // Lifecycle actions state

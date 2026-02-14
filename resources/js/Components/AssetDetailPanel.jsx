@@ -75,14 +75,15 @@ export default function AssetDetailPanel({
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
 
     // Permissions
-    const { hasPermission: canViewAsset } = usePermission('asset.view')
-    const { hasPermission: canEditMetadata } = usePermission('metadata.edit_post_upload')
-    const { hasPermission: canRegenerateAiMetadata } = usePermission('assets.ai_metadata.regenerate')
-    const { hasPermission: canRegenerateThumbnailsAdmin } = usePermission('assets.regenerate_thumbnails_admin')
-    const { hasPermission: canPublish } = usePermission('asset.publish')
-    const { hasPermission: canUnpublish } = usePermission('asset.unpublish')
-    const { hasPermission: canArchive } = usePermission('asset.archive')
-    const { hasPermission: canRestore } = usePermission('asset.restore')
+    const { can } = usePermission()
+    const canViewAsset = can('asset.view')
+    const canEditMetadata = can('metadata.edit_post_upload')
+    const canRegenerateAiMetadata = can('assets.ai_metadata.regenerate')
+    const canRegenerateThumbnailsAdmin = can('assets.regenerate_thumbnails_admin')
+    const canPublish = can('asset.publish')
+    const canUnpublish = can('asset.unpublish')
+    const canArchive = can('asset.archive')
+    const canRestore = can('asset.restore')
 
     const tenantRole = auth?.tenant_role || null
     const brandRole = auth?.brand_role || null

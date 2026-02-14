@@ -44,7 +44,20 @@ export default function CompanyPermissions({
         companyManagement: {
             title: 'Company Management',
             type: 'company',
-            permissions: ['company_settings.view', 'team.manage', 'billing.view', 'billing.manage', 'activity_logs.view'],
+            permissions: [
+                'company_settings.view',
+                'company_settings.edit',
+                'company_settings.manage_download_policy',
+                'company_settings.manage_dashboard_widgets',
+                'company_settings.manage_ai_settings',
+                'company_settings.view_tag_quality',
+                'company_settings.ownership_transfer',
+                'company_settings.delete_company',
+                'team.manage',
+                'billing.view',
+                'billing.manage',
+                'activity_logs.view',
+            ],
         },
         categoryManagement: {
             title: 'Category Management',

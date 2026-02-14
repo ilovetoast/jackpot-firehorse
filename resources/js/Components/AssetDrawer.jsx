@@ -732,9 +732,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const categoryName = displayAsset.category?.name || 'Uncategorized'
 
     // Check if user has permission to generate/retry thumbnails
-    const { hasPermission: canRetryThumbnails } = usePermission('assets.retry_thumbnails')
-    const { hasPermission: canPublish } = usePermission('asset.publish')
-    const { hasPermission: canApproveMetadata } = usePermission('metadata.bypass_approval')
+    const { can } = usePermission()
+    const canRetryThumbnails = can('assets.retry_thumbnails')
+    const canPublish = can('asset.publish')
+    const canApproveMetadata = can('metadata.bypass_approval')
 
     // Check if asset can have thumbnail generated (for previously skipped assets)
     // IMPORTANT: This is for existing assets that were skipped but are now supported

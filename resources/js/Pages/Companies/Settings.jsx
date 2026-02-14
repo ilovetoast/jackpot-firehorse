@@ -19,10 +19,18 @@ const DEFAULT_DOWNLOAD_POLICY = {
 export default function CompanySettings({ tenant, company_url_domain = 'jackpot.local', billing, team_members_count, brands_count, is_current_user_owner, tenant_users = [], pending_transfer = null, enterprise_download_policy: enterpriseDownloadPolicy = null }) {
     const page = usePage()
     const { auth, errors: pageErrors = {}, flash = {} } = page.props
-    const { hasPermission: canViewAiUsage } = usePermission('ai.usage.view')
-    const { hasPermission: canEditViaPermission } = usePermission('companies.settings.edit')
+    const { can } = usePermission()
+    const canViewAiUsage = can('ai.usage.view')
+    const canEditViaPermission = can('company_settings.edit')
     // Company owners should always be able to edit settings
     const canEditCompanySettings = is_current_user_owner || canEditViaPermission
+    const canManageDashboardWidgets = is_current_user_owner || can('company_settings.manage_dashboard_widgets')
+    const canManageAiSettings = is_current_user_owner || can('company_settings.manage_ai_settings')
+    const canViewTagQuality = is_current_user_owner || can('company_settings.view_tag_quality')
+    const canManageDownloadPolicy = is_current_user_owner || can('company_settings.manage_download_policy')
+    const canOwnershipTransfer = is_current_user_owner
+    const canDeleteCompany = is_current_user_owner
+    const canViewMetadata = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
     const [activeSection, setActiveSection] = useState('company-information')
     const isEnterprise = billing?.current_plan === 'enterprise'
     const [downloadPolicy, setDownloadPolicy] = useState(() => ({
@@ -42,18 +50,6 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
         }
     }, [enterpriseDownloadPolicy])
 
-    // Debug permission check
-    useEffect(() => {
-        console.log('[AI Settings] Permission check:', {
-            canViewAiUsage,
-            canEditCompanySettings,
-            is_current_user_owner,
-            canEditViaPermission,
-            tenantRole: auth?.tenant_role,
-            rolePermissions: auth?.role_permissions,
-            directPermissions: auth?.permissions
-        })
-    }, [canViewAiUsage, canEditCompanySettings, is_current_user_owner, canEditViaPermission, auth])
     const [showOwnershipTransferModal, setShowOwnershipTransferModal] = useState(false)
     const [selectedNewOwner, setSelectedNewOwner] = useState(null)
     const [initiatingTransfer, setInitiatingTransfer] = useState(false)
@@ -297,6 +293,22 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
         return statusMap[status] || status
     }
 
+    // Nav items: sections that appear in sidebar (always show link; content may be blurred for non-access)
+    const navItems = [
+        { id: 'company-information', label: 'Company Information', canAccess: canEditCompanySettings },
+        { id: 'plan-billing', label: 'Plan & Billing', canAccess: true },
+        { id: 'team-members', label: 'Team Members', canAccess: true },
+        { id: 'brands-settings', label: 'Brands Settings', canAccess: true },
+        { id: 'enterprise-download-policy', label: 'Enterprise Download Policy', canAccess: true },
+        { id: 'metadata-settings', label: 'Metadata', canAccess: canViewMetadata },
+        { id: 'dashboard-widgets', label: 'Dashboard Widgets', canAccess: canManageDashboardWidgets },
+        { id: 'ai-settings', label: 'AI Settings', canAccess: canManageAiSettings },
+        { id: 'tag-quality', label: 'Tag Quality', canAccess: canViewTagQuality },
+        { id: 'ai-usage', label: 'AI Usage', canAccess: canViewAiUsage },
+        { id: 'ownership-transfer', label: 'Ownership Transfer', canAccess: canOwnershipTransfer, ownerOnly: true },
+        { id: 'danger-zone', label: 'Danger Zone', canAccess: canDeleteCompany, ownerOnly: true },
+    ].filter((item) => item.id !== 'metadata-settings' || canViewMetadata)
+
     return (
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={tenant} />
@@ -308,166 +320,47 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                         <p className="mt-2 text-sm text-gray-700">Manage your company's settings and preferences</p>
                     </div>
 
-                    {/* Navigation Bar */}
-                    <div className="mb-8 border-b border-gray-200">
-                        <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Company settings sections">
-                            <button
-                                type="button"
-                                onClick={() => handleSectionClick('company-information')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                    activeSection === 'company-information'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Company Information
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleSectionClick('plan-billing')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                    activeSection === 'plan-billing'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Plan & Billing
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleSectionClick('team-members')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                    activeSection === 'team-members'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Team Members
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleSectionClick('brands-settings')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                    activeSection === 'brands-settings'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Brands Settings
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleSectionClick('enterprise-download-policy')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                    activeSection === 'enterprise-download-policy'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Enterprise Download Policy
-                            </button>
-                            {(Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage'))) && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleSectionClick('metadata-settings')}
-                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                        activeSection === 'metadata-settings'
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                    }`}
-                                >
-                                    Metadata
-                                </button>
-                            )}
-                            {canEditCompanySettings && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleSectionClick('dashboard-widgets')}
-                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                        activeSection === 'dashboard-widgets'
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                    }`}
-                                >
-                                    Dashboard Widgets
-                                </button>
-                            )}
-                            {canEditCompanySettings && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleSectionClick('ai-settings')}
-                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                        activeSection === 'ai-settings'
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                    }`}
-                                >
-                                    AI Settings
-                                </button>
-                            )}
-                            {canEditCompanySettings && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleSectionClick('tag-quality')}
-                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                        activeSection === 'tag-quality'
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                    }`}
-                                >
-                                    Tag Quality
-                                </button>
-                            )}
-                            {canViewAiUsage && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleSectionClick('ai-usage')}
-                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                        activeSection === 'ai-usage'
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                    }`}
-                                >
-                                    AI Usage
-                                </button>
-                            )}
-                            {is_current_user_owner && (
-                                <button
-                                    type="button"
-                                    onClick={() => handleSectionClick('ownership-transfer')}
-                                    className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                        activeSection === 'ownership-transfer'
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                    }`}
-                                >
-                                    Ownership Transfer
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => handleSectionClick('danger-zone')}
-                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
-                                    activeSection === 'danger-zone'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                }`}
-                            >
-                                Danger Zone
-                            </button>
-                        </nav>
-                    </div>
+                    {/* Two-column layout: left sidebar nav + main content */}
+                    <div className="flex flex-col lg:flex-row gap-8">
+                        {/* Left sidebar nav - Tailwind UI docs style */}
+                        <aside className="lg:w-56 flex-shrink-0">
+                            <nav className="sticky top-8 space-y-1" aria-label="Company settings sections">
+                                {navItems.map((item) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => handleSectionClick(item.id)}
+                                        className={`w-full text-left rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                                            activeSection === item.id
+                                                ? 'bg-indigo-50 text-indigo-700'
+                                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                        } ${!item.canAccess ? 'opacity-75' : ''}`}
+                                    >
+                                        <span className="flex items-center justify-between">
+                                            {item.label}
+                                            {!item.canAccess && item.ownerOnly && (
+                                                <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Owner only">
+                                                    Owner only
+                                                </span>
+                                            )}
+                                        </span>
+                                    </button>
+                                ))}
+                            </nav>
+                        </aside>
+
+                        {/* Main content */}
+                        <div className="flex-1 min-w-0">
 
                     {/* Company Information */}
                     <div id="company-information" className="mb-12 scroll-mt-8">
+                        {canEditCompanySettings ? (
                         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                {/* Left: Header */}
                                 <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
                                     <h2 className="text-lg font-semibold text-gray-900">Company Information</h2>
                                     <p className="mt-1 text-sm text-gray-500">Update your company name and details</p>
                                 </div>
-                                {/* Right: Content */}
                                 <div className="lg:col-span-2 px-6 py-6">
                                     <form onSubmit={submit}>
                             <div className="space-y-6">
@@ -688,6 +581,33 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                 </div>
                             </div>
                         </div>
+                        ) : (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                            <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                <h2 className="text-lg font-semibold text-gray-900">Company Information</h2>
+                                                <p className="mt-1 text-sm text-gray-500">Update your company name and details</p>
+                                            </div>
+                                            <div className="lg:col-span-2 px-6 py-6">
+                                                <div className="space-y-4">
+                                                    <div className="h-10 bg-gray-100 rounded" />
+                                                    <div className="h-10 bg-gray-100 rounded" />
+                                                    <div className="h-10 bg-gray-100 rounded" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-gray-700">Restricted</p>
+                                            <p className="mt-1 text-sm text-gray-500">You don't have permission to edit company information. Ask an owner or admin to grant you access.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Plan & Billing */}
@@ -803,6 +723,29 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
 
                     {/* Enterprise Download Policy — Company Settings → Downloads → Policy (D12: single card like other sections) */}
                     <div id="enterprise-download-policy" className="mb-12 scroll-mt-8">
+                        {isEnterprise && !canManageDownloadPolicy ? (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                            <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                <h2 className="text-lg font-semibold text-gray-900">Enterprise Download Policy</h2>
+                                                <p className="mt-1 text-sm text-gray-500">Controls how assets leave the system.</p>
+                                            </div>
+                                            <div className="lg:col-span-2 px-6 py-6">
+                                                <div className="h-32 bg-gray-100 rounded" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-gray-700">Restricted</p>
+                                            <p className="mt-1 text-sm text-gray-500">You don't have permission to manage download policy. Ask an owner or admin to grant you access.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
                         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                 {/* Left: Header */}
@@ -949,10 +892,11 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                 </div>
                             </div>
                         </div>
+                        )}
                     </div>
 
                     {/* Metadata Settings */}
-                    {(Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage'))) && (
+                    {canViewMetadata && (
                         <div id="metadata-settings" className="mb-12 scroll-mt-8">
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -985,9 +929,131 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                         </div>
                     )}
 
-                    {/* Ownership Transfer */}
-                    {is_current_user_owner && (
-                        <div id="ownership-transfer" className="mb-12 scroll-mt-8">
+                    {/* Dashboard Widget Settings */}
+                    <div id="dashboard-widgets" className="mb-12 scroll-mt-8">
+                        {canManageDashboardWidgets ? (
+                            <DashboardWidgetSettings 
+                                tenant={tenant} 
+                                canEdit={canManageDashboardWidgets}
+                            />
+                        ) : (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="px-6 py-6">
+                                            <h2 className="text-lg font-semibold text-gray-900">Dashboard Widgets</h2>
+                                            <p className="mt-1 text-sm text-gray-500">Configure which widgets appear on the dashboard for each role</p>
+                                            <div className="mt-4 h-24 bg-gray-100 rounded" />
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-gray-700">Restricted</p>
+                                            <p className="mt-1 text-sm text-gray-500">You don't have permission to manage dashboard widgets. Ask an owner or admin to grant you access.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* AI Settings */}
+                    <div id="ai-settings" className="mb-12 scroll-mt-8">
+                        {canManageAiSettings ? (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Configure AI tagging behavior and controls</p>
+                                    </div>
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <AiTaggingSettings 
+                                            canEdit={canManageAiSettings} 
+                                            currentPlan={billing?.current_plan}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                            <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
+                                                <p className="mt-1 text-sm text-gray-500">Configure AI tagging behavior and controls</p>
+                                            </div>
+                                            <div className="lg:col-span-2 px-6 py-6">
+                                                <div className="h-32 bg-gray-100 rounded" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-gray-700">Restricted</p>
+                                            <p className="mt-1 text-sm text-gray-500">You don't have permission to manage AI settings. Ask an owner or admin to grant you access.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Tag Quality */}
+                    <div id="tag-quality" className="mb-12 scroll-mt-8">
+                        {canViewTagQuality ? (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="px-6 py-6">
+                                    <div className="mb-4">
+                                        <h2 className="text-lg font-semibold text-gray-900">Tag Quality & Trust Metrics</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Understand how AI-generated tags perform and identify areas for improvement
+                                        </p>
+                                    </div>
+                                    <TagQuality canView={canViewTagQuality} />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="px-6 py-6">
+                                            <h2 className="text-lg font-semibold text-gray-900">Tag Quality & Trust Metrics</h2>
+                                            <p className="mt-1 text-sm text-gray-500">Understand how AI-generated tags perform and identify areas for improvement</p>
+                                            <div className="mt-4 h-24 bg-gray-100 rounded" />
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-gray-700">Restricted</p>
+                                            <p className="mt-1 text-sm text-gray-500">You don't have permission to view tag quality metrics. Ask an owner or admin to grant you access.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* AI Usage */}
+                    {canViewAiUsage && (
+                        <div id="ai-usage" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">AI Usage</h2>
+                                        <p className="mt-1 text-sm text-gray-500">View current month's AI feature usage and caps</p>
+                                    </div>
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <AiUsagePanel canView={canViewAiUsage} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Ownership Transfer - owner only; show blurred hint to admin */}
+                    <div id="ownership-transfer" className="mb-12 scroll-mt-8">
+                        {canOwnershipTransfer ? (
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                     {/* Left: Header */}
@@ -1160,120 +1226,101 @@ export default function CompanySettings({ tenant, company_url_domain = 'jackpot.
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
-
-                    {/* Dashboard Widget Settings */}
-                    {canEditCompanySettings && (
-                        <div id="dashboard-widgets" className="mb-12 scroll-mt-8">
-                            <DashboardWidgetSettings 
-                                tenant={tenant} 
-                                canEdit={canEditCompanySettings}
-                            />
-                        </div>
-                    )}
-
-                    {/* AI Settings */}
-                    {canEditCompanySettings && (
-                        <div id="ai-settings" className="mb-12 scroll-mt-8">
+                        ) : (
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                    {/* Left: Header */}
-                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
-                                        <p className="mt-1 text-sm text-gray-500">Configure AI tagging behavior and controls</p>
-                                    </div>
-                                    {/* Right: Content */}
-                                    <div className="lg:col-span-2 px-6 py-6">
-                                        <AiTaggingSettings 
-                                            canEdit={canEditCompanySettings} 
-                                            currentPlan={billing?.current_plan}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Tag Quality */}
-                    {canEditCompanySettings && (
-                        <div id="tag-quality" className="mb-12 scroll-mt-8">
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="px-6 py-6">
-                                    <div className="mb-4">
-                                        <h2 className="text-lg font-semibold text-gray-900">Tag Quality & Trust Metrics</h2>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Understand how AI-generated tags perform and identify areas for improvement
-                                        </p>
-                                    </div>
-                                    <TagQuality canView={canEditCompanySettings} />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* AI Usage */}
-                    {canViewAiUsage && (
-                        <div id="ai-usage" className="mb-12 scroll-mt-8">
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                    {/* Left: Header */}
-                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">AI Usage</h2>
-                                        <p className="mt-1 text-sm text-gray-500">View current month's AI feature usage and caps</p>
-                                    </div>
-                                    {/* Right: Content */}
-                                    <div className="lg:col-span-2 px-6 py-6">
-                                        <AiUsagePanel canView={canViewAiUsage} />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Danger Zone */}
-                    <div id="danger-zone" className="mb-12 scroll-mt-8">
-                        <div className="overflow-hidden rounded-lg border-2 border-red-200 bg-red-50 shadow-sm ring-1 ring-gray-200">
-                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                {/* Left: Header */}
-                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-red-200">
-                                    <h2 className="text-lg font-semibold text-red-900">Danger Zone</h2>
-                                    <p className="mt-1 text-sm text-red-700">Irreversible and destructive actions</p>
-                                </div>
-                                {/* Right: Content */}
-                                <div className="lg:col-span-2 px-6 py-6">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <h3 className="text-base font-semibold text-red-900">Delete Company</h3>
-                                            <p className="mt-1 text-sm text-red-700">
-                                                Permanently delete your company and all associated data. This action cannot be undone.
-                                            </p>
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                            <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                <h2 className="text-lg font-semibold text-gray-900">Ownership Transfer</h2>
+                                                <p className="mt-1 text-sm text-gray-500">Transfer company ownership to another team member</p>
+                                            </div>
+                                            <div className="lg:col-span-2 px-6 py-6">
+                                                <div className="h-32 bg-gray-100 rounded" />
+                                            </div>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE "${tenant.name}"? This action cannot be undone. All data, brands, assets, and team members will be permanently deleted.`)) {
-                                                    if (confirm(`Final confirmation: This will permanently delete "${tenant.name}" and all associated data. Continue?`)) {
-                                                        router.delete('/app/companies/settings', {
-                                                            onError: (errors) => {
-                                                                if (errors.error) {
-                                                                    alert(errors.error)
-                                                                }
-                                                            },
-                                                        })
-                                                    }
-                                                }
-                                            }}
-                                            className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                        >
-                                            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                            </svg>
-                                            Delete Company
-                                        </button>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-gray-700">Owner only</p>
+                                            <p className="mt-1 text-sm text-gray-500">Only the company owner can transfer ownership. Contact your owner if you need this change.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
+                        )}
+                    </div>
+
+                    {/* Danger Zone - owner only for delete; show blurred hint to admin */}
+                    <div id="danger-zone" className="mb-12 scroll-mt-8">
+                        {canDeleteCompany ? (
+                            <div className="overflow-hidden rounded-lg border-2 border-red-200 bg-red-50 shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-red-200">
+                                        <h2 className="text-lg font-semibold text-red-900">Danger Zone</h2>
+                                        <p className="mt-1 text-sm text-red-700">Irreversible and destructive actions</p>
+                                    </div>
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-base font-semibold text-red-900">Delete Company</h3>
+                                                <p className="mt-1 text-sm text-red-700">
+                                                    Permanently delete your company and all associated data. This action cannot be undone.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (confirm(`WARNING: Are you sure you want to PERMANENTLY DELETE "${tenant.name}"? This action cannot be undone. All data, brands, assets, and team members will be permanently deleted.`)) {
+                                                        if (confirm(`Final confirmation: This will permanently delete "${tenant.name}" and all associated data. Continue?`)) {
+                                                            router.delete('/app/companies/settings', {
+                                                                onError: (errors) => {
+                                                                    if (errors.error) {
+                                                                        alert(errors.error)
+                                                                    }
+                                                                },
+                                                            })
+                                                        }
+                                                    }
+                                                }}
+                                                className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                            >
+                                                <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                                </svg>
+                                                Delete Company
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="overflow-hidden rounded-lg border-2 border-red-200 bg-red-50 shadow-sm ring-1 ring-gray-200">
+                                <div className="relative">
+                                    <div className="blur-sm select-none pointer-events-none">
+                                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                            <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-red-200">
+                                                <h2 className="text-lg font-semibold text-red-900">Danger Zone</h2>
+                                                <p className="mt-1 text-sm text-red-700">Irreversible and destructive actions</p>
+                                            </div>
+                                            <div className="lg:col-span-2 px-6 py-6">
+                                                <h3 className="text-base font-semibold text-red-900">Delete Company</h3>
+                                                <p className="mt-1 text-sm text-red-700">Permanently delete your company and all associated data.</p>
+                                                <div className="mt-4 h-10 w-32 bg-red-200 rounded" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-red-50/80 backdrop-blur-[2px] rounded-lg">
+                                        <div className="text-center px-4">
+                                            <p className="text-sm font-medium text-red-800">Owner only</p>
+                                            <p className="mt-1 text-sm text-red-700">Only the company owner can delete the company. Contact your owner for this action.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                         </div>
                     </div>
                 </div>

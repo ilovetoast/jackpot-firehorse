@@ -25,7 +25,8 @@ import { CategoryIcon } from '../../Helpers/categoryIcons'
 export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
-    const { hasPermission: canUpload } = usePermission('asset.upload')
+    const { can } = usePermission()
+    const canUpload = can('asset.upload')
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)

@@ -10,7 +10,6 @@ import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
-import { usePermission } from '../hooks/usePermission'
 
 export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null, primaryColor }) {
     const { auth } = usePage().props

@@ -258,10 +258,12 @@ class CompanyController extends Controller
             abort(403, 'You do not have access to this company.');
         }
 
-        // Check if user has permission to view company settings (required for update too)
-        // Check via tenant role permissions
+        // Check if user has permission to edit company settings
         if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
-            abort(403, 'Only administrators and owners can update company settings.');
+            abort(403, 'You do not have access to company settings.');
+        }
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.edit')) {
+            abort(403, 'You do not have permission to edit company settings.');
         }
 
         $validated = $request->validate([
@@ -363,8 +365,8 @@ class CompanyController extends Controller
             abort(403, 'You do not have access to this company.');
         }
 
-        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
-            abort(403, 'Only administrators and owners can update company settings.');
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_download_policy')) {
+            abort(403, 'You do not have permission to manage download policy.');
         }
 
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
@@ -409,9 +411,8 @@ class CompanyController extends Controller
             abort(403, 'You do not have access to this company.');
         }
 
-        // Check if user has permission to update company settings
-        if (! $user->hasPermissionForTenant($tenant, 'company_settings.view')) {
-            abort(403, 'Only administrators and owners can update widget settings.');
+        if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_dashboard_widgets')) {
+            abort(403, 'You do not have permission to manage dashboard widgets.');
         }
 
         $validated = $request->validate([

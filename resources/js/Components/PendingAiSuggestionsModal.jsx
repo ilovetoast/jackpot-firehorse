@@ -20,8 +20,9 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
     const [processing, setProcessing] = useState(new Set())
     
     // Permission checks
-    const { hasPermission: canView } = usePermission('metadata.suggestions.view')
-    const { hasPermission: canApply } = usePermission('metadata.suggestions.apply')
+    const { can } = usePermission()
+    const canView = can('metadata.suggestions.view')
+    const canApply = can('metadata.suggestions.apply')
 
     // Fetch all pending suggestions
     useEffect(() => {

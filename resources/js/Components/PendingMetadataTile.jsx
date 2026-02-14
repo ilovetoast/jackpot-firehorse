@@ -16,7 +16,8 @@ import { usePermission } from '../hooks/usePermission'
 
 export default function PendingMetadataTile({ pendingCount = 0 }) {
     const [isModalOpen, setIsModalOpen] = useState(false)
-    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
+    const { can } = usePermission()
+    const canApprove = can('metadata.bypass_approval')
 
     // Only show tile for users who can approve metadata
     // Contributors cannot approve, so they shouldn't see this tile

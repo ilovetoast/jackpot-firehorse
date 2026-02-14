@@ -29,7 +29,8 @@ export default function PendingMetadataList({ assetId }) {
     const [aiSuggestionsEnabled, setAiSuggestionsEnabled] = useState(false)
 
     // Step 4: Use permission check instead of role check
-    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
+    const { can } = usePermission()
+    const canApprove = can('metadata.bypass_approval')
 
     // Fetch pending metadata
     useEffect(() => {

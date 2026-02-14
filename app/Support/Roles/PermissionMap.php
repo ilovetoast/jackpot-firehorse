@@ -38,16 +38,39 @@ class PermissionMap
     public static function tenantPermissions(): array
     {
         // Company permissions (tenant-scoped)
+        // Aligned with Company Settings page sections:
+        // - company_settings.view: View Company Settings page
+        // - company_settings.edit: Company Information (name, slug, timezone, etc.)
+        // - company_settings.manage_download_policy: Enterprise Download Policy
+        // - company_settings.manage_dashboard_widgets: Dashboard Widgets
+        // - company_settings.manage_ai_settings: AI Settings
+        // - company_settings.view_tag_quality: Tag Quality
+        // - team.manage: Team Members
+        // - billing.view/manage: Plan & Billing
+        // - brand_settings.manage: Brands Settings
         $companyPermissions = [
             'billing.view',
             'billing.manage',
             'company_settings.view',
+            'company_settings.edit',
+            'company_settings.manage_download_policy',
+            'company_settings.manage_dashboard_widgets',
+            'company_settings.manage_ai_settings',
+            'company_settings.view_tag_quality',
             'team.manage',
             'activity_logs.view',
             'brand_settings.manage',
             'brand_categories.manage',
             'view.restricted.categories',
             'assets.retry_thumbnails',
+        ];
+
+        // Owner-only permissions (never given to admin)
+        // - company_settings.ownership_transfer: Ownership Transfer section
+        // - company_settings.delete_company: Danger Zone (Delete Company)
+        $ownerOnlyPermissions = [
+            'company_settings.ownership_transfer',
+            'company_settings.delete_company',
         ];
 
         // DAM Asset permissions (tenant-scoped)
@@ -103,9 +126,10 @@ class PermissionMap
         ];
 
         return [
-            // Owner: ALL permissions (full access)
+            // Owner: ALL permissions (full access) including owner-only
             'owner' => array_merge(
                 $companyPermissions,
+                $ownerOnlyPermissions,
                 $assetPermissions,
                 $metadataPermissions,
                 $tagPermissions,
@@ -117,7 +141,7 @@ class PermissionMap
                 ]
             ),
 
-            // Admin: All Manager permissions + governance permissions
+            // Admin: All Manager permissions + governance (no owner-only permissions)
             'admin' => array_merge(
                 $companyPermissions,
                 $assetPermissions,

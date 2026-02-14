@@ -26,7 +26,8 @@ export default function AddAssetButton({
     disabled = false
 }) {
     const { auth } = usePage().props
-    const { hasPermission: canUpload } = usePermission('asset.upload')
+    const { can } = usePermission()
+    const canUpload = can('asset.upload')
     
     // Hide button if user doesn't have upload permission
     if (!canUpload) {

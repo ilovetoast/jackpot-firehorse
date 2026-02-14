@@ -2,12 +2,12 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AuthPermissionService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Middleware;
-use Spatie\Permission\Models\Role;
 
 class HandleInertiaRequests extends Middleware
 {
@@ -260,112 +260,15 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
-        // Get user permissions and roles for current tenant
-        $permissions = [];
-        $roles = [];
-        $tenantRole = null;
-        $brandRole = null;
-        $rolePermissions = [];
-        $permissions = []; // Initialize as empty array
-        $roles = []; // Initialize as empty array
-        
-        if ($user && $currentTenantId && $tenant) {
-            // Refresh the user's tenants relationship to ensure we have fresh pivot data
+        // Effective permissions: merged tenant + Spatie + brand role permissions (no collisions)
+        $effectivePermissions = [];
+        if ($user) {
             $user->load('tenants');
-            
-            // Get site-wide permissions and roles from Spatie (global)
-            $permissions = $user->getAllPermissions()->pluck('name')->toArray();
-            $siteRoles = $user->getSiteRoles();
-            $roles = array_values($siteRoles);
-            
-            // Get tenant-specific role from pivot table using the User model method
-            // This ensures pivot data is loaded correctly
-            $tenantRole = $user->getRoleForTenant($tenant);
-            
-            // If role is null but user belongs to tenant, try to determine role from created_at order
-            // (fallback: first user is owner, others are members)
-            if (!$tenantRole) {
-                $belongsToTenant = $user->tenants()->where('tenants.id', $tenant->id)->exists();
-                if ($belongsToTenant) {
-                    // Check if this is the first user (by pivot created_at) - they should be owner
-                    $firstUser = $tenant->users()->orderBy('tenant_user.created_at')->first();
-                    if ($firstUser && $firstUser->id === $user->id) {
-                        $tenantRole = 'owner';
-                        // Set the role in the pivot table for future requests
-                        $user->setRoleForTenant($tenant, 'owner');
-                    } else {
-                        // Default to member if no role is set
-                        $tenantRole = 'member';
-                        $user->setRoleForTenant($tenant, 'member');
-                    }
-                }
-            }
-            
-            // Add permissions from site roles (site_admin, site_owner, etc.)
-            // Site roles are Spatie roles, so their permissions should already be in getAllPermissions()
-            // But we also explicitly add them here to ensure they're included
-            foreach ($siteRoles as $siteRoleName) {
-                $siteRoleModel = \Spatie\Permission\Models\Role::where('name', $siteRoleName)->first();
-                if ($siteRoleModel) {
-                    $siteRolePermissions = $siteRoleModel->permissions->pluck('name')->toArray();
-                    $permissions = array_unique(array_merge($permissions, $siteRolePermissions));
-                }
-            }
-            
-            if ($tenantRole) {
-                $roles[] = $tenantRole;
-                
-                // Add permissions from tenant role to the permissions array
-                // This ensures tenant role permissions (like metadata.registry.view) are available in frontend
-                $roleModel = \Spatie\Permission\Models\Role::where('name', $tenantRole)->first();
-                if ($roleModel) {
-                    $tenantRolePermissions = $roleModel->permissions->pluck('name')->toArray();
-                    $permissions = array_unique(array_merge($permissions, $tenantRolePermissions));
-                }
-            }
-            
-            // Build role permissions mapping for frontend permission checking
-            // This maps each role name to an array of permission names
-            // Always build this mapping, even if user has no tenant role, so frontend can check any role
-            $allRoles = Role::all();
-            foreach ($allRoles as $role) {
-                $rolePermissions[$role->name] = $role->permissions->pluck('name')->toArray();
-            }
-            
-            // Add brand role permissions mapping (brand roles are NOT Spatie roles, they're strings in brand_user pivot)
-            // Use PermissionMap to get brand role permissions
-            $brandRolePermissions = \App\Support\Roles\PermissionMap::brandPermissions();
-            foreach ($brandRolePermissions as $brandRoleName => $brandPerms) {
-                $rolePermissions[$brandRoleName] = $brandPerms;
-            }
-            
-            // Get user's brand role for the active brand (if available)
-            $brandRole = null;
-            if ($activeBrand && $user) {
-                $brandRole = $user->getRoleForBrand($activeBrand);
-            }
-        } else {
-            // No tenant selected - still get site role permissions if user has site roles
-            if ($user) {
-                $siteRoles = $user->getSiteRoles();
-                foreach ($siteRoles as $siteRoleName) {
-                    $siteRoleModel = \Spatie\Permission\Models\Role::where('name', $siteRoleName)->first();
-                    if ($siteRoleModel) {
-                        $siteRolePermissions = $siteRoleModel->permissions->pluck('name')->toArray();
-                        $permissions = array_unique(array_merge($permissions, $siteRolePermissions));
-                    }
-                }
-                
-                // Also get direct Spatie permissions (should already include site role permissions, but ensure they're there)
-                $spatiePermissions = $user->getAllPermissions()->pluck('name')->toArray();
-                $permissions = array_unique(array_merge($permissions, $spatiePermissions));
-            }
-            
-            // Even if no tenant is selected, build role permissions mapping for consistency
-            $allRoles = Role::all();
-            foreach ($allRoles as $role) {
-                $rolePermissions[$role->name] = $role->permissions->pluck('name')->toArray();
-            }
+            $effectivePermissions = app(AuthPermissionService::class)->effectivePermissions(
+                $user,
+                $tenant,
+                $activeBrand ?? null
+            );
         }
 
         $parentShared = parent::share($request);
@@ -478,11 +381,7 @@ class HandleInertiaRequests extends Middleware
                 // User is in company but has no brand access (removed from all brands)
                 'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && (is_array($brands) && count($brands) === 0),
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
-                'permissions' => array_values($permissions), // Ensure it's a proper array (not an object with numeric keys)
-                'roles' => $roles,
-                'tenant_role' => $tenantRole, // Current tenant-specific role
-                'brand_role' => $brandRole ?? null, // Current brand-specific role (if active brand exists)
-                'role_permissions' => $rolePermissions, // Mapping of role names to permission arrays (includes both tenant and brand roles)
+                'effective_permissions' => $effectivePermissions,
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
                     $featureGate = app(FeatureGate::class);

@@ -22,8 +22,9 @@ export default function MetadataCandidateReview({ assetId }) {
     const [showConfirmReject, setShowConfirmReject] = useState(null)
     
     // Check if user can view metadata suggestions
-    const { hasPermission: canViewSuggestions } = usePermission('metadata.suggestions.view')
-    const { hasPermission: canApplySuggestions } = usePermission('metadata.suggestions.apply')
+    const { can } = usePermission()
+    const canViewSuggestions = can('metadata.suggestions.view')
+    const canApplySuggestions = can('metadata.suggestions.apply')
 
     // Fetch reviewable candidates
     useEffect(() => {

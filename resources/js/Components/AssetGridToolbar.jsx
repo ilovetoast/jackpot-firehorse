@@ -101,12 +101,9 @@ export default function AssetGridToolbar({
     const [pendingTagsCount, setPendingTagsCount] = useState(0)
     const [loadingPendingCounts, setLoadingPendingCounts] = useState(false)
     
-    // Check if user can approve assets (admin/brand_manager)
-    const brandRole = auth?.brand_role?.toLowerCase()
-    const tenantRole = auth?.tenant_role?.toLowerCase()
-    const isTenantOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
-    const isBrandApprover = brandRole === 'brand_manager' || brandRole === 'admin'
-    const canApprove = isBrandApprover || isTenantOwnerOrAdmin
+    // Check if user can approve assets (backend owns permission logic)
+    const { can } = usePermission()
+    const canApprove = can('metadata.bypass_approval')
     const approvalsEnabled = auth?.approval_features?.approvals_enabled
     
     useEffect(() => {
@@ -152,7 +149,7 @@ export default function AssetGridToolbar({
         // TODO: Fetch pending tag suggestions count for this category
         // For now, set to 0
         setPendingTagsCount(0)
-    }, [canApprove, approvalsEnabled, brand?.id, selectedCategoryId, brandRole, tenantRole])
+    }, [canApprove, approvalsEnabled, brand?.id, selectedCategoryId])
     
     // Handle click on pending assets callout - enable 'Pending Publication' filter
     const handlePendingAssetsClick = () => {

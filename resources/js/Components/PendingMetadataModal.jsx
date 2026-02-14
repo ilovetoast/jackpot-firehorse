@@ -24,7 +24,8 @@ export default function PendingMetadataModal({ isOpen, onClose }) {
     const currentIndexRef = useRef(0) // Track current index for closures
     
     // Permission checks - only approvers can use this modal
-    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
+    const { can } = usePermission()
+    const canApprove = can('metadata.bypass_approval')
 
     // Fetch all pending metadata approvals
     useEffect(() => {

@@ -426,6 +426,19 @@ class User extends Authenticatable
     }
 
     /**
+     * Check if user has a permission in the given tenant/brand context.
+     * Uses AuthPermissionService for unified backend permission checks.
+     *
+     * @param string $permission Permission string (e.g. 'team.manage', 'asset.view')
+     * @param Tenant|null $tenant Tenant context (null for site-only checks)
+     * @param Brand|null $brand Brand context (optional, for brand-scoped permissions)
+     */
+    public function canForContext(string $permission, ?Tenant $tenant = null, ?Brand $brand = null): bool
+    {
+        return app(\App\Services\AuthPermissionService::class)->can($this, $permission, $tenant, $brand);
+    }
+
+    /**
      * Check if user has a permission based on their tenant role.
      * For company-level permissions, ONLY checks tenant role permissions.
      * For site-level permissions, checks both Spatie permissions and tenant role permissions.

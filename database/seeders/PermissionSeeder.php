@@ -15,17 +15,31 @@ class PermissionSeeder extends Seeder
      */
     public function run(): void
     {
-        // Company permissions (tenant-scoped)
+        // Company permissions (tenant-scoped) - aligned with Company Settings sections
+        // company_settings.edit = Company Information | manage_download_policy = Enterprise Download Policy
+        // manage_dashboard_widgets = Dashboard Widgets | manage_ai_settings = AI Settings
+        // view_tag_quality = Tag Quality | ownership_transfer/delete_company = owner only
         $companyPermissions = [
             'billing.view',
             'billing.manage',
             'company_settings.view',
+            'company_settings.edit',
+            'company_settings.manage_download_policy',
+            'company_settings.manage_dashboard_widgets',
+            'company_settings.manage_ai_settings',
+            'company_settings.view_tag_quality',
             'team.manage',
             'activity_logs.view',
             'brand_settings.manage',
             'brand_categories.manage',
             'view.restricted.categories',
             'assets.retry_thumbnails',
+        ];
+
+        // Owner-only (Ownership Transfer, Delete Company)
+        $ownerOnlyPermissions = [
+            'company_settings.ownership_transfer',
+            'company_settings.delete_company',
         ];
 
         // DAM Asset permissions (tenant-scoped)
@@ -115,6 +129,7 @@ class PermissionSeeder extends Seeder
         // Create all permissions
         $allCompanyPermissions = array_merge(
             $companyPermissions,
+            $ownerOnlyPermissions,
             $assetPermissions,
             $metadataPermissions,
             $tagPermissions,

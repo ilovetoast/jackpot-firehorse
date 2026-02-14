@@ -15,8 +15,9 @@ export default function NotificationBell({ textColor = '#000000' }) {
     const [unreadCount, setUnreadCount] = useState(0)
     const [isOpen, setIsOpen] = useState(false)
     const [loading, setLoading] = useState(true)
-    const { hasPermission: canApprove } = usePermission('metadata.bypass_approval')
-    const { hasPermission: canViewSuggestions } = usePermission('metadata.suggestions.view')
+    const { can } = usePermission()
+    const canApprove = can('metadata.bypass_approval')
+    const canViewSuggestions = can('metadata.suggestions.view')
     const [hasStaleAssetGrid, setHasStaleAssetGrid] = useState(() => {
         // Initialize from window-level state
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {

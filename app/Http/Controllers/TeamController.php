@@ -50,8 +50,8 @@ class TeamController extends Controller
             ]);
         }
 
-        // Check if user has permission to manage team
-        if (! $user->hasPermissionForTenant($tenant, 'team.manage')) {
+        // Check if user has permission to manage team (unified AuthPermissionService)
+        if (! $user->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can access team management.');
         }
 
@@ -372,7 +372,7 @@ class TeamController extends Controller
         }
 
         // Check if user has permission to manage team
-        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can manage team members.');
         }
 
@@ -430,7 +430,7 @@ class TeamController extends Controller
         if (! $authUser->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(403, 'You do not have access to this company.');
         }
-        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can remove users from the company.');
         }
         if ($user->id === $authUser->id) {
@@ -490,7 +490,7 @@ class TeamController extends Controller
         }
 
         // Check if user has permission to manage team
-        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can manage team members.');
         }
 
@@ -586,7 +586,7 @@ class TeamController extends Controller
         }
 
         // Check if user has permission to manage team
-        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can manage team members.');
         }
 
@@ -651,7 +651,7 @@ class TeamController extends Controller
         if (! $authUser->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(403, 'You do not have access to this company.');
         }
-        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can add users to brands.');
         }
 
@@ -715,7 +715,7 @@ class TeamController extends Controller
         }
 
         // Check if user has permission to manage team
-        if (! $authUser->hasPermissionForTenant($tenant, 'team.manage')) {
+        if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can invite team members.');
         }
 

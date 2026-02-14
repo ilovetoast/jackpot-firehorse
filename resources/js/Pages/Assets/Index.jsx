@@ -30,7 +30,8 @@ import { CategoryIcon } from '../../Helpers/categoryIcons'
 export default function AssetsIndex({ categories, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
-    const { hasPermission: canUpload } = usePermission('asset.upload')
+    const { can } = usePermission()
+    const canUpload = can('asset.upload')
     
     // Use prop directly (now in function signature) or fallback to pageProps
     const availableValues = available_values || pageProps.available_values || {}

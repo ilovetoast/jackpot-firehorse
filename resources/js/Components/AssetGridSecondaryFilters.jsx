@@ -81,9 +81,10 @@ export default function AssetGridSecondaryFilters({
     // Pending Publication (pending_publication) requires asset.publish
     // Unpublished requires metadata.bypass_approval
     // Archived requires asset.archive
-    const { hasPermission: canPublish } = usePermission('asset.publish')
-    const { hasPermission: canBypassApproval } = usePermission('metadata.bypass_approval')
-    const { hasPermission: canArchive } = usePermission('asset.archive')
+    const { can } = usePermission()
+    const canPublish = can('asset.publish')
+    const canBypassApproval = can('metadata.bypass_approval')
+    const canArchive = can('asset.archive')
     
     // Phase L.5.1: Lifecycle filter state (all three filters)
     const [pendingPublicationFilter, setPendingPublicationFilter] = useState(false)

@@ -36,14 +36,28 @@ use Stripe\Price;
 class SiteAdminController extends Controller
 {
     /**
+     * Authorize that the current user is site owner (user ID 1) or has site_admin/site_owner role.
+     */
+    private function authorizeSiteAdmin(?string $message = null): void
+    {
+        $user = Auth::user();
+        if (! $user) {
+            abort(403);
+        }
+        $siteRoles = $user->getSiteRoles();
+        $isSiteOwner = $user->id === 1;
+        $isSiteAdmin = in_array('site_admin', $siteRoles) || in_array('site_owner', $siteRoles);
+        if (! $isSiteOwner && ! $isSiteAdmin) {
+            abort(403, $message ?? 'Only site owners and site admins can access this page.');
+        }
+    }
+
+    /**
      * Display the site admin dashboard.
      */
     public function index(Request $request): Response
     {
-        // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
         
         // MINIMAL INITIAL LOAD - Only load basic company info
         // Heavy data (users, costs, etc.) will be loaded via AJAX
@@ -113,9 +127,7 @@ class SiteAdminController extends Controller
      */
     public function stats(): \Illuminate\Http\JsonResponse
     {
-        if (Auth::id() !== 1) {
-            abort(403);
-        }
+        $this->authorizeSiteAdmin();
 
         // Cache stats for 5 minutes
         $stats = cache()->remember('admin_stats', 300, function () {
@@ -193,9 +205,7 @@ class SiteAdminController extends Controller
      */
     public function companyDetails(Tenant $tenant): \Illuminate\Http\JsonResponse
     {
-        if (Auth::id() !== 1) {
-            abort(403);
-        }
+        $this->authorizeSiteAdmin();
 
         $planService = app(\App\Services\PlanService::class);
         
@@ -290,9 +300,7 @@ class SiteAdminController extends Controller
      */
     public function companyUsers(Tenant $tenant): \Illuminate\Http\JsonResponse
     {
-        if (Auth::id() !== 1) {
-            abort(403);
-        }
+        $this->authorizeSiteAdmin();
 
         $planService = app(\App\Services\PlanService::class);
         
@@ -353,9 +361,7 @@ class SiteAdminController extends Controller
      */
     public function allUsers(Request $request): \Illuminate\Http\JsonResponse
     {
-        if (Auth::id() !== 1) {
-            abort(403);
-        }
+        $this->authorizeSiteAdmin();
 
         $perPage = (int) $request->get('per_page', 50);
         $search = $request->get('search', '');
@@ -422,9 +428,7 @@ class SiteAdminController extends Controller
      */
     public function usersForSelector(Request $request): \Illuminate\Http\JsonResponse
     {
-        if (Auth::id() !== 1) {
-            abort(403);
-        }
+        $this->authorizeSiteAdmin();
 
         $search = $request->get('search', '');
         $excludeTenantId = $request->get('exclude_tenant_id');
@@ -466,9 +470,7 @@ class SiteAdminController extends Controller
     public function addUserToCompany(Request $request, Tenant $tenant)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Check if company has access to brand_manager role (Pro/Enterprise plans only)
         $planService = app(\App\Services\PlanService::class);
@@ -572,9 +574,7 @@ class SiteAdminController extends Controller
     public function updateUserRole(Request $request, Tenant $tenant, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify user belongs to this company
         if (!$tenant->users()->where('users.id', $user->id)->exists()) {
@@ -680,9 +680,7 @@ class SiteAdminController extends Controller
     public function updateUserBrandRole(Request $request, Tenant $tenant, User $user, Brand $brand)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify user belongs to this company
         if (!$tenant->users()->where('users.id', $user->id)->exists()) {
@@ -765,29 +763,30 @@ class SiteAdminController extends Controller
     public function assignSiteRole(Request $request, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $validated = $request->validate([
-            'role' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
+            'role' => 'nullable|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
         ]);
 
+        $newRole = $validated['role'] ?: null;
+
         // CRITICAL: Only user ID 1 can have site_owner role
-        if ($validated['role'] === 'site_owner' && $user->id !== 1) {
+        if ($newRole === 'site_owner' && $user->id !== 1) {
             return redirect()->back()->withErrors(['role' => 'Only user ID 1 can have the site_owner role.']);
         }
 
-        // Get old site roles for logging (include both 'compliance' and 'site_compliance' for backward compatibility)
-        $oldSiteRoles = $user->getRoleNames()->filter(function ($role) {
-            return in_array($role, ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance', 'site_compliance']);
-        })->toArray();
-        
-        // Remove existing site roles (include both 'compliance' and 'site_compliance' for backward compatibility)
-        $user->removeRole(['site_owner', 'site_admin', 'site_support', 'site_engineering', 'compliance', 'site_compliance']);
-        
-        // Assign the new site role
-        $user->assignRole($validated['role']);
+        // Get old site roles for logging
+        $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'site_compliance'];
+        $oldSiteRoles = $user->getRoleNames()->filter(fn ($role) => in_array($role, $siteRoleNames))->toArray();
+
+        // Remove existing site roles (only use actual Spatie role names: site_compliance exists, 'compliance' does not)
+        $user->removeRole($siteRoleNames);
+
+        // Assign the new site role (or none if unassigning)
+        if ($newRole) {
+            $user->assignRole($newRole);
+        }
 
         // Log activity for all companies this user belongs to
         // Site role changes affect all companies, so we log for each tenant
@@ -804,12 +803,12 @@ class SiteAdminController extends Controller
                     'admin_name' => $admin->name,
                     'admin_email' => $admin->email,
                     'old_roles' => $oldSiteRoles,
-                    'new_role' => $validated['role'],
+                    'new_role' => $newRole,
                 ]
             );
         }
 
-        return back()->with('success', 'Site role assigned successfully.');
+        return back()->with('success', $newRole ? 'Site role assigned successfully.' : 'Site role removed successfully.');
     }
 
     /**
@@ -818,9 +817,7 @@ class SiteAdminController extends Controller
     public function removeUserFromCompany(Request $request, Tenant $tenant, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify the user to be removed belongs to this company
         if (!$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
@@ -879,9 +876,7 @@ class SiteAdminController extends Controller
     public function cancelAccount(Request $request, Tenant $tenant, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify the user belongs to this company
         if (!$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
@@ -948,9 +943,7 @@ class SiteAdminController extends Controller
     public function deleteAccount(Request $request, Tenant $tenant, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Verify the user belongs to this company
         if (!$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
@@ -1069,9 +1062,7 @@ class SiteAdminController extends Controller
     public function deleteUserAccount(Request $request, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Check if user has no companies
         $hasNoCompanies = $user->tenants()->count() === 0;
@@ -1127,9 +1118,7 @@ class SiteAdminController extends Controller
     public function suspendAccount(Request $request, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Prevent suspending yourself
         if ($user->id === Auth::id()) {
@@ -1183,9 +1172,7 @@ class SiteAdminController extends Controller
     public function unsuspendAccount(Request $request, User $user)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Unsuspend the user
         $user->unsuspend();
@@ -1218,9 +1205,7 @@ class SiteAdminController extends Controller
     public function viewUser(User $user): Response
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Get user's companies with roles
         $companies = $user->tenants()->get()->map(function ($tenant) use ($user) {
@@ -1337,9 +1322,7 @@ class SiteAdminController extends Controller
     public function documentation(): Response
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         return Inertia::render('Admin/Documentation');
     }
@@ -1352,9 +1335,7 @@ class SiteAdminController extends Controller
     public function updatePlan(Request $request, Tenant $tenant)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can update plans.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can update plans.');
 
         $planService = app(\App\Services\PlanService::class);
         
@@ -1628,9 +1609,7 @@ class SiteAdminController extends Controller
     public function permissions(): Response
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Get site roles
         $siteRoles = [
@@ -1641,12 +1620,13 @@ class SiteAdminController extends Controller
             ['id' => 'site_compliance', 'name' => 'Site Compliance', 'icon' => ''],
         ];
 
-        // Get company roles (all tenant-level roles from database)
-        // Ordered by hierarchy: Owner > Admin > Brand Manager > Manager > Contributor > Uploader > Viewer > Member
+        // Get company roles (all tenant-level + legacy roles from database)
+        // Ordered by hierarchy: Owner > Admin > Agency Partner > Brand Manager > Manager > Contributor > Uploader > Viewer > Member
         // Note: 'member' is deprecated but kept for backward compatibility
         $companyRoles = [
             ['id' => 'owner', 'name' => 'Owner', 'icon' => '👑'],
             ['id' => 'admin', 'name' => 'Admin', 'icon' => ''],
+            ['id' => 'agency_partner', 'name' => 'Agency Partner', 'icon' => ''],
             ['id' => 'brand_manager', 'name' => 'Brand Manager', 'icon' => ''],
             ['id' => 'manager', 'name' => 'Manager', 'icon' => ''],
             ['id' => 'contributor', 'name' => 'Contributor', 'icon' => ''],
@@ -1761,9 +1741,7 @@ class SiteAdminController extends Controller
     public function stripeStatus(): Response
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         // Laravel Cashier uses STRIPE_KEY and STRIPE_SECRET from env
         $stripeKey = env('STRIPE_KEY');
@@ -2016,9 +1994,7 @@ class SiteAdminController extends Controller
     public function saveSiteRolePermissions(Request $request)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $validated = $request->validate([
             'role_id' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
@@ -2078,19 +2054,17 @@ class SiteAdminController extends Controller
     public function saveCompanyRolePermissions(Request $request)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
-        // Validate using RoleRegistry - only tenant roles for company role permissions
+        // Validate - allow any role that exists in the database (tenant + legacy roles)
         $validated = $request->validate([
             'role_id' => [
                 'required',
                 'string',
                 function ($attribute, $value, $fail) {
-                    // Only tenant roles are valid for company role permissions
-                    if (!RoleRegistry::isValidTenantRole($value)) {
-                        $fail("Invalid tenant role: {$value}. Valid roles are: " . implode(', ', RoleRegistry::tenantRoles()));
+                    $role = Role::where('name', $value)->where('guard_name', 'web')->first();
+                    if (!$role) {
+                        $fail("Role does not exist: {$value}");
                     }
                 },
             ],
@@ -2133,9 +2107,7 @@ class SiteAdminController extends Controller
     public function createPermission(Request $request)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $validated = $request->validate([
             'name' => 'required|string|max:255|regex:/^[a-z0-9._]+$/',
@@ -2171,9 +2143,7 @@ class SiteAdminController extends Controller
     public function syncSubscription(Request $request, Tenant $tenant)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         if (!$tenant->stripe_id) {
             return back()->withErrors(['error' => 'Tenant does not have a Stripe customer ID.']);
@@ -2231,9 +2201,7 @@ class SiteAdminController extends Controller
     public function processRefund(Request $request)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $validated = $request->validate([
             'tenant_id' => 'required|exists:tenants,id',
@@ -2266,9 +2234,7 @@ class SiteAdminController extends Controller
     public function activityLogs(Request $request): Response
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can access this page.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $query = \App\Models\ActivityEvent::query();
 
@@ -2636,9 +2602,7 @@ class SiteAdminController extends Controller
     public function resetSubscriptions(Request $request, Tenant $tenant)
     {
         // Only user ID 1 (Site Owner) can access
-        if (Auth::id() !== 1) {
-            abort(403, 'Only site owners can reset subscriptions.');
-        }
+        $this->authorizeSiteAdmin('Only site owners and site admins can reset subscriptions.');
 
         try {
             $stripeSecret = env('STRIPE_SECRET');

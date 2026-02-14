@@ -35,8 +35,9 @@ export default function AssetTagManager({
     // Permission check - align with existing asset permissions
     // If user can see the asset drawer, they can see tags. Use same pattern as metadata.
     const canView = true // Tags are viewable if asset is viewable (drawer already shown)
-    const { hasPermission: canAddTags } = usePermission('assets.tags.create')
-    const { hasPermission: canRemoveTags } = usePermission('assets.tags.delete')
+    const { can } = usePermission()
+    const canAddTags = can('assets.tags.create')
+    const canRemoveTags = can('assets.tags.delete')
 
     // Handle tag added
     const handleTagAdded = (newTag) => {

@@ -45,7 +45,7 @@ class TagQualityMetricsTest extends TestCase
         ]);
 
         $this->admin->tenants()->attach($this->tenant->id, [
-            'permissions' => json_encode(['companies.settings.edit', 'ai.usage.view'])
+            'permissions' => json_encode(['company_settings.edit', 'ai.usage.view'])
         ]);
 
         // Create regular user

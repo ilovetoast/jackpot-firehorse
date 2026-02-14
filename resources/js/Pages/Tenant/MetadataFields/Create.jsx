@@ -6,7 +6,8 @@ import { usePermission } from '../../../hooks/usePermission'
 
 export default function CreateTenantMetadataField({ categories = [], preselectedCategoryId = null }) {
     const { auth } = usePage().props
-    const { hasPermission: canCreate } = usePermission('metadata.tenant.field.create')
+    const { can } = usePermission()
+    const canCreate = can('metadata.tenant.field.create')
     const [formData, setFormData] = useState({
         key: '',
         system_label: '',
