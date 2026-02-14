@@ -39,26 +39,27 @@ class PresenceService
     {
         try {
             $pattern = $this->pattern($tenant->id, $brand?->id);
-
-            $cursor = null;
+            $prefix = config('database.redis.options.prefix') ?? '';
+            $redis = Redis::connection();
+            $iterator = null;
             $results = [];
 
             do {
-                [$cursor, $keys] = Redis::scan($cursor, [
-                    'match' => $pattern,
-                    'count' => 100,
-                ]);
-
-                foreach ($keys as $key) {
-                    $data = Redis::get($key);
-                    if ($data) {
-                        $decoded = json_decode($data, true);
-                        if ($decoded) {
-                            $results[] = $decoded;
+                $keys = $redis->scan($iterator, $pattern, 100);
+                if (is_array($keys)) {
+                    foreach ($keys as $key) {
+                        // Scan returns physical keys (with prefix); get() expects logical key
+                        $logicalKey = $prefix ? substr((string) $key, strlen($prefix)) : $key;
+                        $data = $redis->get($logicalKey);
+                        if ($data) {
+                            $decoded = json_decode($data, true);
+                            if ($decoded) {
+                                $results[] = $decoded;
+                            }
                         }
                     }
                 }
-            } while ($cursor != 0);
+            } while ($iterator != 0);
 
             return collect($results)
                 ->filter()
@@ -74,8 +75,14 @@ class PresenceService
         return 'presence:'.$tenantId.':'.($brandId ?? 'all').':'.$userId;
     }
 
+    /**
+     * Redis keys are automatically prefixed (e.g. jackpot-database-).
+     * We must include the prefix when scanning or SCAN will not match.
+     */
     protected function pattern($tenantId, $brandId): string
     {
-        return 'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
+        $prefix = config('database.redis.options.prefix') ?? '';
+
+        return $prefix.'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
     }
 }
