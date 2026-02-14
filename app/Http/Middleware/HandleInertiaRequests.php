@@ -265,10 +265,16 @@ class HandleInertiaRequests extends Middleware
         if ($user) {
             $user->load('tenants');
         }
-        $brand = app()->bound('brand') ? app('brand') : $activeBrand ?? null;
-        $effectivePermissions = ($user && $tenant)
-            ? app(AuthPermissionService::class)->effectivePermissions($user, $tenant, $brand)
-            : [];
+        $effectivePermissions = [];
+        if ($user && $tenant) {
+            try {
+                $brand = app()->bound('brand') ? app('brand') : $activeBrand ?? null;
+                $effectivePermissions = app(AuthPermissionService::class)
+                    ->effectivePermissions($user, $tenant, $brand);
+            } catch (\Throwable $e) {
+                $effectivePermissions = [];
+            }
+        }
 
         $parentShared = parent::share($request);
         
@@ -494,7 +500,12 @@ class HandleInertiaRequests extends Middleware
                 'my_pending_metadata_approvals' => 0,
             ];
         }
-        
+
+        // Guarantee effective_permissions is always present (never undefined) — merge last to prevent overwrite
+        $shared['auth'] = array_merge($shared['auth'] ?? [], [
+            'effective_permissions' => $effectivePermissions,
+        ]);
+
         return $shared;
     }
 }
