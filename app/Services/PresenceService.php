@@ -41,20 +41,32 @@ class PresenceService
             $pattern = 'presence:'.$tenant->id.':'.($brand?->id ?? 'all').':*';
 
             $redis = Redis::connection();
-            $iterator = null;
+            $prefix = $redis->client()->getOption(\Redis::OPT_PREFIX) ?: '';
+            $cursor = 0;
             $results = [];
 
-            while (($keys = $redis->scan($iterator, $pattern, 100)) !== false) {
-                foreach ($keys as $key) {
-                    $data = $redis->get($key);
-                    if ($data) {
-                        $decoded = json_decode($data, true);
-                        if (is_array($decoded)) {
-                            $results[] = $decoded;
+            do {
+                [$cursor, $keys] = $redis->scan($cursor, [
+                    'match' => $pattern,
+                    'count' => 100,
+                ]);
+
+                if (! empty($keys)) {
+                    foreach ($keys as $key) {
+                        if ($prefix && str_starts_with($key, $prefix)) {
+                            $key = substr($key, strlen($prefix));
+                        }
+
+                        $data = $redis->get($key);
+                        if ($data) {
+                            $decoded = json_decode($data, true);
+                            if (is_array($decoded)) {
+                                $results[] = $decoded;
+                            }
                         }
                     }
                 }
-            }
+            } while ($cursor != 0);
 
             return $results;
         } catch (\Throwable $e) {
