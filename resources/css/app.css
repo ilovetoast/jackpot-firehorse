@@ -60,6 +60,15 @@
     .animate-bucket-count-bump {
         animation: bucket-count-bump 0.45s ease-out;
     }
+
+    /* Cinematic Experience: fade-in for splash */
+    @keyframes fade-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in {
+        animation: fade-in 600ms ease-in-out forwards;
+    }
 }
 
 

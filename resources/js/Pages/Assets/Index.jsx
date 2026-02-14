@@ -19,6 +19,7 @@ import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import OnlineUsersIndicator from '../../Components/OnlineUsersIndicator'
 import axios from 'axios'
 import {
     FolderIcon,
@@ -780,6 +781,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     </div>
                                 )}
                             </nav>
+                        </div>
+                        <div className="flex-shrink-0 px-2 pb-3">
+                            <OnlineUsersIndicator
+                                textColor={textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+                            />
                         </div>
                     </div>
                 </div>

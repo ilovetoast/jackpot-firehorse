@@ -1016,11 +1016,11 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
         const todayStr = toISO(today)
         const presets = [
             { value: '', label: 'Any' },
-            { value: 'expired', label: 'Expired', operator: 'before', value: todayStr },
-            { value: 'within_7', label: 'Expires within 7 days', operator: 'range', value: [todayStr, addDays(7)] },
-            { value: 'within_30', label: 'Expires within 30 days', operator: 'range', value: [todayStr, addDays(30)] },
-            { value: 'within_60', label: 'Expires within 60 days', operator: 'range', value: [todayStr, addDays(60)] },
-            { value: 'within_90', label: 'Expires within 90 days', operator: 'range', value: [todayStr, addDays(90)] },
+            { value: 'expired', label: 'Expired', operator: 'before', operand: todayStr },
+            { value: 'within_7', label: 'Expires within 7 days', operator: 'range', operand: [todayStr, addDays(7)] },
+            { value: 'within_30', label: 'Expires within 30 days', operator: 'range', operand: [todayStr, addDays(30)] },
+            { value: 'within_60', label: 'Expires within 60 days', operator: 'range', operand: [todayStr, addDays(60)] },
+            { value: 'within_90', label: 'Expires within 90 days', operator: 'range', operand: [todayStr, addDays(90)] },
         ]
         let currentPreset = ''
         if (operator === 'before' && value === todayStr) currentPreset = 'expired'
@@ -1041,7 +1041,7 @@ function FilterValueInput({ field, operator, value, onChange, filteredOptions = 
                         return
                     }
                     const preset = presets.find(p => p.value === key && p.operator)
-                    if (preset) onChange(preset.operator, preset.value)
+                    if (preset) onChange(preset.operator, preset.operand)
                 }}
                 className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
             >

@@ -4,6 +4,7 @@ import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { usePermission } from '../../hooks/usePermission'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import OnlineUsersIndicator from '../../Components/OnlineUsersIndicator'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
@@ -571,6 +572,11 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                     </div>
                                 </div>
                             </nav>
+                        </div>
+                        <div className="flex-shrink-0 px-2 pb-3">
+                            <OnlineUsersIndicator
+                                textColor={textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+                            />
                         </div>
                     </div>
                 </div>

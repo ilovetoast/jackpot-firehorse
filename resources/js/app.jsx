@@ -23,6 +23,12 @@ createInertiaApp({
         const pageModule = await component()
         const PageComponent = pageModule.default || pageModule
         
+        // Standalone cinematic experience: no global UI (FlashMessage, tray, download bar)
+        const isExperience = name.startsWith('Experience/')
+        if (isExperience) {
+            return (props) => <PageComponent {...props} />
+        }
+        
         // Wrap the page component with FlashMessage, AssetProcessingTray, and app-level download bucket bar.
         // DownloadBucketBarGlobal uses BucketContext so state is shared; rendering it here keeps it in the
         // same DOM tree as the page so it's visible (fixed bottom bar). Bucket state lives in BucketProvider
