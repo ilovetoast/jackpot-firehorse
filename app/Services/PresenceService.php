@@ -2,86 +2,78 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 
-/**
- * Redis-based presence for tenant/brand. TTL-only, no DB writes.
- *
- * Key isolation:
- * - In brand context: presence:{tenantId}:{brandId}:{userId} — only users in this brand
- * - At tenant level: presence:{tenantId}:all:{userId} — tenant-wide users
- * Never mix: brand A users never appear in brand B's online list.
- */
 class PresenceService
 {
     protected int $ttl = 90;
 
-    public function heartbeat($user, $tenant, $brand = null, $page = null): void
+    protected function userKey(int $tenantId, ?int $brandId, int $userId): string
+    {
+        return 'presence:user:'.$tenantId.':'.($brandId ?? 'all').':'.$userId;
+    }
+
+    protected function indexKey(int $tenantId, ?int $brandId): string
+    {
+        return 'presence:index:'.$tenantId.':'.($brandId ?? 'all');
+    }
+
+    public function heartbeat($user, $tenant, $brand = null, array $payload = []): void
     {
         try {
-            $key = $this->key($tenant->id, $brand?->id, $user->id);
+            $redis = Redis::connection();
 
-            Redis::setex($key, $this->ttl, json_encode([
+            $userKey = $this->userKey($tenant->id, $brand?->id, $user->id);
+            $indexKey = $this->indexKey($tenant->id, $brand?->id);
+
+            $data = array_merge([
                 'id' => $user->id,
                 'name' => $user->name,
-                'role' => $user->getRoleForTenant($tenant),
-                'page' => $page,
+                'role' => method_exists($user, 'getRoleForTenant')
+                    ? $user->getRoleForTenant($tenant)
+                    : null,
+                'page' => $payload['page'] ?? null,
                 'last_seen' => now()->timestamp,
-            ]));
+            ], $payload);
+
+            $redis->setex($userKey, $this->ttl, json_encode($data));
+            $redis->sadd($indexKey, $user->id);
         } catch (\Throwable $e) {
-            // Fail silently in local if Redis not available
-            Log::debug('Presence heartbeat skipped: '.$e->getMessage());
+            // Silent fail — presence is non-critical
         }
     }
 
     public function online($tenant, $brand = null): array
     {
         try {
-            $pattern = '*presence:'.$tenant->id.':'.($brand?->id ?? 'all').':*';
-
             $redis = Redis::connection();
-            $cursor = 0;
+
+            $indexKey = $this->indexKey($tenant->id, $brand?->id);
+            $userIds = $redis->smembers($indexKey);
+
+            if (empty($userIds)) {
+                return [];
+            }
+
             $results = [];
 
-            do {
-                $result = $redis->scan($cursor, $pattern, 100);
+            foreach ($userIds as $userId) {
+                $userKey = $this->userKey($tenant->id, $brand?->id, (int) $userId);
+                $data = $redis->get($userKey);
 
-                if ($result === false) {
-                    break;
-                }
-
-                $cursor = $result[0];
-                $keys = $result[1];
-
-                if (! empty($keys)) {
-                    foreach ($keys as $key) {
-                        $prefix = $redis->getOptions()['prefix'] ?? '';
-
-                        if ($prefix && str_starts_with($key, $prefix)) {
-                            $key = substr($key, strlen($prefix));
-                        }
-
-                        $data = $redis->get($key);
-
-                        if ($data) {
-                            $decoded = json_decode($data, true);
-                            if (is_array($decoded)) {
-                                $results[] = $decoded;
-                            }
-                        }
+                if ($data) {
+                    $decoded = json_decode($data, true);
+                    if (is_array($decoded)) {
+                        $results[] = $decoded;
                     }
+                } else {
+                    $redis->srem($indexKey, $userId);
                 }
-            } while ($cursor != 0);
+            }
 
-            return $results;
+            return array_values($results);
         } catch (\Throwable $e) {
             return [];
         }
-    }
-
-    protected function key($tenantId, $brandId, $userId): string
-    {
-        return 'presence:'.$tenantId.':'.($brandId ?? 'all').':'.$userId;
     }
 }

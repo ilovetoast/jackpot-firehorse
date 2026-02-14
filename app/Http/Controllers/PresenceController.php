@@ -26,7 +26,7 @@ class PresenceController extends Controller
             return response()->noContent();
         }
 
-        app(PresenceService::class)->heartbeat($user, $tenant, $brand, $request->input('page'));
+        app(PresenceService::class)->heartbeat($user, $tenant, $brand, ['page' => $request->input('page')]);
 
         return response()->noContent();
     }
