@@ -39,32 +39,31 @@ class PresenceService
     {
         try {
             $pattern = $this->pattern($tenant->id, $brand?->id);
-            $prefix = config('database.redis.options.prefix') ?? '';
-            $redis = Redis::connection();
-            $iterator = null;
+
+            $redis = Redis::connection('default');
+            $cursor = 0;
             $results = [];
 
             do {
-                $keys = $redis->scan($iterator, $pattern, 100);
-                if (is_array($keys)) {
+                [$cursor, $keys] = $redis->scan($cursor, [
+                    'match' => $pattern,
+                    'count' => 100,
+                ]);
+
+                if (! empty($keys)) {
                     foreach ($keys as $key) {
-                        // Scan returns physical keys (with prefix); get() expects logical key
-                        $logicalKey = $prefix ? substr((string) $key, strlen($prefix)) : $key;
-                        $data = $redis->get($logicalKey);
+                        $data = $redis->get($key);
                         if ($data) {
                             $decoded = json_decode($data, true);
-                            if ($decoded) {
+                            if (is_array($decoded)) {
                                 $results[] = $decoded;
                             }
                         }
                     }
                 }
-            } while ($iterator != 0);
+            } while ($cursor != 0);
 
-            return collect($results)
-                ->filter()
-                ->values()
-                ->toArray();
+            return array_values($results);
         } catch (\Throwable $e) {
             return [];
         }
@@ -77,7 +76,7 @@ class PresenceService
 
     /**
      * Redis keys are automatically prefixed (e.g. jackpot-database-).
-     * We must include the prefix when scanning or SCAN will not match.
+     * SCAN must include the prefix or keys will not match.
      */
     protected function pattern($tenantId, $brandId): string
     {
