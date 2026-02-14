@@ -38,32 +38,25 @@ class PresenceService
     public function online($tenant, $brand = null): array
     {
         try {
-            $pattern = $this->pattern($tenant->id, $brand?->id);
+            $pattern = 'presence:'.$tenant->id.':'.($brand?->id ?? 'all').':*';
 
-            $redis = Redis::connection('default');
-            $cursor = 0;
+            $redis = Redis::connection();
+            $iterator = null;
             $results = [];
 
-            do {
-                [$cursor, $keys] = $redis->scan($cursor, [
-                    'match' => $pattern,
-                    'count' => 100,
-                ]);
-
-                if (! empty($keys)) {
-                    foreach ($keys as $key) {
-                        $data = $redis->get($key);
-                        if ($data) {
-                            $decoded = json_decode($data, true);
-                            if (is_array($decoded)) {
-                                $results[] = $decoded;
-                            }
+            while (($keys = $redis->scan($iterator, $pattern, 100)) !== false) {
+                foreach ($keys as $key) {
+                    $data = $redis->get($key);
+                    if ($data) {
+                        $decoded = json_decode($data, true);
+                        if (is_array($decoded)) {
+                            $results[] = $decoded;
                         }
                     }
                 }
-            } while ($cursor != 0);
+            }
 
-            return array_values($results);
+            return $results;
         } catch (\Throwable $e) {
             return [];
         }
@@ -72,16 +65,5 @@ class PresenceService
     protected function key($tenantId, $brandId, $userId): string
     {
         return 'presence:'.$tenantId.':'.($brandId ?? 'all').':'.$userId;
-    }
-
-    /**
-     * Pattern for SCAN. Use runtime prefix from connection (not config) — connection may override.
-     */
-    protected function pattern($tenantId, $brandId): string
-    {
-        $redis = Redis::connection();
-        $prefix = $redis->client()->getOption(\Redis::OPT_PREFIX) ?? '';
-
-        return $prefix.'presence:'.$tenantId.':'.($brandId ?? 'all').':*';
     }
 }
