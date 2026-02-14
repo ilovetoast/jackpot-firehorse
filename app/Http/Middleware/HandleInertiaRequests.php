@@ -261,15 +261,14 @@ class HandleInertiaRequests extends Middleware
         }
 
         // Effective permissions: merged tenant + Spatie + brand role permissions (no collisions)
-        $effectivePermissions = [];
+        // When tenant is null (e.g. login screen), always return [] — no exceptions
         if ($user) {
             $user->load('tenants');
-            $effectivePermissions = app(AuthPermissionService::class)->effectivePermissions(
-                $user,
-                $tenant,
-                $activeBrand ?? null
-            );
         }
+        $brand = app()->bound('brand') ? app('brand') : $activeBrand ?? null;
+        $effectivePermissions = ($user && $tenant)
+            ? app(AuthPermissionService::class)->effectivePermissions($user, $tenant, $brand)
+            : [];
 
         $parentShared = parent::share($request);
         
@@ -381,7 +380,7 @@ class HandleInertiaRequests extends Middleware
                 // User is in company but has no brand access (removed from all brands)
                 'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && (is_array($brands) && count($brands) === 0),
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
-                'effective_permissions' => $effectivePermissions,
+                'effective_permissions' => $effectivePermissions, // Always array; [] when no tenant
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
                     $featureGate = app(FeatureGate::class);
