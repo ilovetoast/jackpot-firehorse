@@ -64,7 +64,8 @@ class DeliverableController extends Controller
         // to know if a category exists (even if hidden) to avoid adding templates
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('asset_type', AssetType::DELIVERABLE);
+            ->where('asset_type', AssetType::DELIVERABLE)
+            ->ordered();
 
         // Don't filter hidden categories here - we need them to check template existence
         // Hidden categories will be filtered in the response building below
@@ -124,7 +125,7 @@ class DeliverableController extends Controller
                 'is_private' => $category->is_private,
                 'is_locked' => $category->is_locked,
                 'is_hidden' => $category->is_hidden,
-                'sort_order' => $matchingTemplate ? $matchingTemplate->sort_order : 999, // Use template sort_order or high default
+                'sort_order' => $category->sort_order ?? ($matchingTemplate ? $matchingTemplate->sort_order : 999), // Prefer category's sort_order (from Metadata reorder)
                 'access_rules' => $accessRules,
             ]);
         }

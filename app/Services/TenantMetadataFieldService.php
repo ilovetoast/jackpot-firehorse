@@ -200,24 +200,23 @@ class TenantMetadataFieldService
             }
         }
 
-        // Enable field for selected categories
-        if (!empty($data['selectedCategories']) && is_array($data['selectedCategories'])) {
-            $visibilityService = app(\App\Services\MetadataVisibilityService::class);
-            foreach ($data['selectedCategories'] as $categoryId) {
-                try {
-                    $category = \App\Models\Category::find($categoryId);
-                    if ($category && $category->tenant_id === $tenant->id) {
-                        // Unsuppress the field for this category (enable it)
-                        $visibilityService->unsuppressForCategory($tenant, $fieldId, $category);
-                    }
-                } catch (\Exception $e) {
-                    // Log but don't fail field creation if category enablement fails
-                    Log::warning('Failed to enable field for category', [
-                        'field_id' => $fieldId,
-                        'category_id' => $categoryId,
-                        'error' => $e->getMessage(),
-                    ]);
+        // Enable field for selected categories; suppress for all others
+        $visibilityService = app(\App\Services\TenantMetadataVisibilityService::class);
+        $selectedIds = array_map('intval', $data['selectedCategories'] ?? []);
+        $allCategories = \App\Models\Category::where('tenant_id', $tenant->id)->get();
+        foreach ($allCategories as $category) {
+            try {
+                if (in_array((int) $category->id, $selectedIds, true)) {
+                    $visibilityService->unsuppressForCategory($tenant, $fieldId, $category);
+                } else {
+                    $visibilityService->suppressForCategory($tenant, $fieldId, $category);
                 }
+            } catch (\Exception $e) {
+                Log::warning('Failed to set field visibility for category', [
+                    'field_id' => $fieldId,
+                    'category_id' => $category->id,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 

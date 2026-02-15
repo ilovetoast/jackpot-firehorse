@@ -52,6 +52,21 @@ class Category extends Model
     use RecordsActivity, SoftDeletes;
 
     /**
+     * Boot the model.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Category $category) {
+            if ($category->sort_order === null && $category->brand_id && $category->asset_type) {
+                $max = static::where('brand_id', $category->brand_id)
+                    ->where('asset_type', $category->asset_type->value ?? $category->asset_type)
+                    ->max('sort_order');
+                $category->sort_order = ($max ?? 0) + 1;
+            }
+        });
+    }
+
+    /**
      * Custom event names for activity logging.
      */
     protected static $activityEventNames = [
@@ -78,6 +93,7 @@ class Category extends Model
         'is_hidden',
         'requires_approval', // Phase L.5: Category-based approval rules
         'order',
+        'sort_order',
         'system_category_id',
         'system_version',
         'upgrade_available',
@@ -100,6 +116,7 @@ class Category extends Model
             'requires_approval' => 'boolean', // Phase L.5: Category-based approval rules
             'upgrade_available' => 'boolean',
             'deletion_available' => 'boolean',
+            'sort_order' => 'integer',
         ];
     }
 
@@ -125,6 +142,16 @@ class Category extends Model
     public function systemCategory(): BelongsTo
     {
         return $this->belongsTo(SystemCategory::class);
+    }
+
+    /**
+     * Check if the brand has overridden the category name (future-proof).
+     * When true, upgrade will not overwrite name/slug from the system template.
+     * Uses name_override attribute if present; defaults to false when not set.
+     */
+    public function hasNameOverride(): bool
+    {
+        return (bool) ($this->getAttribute('name_override') ?? false);
     }
 
     /**
@@ -233,6 +260,14 @@ class Category extends Model
                         });
                 });
         });
+    }
+
+    /**
+     * Scope a query to order by sort_order ASC.
+     */
+    public function scopeOrdered(Builder $query): Builder
+    {
+        return $query->orderBy('sort_order', 'asc');
     }
 
     /**

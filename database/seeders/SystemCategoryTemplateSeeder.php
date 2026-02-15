@@ -3,18 +3,20 @@
 namespace Database\Seeders;
 
 use App\Enums\AssetType;
-use App\Models\Category;
 use App\Models\SystemCategory;
 use Illuminate\Database\Seeder;
 
 /**
  * System Category Template Seeder
  *
- * Seeds initial system category templates that will be copied to new brands.
+ * Seeds only system category templates (no brand categories).
+ * New brand creation clones from these templates via SystemCategoryService::syncToBrand.
  *
- * ASSET asset type categories: Logos, Photography, Graphics, Video
- * Execution/Deliverable asset type categories (exactly these 10):
- *   Print, Digital, OOH, Events, Videos, Sales Collateral, PR, Packaging, Product Renders, Radio
+ * Each template has explicit version = 1.
+ * Default enabled fields (collection, tags) are configured in metadata_category_defaults.
+ *
+ * ASSET: Logos, Photography, Graphics, Video
+ * DELIVERABLE: Print, Digital, OOH, Events, Videos, Sales Collateral, PR, Packaging, Product Renders, Radio
  */
 class SystemCategoryTemplateSeeder extends Seeder
 {
@@ -32,6 +34,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 0,
+                'version' => 1,
             ],
             [
                 'name' => 'Photography',
@@ -40,6 +43,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 1,
+                'version' => 1,
             ],
             [
                 'name' => 'Graphics',
@@ -48,6 +52,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 2,
+                'version' => 1,
             ],
             [
                 'name' => 'Video',
@@ -56,8 +61,9 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 3,
+                'version' => 1,
             ],
-            // Execution/Deliverable asset type system categories (exactly 10; slugs match metadata_category_defaults)
+            // Execution/Deliverable asset type system categories (exactly 10)
             [
                 'name' => 'Print',
                 'slug' => 'print',
@@ -65,6 +71,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 0,
+                'version' => 1,
             ],
             [
                 'name' => 'Digital',
@@ -73,6 +80,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 1,
+                'version' => 1,
             ],
             [
                 'name' => 'OOH',
@@ -81,6 +89,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 2,
+                'version' => 1,
             ],
             [
                 'name' => 'Events',
@@ -89,6 +98,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 3,
+                'version' => 1,
             ],
             [
                 'name' => 'Videos',
@@ -97,6 +107,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 4,
+                'version' => 1,
             ],
             [
                 'name' => 'Sales Collateral',
@@ -105,6 +116,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 5,
+                'version' => 1,
             ],
             [
                 'name' => 'PR',
@@ -113,6 +125,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 6,
+                'version' => 1,
             ],
             [
                 'name' => 'Packaging',
@@ -121,6 +134,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 7,
+                'version' => 1,
             ],
             [
                 'name' => 'Product Renders',
@@ -129,6 +143,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 8,
+                'version' => 1,
             ],
             [
                 'name' => 'Radio',
@@ -137,6 +152,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 9,
+                'version' => 1,
             ],
         ];
 
@@ -145,6 +161,7 @@ class SystemCategoryTemplateSeeder extends Seeder
                 [
                     'slug' => $template['slug'],
                     'asset_type' => $template['asset_type'],
+                    'version' => 1,
                 ],
                 $template
             );
@@ -154,15 +171,5 @@ class SystemCategoryTemplateSeeder extends Seeder
         SystemCategory::where('asset_type', AssetType::DELIVERABLE)
             ->where('slug', 'digital-ads')
             ->update(['name' => 'Digital']);
-
-        // Hide removed deliverable templates so they no longer appear in Executions sidebar
-        SystemCategory::where('asset_type', AssetType::DELIVERABLE)
-            ->whereIn('slug', ['catalogs', 'press-releases', 'social-creative'])
-            ->update(['is_hidden' => true]);
-
-        // Hide existing brand categories that used the removed templates (so sidebar shows new list only)
-        Category::where('asset_type', AssetType::DELIVERABLE)
-            ->whereIn('slug', ['catalogs', 'press-releases', 'social-creative'])
-            ->update(['is_hidden' => true]);
     }
 }

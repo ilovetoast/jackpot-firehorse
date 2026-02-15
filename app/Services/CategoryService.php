@@ -129,6 +129,17 @@ class CategoryService
 
         $category = Category::create($data);
 
+        // Apply minimal field visibility for custom categories: only collection and tags enabled
+        try {
+            app(\App\Services\TenantMetadataVisibilityService::class)
+                ->applyMinimalDefaultsForCustomCategory($tenant, $category);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('CategoryService: failed to apply minimal defaults for new custom category', [
+                'category_id' => $category->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Create access rules if category is private
         if ($isPrivate && !empty($accessRules)) {
             $this->syncAccessRules($category, $accessRules);

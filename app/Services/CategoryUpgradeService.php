@@ -68,71 +68,58 @@ class CategoryUpgradeService
     }
 
     /**
-     * Apply an upgrade to a category, updating only approved fields.
+     * Apply an upgrade to a category, syncing name/slug from system template and optionally other fields.
+     *
+     * When upgrading from system vX to vY:
+     * - Name and slug are always updated from the latest system template (unless name_override is set).
+     * - Icon, is_private, is_hidden: only updated if explicitly approved or not customized.
+     * - Brand-level metadata field customizations are preserved (not touched by this service).
      *
      * @param Category $category
-     * @param array $approvedFields Array of field names to update
+     * @param array $approvedFields Array of field names to update (icon, is_private, is_hidden)
      * @return Category
      */
     public function applyUpgrade(Category $category, array $approvedFields): Category
     {
-        // Validate approved fields
         $allowedFields = ['name', 'icon', 'is_private', 'is_hidden'];
         $approvedFields = array_intersect($approvedFields, $allowedFields);
 
-        // Allow upgrade even if no fields are approved - this will just update the version number
-        // This is useful when a new version exists but no field values have changed
-
-        // Find the latest SystemCategory version
         $latest = $this->getLatestSystemVersion($category);
-
         if (!$latest) {
             throw new \Exception('No system category template found for this category.');
         }
 
-        // Get the original system version
         $original = $this->getOriginalSystemVersion($category);
-
-        // Store old version for logging
         $oldVersion = $category->system_version ?? 1;
 
-        // Prepare updates
         $updates = [];
 
-        // Only update fields if any are approved
-        if (!empty($approvedFields)) {
-            foreach ($approvedFields as $field) {
-                // Only update if:
-                // 1. Field is unchanged from original system version (safe to update), OR
-                // 2. Field is explicitly approved (user wants to override customization)
-                $currentValue = $category->$field;
-                $originalValue = $original ? $original->$field : null;
-                $newValue = $latest->$field;
+        // 1. Name and slug: always sync from system template unless brand has custom override
+        if (!$category->hasNameOverride()) {
+            $updates['name'] = $latest->name;
+            $updates['slug'] = $latest->slug ?? \Illuminate\Support\Str::slug($latest->name);
+        }
 
-                // Check if field was customized
-                $wasCustomized = $original && $currentValue !== $originalValue;
+        // 2. Icon, is_private, is_hidden: only update if approved or not customized
+        foreach (['icon', 'is_private', 'is_hidden'] as $field) {
+            $currentValue = $category->$field;
+            $originalValue = $original ? $original->$field : null;
+            $newValue = $latest->$field;
+            $wasCustomized = $original && $currentValue !== $originalValue;
 
-                // If customized and user approved, update it
-                // If not customized, safe to update
-                if (!$wasCustomized || in_array($field, $approvedFields)) {
-                    $updates[$field] = $newValue;
-                }
-            }
-
-            // Update category fields only if there are updates
-            if (!empty($updates)) {
-                $category->update($updates);
+            if (!$wasCustomized || in_array($field, $approvedFields)) {
+                $updates[$field] = $newValue;
             }
         }
 
-        // Update version tracking
-        $category->update([
-            'system_version' => $latest->version,
-            'system_category_id' => $latest->id,
-            'upgrade_available' => false,
-        ]);
+        $updates['system_version'] = $latest->version;
+        $updates['system_category_id'] = $latest->id;
+        $updates['upgrade_available'] = false;
 
-        // Log activity
+        $category->update($updates);
+
+        $contentFields = array_intersect(array_keys($updates), ['name', 'slug', 'icon', 'is_private', 'is_hidden']);
+
         ActivityRecorder::record(
             tenant: $category->tenant_id,
             eventType: EventType::CATEGORY_SYSTEM_UPGRADED,
@@ -142,7 +129,7 @@ class CategoryUpgradeService
             metadata: [
                 'old_version' => $oldVersion,
                 'new_version' => $latest->version,
-                'fields_updated' => !empty($updates) ? array_keys($updates) : [],
+                'fields_updated' => array_values($contentFields),
                 'change_summary' => $latest->change_summary,
             ]
         );

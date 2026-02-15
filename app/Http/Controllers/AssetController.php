@@ -77,7 +77,8 @@ class AssetController extends Controller
         $query = Category::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('asset_type', AssetType::ASSET)
-            ->active(); // Filter out soft-deleted, templates, and deleted system categories
+            ->active()
+            ->ordered();
 
         // If user does not have 'manage categories' permission, filter out hidden categories
         if (! $user || ! $user->can('manage categories')) {
@@ -138,7 +139,7 @@ class AssetController extends Controller
                 'is_private' => $category->is_private,
                 'is_locked' => $category->is_locked,
                 'is_hidden' => $category->is_hidden,
-                'sort_order' => $matchingTemplate ? $matchingTemplate->sort_order : 999, // Use template sort_order or high default
+                'sort_order' => $category->sort_order ?? ($matchingTemplate ? $matchingTemplate->sort_order : 999), // Prefer category's sort_order (from Metadata reorder)
                 'access_rules' => $accessRules,
                 'template_exists' => $templateExists, // Flag to indicate if system template still exists
                 'deletion_available' => $deletionAvailable, // Flag to indicate if category can be deleted (template deleted)

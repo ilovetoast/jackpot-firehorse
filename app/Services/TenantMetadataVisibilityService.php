@@ -498,6 +498,80 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * Apply minimal default visibility for a new custom category.
+     * Only collection and tags are enabled; all other fields (system + automated) are disabled.
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @return int Number of rows written (inserted)
+     */
+    public function applyMinimalDefaultsForCustomCategory(Tenant $tenant, Category $category): int
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $enabledFields = ['collection', 'tags'];
+
+        $fields = DB::table('metadata_fields')
+            ->where(function ($q) use ($tenant) {
+                $q->where('scope', 'system')
+                    ->orWhere(function ($q2) use ($tenant) {
+                        $q2->where('scope', 'tenant')->where('tenant_id', $tenant->id);
+                    });
+            })
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->get(['id', 'key']);
+
+        $rows = [];
+        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
+        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+        $brandId = $category->brand_id;
+        $categoryId = $category->id;
+
+        foreach ($fields as $field) {
+            $enabled = in_array($field->key, $enabledFields, true);
+            $row = [
+                'metadata_field_id' => $field->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brandId,
+                'category_id' => $categoryId,
+                'is_hidden' => !$enabled,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+            if ($hasPrimary) {
+                $row['is_primary'] = null;
+            }
+            if ($hasEditHidden) {
+                $row['is_edit_hidden'] = false;
+            }
+            $rows[] = $row;
+        }
+
+        if (empty($rows)) {
+            Log::info('Tenant metadata visibility applied minimal defaults (no rows)', [
+                'tenant_id' => $tenant->id,
+                'category_id' => $category->id,
+            ]);
+            return 0;
+        }
+
+        DB::table('metadata_field_visibility')->insert($rows);
+
+        Log::info('Tenant metadata visibility applied minimal defaults for custom category', [
+            'tenant_id' => $tenant->id,
+            'category_id' => $category->id,
+            'rows_written' => count($rows),
+        ]);
+
+        return count($rows);
+    }
+
+    /**
      * Apply seeded default visibility for one category (from config/metadata_category_defaults.php).
      * Used by "Reset to default" and by SystemCategoryService when adding a new category (Phase 3b).
      * Deletes existing category-level visibility, then inserts rows matching the seeder defaults.
@@ -666,9 +740,10 @@ class TenantMetadataVisibilityService
             ];
         }
 
-        // Default: enabled, no overrides (we still insert a row so category has explicit default)
+        // Default: only collection and tags enabled (no auto-enable of type-based fields)
+        $enabled = in_array($fieldKey, ['tags', 'collection'], true);
         return [
-            'is_hidden' => false,
+            'is_hidden' => !$enabled,
             'is_upload_hidden' => false,
             'is_filter_hidden' => false,
             'is_primary' => null,

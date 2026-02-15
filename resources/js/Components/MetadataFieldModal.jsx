@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { router } from '@inertiajs/react'
+import { ArrowPathIcon, XMarkIcon, ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline'
 
 /**
  * Metadata Field Modal Component
@@ -273,6 +274,7 @@ export default function MetadataFieldModal({
             key: fieldKey,
         }
 
+        let skipFinally = false
         try {
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
             
@@ -348,15 +350,10 @@ export default function MetadataFieldModal({
                 
                 onSuccess?.()
                 onClose()
-            } else {
-                // For non-system fields, use normal update flow
-                const url = isEditing 
-                    ? `/app/tenant/metadata/fields/${field.id}`
-                    : '/app/tenant/metadata/fields'
-                const method = isEditing ? 'PUT' : 'POST'
-
-                const response = await fetch(url, {
-                    method,
+            } else if (isEditing) {
+                // For editing custom fields, use fetch (update + category suppressions)
+                const response = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest',
@@ -365,73 +362,48 @@ export default function MetadataFieldModal({
                     credentials: 'same-origin',
                     body: JSON.stringify(submitData),
                 })
-
                 const data = await response.json()
-
                 if (response.ok) {
-                    // If editing, update category suppressions based on changes
-                    if (isEditing && field.id) {
-                        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+                    if (field.id) {
                         const allCategoryIds = categories.map(cat => cat.id)
                         const newEnabledCategories = formData.selectedCategories || []
-                        
-                        // Find categories that were enabled but are now unchecked (need to suppress)
-                        const categoriesToSuppress = originalEnabledCategories.filter(
-                            catId => !newEnabledCategories.includes(catId)
-                        )
-                        
-                        // Find categories that were suppressed but are now checked (need to unsuppress)
-                        const categoriesToUnsuppress = newEnabledCategories.filter(
-                            catId => !originalEnabledCategories.includes(catId)
-                        )
-                        
-                        // Update suppressions in parallel
-                        const suppressionPromises = [
-                            ...categoriesToSuppress.map(categoryId =>
-                                fetch(`/app/api/tenant/metadata/fields/${field.id}/categories/${categoryId}/suppress`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'X-Requested-With': 'XMLHttpRequest',
-                                        'X-CSRF-TOKEN': csrfToken || '',
-                                    },
-                                    credentials: 'same-origin',
-                                })
-                            ),
-                            ...categoriesToUnsuppress.map(categoryId =>
-                                fetch(`/app/api/tenant/metadata/fields/${field.id}/categories/${categoryId}/suppress`, {
-                                    method: 'DELETE',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'X-Requested-With': 'XMLHttpRequest',
-                                        'X-CSRF-TOKEN': csrfToken || '',
-                                    },
-                                    credentials: 'same-origin',
-                                })
-                            )
-                        ]
-                        
-                        // Wait for all suppression updates to complete
-                        await Promise.all(suppressionPromises)
+                        const categoriesToSuppress = originalEnabledCategories.filter(catId => !newEnabledCategories.includes(catId))
+                        const categoriesToUnsuppress = newEnabledCategories.filter(catId => !originalEnabledCategories.includes(catId))
+                        await Promise.all([
+                            ...categoriesToSuppress.map(catId => fetch(`/app/api/tenant/metadata/fields/${field.id}/categories/${catId}/suppress`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken || '' }, credentials: 'same-origin' })),
+                            ...categoriesToUnsuppress.map(catId => fetch(`/app/api/tenant/metadata/fields/${field.id}/categories/${catId}/suppress`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken || '' }, credentials: 'same-origin' })),
+                        ])
                     }
-                    
                     onSuccess?.()
                     onClose()
                 } else {
-                    // Handle plan limit errors specifically
-                    if (response.status === 403 && data.limit_type) {
-                        setErrors({ 
-                            error: data.message || `Plan limit exceeded. ${data.current_count || 0} of ${data.max_allowed || 0} custom metadata fields used. Please upgrade your plan.` 
-                        })
-                    } else {
-                        setErrors(data.errors || { error: data.error || 'Failed to save field' })
-                    }
+                    setErrors(data.errors || { error: data.error || 'Failed to save field' })
                 }
+            } else {
+                // Create: use Inertia router.post for proper response handling
+                const storeUrl = typeof route === 'function' ? route('tenant.metadata.fields.store') : '/app/tenant/metadata/fields'
+                router.post(storeUrl, submitData, {
+                    preserveScroll: true,
+                    preserveState: true,
+                    forceFormData: false,
+                    onSuccess: () => {
+                        onSuccess?.()
+                        onClose()
+                    },
+                    onError: (errors) => {
+                        setErrors(errors || {})
+                    },
+                    onFinish: () => {
+                        setSubmitting(false)
+                    },
+                })
+                skipFinally = true
+                return
             }
         } catch (error) {
             setErrors({ error: 'An error occurred while saving the field' })
         } finally {
-            setSubmitting(false)
+            if (!skipFinally) setSubmitting(false)
         }
     }
 
@@ -981,8 +953,11 @@ export default function MetadataFieldModal({
                             <button
                                 type="submit"
                                 disabled={submitting || (!isEditing && customFieldsLimit && !customFieldsLimit.can_create)}
-                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
+                                {submitting && (
+                                    <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden />
+                                )}
                                 {submitting ? (isEditing ? 'Saving...' : 'Creating...') : (isEditing ? 'Save Changes' : 'Create Field')}
                             </button>
                         </div>

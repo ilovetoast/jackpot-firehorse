@@ -809,7 +809,7 @@ export default function AppNav({ brand, tenant }) {
                                                         <svg className="h-4 w-4 mr-2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M9.12 14.826l2.17 1.785a.996.996 0 001.36 0l4.34-3.57a.997.997 0 000-1.52l-4.34-3.57a.996.996 0 00-1.36 0l-2.17 1.785a.996.996 0 01-1.36 0l-2.17-1.785a.996.996 0 00-1.36 0l-4.34 3.57a.997.997 0 000 1.52l4.34 3.57a.996.996 0 001.36 0l2.17-1.785a.996.996 0 011.36 0z" />
                                                         </svg>
-                                                        Metafields
+                                                        Categories & Fields
                                                     </Link>
                                                 )}
                                             </div>

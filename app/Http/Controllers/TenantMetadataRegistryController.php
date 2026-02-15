@@ -48,7 +48,7 @@ class TenantMetadataRegistryController extends Controller
      *
      * GET /tenant/metadata/registry
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $tenant = app('tenant');
         $user = Auth::user();
@@ -69,10 +69,28 @@ class TenantMetadataRegistryController extends Controller
         $registry = $this->registryService->getRegistry($tenant);
 
         // Brands list for By Category brand selector (one brand at a time to avoid duplicate category names)
+        // Include category_limits per brand for Add Category modal
+        $planService = app(\App\Services\PlanService::class);
+        $categoryService = app(\App\Services\CategoryService::class);
+        $limits = $planService->getPlanLimits($tenant);
+        $maxCategories = $limits['max_categories'] ?? 0;
+
         $brands = $tenant->brands()
             ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($b) => ['id' => $b->id, 'name' => $b->name])
+            ->get()
+            ->map(function ($b) use ($planService, $categoryService, $tenant, $maxCategories) {
+                $currentCount = $b->categories()->custom()->count();
+                $canCreate = $categoryService->canCreate($tenant, $b);
+                return [
+                    'id' => $b->id,
+                    'name' => $b->name,
+                    'category_limits' => [
+                        'current' => $currentCount,
+                        'max' => $maxCategories,
+                        'can_create' => $canCreate,
+                    ],
+                ];
+            })
             ->values();
 
         // Active brand id for initial By Category brand dropdown selection (session/context brand)
@@ -81,27 +99,50 @@ class TenantMetadataRegistryController extends Controller
 
         // Get all active categories for suppression UI
         // Include both system and non-system categories (use active() scope)
+        // ordered() sorts by sort_order ASC; include is_hidden, sort_order, is_system for Metadata page
         $categories = $tenant->brands()
             ->with(['categories' => function ($query) {
-                $query->active() // Filter out soft-deleted and templates
+                $query->active()
+                    ->ordered()
                     ->orderBy('name');
             }])
             ->get()
             ->pluck('categories')
             ->flatten()
-            ->filter(fn ($category) => $category->isActive()) // Additional check for system categories
-            ->map(fn ($category) => [
-                'id' => $category->id,
-                'name' => $category->name,
-                'brand_id' => $category->brand_id,
-                'brand_name' => $category->brand->name ?? null,
-                'asset_type' => $category->asset_type?->value ?? 'asset', // Include asset_type for grouping
-            ])
+            ->filter(fn ($category) => $category->isActive())
+            ->map(function ($category) {
+                $accessRules = [];
+                if ($category->is_private && !$category->is_system) {
+                    $accessRules = $category->accessRules()->get()->map(function ($rule) {
+                        if ($rule->access_type === 'role') {
+                            return ['type' => 'role', 'role' => $rule->role];
+                        }
+                        if ($rule->access_type === 'user') {
+                            return ['type' => 'user', 'user_id' => $rule->user_id];
+                        }
+                        return null;
+                    })->filter()->values()->toArray();
+                }
+                return [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'slug' => $category->slug ?? \Illuminate\Support\Str::slug($category->name),
+                    'brand_id' => $category->brand_id,
+                    'brand_name' => $category->brand->name ?? null,
+                    'asset_type' => $category->asset_type?->value ?? 'asset',
+                    'is_system' => $category->is_system,
+                    'is_hidden' => $category->is_hidden,
+                    'is_private' => $category->is_private,
+                    'access_rules' => $accessRules,
+                    'sort_order' => $category->sort_order,
+                    'system_version' => $category->system_version,
+                    'upgrade_available' => $category->upgrade_available ?? false,
+                    'deletion_available' => $category->deletion_available ?? false,
+                ];
+            })
             ->values();
 
-        // Get plan limits for custom metadata fields
-        $planService = app(\App\Services\PlanService::class);
-        $limits = $planService->getPlanLimits($tenant);
+        // Get plan limits for custom metadata fields (reuse $planService, $limits from brands block above)
         $maxCustomFields = $limits['max_custom_metadata_fields'] ?? 0;
         
         // Count current custom fields
@@ -123,6 +164,8 @@ class TenantMetadataRegistryController extends Controller
             'brands' => $brands,
             'active_brand_id' => $active_brand_id,
             'categories' => $categories,
+            'initial_category_slug' => $request->query('category'),
+            'initial_brand_id' => $request->query('brand') ? (int) $request->query('brand') : null,
             'canManageVisibility' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage'),
             'canManageFields' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage'),
             'customFieldsLimit' => [
@@ -402,6 +445,50 @@ class TenantMetadataRegistryController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Visibility override removed',
+        ]);
+    }
+
+    /**
+     * PATCH category field visibility (enable/disable toggle).
+     * Returns JSON only — no redirect, no flash. Updated field state only.
+     *
+     * PATCH /api/tenant/metadata/fields/{field}/categories/{category}/visibility
+     */
+    public function patchCategoryFieldVisibility(Request $request, int $field, int $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            return response()->json(['error' => 'You do not have permission to manage metadata visibility.'], 403);
+        }
+
+        $categoryModel = Category::where('id', $category)
+            ->whereHas('brand', function ($query) use ($tenant) {
+                $query->where('tenant_id', $tenant->id);
+            })
+            ->first();
+
+        if (!$categoryModel) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        $isHidden = filter_var($request->input('is_hidden'), FILTER_VALIDATE_BOOLEAN);
+
+        if ($isHidden) {
+            $this->visibilityService->suppressForCategory($tenant, $field, $categoryModel);
+        } else {
+            $this->visibilityService->unsuppressForCategory($tenant, $field, $categoryModel);
+        }
+
+        return response()->json([
+            'field_id' => $field,
+            'category_id' => $category,
+            'is_hidden' => $isHidden,
         ]);
     }
 

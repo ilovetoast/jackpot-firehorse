@@ -1,23 +1,49 @@
-import { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { router } from '@inertiajs/react'
 import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+} from '@dnd-kit/core'
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
     ArrowPathIcon,
+    ArrowUpCircleIcon,
     Bars3Icon,
-    BookmarkIcon,
     CheckCircleIcon,
     ChevronDownIcon,
     ChevronRightIcon,
-    DocumentDuplicateIcon,
+    CloudArrowUpIcon,
+    EllipsisVerticalIcon,
     EyeIcon,
+    FolderIcon,
     FunnelIcon,
     InformationCircleIcon,
     PencilIcon,
     PlusIcon,
+    RectangleStackIcon,
     Squares2X2Icon,
+    StarIcon,
+    XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
 import MetadataFieldModal from '../../../Components/MetadataFieldModal'
-import PlanLimitIndicator from '../../../Components/PlanLimitIndicator'
+import AddCategorySlideOver from '../../../Components/Metadata/AddCategorySlideOver'
+import AdvancedSettingsSlideOver from '../../../Components/Metadata/AdvancedSettingsSlideOver'
+import CategorySettingsSlideOver from '../../../Components/Metadata/CategorySettingsSlideOver'
+import UpgradeCategoryModal from '../../../Components/Metadata/UpgradeCategoryModal'
+import CategoryList from '../../../Components/Metadata/CategoryList'
 
 /**
  * By Category View Component
@@ -30,7 +56,7 @@ import PlanLimitIndicator from '../../../Components/PlanLimitIndicator'
  * 🎯 CANONICAL CONTROL SURFACE FOR ASSET GRID FILTERS
  * 
  * This is the ONLY place where filter visibility and primary/secondary placement
- * can be configured. All other tabs (All Metadata, Custom Fields, Filters) are
+ * can be configured.
  * read-only or overview-only and must never reintroduce filter controls.
  * 
  * Ownership:
@@ -41,6 +67,8 @@ import PlanLimitIndicator from '../../../Components/PlanLimitIndicator'
  * Displays metadata fields organized by category, making it clear
  * which fields are enabled for each category.
  */
+const METADATA_REGISTRY_URL = typeof route === 'function' ? route('tenant.metadata.registry.index') : '/app/tenant/metadata/registry'
+
 export default function ByCategoryView({ 
     registry, 
     brands = [],
@@ -50,14 +78,14 @@ export default function ByCategoryView({
     canManageVisibility,
     canManageFields = false,
     customFieldsLimit = null,
-    metadataFieldFamilies = {}
+    metadataFieldFamilies = {},
+    initialCategorySlug = null,
 }) {
     const [selectedCategoryId, setSelectedCategoryId] = useState(null)
     const [expandedFamilies, setExpandedFamilies] = useState({})
-    const selectedCategoryIdRef = useRef(null) // Persist selected category across reloads
+    const selectedCategoryIdRef = useRef(null)
     const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
     const [loadingFields, setLoadingFields] = useState(new Set())
-    const [draggedFieldId, setDraggedFieldId] = useState(null)
     const [fieldOrder, setFieldOrder] = useState({}) // Store order per category: { categoryId: [fieldId, ...] }
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
     const [modalOpen, setModalOpen] = useState(false)
@@ -71,7 +99,6 @@ export default function ByCategoryView({
     const [applyOtherBrandsTargets, setApplyOtherBrandsTargets] = useState([]) // { brand_name, category_name }[]
     const [applyOtherBrandsLoading, setApplyOtherBrandsLoading] = useState(false)
     // Phase 3a: Named profiles
-    const [saveProfileModalOpen, setSaveProfileModalOpen] = useState(false)
     const [saveProfileName, setSaveProfileName] = useState('')
     const [profileAvailableToAllBrands, setProfileAvailableToAllBrands] = useState(false)
     const [saveProfileLoading, setSaveProfileLoading] = useState(false)
@@ -81,18 +108,51 @@ export default function ByCategoryView({
     const [confirmApplyProfileOpen, setConfirmApplyProfileOpen] = useState(false)
     const [previewSnapshot, setPreviewSnapshot] = useState(null) // profile snapshot for preview (not saved)
     const [previewProfileName, setPreviewProfileName] = useState(null)
+    const [localCategories, setLocalCategories] = useState(categories)
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+    const [categoryToDelete, setCategoryToDelete] = useState(null)
+    const [editingCategoryId, setEditingCategoryId] = useState(null)
+    const [editingCategoryName, setEditingCategoryName] = useState('')
+    const [expandedAvailable, setExpandedAvailable] = useState(false)
+    const [expandedAutomated, setExpandedAutomated] = useState(false)
+    const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false)
+    const [categorySettingsOpen, setCategorySettingsOpen] = useState(false)
+    const [categorySettingsCategory, setCategorySettingsCategory] = useState(null)
+    const [categoryMenuOpen, setCategoryMenuOpen] = useState(false)
+    const [categoryFormData, setCategoryFormData] = useState({ brand_roles: [], brand_users: [] })
+    const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
+    const [upgradeLoading, setUpgradeLoading] = useState(false)
+    const [confirmRevertOpen, setConfirmRevertOpen] = useState(false)
+    const [categoryToRevert, setCategoryToRevert] = useState(null)
+    const [highlightedFieldId, setHighlightedFieldId] = useState(null)
+    const [fieldReorderLoading, setFieldReorderLoading] = useState(false)
+
+    useEffect(() => {
+        setLocalCategories(categories)
+    }, [categories])
+
+    // Scope to one brand at a time so the list has no duplicate category names
+    const categoriesForBrand = useMemo(() => {
+        if (!selectedBrandId) return localCategories
+        return localCategories.filter(c => c.brand_id === selectedBrandId)
+    }, [localCategories, selectedBrandId])
+
+    // Sync selectedCategoryId from URL param (initialCategorySlug) on mount and when slug/brand changes
+    useEffect(() => {
+        if (categoriesForBrand.length === 0) return
+        if (initialCategorySlug) {
+            const match = categoriesForBrand.find(c => (c.slug || '').toLowerCase() === initialCategorySlug.toLowerCase())
+            setSelectedCategoryId(match ? match.id : categoriesForBrand[0]?.id ?? null)
+        } else if (!selectedCategoryId) {
+            setSelectedCategoryId(categoriesForBrand[0]?.id ?? null)
+        }
+    }, [initialCategorySlug, categoriesForBrand])
 
     // Sync ref with state
     useEffect(() => {
         selectedCategoryIdRef.current = selectedCategoryId
     }, [selectedCategoryId])
 
-    // Restore selected category after reload
-    useEffect(() => {
-        if (selectedCategoryIdRef.current && !selectedCategoryId) {
-            setSelectedCategoryId(selectedCategoryIdRef.current)
-        }
-    }, [selectedCategoryId])
 
     const { system_fields: systemFields = [], tenant_fields = [] } = registry || {}
     const allFields = [...systemFields, ...tenant_fields]
@@ -113,12 +173,6 @@ export default function ByCategoryView({
         
         return { manageableFields: manageable, automatedFields: automated }
     }, [allFields])
-
-    // Scope to one brand at a time so the list has no duplicate category names
-    const categoriesForBrand = useMemo(() => {
-        if (!selectedBrandId) return categories
-        return categories.filter(c => c.brand_id === selectedBrandId)
-    }, [categories, selectedBrandId])
 
     // Clear selected category if it no longer belongs to the selected brand
     useEffect(() => {
@@ -145,6 +199,118 @@ export default function ByCategoryView({
         return groups
     }, [categoriesForBrand])
 
+    const brandId = selectedBrandId ?? brands[0]?.id ?? categoriesForBrand[0]?.brand_id
+
+    const onCategoriesChange = useCallback((newGrouped) => {
+        const bid = selectedBrandId ?? brands[0]?.id ?? categoriesForBrand[0]?.brand_id
+        if (!bid) return
+        setLocalCategories((prev) => {
+            const other = prev.filter((c) => c.brand_id !== bid)
+            const brandName = brands.find((b) => b.id === bid)?.name
+            const assetWithBrand = (newGrouped.asset || []).map((c) => ({ ...c, brand_id: bid, brand_name: brandName }))
+            const deliverableWithBrand = (newGrouped.deliverable || []).map((c) => ({ ...c, brand_id: bid, brand_name: brandName }))
+            return [...other, ...assetWithBrand, ...deliverableWithBrand]
+        })
+    }, [selectedBrandId, brands, categoriesForBrand])
+
+    const getCsrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
+
+    const handleRenameCategory = useCallback(async (category, newName) => {
+        if (!brandId || !newName?.trim()) return
+        const trimmed = newName.trim()
+        const slug = trimmed.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+        try {
+            const res = await fetch(`/app/brands/${brandId}/categories/${category.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ name: trimmed, slug: slug || category.slug || 'category' }),
+            })
+            if (res.ok) {
+                setLocalCategories((prev) =>
+                    prev.map((c) => (c.id === category.id ? { ...c, name: trimmed } : c))
+                )
+                setSuccessMessage('Category renamed.')
+                setTimeout(() => setSuccessMessage(null), 3000)
+            }
+        } catch (e) {
+            setSuccessMessage('Failed to rename.')
+            setTimeout(() => setSuccessMessage(null), 3000)
+        } finally {
+            setEditingCategoryId(null)
+        }
+    }, [brandId])
+
+    const handleDeleteCategory = useCallback(() => {
+        if (!brandId || !categoryToDelete) return
+        const url = typeof route === 'function' ? route('brands.categories.destroy', { brand: brandId, category: categoryToDelete.id }) : `/app/brands/${brandId}/categories/${categoryToDelete.id}`
+        router.delete(url, {
+            preserveScroll: false,
+            onSuccess: () => {
+                setSelectedCategoryId(null)
+                setConfirmDeleteOpen(false)
+                setCategoryToDelete(null)
+            },
+            onError: () => {
+                setSuccessMessage('Failed to delete category.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setConfirmDeleteOpen(false)
+                setCategoryToDelete(null)
+            },
+        })
+    }, [brandId, categoryToDelete])
+
+    const [addCategoryOpen, setAddCategoryOpen] = useState(false)
+
+    const handleAddCategorySuccess = useCallback((newCategory) => {
+        setLocalCategories(prev => [...prev, newCategory])
+        setSelectedCategoryId(newCategory.id)
+        setFieldCategoryData({}) // Clear cache so UI refetches visibility (new category has minimal defaults)
+        setAddCategoryOpen(false)
+    }, [])
+
+    const handleAddCategory = useCallback(() => {
+        if (brandId) setAddCategoryOpen(true)
+    }, [brandId])
+
+    // Fetch brand roles/users when opening category settings
+    useEffect(() => {
+        if (categorySettingsOpen && brandId) {
+            fetch(`/app/api/brands/${brandId}/category-form-data`, { credentials: 'same-origin' })
+                .then((r) => r.json())
+                .then((data) => {
+                    setCategoryFormData({
+                        brand_roles: data.brand_roles || [],
+                        brand_users: data.brand_users || [],
+                    })
+                })
+                .catch(() => setCategoryFormData({ brand_roles: [], brand_users: [] }))
+        }
+    }, [categorySettingsOpen, brandId])
+
+    const handleCategorySettingsSuccess = useCallback((updatedCategory) => {
+        setLocalCategories((prev) =>
+            prev.map((c) => (c.id === updatedCategory.id ? { ...c, ...updatedCategory } : c))
+        )
+        setSuccessMessage('Category updated')
+        setTimeout(() => setSuccessMessage(null), 3000)
+    }, [])
+
+    const handleCategorySettingsDelete = useCallback((cat) => {
+        setCategoryToDelete(cat)
+        setConfirmDeleteOpen(true)
+    }, [])
+
+    const handleCategorySettingsClick = useCallback((cat) => {
+        setCategorySettingsCategory(cat)
+        setCategorySettingsOpen(true)
+    }, [])
+
     // Load category data for a field (forceRefetch = true to skip cache after saving visibility)
     const loadFieldCategoryData = async (field, forceRefetch = false) => {
         if (!forceRefetch && fieldCategoryData[field.id]) {
@@ -165,7 +331,7 @@ export default function ByCategoryView({
             
             const categoryData = {
                 suppressed: suppressedIds,
-                visible: categories.filter(cat => !suppressedIds.includes(cat.id)).map(cat => cat.id),
+                visible: categoriesForBrand.filter(cat => !suppressedIds.includes(cat.id)).map(cat => cat.id),
                 overrides: categoryOverrides, // Category-specific overrides including is_primary
             }
             
@@ -177,7 +343,7 @@ export default function ByCategoryView({
             return categoryData
         } catch (error) {
             console.error('Failed to load category data:', error)
-            return { suppressed: [], visible: categories.map(cat => cat.id) }
+            return { suppressed: [], visible: categoriesForBrand.map(cat => cat.id) }
         } finally {
             setLoadingFields(prev => {
                 const next = new Set(prev)
@@ -196,81 +362,76 @@ export default function ByCategoryView({
         }
     }, [selectedCategoryId, manageableFields.length, automatedFields.length])
 
-    // Get CSRF token helper
-    const getCsrfToken = () => {
-        return document.querySelector('meta[name="csrf-token"]')?.content || ''
-    }
-
-    // Toggle field visibility for selected category
+    // Toggle field visibility for selected category (enable/disable per category)
     const toggleCategoryField = async (fieldId, categoryId, isSuppressed) => {
         if (!canManageVisibility) return
 
+        // isSuppressed=true means enabling (remove suppression), isSuppressed=false means disabling (add suppression)
+        const willBeEnabled = !!isSuppressed
+        const newSuppressed = willBeEnabled
+            ? (fieldCategoryData[fieldId]?.suppressed || []).filter(id => id !== categoryId)
+            : [...(fieldCategoryData[fieldId]?.suppressed || []), categoryId]
+
+        // 1. Optimistically update local state immediately
+        setFieldCategoryData(prev => {
+            const current = prev[fieldId] || { suppressed: [], visible: [] }
+            const visibleCategories = categoriesForBrand.filter(cat => !newSuppressed.includes(cat.id))
+            return {
+                ...prev,
+                [fieldId]: {
+                    suppressed: newSuppressed,
+                    visible: visibleCategories.map(cat => cat.id),
+                }
+            }
+        })
+
+        if (willBeEnabled && !fieldOrder[categoryId]) {
+            setFieldOrder(prev => ({ ...prev, [categoryId]: [] }))
+        }
+
         try {
-            if (isSuppressed) {
-                // Enable field for category (remove suppression)
-                const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/suppress`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-TOKEN': getCsrfToken(),
-                    },
-                    credentials: 'same-origin',
-                })
-                
-                if (response.ok) {
-                    // Update cached data
-                    setFieldCategoryData(prev => {
-                        const current = prev[fieldId] || { suppressed: [], visible: [] }
-                        const newSuppressed = current.suppressed.filter(id => id !== categoryId)
-                        const visibleCategories = categories.filter(cat => !newSuppressed.includes(cat.id))
-                        return {
-                            ...prev,
-                            [fieldId]: {
-                                suppressed: newSuppressed,
-                                visible: visibleCategories.map(cat => cat.id),
-                            }
-                        }
-                    })
-                    
-                    // Initialize order for this category if not exists
-                    if (!fieldOrder[categoryId]) {
-                        setFieldOrder(prev => ({
-                            ...prev,
-                            [categoryId]: []
-                        }))
-                    }
-                }
+            const url = `/app/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/visibility`
+            const response = await fetch(url, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ is_hidden: !willBeEnabled }),
+            })
+
+            console.log('[ByCategory] Toggle category field: request fired', { fieldId, categoryId, willBeEnabled })
+            console.log('[ByCategory] Toggle category field: response status', response.status)
+
+            if (response.ok) {
+                // Success: state already updated optimistically; no re-fetch, no page reload
             } else {
-                // Disable field for category (add suppression)
-                const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/suppress`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-TOKEN': getCsrfToken(),
-                    },
-                    credentials: 'same-origin',
+                // Revert optimistic update on error
+                setFieldCategoryData(prev => {
+                    const current = prev[fieldId] || { suppressed: [], visible: [] }
+                    const reverted = willBeEnabled ? [...current.suppressed, categoryId] : current.suppressed.filter(id => id !== categoryId)
+                    const visibleCategories = categoriesForBrand.filter(cat => !reverted.includes(cat.id))
+                    return {
+                        ...prev,
+                        [fieldId]: { suppressed: reverted, visible: visibleCategories.map(cat => cat.id) },
+                    }
                 })
-                
-                if (response.ok) {
-                    // Update cached data
-                    setFieldCategoryData(prev => {
-                        const current = prev[fieldId] || { suppressed: [], visible: [] }
-                        const newSuppressed = [...current.suppressed, categoryId]
-                        const visibleCategories = categories.filter(cat => !newSuppressed.includes(cat.id))
-                        return {
-                            ...prev,
-                            [fieldId]: {
-                                suppressed: newSuppressed,
-                                visible: visibleCategories.map(cat => cat.id),
-                            }
-                        }
-                    })
-                }
             }
         } catch (error) {
             console.error('Failed to toggle category field:', error)
+            // Revert optimistic update
+            setFieldCategoryData(prev => {
+                const current = prev[fieldId] || { suppressed: [], visible: [] }
+                const reverted = willBeEnabled ? [...current.suppressed, categoryId] : current.suppressed.filter(id => id !== categoryId)
+                const visibleCategories = categoriesForBrand.filter(cat => !reverted.includes(cat.id))
+                return {
+                    ...prev,
+                    [fieldId]: { suppressed: reverted, visible: visibleCategories.map(cat => cat.id) },
+                }
+            })
         }
     }
 
@@ -279,38 +440,31 @@ export default function ByCategoryView({
         if (!canManageVisibility) return
 
         const newValue = !currentValue
-        // Quick View = show_on_edit (controls visibility in drawer and details modal)
         const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
         const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Quick View' : 'Filter'
-
-        // Store current selected category to restore after reload
         const currentCategoryId = selectedCategoryIdRef.current
 
-        // C9.2: Validate category_id is present for category-scoped settings
-        if (!currentCategoryId) {
-            console.warn('[ByCategory] No category selected, saving at tenant level', {
-                fieldId,
-                context,
+        // Optimistic update
+        if (currentCategoryId) {
+            setFieldCategoryData((prev) => {
+                const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                const updatedOverrides = {
+                    ...fieldData.overrides,
+                    [currentCategoryId]: {
+                        ...fieldData.overrides[currentCategoryId],
+                        [visibilityKey]: newValue,
+                    },
+                }
+                return {
+                    ...prev,
+                    [fieldId]: { ...fieldData, overrides: updatedOverrides },
+                }
             })
         }
 
         try {
-            // C9.2: Include category_id when saving category-specific visibility settings
-            const requestBody = {
-                [visibilityKey]: newValue,
-            }
-            if (currentCategoryId) {
-                requestBody.category_id = currentCategoryId
-            }
-
-            console.log('[ByCategory] Saving visibility', {
-                fieldId,
-                context,
-                visibilityKey,
-                newValue,
-                categoryId: currentCategoryId,
-                requestBody,
-            })
+            const requestBody = { [visibilityKey]: newValue }
+            if (currentCategoryId) requestBody.category_id = currentCategoryId
 
             const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
                 method: 'POST',
@@ -324,60 +478,48 @@ export default function ByCategoryView({
             })
             
             const responseData = await response.json().catch(() => ({}))
-            console.log('[ByCategory] Visibility save response', {
-                ok: response.ok,
-                status: response.status,
-                data: responseData,
-            })
-            
             if (response.ok) {
-                // Show success message
                 setSuccessMessage(`${contextLabel} visibility ${newValue ? 'enabled' : 'disabled'}`)
                 setTimeout(() => setSuccessMessage(null), 3000)
-
-                // Invalidate and refetch category data for this field so checkboxes show saved state (no full reload to avoid resetting view)
-                setFieldCategoryData(prev => {
-                    const next = { ...prev }
-                    delete next[fieldId]
-                    return next
-                })
-                const fieldToRefetch = manageableFields.find(f => f.id === fieldId) || automatedFields.find(f => f.id === fieldId)
-                if (fieldToRefetch) {
-                    loadFieldCategoryData(fieldToRefetch, true).catch(() => {})
+                if (!currentCategoryId) {
+                    setFieldCategoryData((prev) => { const n = { ...prev }; delete n[fieldId]; return n })
+                    const f = manageableFields.find(x => x.id === fieldId) || automatedFields.find(x => x.id === fieldId)
+                    if (f) loadFieldCategoryData(f, true).catch(() => {})
                 }
             } else {
-                // C9.2: Enhanced error handling for visibility save failures
                 const errorMsg = responseData?.error || responseData?.message || `Failed to update visibility (${response.status})`
-                console.error('[ByCategory] Visibility save failed', {
-                    status: response.status,
-                    error: errorMsg,
-                    responseData,
-                    fieldId,
-                    context,
-                    categoryId: currentCategoryId,
-                })
-                
-                // Show user-friendly error message
                 setSuccessMessage(`Error: ${errorMsg}. Please try again.`)
                 setTimeout(() => setSuccessMessage(null), 5000)
-                
-                // Revert checkbox state on error (optimistic update rollback)
-                // Note: The checkbox will revert when the page reloads, but we could add optimistic state here
+                if (currentCategoryId) {
+                    setFieldCategoryData((prev) => {
+                        const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                        const updatedOverrides = {
+                            ...fieldData.overrides,
+                            [currentCategoryId]: {
+                                ...fieldData.overrides[currentCategoryId],
+                                [visibilityKey]: currentValue,
+                            },
+                        }
+                        return { ...prev, [fieldId]: { ...fieldData, overrides: updatedOverrides } }
+                    })
+                }
             }
         } catch (error) {
-            // C9.2: Handle network errors and other exceptions
-            console.error('[ByCategory] Network or other error during visibility save', {
-                error: error.message,
-                stack: error.stack,
-                fieldId,
-                context,
-                categoryId: currentCategoryId,
-            })
-            
-            // Show user-friendly error message
-            const errorMsg = error.message || 'Network error. Please check your connection and try again.'
-            setSuccessMessage(`Error: ${errorMsg}`)
+            setSuccessMessage(error.message || 'Network error. Please try again.')
             setTimeout(() => setSuccessMessage(null), 5000)
+            if (currentCategoryId) {
+                setFieldCategoryData((prev) => {
+                    const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                    const updatedOverrides = {
+                        ...fieldData.overrides,
+                        [currentCategoryId]: {
+                            ...fieldData.overrides[currentCategoryId],
+                            [visibilityKey]: currentValue,
+                        },
+                    }
+                    return { ...prev, [fieldId]: { ...fieldData, overrides: updatedOverrides } }
+                })
+            }
         }
     }
 
@@ -500,12 +642,8 @@ export default function ByCategoryView({
                 setSuccessMessage(`AI tagging suggestions ${newValue ? 'enabled' : 'disabled'}`)
                 setTimeout(() => setSuccessMessage(null), 3000)
                 
-                // Silently reload registry in background without page refresh
-                router.reload({ 
-                    only: ['registry'],
-                    preserveState: true,
-                    preserveScroll: true,
-                })
+                // Silently refresh registry preserving category + brand
+                refreshMetadataRegistry()
             } else {
                 const errorData = await response.json().catch(() => ({}))
                 setSuccessMessage(errorData.error || 'Failed to update AI tagging suggestions')
@@ -595,60 +733,157 @@ export default function ByCategoryView({
         return typeFamilyConfig.fields
     }, [typeFamilyConfig])
 
+    const tenantFieldIds = useMemo(() => new Set((registry?.tenant_fields || []).map(f => f.id)), [registry?.tenant_fields])
+
     const fieldsByFamily = useMemo(() => {
         const { enabled, available } = getFieldsForCategory
         const typeEnabled = typeFamilyFieldKeys.length > 0 ? enabled.filter(f => typeFamilyFieldKeys.includes(f.key)) : []
         const typeAvailable = typeFamilyFieldKeys.length > 0 ? available.filter(f => typeFamilyFieldKeys.includes(f.key)) : []
         const otherEnabled = typeFamilyFieldKeys.length > 0 ? enabled.filter(f => !typeFamilyFieldKeys.includes(f.key)) : enabled
         const otherAvailable = typeFamilyFieldKeys.length > 0 ? available.filter(f => !typeFamilyFieldKeys.includes(f.key)) : available
-        return { typeFamilyEnabled: typeEnabled, typeFamilyAvailable: typeAvailable, otherEnabled, otherAvailable }
-    }, [getFieldsForCategory, typeFamilyFieldKeys])
+        const otherSystemEnabled = otherEnabled.filter(f => !tenantFieldIds.has(f.id))
+        const customEnabledForCategory = otherEnabled.filter(f => tenantFieldIds.has(f.id))
+        return {
+            typeFamilyEnabled: typeEnabled,
+            typeFamilyAvailable: typeAvailable,
+            otherEnabled,
+            otherAvailable,
+            otherSystemEnabled,
+            customEnabledForCategory,
+        }
+    }, [getFieldsForCategory, typeFamilyFieldKeys, tenantFieldIds])
 
     const toggleFamilyExpanded = useCallback((familyKey) => {
         setExpandedFamilies(prev => ({ ...prev, [familyKey]: !prev[familyKey] }))
     }, [])
 
-    // Drag handlers
-    const handleDragStart = (e, fieldId) => {
-        setDraggedFieldId(fieldId)
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/html', fieldId)
-    }
+    const buildFullFieldOrder = useCallback((typeFamilyIds, otherSystemIds, customIds) => {
+        return [...typeFamilyIds, ...otherSystemIds, ...customIds]
+    }, [])
 
-    const handleDragOver = (e) => {
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-    }
+    const handleEnabledFieldsDragEnd = useCallback((event) => {
+        const { active, over } = event
+        if (!over || active.id === over.id || !selectedCategoryId || !brandId) return
 
-    const handleDrop = (e, targetFieldId) => {
-        e.preventDefault()
-        if (!draggedFieldId || draggedFieldId === targetFieldId || !selectedCategoryId) return
+        const { otherSystemEnabled, typeFamilyEnabled, customEnabledForCategory } = fieldsByFamily
+        const oldIndex = otherSystemEnabled.findIndex(f => String(f.id) === String(active.id))
+        const newIndex = otherSystemEnabled.findIndex(f => String(f.id) === String(over.id))
+        if (oldIndex === -1 || newIndex === -1) return
 
-        const enabled = getFieldsForCategory.enabled
-        const draggedIndex = enabled.findIndex(f => f.id === draggedFieldId)
-        const targetIndex = enabled.findIndex(f => f.id === targetFieldId)
+        const reorderedOtherSystem = arrayMove(otherSystemEnabled, oldIndex, newIndex)
+        const order = fieldOrder[selectedCategoryId] || []
+        const customIdsInOrder = order.filter(id => customEnabledForCategory.some(f => f.id === id))
+        const newFieldIds = buildFullFieldOrder(
+            typeFamilyEnabled.map(f => f.id),
+            reorderedOtherSystem.map(f => f.id),
+            customIdsInOrder.length > 0 ? customIdsInOrder : customEnabledForCategory.map(f => f.id)
+        )
 
-        if (draggedIndex === -1 || targetIndex === -1) return
-
-        // Reorder array
-        const newOrder = [...enabled]
-        const [removed] = newOrder.splice(draggedIndex, 1)
-        newOrder.splice(targetIndex, 0, removed)
-
-        // Update order state
         setFieldOrder(prev => ({
             ...prev,
-            [selectedCategoryId]: newOrder.map(f => f.id)
+            [selectedCategoryId]: newFieldIds
         }))
 
-        setDraggedFieldId(null)
-    }
+        setFieldReorderLoading(true)
+        fetch(`/app/brands/${brandId}/categories/${selectedCategoryId}/fields/reorder`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ field_order: newFieldIds }),
+        })
+            .then(res => { if (!res.ok) throw new Error('Failed to reorder') })
+            .catch(e => console.error('[ByCategory] Field reorder failed:', e))
+            .finally(() => setFieldReorderLoading(false))
+    }, [selectedCategoryId, brandId, fieldsByFamily, fieldOrder, buildFullFieldOrder])
 
-    const handleDragEnd = () => {
-        setDraggedFieldId(null)
-    }
+    const handleCustomFieldsDragEnd = useCallback((event) => {
+        const { active, over } = event
+        if (!over || active.id === over.id || !selectedCategoryId || !brandId) return
 
-    const selectedCategory = categories.find(cat => cat.id === selectedCategoryId)
+        const { otherSystemEnabled, typeFamilyEnabled, customEnabledForCategory } = fieldsByFamily
+        const oldIndex = customEnabledForCategory.findIndex(f => String(f.id) === String(active.id))
+        const newIndex = customEnabledForCategory.findIndex(f => String(f.id) === String(over.id))
+        if (oldIndex === -1 || newIndex === -1) return
+
+        const reorderedCustom = arrayMove(customEnabledForCategory, oldIndex, newIndex)
+        const order = fieldOrder[selectedCategoryId] || []
+        const otherSystemIdsInOrder = order.filter(id => otherSystemEnabled.some(f => f.id === id))
+        const newFieldIds = buildFullFieldOrder(
+            typeFamilyEnabled.map(f => f.id),
+            otherSystemIdsInOrder.length > 0 ? otherSystemIdsInOrder : otherSystemEnabled.map(f => f.id),
+            reorderedCustom.map(f => f.id)
+        )
+
+        setFieldOrder(prev => ({
+            ...prev,
+            [selectedCategoryId]: newFieldIds
+        }))
+
+        setFieldReorderLoading(true)
+        fetch(`/app/brands/${brandId}/categories/${selectedCategoryId}/fields/reorder`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ field_order: newFieldIds }),
+        })
+            .then(res => { if (!res.ok) throw new Error('Failed to reorder') })
+            .catch(e => console.error('[ByCategory] Custom field reorder failed:', e))
+            .finally(() => setFieldReorderLoading(false))
+    }, [selectedCategoryId, brandId, fieldsByFamily, fieldOrder, buildFullFieldOrder])
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    )
+
+    const selectedCategory = categoriesForBrand.find(cat => cat.id === selectedCategoryId)
+
+    // Refresh metadata page via router.get preserving category + brand in URL (replaces router.reload)
+    const refreshMetadataRegistry = useCallback((opts = {}) => {
+        const params = {}
+        if (selectedBrandId) params.brand = selectedBrandId
+        if (selectedCategory?.slug) params.category = selectedCategory.slug
+        router.get(METADATA_REGISTRY_URL, params, {
+            preserveState: true,
+            preserveScroll: true,
+            ...opts,
+        })
+    }, [selectedBrandId, selectedCategory?.slug])
+
+    // Select category: update URL and local state
+    const handleSelectCategory = useCallback((categoryId) => {
+        const cat = categoriesForBrand.find(c => c.id === categoryId)
+        const params = {}
+        if (selectedBrandId) params.brand = selectedBrandId
+        if (cat?.slug) params.category = cat.slug
+        router.get(METADATA_REGISTRY_URL, params, {
+            preserveState: true,
+            preserveScroll: true,
+        })
+        setSelectedCategoryId(categoryId)
+    }, [categoriesForBrand, selectedBrandId])
+
+    // Brand change: update URL (Index syncs from initial_brand_id)
+    const handleBrandChange = useCallback((brandId) => {
+        const params = {}
+        if (brandId) params.brand = brandId
+        if (selectedCategory?.slug) params.category = selectedCategory.slug
+        router.get(METADATA_REGISTRY_URL, params, {
+            preserveState: true,
+            preserveScroll: true,
+        })
+        onBrandChange(brandId)
+    }, [selectedCategory?.slug, onBrandChange])
 
     const handleEditField = async (field) => {
         setLoadingFieldData(true)
@@ -712,19 +947,20 @@ export default function ByCategoryView({
         }
     }
 
-    const handleModalSuccess = () => {
-        // Reload registry data
-        router.reload({ 
-            only: ['registry'],
-            preserveState: true,
-            preserveScroll: true,
+    const handleModalSuccess = (newFieldId) => {
+        if (newFieldId) setHighlightedFieldId(newFieldId)
+        refreshMetadataRegistry({
+            onSuccess: () => {
+                setFieldCategoryData({})
+                if (newFieldId) setTimeout(() => setHighlightedFieldId(null), 2000)
+            },
         })
     }
 
     // Copy visibility settings from another category to the selected category (called after confirm)
     const handleCopyFromConfirm = async () => {
         if (!canManageVisibility || !selectedCategoryId || !copyFromSourceId) return
-        const sourceCat = categories.find(c => c.id === copyFromSourceId)
+        const sourceCat = categoriesForBrand.find(c => c.id === copyFromSourceId)
         const targetCat = selectedCategory
         if (!sourceCat || !targetCat) return
         setCopyOrResetLoading(true)
@@ -744,7 +980,7 @@ export default function ByCategoryView({
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setCopyFromSourceId(null)
                 setConfirmCopyOpen(false)
-                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
             } else {
                 setSuccessMessage(data.error || 'Failed to copy settings.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -776,9 +1012,91 @@ export default function ByCategoryView({
                 setSuccessMessage(data.message || 'Category reset to default.')
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setConfirmResetOpen(false)
-                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
             } else {
                 setSuccessMessage(data.error || 'Failed to reset.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setCopyOrResetLoading(false)
+        }
+    }
+
+    // Upgrade system category to latest version
+    const handleUpgradeConfirm = async () => {
+        if (!selectedCategory?.id || !brandId) return
+        setUpgradeLoading(true)
+        try {
+            const response = await fetch(`/app/brands/${brandId}/categories/${selectedCategory.id}/upgrade`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ approved_fields: [] }),
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message ?? 'Category upgraded.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setUpgradeModalOpen(false)
+                if (data.category) {
+                    setLocalCategories((prev) =>
+                        prev.map((c) => (c.id === data.category.id ? { ...c, ...data.category } : c))
+                    )
+                } else {
+                    refreshMetadataRegistry()
+                }
+            } else {
+                setSuccessMessage(data.error ?? 'Failed to upgrade.')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (err) {
+            setSuccessMessage('Network error. Please try again.')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setUpgradeLoading(false)
+        }
+    }
+
+    // Open upgrade modal for category (from list)
+    const handleUpgradeClick = (category) => {
+        setSelectedCategoryId(category.id)
+        setUpgradeModalOpen(true)
+    }
+
+    // Revert system category to default (from list)
+    const handleRevertClick = (category) => {
+        setCategoryToRevert(category)
+        setConfirmRevertOpen(true)
+    }
+    const handleRevertConfirm = async () => {
+        if (!categoryToRevert?.id) return
+        setCopyOrResetLoading(true)
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/categories/${categoryToRevert.id}/reset`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.ok) {
+                setSuccessMessage(data.message ?? 'Reverted to system default.')
+                setTimeout(() => setSuccessMessage(null), 4000)
+                setCategoryToRevert(null)
+                setConfirmRevertOpen(false)
+                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
+            } else {
+                setSuccessMessage(data.error ?? 'Failed to revert.')
                 setTimeout(() => setSuccessMessage(null), 5000)
             }
         } catch (err) {
@@ -836,7 +1154,7 @@ export default function ByCategoryView({
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setApplyOtherBrandsTargets([])
                 setConfirmApplyOtherBrandsOpen(false)
-                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
             } else {
                 setSuccessMessage(data.error ?? 'Failed to apply to other brands.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -892,7 +1210,7 @@ export default function ByCategoryView({
             if (response.ok) {
                 setSuccessMessage(data.message || 'Profile saved.')
                 setTimeout(() => setSuccessMessage(null), 4000)
-                setSaveProfileModalOpen(false)
+                setAdvancedSettingsOpen(false)
                 setSaveProfileName('')
                 setProfileAvailableToAllBrands(false)
                 setProfiles(prev => [...prev, data.profile].filter(Boolean))
@@ -964,7 +1282,7 @@ export default function ByCategoryView({
                 setConfirmApplyProfileOpen(false)
                 setPreviewSnapshot(null)
                 setPreviewProfileName(null)
-                router.reload({ only: ['registry'], preserveState: true, preserveScroll: true, onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
             } else {
                 setSuccessMessage(data.error ?? 'Failed to apply profile.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -978,7 +1296,7 @@ export default function ByCategoryView({
     }
 
     return (
-        <div className="space-y-6">
+        <div className="flex flex-col lg:flex-row gap-6 min-h-0">
             {/* Success Message Toast */}
             {successMessage && (
                 <div className="fixed top-4 right-4 z-50 max-w-md w-full animate-in slide-in-from-top-5">
@@ -1006,12 +1324,11 @@ export default function ByCategoryView({
                     </div>
                 </div>
             )}
-            
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Category List (Left Sidebar) */}
-            <div className="lg:col-span-1">
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                    {/* Brand selector: one brand at a time so category list has no duplicates */}
+
+            {/* LEFT PANEL — Brand Content Structure (sticky) */}
+            <div className="lg:w-80 flex-shrink-0 lg:sticky lg:top-6 lg:self-start overflow-y-auto scrollbar-thin max-h-[calc(100vh-8rem)]">
+                <div className="rounded-lg bg-white shadow-sm border border-gray-100 p-5">
+                    <h2 className="text-base font-semibold text-gray-900 mb-4">Brand Content Structure</h2>
                     {brands.length > 1 && (
                         <div className="mb-4">
                             <label htmlFor="by-category-brand" className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
@@ -1020,8 +1337,8 @@ export default function ByCategoryView({
                             <select
                                 id="by-category-brand"
                                 value={selectedBrandId ?? ''}
-                                onChange={(e) => onBrandChange(e.target.value ? parseInt(e.target.value, 10) : null)}
-                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                onChange={(e) => handleBrandChange(e.target.value ? parseInt(e.target.value, 10) : null)}
+                                className="w-full rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                             >
                                 {brands.map(b => (
                                     <option key={b.id} value={b.id}>{b.name}</option>
@@ -1032,191 +1349,151 @@ export default function ByCategoryView({
                     {brands.length === 1 && (
                         <p className="text-xs text-gray-500 mb-3">{brands[0].name}</p>
                     )}
-                    <h3 className="text-sm font-semibold text-gray-900 mb-4">Categories</h3>
-                    <div className="space-y-2">
-                        {/* Asset Categories */}
-                        {groupedCategories.asset.length > 0 && (
-                            <div>
-                                <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                                    Asset Categories
-                                </div>
-                                {groupedCategories.asset.map(category => (
-                                    <button
-                                        key={category.id}
-                                        onClick={() => setSelectedCategoryId(category.id)}
-                                        className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                                            selectedCategoryId === category.id
-                                                ? 'bg-indigo-50 text-indigo-700 font-medium'
-                                                : 'text-gray-700 hover:bg-gray-50'
-                                        }`}
-                                    >
-                                        {category.name}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Execution Categories (internal: deliverable) */}
-                        {groupedCategories.deliverable.length > 0 && (
-                            <div className="mt-4">
-                                <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                                    Execution Categories
-                                </div>
-                                {groupedCategories.deliverable.map(category => (
-                                    <button
-                                        key={category.id}
-                                        onClick={() => setSelectedCategoryId(category.id)}
-                                        className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                                            selectedCategoryId === category.id
-                                                ? 'bg-indigo-50 text-indigo-700 font-medium'
-                                                : 'text-gray-700 hover:bg-gray-50'
-                                        }`}
-                                    >
-                                        {category.name}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-
-                        {categoriesForBrand.length === 0 && (
-                            <p className="text-sm text-gray-500 italic">
-                                {selectedBrandId ? 'No categories for this brand' : 'No categories available'}
-                            </p>
-                        )}
-                    </div>
+                    <CategoryList
+                        groupedCategories={groupedCategories}
+                        selectedCategoryId={selectedCategoryId}
+                        onSelectCategory={handleSelectCategory}
+                        canManageVisibility={canManageVisibility}
+                        brandId={brandId}
+                        onCategoriesChange={onCategoriesChange}
+                        onRename={(cat) => { setEditingCategoryId(cat.id); setEditingCategoryName(cat.name) }}
+                        onCategorySettingsClick={handleCategorySettingsClick}
+                        onDelete={(cat) => { setCategoryToDelete(cat); setConfirmDeleteOpen(true) }}
+                        onRevert={handleRevertClick}
+                        onUpgrade={handleUpgradeClick}
+                        onSaveRename={(cat, name) => handleRenameCategory(cat, name)}
+                        onCancelRename={() => { setEditingCategoryId(null); setEditingCategoryName('') }}
+                        onAddCategory={brandId ? handleAddCategory : undefined}
+                        editingCategoryId={editingCategoryId}
+                        editingCategoryName={editingCategoryName}
+                        onEditingCategoryNameChange={setEditingCategoryName}
+                    />
                 </div>
             </div>
 
-            {/* Selected Category Panel (Right Side) */}
-            <div className="lg:col-span-2">
-                {selectedCategory ? (
-                    <div className="space-y-6">
-                        {/* Header */}
-                        <div className="bg-white rounded-lg border border-gray-200 p-6">
-                            <h2 className="text-lg font-semibold text-gray-900">
-                                Metadata for: {selectedCategory.name}
-                            </h2>
-                            <p className="mt-2 text-sm text-gray-600">
-                                Enable which metadata fields appear for assets in this category. Configure filter visibility and primary placement to control how fields appear in the asset grid.
-                            </p>
-                            {previewProfileName && (
-                                <div className="mt-4 rounded-md bg-amber-50 border border-amber-200 px-4 py-2 flex items-center justify-between">
-                                    <span className="text-sm text-amber-800">
-                                        Previewing profile &quot;{previewProfileName}&quot; — not saved. Apply to save, or Revert to cancel.
-                                    </span>
-                                    <div className="flex items-center gap-2">
-                                        <button type="button" onClick={handleRevertPreview} className="text-sm font-medium text-amber-700 hover:text-amber-900">Revert</button>
-                                        <button type="button" onClick={() => { setConfirmApplyProfileOpen(true) }} disabled={copyOrResetLoading} className="rounded-md bg-amber-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">Apply to save</button>
-                                    </div>
-                                </div>
+            {/* RIGHT PANEL */}
+            <div className="flex-1 min-w-0 min-h-[480px]">
+                {!selectedCategory ? (
+                    <div className="relative flex items-center justify-center min-h-[320px] p-6">
+                        {/* Ambient background */}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="absolute w-96 h-96 rounded-full bg-gradient-to-br from-purple-100/40 to-transparent blur-2xl opacity-40" aria-hidden />
+                        </div>
+                        {/* Card */}
+                        <div className="relative rounded-xl bg-white shadow-sm p-10 text-center max-w-[480px]">
+                            <FolderIcon className="mx-auto h-12 w-12 text-purple-400/70 mb-5" aria-hidden />
+                            <h3 className="text-xl font-semibold text-gray-900">Select a category</h3>
+                            <p className="mt-2 text-sm text-gray-500">Configure how metadata fields behave for each content type.</p>
+                            {brandId && (
+                                <button
+                                    type="button"
+                                    onClick={handleAddCategory}
+                                    className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:shadow-md hover:shadow-purple-500/25 transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                >
+                                    <PlusIcon className="h-4 w-4" />
+                                    Create Category
+                                </button>
                             )}
-                            {canManageVisibility && (
-                                <div className="mt-4 border-t border-gray-100 pt-4 space-y-4">
-                                    <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-                                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Copy from category</span>
-                                        <select
-                                            id="copy-from-category"
-                                            value={copyFromSourceId ?? ''}
-                                            onChange={(e) => setCopyFromSourceId(e.target.value ? parseInt(e.target.value, 10) : null)}
-                                            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                        >
-                                            <option value="">Select category…</option>
-                                            {categoriesForBrand
-                                                .filter(c => c.id !== selectedCategoryId)
-                                                .map(c => (
-                                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                                ))}
-                                        </select>
-                                        <button
-                                            type="button"
-                                            onClick={() => copyFromSourceId && setConfirmCopyOpen(true)}
-                                            disabled={!copyFromSourceId || copyOrResetLoading}
-                                            className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
-                                        >
-                                            <DocumentDuplicateIcon className="h-4 w-4" />
-                                            Copy settings
-                                        </button>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Reset</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setConfirmResetOpen(true)}
-                                            disabled={copyOrResetLoading}
-                                            className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
-                                        >
-                                            <ArrowPathIcon className="h-4 w-4" />
-                                            Reset to default
-                                        </button>
-                                    </div>
-                                    {brands.length > 1 && (
-                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Propagate</span>
+                        </div>
+                    </div>
+                ) : (
+                    <div
+                        key={selectedCategoryId}
+                        className="space-y-6 p-6 animate-fade-slide-in"
+                    >
+                        {/* Category Header */}
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <h2 className="text-3xl font-semibold tracking-tight text-gray-900">{selectedCategory.name}</h2>
+                                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                                    {selectedCategory.is_system && (
+                                        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-normal text-gray-500 bg-gray-100">
+                                            System{selectedCategory.system_version ? ` · v${selectedCategory.system_version}` : ''}
+                                        </span>
+                                    )}
+                                    {(selectedCategory.upgrade_available || selectedCategory.has_update_available) && selectedCategory.is_system && (
+                                        <>
+                                            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-normal text-amber-700 bg-gray-100">Update Available</span>
                                             <button
                                                 type="button"
-                                                onClick={handleApplyToOtherBrandsClick}
-                                                disabled={copyOrResetLoading || applyOtherBrandsLoading}
-                                                className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
-                                                title="Apply this category's settings to the same category type in all other brands"
+                                                onClick={() => setUpgradeModalOpen(true)}
+                                                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-amber-700 bg-gray-100 hover:bg-amber-50 transition-colors"
                                             >
-                                                <Squares2X2Icon className="h-4 w-4" />
-                                                Apply to other brands
+                                                <ArrowUpCircleIcon className="h-3 w-3" />
+                                                Upgrade
                                             </button>
-                                        </div>
+                                        </>
                                     )}
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Profiles</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSaveProfileModalOpen(true)}
-                                            disabled={copyOrResetLoading}
-                                            className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50"
-                                            title="Save current category visibility as a named profile"
-                                        >
-                                            <BookmarkIcon className="h-4 w-4" />
-                                            Save as profile
-                                        </button>
-                                        <select
-                                            id="apply-profile"
-                                            value={applyProfileId ?? ''}
-                                            onFocus={fetchProfiles}
-                                            onChange={(e) => setApplyProfileId(e.target.value ? parseInt(e.target.value, 10) : null)}
-                                            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                            title="Select a saved profile"
-                                        >
-                                            <option value="">Select profile…</option>
-                                            {profiles.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name}{p.category_slug ? ` (${p.category_slug})` : ''}</option>
-                                            ))}
-                                        </select>
-                                        <button type="button" onClick={handlePreviewProfile} disabled={!applyProfileId || copyOrResetLoading} className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50" title="Preview profile without saving">Preview</button>
-                                        <button type="button" onClick={handleApplyProfileClick} disabled={!applyProfileId || copyOrResetLoading} className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50" title="Apply selected profile to this category">Apply</button>
-                                    </div>
+                                    {selectedCategory.is_customized && (
+                                        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-gray-500 bg-gray-100" title="Customized from system default">
+                                            <span className="w-1 h-1 rounded-full bg-gray-400" aria-hidden />
+                                            Customized
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            {canManageVisibility && (
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => setCategoryMenuOpen((o) => !o)}
+                                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                                        aria-expanded={categoryMenuOpen}
+                                        aria-haspopup="true"
+                                    >
+                                        <EllipsisVerticalIcon className="w-5 h-5 text-gray-500" />
+                                        Options
+                                    </button>
+                                    {categoryMenuOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-10" onClick={() => setCategoryMenuOpen(false)} aria-hidden />
+                                            <div className="absolute right-0 top-full mt-1 w-56 rounded-lg bg-white py-1 shadow-lg ring-1 ring-black/5 z-20">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setCategoryMenuOpen(false); setAdvancedSettingsOpen(true) }}
+                                                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    <Squares2X2Icon className="h-4 w-4 text-gray-400" />
+                                                    Advanced Settings
+                                                </button>
+                                                {selectedCategory && !selectedCategory.is_system && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setCategoryMenuOpen(false); setCategorySettingsCategory(selectedCategory); setCategorySettingsOpen(true) }}
+                                                        className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                    >
+                                                        <PencilIcon className="h-4 w-4 text-gray-400" />
+                                                        Category Settings
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
-
-                        {/* Plan Limit Indicator */}
-                        {customFieldsLimit && customFieldsLimit.max > 0 && (
-                            <PlanLimitIndicator
-                                current={customFieldsLimit.current}
-                                max={customFieldsLimit.max}
-                                label="Custom Metadata Fields"
-                                className="mb-6"
-                            />
+                        <div className="mt-4 border-b border-gray-200" aria-hidden />
+                        {previewProfileName && (
+                            <div className="rounded-lg bg-amber-50/80 border border-amber-200/60 px-4 py-2 flex items-center justify-between">
+                                <span className="text-sm text-amber-800">
+                                    Previewing profile &quot;{previewProfileName}&quot; — not saved. Apply to save, or Revert to cancel.
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    <button type="button" onClick={handleRevertPreview} className="text-sm font-medium text-amber-700 hover:text-amber-900">Revert</button>
+                                    <button type="button" onClick={() => { setConfirmApplyProfileOpen(true) }} disabled={copyOrResetLoading} className="rounded-md bg-amber-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">Apply to save</button>
+                                </div>
+                            </div>
                         )}
 
+                        {/* Fields content — premium card */}
+                        <div className="rounded-xl border border-gray-200 bg-white shadow-md overflow-hidden">
+                            <div className="px-8 py-6 space-y-0">
                         {/* Enabled Fields */}
-                        <div className="bg-white rounded-lg border border-gray-200">
-                            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                                <div>
-                                    <h3 className="text-sm font-semibold text-gray-900">
-                                        Enabled for this category ({getFieldsForCategory.enabled.length})
-                                    </h3>
-                                    <p className="mt-1 text-xs text-gray-500">
-                                        These fields are visible for assets in this category
-                                    </p>
-                                </div>
+                        <div className="mt-0 first:mt-0">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-medium text-gray-700">
+                                    Enabled Fields ({getFieldsForCategory.enabled.length})
+                                </h3>
                                 {canManageFields && (
                                     <button
                                         type="button"
@@ -1235,7 +1512,7 @@ export default function ByCategoryView({
                                     </button>
                                 )}
                             </div>
-                            <div className="divide-y divide-gray-200">
+                            <div className="space-y-0.5">
                                 {getFieldsForCategory.enabled.length > 0 || (fieldsByFamily.typeFamilyEnabled.length + fieldsByFamily.typeFamilyAvailable.length) > 0 ? (
                                     <>
                                         {typeFamilyConfig && (fieldsByFamily.typeFamilyEnabled.length > 0 || fieldsByFamily.typeFamilyAvailable.length > 0) && (
@@ -1257,110 +1534,111 @@ export default function ByCategoryView({
                                                 systemFields={systemFields}
                                                 fieldCategoryData={fieldCategoryData}
                                                 previewOverlay={previewOverlay}
+                                                highlightedFieldId={highlightedFieldId}
                                             />
                                         )}
-                                        {fieldsByFamily.otherEnabled.map((field) => (
-                                            <FieldRow
-                                                key={field.id}
-                                                field={field}
-                                                categoryId={selectedCategoryId}
-                                                isEnabled={true}
-                                                onToggle={toggleCategoryField}
-                                                onVisibilityToggle={toggleVisibility}
-                                                onPrimaryToggle={togglePrimary}
-                                                onAiEligibleToggle={toggleAiEligible}
-                                                onEdit={canManageFields ? handleEditField : null}
-                                                canManage={canManageVisibility && !previewProfileName}
-                                                canManageFields={canManageFields}
-                                                systemFields={systemFields}
-                                                fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                                isDraggable={true}
-                                                onDragStart={handleDragStart}
-                                                onDragOver={handleDragOver}
-                                                onDrop={handleDrop}
-                                                onDragEnd={handleDragEnd}
-                                                isDragging={draggedFieldId === field.id}
-                                            />
-                                        ))}
-                                    </>
-                                ) : (
-                                    <div className="px-6 py-8 text-center text-sm text-gray-500">
-                                        No fields enabled for this category yet.
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* System Automated Fields (Subtle Display) */}
-                        {(getFieldsForCategory.enabledAutomated.length > 0 || getFieldsForCategory.availableAutomated.length > 0) && (
-                            <div className="bg-gray-50 rounded-lg border border-gray-200">
-                                <div className="px-6 py-3 border-b border-gray-200">
-                                    <h3 className="text-xs font-medium text-gray-600">
-                                        System Automated Fields
-                                    </h3>
-                                    <p className="mt-1 text-xs text-gray-500">
-                                        These fields are automatically filled by the system. Upload is disabled, but you can control edit visibility, filter visibility, and disable them per category.
-                                    </p>
-                                </div>
-                                <div className="divide-y divide-gray-200">
-                                    {/* Enabled Automated Fields */}
-                                    {getFieldsForCategory.enabledAutomated.length > 0 && (
-                                        <div className="px-6 py-2 bg-white/50">
-                                            <div className="text-xs font-medium text-gray-500 mb-2">Enabled ({getFieldsForCategory.enabledAutomated.length})</div>
-                                            <div className="space-y-1">
-                                                {getFieldsForCategory.enabledAutomated.map(field => (
-                                                    <AutomatedFieldRow
+                                        <DndContext
+                                            sensors={sensors}
+                                            collisionDetection={closestCenter}
+                                            onDragEnd={handleEnabledFieldsDragEnd}
+                                        >
+                                            <SortableContext
+                                                items={fieldsByFamily.otherSystemEnabled.map(f => f.id)}
+                                                strategy={verticalListSortingStrategy}
+                                            >
+                                                {fieldsByFamily.otherSystemEnabled.map((field) => (
+                                                    <SortableFieldRow
                                                         key={field.id}
                                                         field={field}
                                                         categoryId={selectedCategoryId}
                                                         isEnabled={true}
                                                         onToggle={toggleCategoryField}
                                                         onVisibilityToggle={toggleVisibility}
+                                                        onPrimaryToggle={togglePrimary}
+                                                        onAiEligibleToggle={toggleAiEligible}
+                                                        onEdit={canManageFields ? handleEditField : null}
                                                         canManage={canManageVisibility && !previewProfileName}
+                                                        canManageFields={canManageFields}
                                                         systemFields={systemFields}
                                                         fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
+                                                        isHighlighted={field.id === highlightedFieldId}
                                                     />
                                                 ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {/* Available Automated Fields */}
-                                    {getFieldsForCategory.availableAutomated.length > 0 && (
-                                        <div className="px-6 py-2 bg-white/50">
-                                            <div className="text-xs font-medium text-gray-500 mb-2">Available ({getFieldsForCategory.availableAutomated.length})</div>
-                                            <div className="space-y-1">
-                                                {getFieldsForCategory.availableAutomated.map(field => (
-                                                    <AutomatedFieldRow
-                                                        key={field.id}
-                                                        field={field}
-                                                        categoryId={selectedCategoryId}
-                                                        isEnabled={false}
-                                                        onToggle={toggleCategoryField}
-                                                        onVisibilityToggle={toggleVisibility}
-                                                        canManage={canManageVisibility && !previewProfileName}
-                                                        systemFields={systemFields}
-                                                        fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
+                                            </SortableContext>
+                                        </DndContext>
+                                        {fieldReorderLoading && (
+                                            <p className="text-xs text-gray-400 mt-1">Saving order…</p>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div className="px-4 py-4 text-center text-sm text-gray-500">
+                                        No fields enabled.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* System Automated Fields — collapsed by default */}
+                        {(getFieldsForCategory.enabledAutomated.length > 0 || getFieldsForCategory.availableAutomated.length > 0) && (
+                            <div className="mt-8">
+                                <button
+                                    type="button"
+                                    onClick={() => setExpandedAutomated(v => !v)}
+                                    className="w-full flex items-center justify-between gap-2 text-left py-1.5 -mx-1 px-1 rounded hover:bg-gray-50/50 transition-colors"
+                                >
+                                    <h3 className="text-sm font-medium text-gray-700">
+                                        System Automated ({getFieldsForCategory.enabledAutomated.length + getFieldsForCategory.availableAutomated.length})
+                                    </h3>
+                                    {expandedAutomated ? <ChevronDownIcon className="w-4 h-4 text-gray-400" /> : <ChevronRightIcon className="w-4 h-4 text-gray-400" />}
+                                </button>
+                                {expandedAutomated && (
+                                <div className="space-y-0.5 mt-2">
+                                    {getFieldsForCategory.enabledAutomated.map(field => (
+                                        <AutomatedFieldRow
+                                            key={field.id}
+                                            field={field}
+                                            categoryId={selectedCategoryId}
+                                            isEnabled={true}
+                                            onToggle={toggleCategoryField}
+                                            onVisibilityToggle={toggleVisibility}
+                                            canManage={canManageVisibility && !previewProfileName}
+                                            systemFields={systemFields}
+                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
+                                        />
+                                    ))}
+                                    {getFieldsForCategory.availableAutomated.map(field => (
+                                        <AutomatedFieldRow
+                                            key={field.id}
+                                            field={field}
+                                            categoryId={selectedCategoryId}
+                                            isEnabled={false}
+                                            onToggle={toggleCategoryField}
+                                            onVisibilityToggle={toggleVisibility}
+                                            canManage={canManageVisibility && !previewProfileName}
+                                            systemFields={systemFields}
+                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
+                                        />
+                                    ))}
                                 </div>
+                                )}
                             </div>
                         )}
 
-                        {/* Available Fields (excludes type family members — those appear under Type when expanded) */}
+                        {/* Available Fields — collapsed by default */}
                         {fieldsByFamily.otherAvailable.length > 0 && (
-                            <div className="bg-white rounded-lg border border-gray-200">
-                                <div className="px-6 py-4 border-b border-gray-200">
-                                    <h3 className="text-sm font-semibold text-gray-900">
-                                        Available for this category ({fieldsByFamily.otherAvailable.length})
+                            <div className="mt-8">
+                                <button
+                                    type="button"
+                                    onClick={() => setExpandedAvailable(v => !v)}
+                                    className="w-full flex items-center justify-between gap-2 text-left py-1.5 -mx-1 px-1 rounded hover:bg-gray-50/50 transition-colors"
+                                >
+                                    <h3 className="text-sm font-medium text-gray-700">
+                                        Available ({fieldsByFamily.otherAvailable.length})
                                     </h3>
-                                    <p className="mt-1 text-xs text-gray-500">
-                                        Enable these fields to make them visible for this category
-                                    </p>
-                                </div>
-                                <div className="divide-y divide-gray-200">
+                                    {expandedAvailable ? <ChevronDownIcon className="w-4 h-4 text-gray-400" /> : <ChevronRightIcon className="w-4 h-4 text-gray-400" />}
+                                </button>
+                                {expandedAvailable && (
+                                <div className="space-y-0.5 mt-2">
                                     {fieldsByFamily.otherAvailable.map(field => (
                                         <FieldRow
                                             key={field.id}
@@ -1375,20 +1653,99 @@ export default function ByCategoryView({
                                             systemFields={systemFields}
                                             fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
                                             isDraggable={false}
+                                            isHighlighted={field.id === highlightedFieldId}
                                         />
                                     ))}
                                 </div>
+                                )}
                             </div>
                         )}
-                    </div>
-                ) : (
-                    <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-                        <p className="text-sm text-gray-500">
-                            Select a category from the list to manage its metadata fields.
-                        </p>
+
+                        {/* Custom Fields — reorderable when enabled, centered empty state when none */}
+                        {canManageFields && (tenant_fields.length === 0 || fieldsByFamily.customEnabledForCategory.length > 0) && (
+                            <div className="mt-8">
+                                {fieldsByFamily.customEnabledForCategory.length > 0 ? (
+                                    <>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="text-sm font-medium text-gray-700">
+                                                Custom Fields
+                                                <span className="font-normal text-gray-500 ml-1">({fieldsByFamily.customEnabledForCategory.length})</span>
+                                            </h3>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setEditingField(null); setModalOpen(true) }}
+                                                disabled={customFieldsLimit && !customFieldsLimit.can_create}
+                                                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title={customFieldsLimit && !customFieldsLimit.can_create
+                                                    ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
+                                                    : 'Add custom metadata field'}
+                                            >
+                                                <PlusIcon className="h-4 w-4" />
+                                                Add Field
+                                            </button>
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <DndContext
+                                                sensors={sensors}
+                                                collisionDetection={closestCenter}
+                                                onDragEnd={handleCustomFieldsDragEnd}
+                                            >
+                                                <SortableContext
+                                                    items={fieldsByFamily.customEnabledForCategory.map(f => f.id)}
+                                                    strategy={verticalListSortingStrategy}
+                                                >
+                                                    {fieldsByFamily.customEnabledForCategory.map((field) => (
+                                                        <SortableFieldRow
+                                                            key={field.id}
+                                                            field={field}
+                                                            categoryId={selectedCategoryId}
+                                                            isEnabled={true}
+                                                            onToggle={toggleCategoryField}
+                                                            onVisibilityToggle={toggleVisibility}
+                                                            onPrimaryToggle={togglePrimary}
+                                                            onAiEligibleToggle={toggleAiEligible}
+                                                            onEdit={handleEditField}
+                                                            canManage={canManageVisibility && !previewProfileName}
+                                                            canManageFields={canManageFields}
+                                                            systemFields={systemFields}
+                                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
+                                                            isHighlighted={field.id === highlightedFieldId}
+                                                        />
+                                                    ))}
+                                                </SortableContext>
+                                            </DndContext>
+                                            {fieldReorderLoading && (
+                                                <p className="text-xs text-gray-400 mt-1">Saving order…</p>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="py-12 flex justify-center">
+                                        <div className="max-w-md w-full rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-6 py-8 text-center">
+                                            <p className="text-sm text-gray-500 mb-3">
+                                                Custom fields let you define structured metadata specific to this category.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setEditingField(null); setModalOpen(true) }}
+                                                disabled={customFieldsLimit && !customFieldsLimit.can_create}
+                                                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                title={customFieldsLimit && !customFieldsLimit.can_create
+                                                    ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
+                                                    : 'Add custom metadata field'}
+                                            >
+                                                <PlusIcon className="h-4 w-4" />
+                                                Add Custom Field
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                            </div>
+                        </div>
                     </div>
                 )}
-            </div>
             </div>
 
             {/* Copy settings confirmation */}
@@ -1398,7 +1755,7 @@ export default function ByCategoryView({
                 onConfirm={handleCopyFromConfirm}
                 title="Copy settings"
                 message={copyFromSourceId && selectedCategory
-                    ? `Copy settings from "${categories.find(c => c.id === copyFromSourceId)?.name ?? ''}" to "${selectedCategory.name}"? This will overwrite current visibility for ${selectedCategory.name}.`
+                    ? `Copy settings from "${categoriesForBrand.find(c => c.id === copyFromSourceId)?.name ?? ''}" to "${selectedCategory.name}"? This will overwrite current visibility for ${selectedCategory.name}.`
                     : ''}
                 confirmText="OK"
                 cancelText="Cancel"
@@ -1433,6 +1790,29 @@ export default function ByCategoryView({
                 variant="warning"
                 loading={copyOrResetLoading}
             />
+            {/* Delete category confirmation */}
+            <ConfirmDialog
+                open={confirmDeleteOpen}
+                onClose={() => { setConfirmDeleteOpen(false); setCategoryToDelete(null) }}
+                onConfirm={handleDeleteCategory}
+                title="Delete category"
+                message={categoryToDelete ? `Delete "${categoryToDelete.name}"? This cannot be undone.` : ''}
+                confirmText="Delete"
+                cancelText="Cancel"
+                variant="danger"
+            />
+            {/* Revert to system default confirmation */}
+            <ConfirmDialog
+                open={confirmRevertOpen}
+                onClose={() => { setConfirmRevertOpen(false); setCategoryToRevert(null) }}
+                onConfirm={handleRevertConfirm}
+                title="Revert to System"
+                message={categoryToRevert ? `Revert "${categoryToRevert.name}" to system default? This removes all category-level visibility overrides.` : ''}
+                confirmText="Revert"
+                cancelText="Cancel"
+                variant="warning"
+                loading={copyOrResetLoading}
+            />
             {/* Apply to other brands confirmation */}
             <ConfirmDialog
                 open={confirmApplyOtherBrandsOpen}
@@ -1450,52 +1830,79 @@ export default function ByCategoryView({
                 variant="warning"
                 loading={copyOrResetLoading}
             />
-            {/* Save as profile modal */}
-            {saveProfileModalOpen && (
-                <div className="fixed inset-0 z-50 overflow-y-auto">
-                    <div className="flex min-h-full items-center justify-center p-4">
-                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => { if (!saveProfileLoading) { setSaveProfileModalOpen(false); setProfileAvailableToAllBrands(false) } }} />
-                        <div className="relative bg-white rounded-lg shadow-xl px-4 pb-4 pt-5 sm:p-6 w-full max-w-sm">
-                            <h3 className="text-base font-semibold text-gray-900">Save as profile</h3>
-                            <p className="mt-1 text-sm text-gray-500">Save current visibility as a named profile you can apply later.</p>
-                            <div className="mt-4">
-                                <label htmlFor="profile-name" className="block text-sm font-medium text-gray-700">Profile name</label>
-                                <input
-                                    id="profile-name"
-                                    type="text"
-                                    value={saveProfileName}
-                                    onChange={(e) => setSaveProfileName(e.target.value)}
-                                    placeholder="e.g. Graphics Standard"
-                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                    disabled={saveProfileLoading}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleSaveProfileSubmit()}
-                                />
-                            </div>
-                            <div className="mt-4">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={profileAvailableToAllBrands}
-                                        onChange={(e) => setProfileAvailableToAllBrands(e.target.checked)}
-                                        disabled={saveProfileLoading}
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                    />
-                                    <span className="text-sm text-gray-700">Available to all brands</span>
-                                </label>
-                                <p className="mt-1 text-xs text-gray-500 ml-6">
-                                    {brands.length > 1
-                                        ? 'When checked, this profile can be applied from any brand. When unchecked, it is only visible for the current brand.'
-                                        : 'When checked, this profile will be available to all brands when you add more.'}
-                                </p>
-                            </div>
-                            <div className="mt-5 flex justify-end gap-2">
-                                <button type="button" onClick={() => { setSaveProfileModalOpen(false); setProfileAvailableToAllBrands(false) }} disabled={saveProfileLoading} className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                                <button type="button" onClick={handleSaveProfileSubmit} disabled={!saveProfileName.trim() || saveProfileLoading} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50">{saveProfileLoading ? 'Saving…' : 'Save'}</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Advanced Settings slide-over */}
+            <AdvancedSettingsSlideOver
+                isOpen={advancedSettingsOpen}
+                onClose={() => setAdvancedSettingsOpen(false)}
+                categoriesForBrand={categoriesForBrand}
+                selectedCategoryId={selectedCategoryId}
+                copyFromSourceId={copyFromSourceId}
+                setCopyFromSourceId={setCopyFromSourceId}
+                onCopySettings={() => {
+                    setAdvancedSettingsOpen(false)
+                    setConfirmCopyOpen(true)
+                }}
+                onReset={() => {
+                    setAdvancedSettingsOpen(false)
+                    setConfirmResetOpen(true)
+                }}
+                onSaveProfile={handleSaveProfileSubmit}
+                onApplyProfile={() => {
+                    setAdvancedSettingsOpen(false)
+                    handleApplyProfileClick()
+                }}
+                onPreviewProfile={async () => {
+                    setAdvancedSettingsOpen(false)
+                    await handlePreviewProfile()
+                }}
+                onApplyToOtherBrands={brands.length > 1 ? () => {
+                    setAdvancedSettingsOpen(false)
+                    handleApplyToOtherBrandsClick()
+                } : undefined}
+                profiles={profiles}
+                applyProfileId={applyProfileId}
+                setApplyProfileId={setApplyProfileId}
+                fetchProfiles={fetchProfiles}
+                saveProfileName={saveProfileName}
+                setSaveProfileName={setSaveProfileName}
+                profileAvailableToAllBrands={profileAvailableToAllBrands}
+                setProfileAvailableToAllBrands={setProfileAvailableToAllBrands}
+                brands={brands}
+                loading={copyOrResetLoading}
+                saveProfileLoading={saveProfileLoading}
+            />
+            {/* Upgrade category modal */}
+            <UpgradeCategoryModal
+                isOpen={upgradeModalOpen}
+                onClose={() => setUpgradeModalOpen(false)}
+                category={selectedCategory}
+                brandId={brandId}
+                onConfirm={handleUpgradeConfirm}
+                loading={upgradeLoading}
+            />
+
+            {/* Add Category Slide-over */}
+            <AddCategorySlideOver
+                isOpen={addCategoryOpen}
+                onClose={() => setAddCategoryOpen(false)}
+                brandId={brandId}
+                brandName={brands.find(b => b.id === brandId)?.name ?? ''}
+                categoryLimits={brands.find(b => b.id === brandId)?.category_limits ?? null}
+                onSuccess={handleAddCategorySuccess}
+            />
+
+            {/* Category Settings Slide-over */}
+            <CategorySettingsSlideOver
+                isOpen={categorySettingsOpen}
+                onClose={() => { setCategorySettingsOpen(false); setCategorySettingsCategory(null) }}
+                category={categorySettingsCategory}
+                brandId={brandId}
+                brandRoles={categoryFormData.brand_roles}
+                brandUsers={categoryFormData.brand_users}
+                onSuccess={handleCategorySettingsSuccess}
+                onDelete={handleCategorySettingsDelete}
+            />
+
             {/* Metadata Field Modal */}
             <MetadataFieldModal
                 isOpen={modalOpen}
@@ -1539,12 +1946,10 @@ function FamilyRow({
     systemFields,
     fieldCategoryData,
     previewOverlay,
+    highlightedFieldId,
 }) {
     const label = familyConfig?.label || familyKey
     const members = [...enabledMembers, ...availableMembers]
-    const uploadRef = useRef(null)
-    const editRef = useRef(null)
-    const filterRef = useRef(null)
 
     const getEffective = (field, context) => {
         const categoryData = previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]
@@ -1568,12 +1973,6 @@ function FamilyRow({
     const mixedEdit = edits.length > 0 && !allEdit && !noEdit
     const mixedFilter = filters.length > 0 && !allFilter && !noFilter
 
-    useLayoutEffect(() => {
-        if (uploadRef.current) uploadRef.current.indeterminate = mixedUpload
-        if (editRef.current) editRef.current.indeterminate = mixedEdit
-        if (filterRef.current) filterRef.current.indeterminate = mixedFilter
-    }, [mixedUpload, mixedEdit, mixedFilter])
-
     const handleFamilyVisibility = (context, currentCommon) => {
         const newVal = !currentCommon
         members.forEach(field => {
@@ -1586,9 +1985,9 @@ function FamilyRow({
     }
 
     return (
-        <div className="bg-gray-50/70 rounded border border-gray-200 overflow-hidden">
+        <div className="rounded-md overflow-hidden text-sm">
             <div
-                className="px-6 py-4 flex items-center gap-3 cursor-pointer hover:bg-gray-100/70 transition-colors"
+                className="group px-3 py-1.5 flex items-center gap-2 cursor-pointer hover:bg-gray-50/80 transition-all duration-200 ease-out rounded-md"
                 onClick={onToggleExpand}
                 role="button"
                 tabIndex={0}
@@ -1596,68 +1995,48 @@ function FamilyRow({
                 aria-expanded={expanded}
             >
                 <span className="flex-shrink-0 text-gray-500">
-                    {expanded ? <ChevronDownIcon className="w-5 h-5" /> : <ChevronRightIcon className="w-5 h-5" />}
+                    {expanded ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
                 </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System field group" />
                 <span className="text-sm font-medium text-gray-900">{label}</span>
-                <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded">System</span>
-                <span className="text-xs text-gray-500" title={`${enabledMembers.length} enabled in this category; ${availableMembers.length} available for this category`}>
-                    {enabledMembers.length} enabled in this category · {availableMembers.length} available for this category
+                <span className="text-xs text-gray-500" title={`${enabledMembers.length} enabled; ${availableMembers.length} available`}>
+                    {enabledMembers.length} enabled · {availableMembers.length} available
                 </span>
                 <div className="flex-1" />
-                <div className="flex items-center gap-6 text-xs text-gray-600" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center gap-3">
-                        <EyeIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
-                        <label className="flex items-center gap-1.5 cursor-pointer" title={mixedUpload ? 'Some fields differ' : undefined} onClick={e => e.stopPropagation()}>
-                            <input
-                                ref={uploadRef}
-                                type="checkbox"
-                                checked={allUpload}
-                                onChange={() => handleFamilyVisibility('upload', allUpload)}
-                                disabled={!canManage || members.length === 0}
-                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
-                                aria-label={mixedUpload ? 'Upload: some fields differ' : 'Upload'}
-                            />
-                            <span>Upload</span>
-                        </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer" title={mixedEdit ? 'Some fields differ' : undefined} onClick={e => e.stopPropagation()}>
-                            <input
-                                ref={editRef}
-                                type="checkbox"
-                                checked={allEdit}
-                                onChange={() => handleFamilyVisibility('edit', allEdit)}
-                                disabled={!canManage || members.length === 0}
-                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
-                                aria-label={mixedEdit ? 'Quick view: some fields differ' : 'Quick view'}
-                            />
-                            <span>Quick View</span>
-                        </label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <FunnelIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
-                        <label className="flex items-center gap-1.5 cursor-pointer" title={mixedFilter ? 'Some fields differ' : undefined} onClick={e => e.stopPropagation()}>
-                            <input
-                                ref={filterRef}
-                                type="checkbox"
-                                checked={allFilter}
-                                onChange={() => handleFamilyVisibility('filter', allFilter)}
-                                disabled={!canManage || members.length === 0}
-                                className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
-                                aria-label={mixedFilter ? 'Filter: some fields differ' : 'Filter'}
-                            />
-                            <span>Filter</span>
-                        </label>
-                    </div>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-70 focus-within:opacity-70 transition-opacity duration-200" onClick={e => e.stopPropagation()}>
+                    <button
+                        type="button"
+                        onClick={() => canManage && members.length > 0 && handleFamilyVisibility('upload', allUpload)}
+                        disabled={!canManage || members.length === 0}
+                        title={mixedUpload ? 'Some fields differ. Click to set all.' : 'Upload: Show in upload form when adding assets'}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allUpload ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                    >
+                        <CloudArrowUpIcon className="w-4 h-4" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => canManage && members.length > 0 && handleFamilyVisibility('edit', allEdit)}
+                        disabled={!canManage || members.length === 0}
+                        title={mixedEdit ? 'Some fields differ. Click to set all.' : 'Quick View: Show in asset details drawer and modal'}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allEdit ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                    >
+                        <EyeIcon className="w-4 h-4" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => canManage && members.length > 0 && handleFamilyVisibility('filter', allFilter)}
+                        disabled={!canManage || members.length === 0}
+                        title={mixedFilter ? 'Some fields differ. Click to set all.' : 'Filter: Show in asset grid filter bar'}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allFilter ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                    >
+                        <FunnelIcon className="w-4 h-4" />
+                    </button>
                 </div>
             </div>
-            {members.length > 1 && canManage && (
-                <p className="px-6 pb-3 pt-0 text-xs text-gray-500" onClick={e => e.stopPropagation()} role="presentation">
-                    Changes apply to all {members.length} {label} fields in this category.
-                </p>
-            )}
             {expanded && (
-                <div className="border-t border-gray-200 divide-y divide-gray-200">
+                <div className="border-t border-gray-100/80 space-y-0.5 pt-2 mt-1">
                     {enabledMembers.map(field => (
-                        <div key={field.id} className="bg-white">
+                        <div key={field.id}>
                             <FieldRow
                                 field={field}
                                 categoryId={categoryId}
@@ -1672,11 +2051,12 @@ function FamilyRow({
                                 systemFields={systemFields}
                                 fieldCategoryData={previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]}
                                 isDraggable={false}
+                                isHighlighted={field.id === highlightedFieldId}
                             />
                         </div>
                     ))}
                     {availableMembers.map(field => (
-                        <div key={field.id} className="bg-white">
+                        <div key={field.id}>
                             <FieldRow
                                 field={field}
                                 categoryId={categoryId}
@@ -1691,11 +2071,43 @@ function FamilyRow({
                                 systemFields={systemFields}
                                 fieldCategoryData={previewOverlay?.[field.id] ?? fieldCategoryData?.[field.id]}
                                 isDraggable={false}
+                                isHighlighted={field.id === highlightedFieldId}
                             />
                         </div>
                     ))}
                 </div>
             )}
+        </div>
+    )
+}
+
+/**
+ * Sortable Field Row — wraps FieldRow with dnd-kit useSortable
+ */
+function SortableFieldRow(props) {
+    const { field, canManage, ...rest } = props
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: field.id })
+
+    const style = { transform: CSS.Transform.toString(transform), transition }
+
+    return (
+        <div ref={setNodeRef} style={style}>
+            <div className="transition-transform duration-200 ease-out hover:scale-[1.01] origin-left">
+                <FieldRow
+                {...rest}
+                field={field}
+                isDraggable={!!canManage}
+                isDragging={isDragging}
+                dragHandleProps={canManage ? { ...attributes, ...listeners } : null}
+            />
+            </div>
         </div>
     )
 }
@@ -1723,7 +2135,9 @@ function FieldRow({
     onDragOver,
     onDrop,
     onDragEnd,
-    isDragging = false
+    isDragging = false,
+    dragHandleProps = null,
+    isHighlighted = false,
 }) {
     // Determine if field is system or custom
     // Custom fields have scope === 'tenant', system fields have scope === 'system' or are in systemFields array
@@ -1770,8 +2184,8 @@ function FieldRow({
 
     return (
         <div 
-            className={`px-6 py-4 transition-colors rounded ${
-                isDragging ? 'opacity-50' : isSystem ? 'bg-gray-50/70 hover:bg-gray-100/70' : 'hover:bg-gray-50'
+            className={`group px-3 py-1.5 rounded-md text-sm transition-colors duration-200 ease-out ${
+                isDragging ? 'opacity-50' : isHighlighted ? 'bg-indigo-50' : 'hover:bg-gray-50/80'
             }`}
             draggable={isDraggable && canManage && !isSystem}
             onDragStart={isDraggable && !isSystem ? (e) => onDragStart(e, field.id) : undefined}
@@ -1779,106 +2193,93 @@ function FieldRow({
             onDrop={isDraggable && !isSystem ? (e) => onDrop(e, field.id) : undefined}
             onDragEnd={isDraggable && !isSystem ? onDragEnd : undefined}
         >
-            <div className="flex items-start gap-4">
+            <div className="flex items-center gap-2">
                 {/* Drag Handle (only for enabled, non-system fields) */}
                 {isDraggable && canManage && (
-                    <div className={`flex-shrink-0 pt-1 text-gray-400 ${isSystem ? 'cursor-not-allowed opacity-60' : 'cursor-move hover:text-gray-600'}`}>
-                        <Bars3Icon className="w-5 h-5" />
+                    <div
+                        className={`flex-shrink-0 text-gray-400 opacity-60 hover:opacity-100 transition-opacity ${isSystem ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing hover:text-gray-600'}`}
+                        {...(dragHandleProps || {})}
+                    >
+                        <Bars3Icon className="w-4 h-4" aria-hidden />
                     </div>
                 )}
-                
-                <div className="flex-1 min-w-0">
-                    {/* Field Name and Badge */}
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="text-sm font-medium text-gray-900">
+                {/* Left: Field name */}
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                    {/* Field Name with System dot */}
+                    <div className="flex items-center gap-2 min-w-0">
+                        {isSystem && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System field" />
+                        )}
+                        <span className="text-sm font-semibold text-gray-900 truncate">
                             {field.label || field.system_label || field.key || 'Unnamed Field'}
                         </span>
-                        {isSystem ? (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded" title="System field">
-                                System
-                            </span>
-                        ) : (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 rounded" title="Custom field">
-                                Custom
-                            </span>
-                        )}
-                        {/* AI Suggestions Indicator - show for all AI-eligible fields */}
                         {aiEligible && (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100/80 text-amber-800 rounded" title="AI suggestions">
+                            <span className="px-1.5 py-0.5 text-xs font-medium bg-amber-100/80 text-amber-800 rounded flex-shrink-0" title="AI suggestions">
                                 {isTagsField ? 'AI Tagging' : 'AI'}
                             </span>
                         )}
                     </div>
 
-                    {/* Visibility (Upload, Quick View) · Discovery (Filter, Primary) */}
+                    {/* Middle: Icon visibility toggles — visible on row hover */}
                     {isEnabled && (
-                        <div className="flex items-center gap-6 text-xs text-gray-600">
-                            <div className="flex items-center gap-3" title="Visibility">
-                                <EyeIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
-                                <label className="flex items-center gap-1.5 cursor-pointer" title="Show on upload">
-                                    <input
-                                        type="checkbox"
-                                        checked={effectiveUpload}
-                                        onChange={() => onVisibilityToggle(field.id, 'upload', effectiveUpload)}
-                                        disabled={!canManage}
-                                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    />
-                                    <span>Upload</span>
-                                </label>
-                                <label className="flex items-center gap-1.5 cursor-pointer" title="Show in quick view">
-                                    <input
-                                        type="checkbox"
-                                        checked={effectiveEdit}
-                                        onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
-                                        disabled={!canManage}
-                                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    />
-                                    <span>Quick View</span>
-                                </label>
-                            </div>
-                            <div className="flex items-center gap-2" title="Discovery">
-                                <FunnelIcon className="w-4 h-4 text-gray-400 flex-shrink-0" aria-hidden />
-                                <label className="flex items-center gap-1.5 cursor-pointer" title="Show in filters">
-                                    <input
-                                        type="checkbox"
-                                        checked={effectiveFilter}
-                                        onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
-                                        disabled={!canManage}
-                                        className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    />
-                                    <span>Filter</span>
-                                </label>
-                                {effectiveFilter && (
-                                    <label className="flex items-center gap-1.5 cursor-pointer" title="Primary filters appear inline in the asset grid; others appear under &quot;More filters&quot;.">
-                                        <input
-                                            type="checkbox"
-                                            checked={effectiveIsPrimary}
-                                            onChange={() => onPrimaryToggle(field.id, categoryId, effectiveIsPrimary)}
-                                            disabled={!canManage}
-                                            className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        />
-                                        <span className="text-xs text-gray-600">Primary</span>
-                                        <InformationCircleIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-hidden title="Primary filters appear inline in the asset grid; others appear under More filters." />
-                                    </label>
-                                )}
-                            </div>
+                        <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-70 focus-within:opacity-70 transition-opacity duration-200">
+                            <button
+                                type="button"
+                                onClick={() => canManage && onVisibilityToggle(field.id, 'upload', effectiveUpload)}
+                                disabled={!canManage}
+                                title="Upload: Show in upload form when adding assets"
+                                className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveUpload ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                <CloudArrowUpIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                disabled={!canManage}
+                                title="Quick View: Show in asset details drawer and modal"
+                                className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveEdit ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                <EyeIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                                disabled={!canManage}
+                                title="Filter: Show in asset grid filter bar"
+                                className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveFilter ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                <FunnelIcon className="w-4 h-4" />
+                            </button>
+                            {effectiveFilter && (
+                                <button
+                                    type="button"
+                                    onClick={() => canManage && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary)}
+                                    disabled={!canManage}
+                                    title="Primary: Show inline in grid. Off: Under More filters"
+                                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${effectiveIsPrimary ? 'text-amber-500 hover:bg-amber-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    {effectiveIsPrimary ? (
+                                        <StarIconSolid className="w-4 h-4" />
+                                    ) : (
+                                        <StarIcon className="w-4 h-4" />
+                                    )}
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
 
-                {/* Actions */}
-                <div className="flex-shrink-0 flex items-center gap-2">
-                    {/* Edit Button (for custom fields or if can manage system overrides) */}
+                {/* Right: Edit + on/off switch */}
+                <div className="flex-shrink-0 flex items-center gap-1.5">
                     {onEdit && (canManageFields || !isSystem) && (
                         <button
                             onClick={() => onEdit(field)}
-                            className="text-gray-400 hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-md p-1"
+                            className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-indigo-600 rounded p-1 transition-opacity"
                             title="Edit field"
                         >
-                            <PencilIcon className="h-4 w-4" />
+                            <PencilIcon className="w-4 h-4" />
                         </button>
                     )}
-                    {/* Toggle Switch */}
                     <label className="relative inline-flex items-center cursor-pointer">
                         <input
                             type="checkbox"
@@ -1887,7 +2288,7 @@ function FieldRow({
                             disabled={!canManage}
                             className="sr-only peer"
                         />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"></div>
+                        <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"></div>
                     </label>
                 </div>
             </div>
@@ -1917,57 +2318,47 @@ function AutomatedFieldRow({
     const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? false
 
     return (
-        <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-100/50 transition-colors">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-                {/* Field Name - Subtle */}
-                <span className="text-xs text-gray-600 truncate">
-                    {field.label || field.system_label || field.key || 'Unnamed Field'}
-                </span>
-                {isSystem && (
-                    <span className="px-1.5 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded flex-shrink-0">
-                        Auto
+        <div className="group flex items-center justify-between py-1.5 px-3 rounded-md hover:bg-gray-50/80 transition-colors duration-200 ease-out text-sm">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+                {/* Field Name with System dot */}
+                <div className="flex items-center gap-2 min-w-0">
+                    {isSystem && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System automated field" />
+                    )}
+                    <span className="text-sm text-gray-900 truncate">
+                        {field.label || field.system_label || field.key || 'Unnamed Field'}
                     </span>
-                )}
+                </div>
                 
-                {/* Visibility · Discovery - Only visible when enabled */}
+                {/* Icon toggles: Upload (disabled), Quick View, Filter — visible on row hover, 70% opacity */}
                 {isEnabled && (
-                    <div className="flex items-center gap-4 ml-auto">
-                        <div className="flex items-center gap-2" title="Visibility">
-                            <EyeIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-hidden />
-                            <label className="flex items-center gap-1.5 cursor-not-allowed opacity-50" title="Upload (disabled for auto fields)">
-                                <input type="checkbox" checked={false} disabled className="h-3 w-3 rounded border-gray-300 cursor-not-allowed" />
-                                <span className="text-xs text-gray-400">Upload</span>
-                            </label>
-                            <label className="flex items-center gap-1.5 cursor-pointer" title="Quick View">
-                                <input
-                                    type="checkbox"
-                                    checked={effectiveEdit}
-                                    onChange={() => onVisibilityToggle(field.id, 'edit', effectiveEdit)}
-                                    disabled={!canManage}
-                                    className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                />
-                                <span className="text-xs text-gray-500">Quick View</span>
-                            </label>
-                        </div>
-                        <div className="flex items-center gap-2" title="Discovery">
-                            <FunnelIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-hidden />
-                            <label className="flex items-center gap-1.5 cursor-pointer" title="Filter">
-                                <input
-                                    type="checkbox"
-                                    checked={effectiveFilter}
-                                    onChange={() => onVisibilityToggle(field.id, 'filter', effectiveFilter)}
-                                    disabled={!canManage}
-                                    className="h-3 w-3 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                />
-                                <span className="text-xs text-gray-500">Filter</span>
-                            </label>
-                        </div>
+                    <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-70 transition-opacity duration-200">
+                        <span title="Upload: Disabled for automated fields (system-filled)" className="w-8 h-8 flex items-center justify-center rounded text-gray-300 cursor-not-allowed">
+                            <CloudArrowUpIcon className="w-4 h-4" />
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                            disabled={!canManage}
+                            title="Quick View: Show in asset details drawer and modal"
+                            className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveEdit ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                            <EyeIcon className="w-4 h-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                            disabled={!canManage}
+                            title="Filter: Show in asset grid filter bar"
+                            className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveFilter ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                            <FunnelIcon className="w-4 h-4" />
+                        </button>
                     </div>
                 )}
             </div>
 
-            {/* Toggle Switch - Compact */}
-            <label className="relative inline-flex items-center cursor-pointer ml-3 flex-shrink-0">
+            <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
                 <input
                     type="checkbox"
                     checked={isEnabled}

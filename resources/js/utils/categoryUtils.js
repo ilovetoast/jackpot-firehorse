@@ -8,8 +8,8 @@
 /**
  * Filter categories to only include active, selectable categories.
  * 
- * This function mimics the backend Category::scopeActive() and Category::isActive()
- * logic to ensure consistency between backend and frontend filtering.
+ * IMPORTANT: Does NOT sort. Preserves API order (sort_order from backend).
+ * Sidebar categories must use the sequence returned by the API.
  * 
  * Filters out:
  * - Templates (categories with no ID or ID === 0)

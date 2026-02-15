@@ -36,6 +36,7 @@ import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
+import BatchNamingBar from './Upload/BatchNamingBar'
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -538,6 +539,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 console.log('[UploadDialog] Filtered out category (deletion available):', cat.name)
                 return false
             }
+        }
+
+        // Filter out hidden categories - hidden categories should not appear in upload dropdown
+        if (cat.is_hidden === true || cat.is_hidden === 'true' || cat.is_hidden === 1) {
+            return false
         }
         
         // Debug: Log category properties to help diagnose permission issues
@@ -4128,6 +4134,22 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         />
                                                 </div>
                                             </div>
+
+                                {/* Batch naming — optional when 2+ files */}
+                                <BatchNamingBar
+                                    items={v2UploadManager.items}
+                                    onApply={(updates) => {
+                                        const updateMap = new Map(updates.map((u) => [u.clientId, u]))
+                                        setV2Files((prev) =>
+                                            prev.map((f) => {
+                                                const u = updateMap.get(f.clientId)
+                                                if (!u) return f
+                                                return { ...f, resolvedFilename: u.resolvedFilename, title: u.title }
+                                            })
+                                        )
+                                    }}
+                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                />
 
                                 {/* Upload Tray — files first, then metadata filters below */}
                                 {/* CLEAN UPLOADER V2: UploadTray now uses v2Files state */}

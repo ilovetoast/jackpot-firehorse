@@ -11,8 +11,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
-use Inertia\Inertia;
-use Inertia\Response;
 
 /**
  * Tenant Metadata Field Controller
@@ -38,55 +36,6 @@ class TenantMetadataFieldController extends Controller
         $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
         
         return $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, $permission);
-    }
-
-    /**
-     * Show the form for creating a new tenant metadata field.
-     *
-     * GET /tenant/metadata/fields/create
-     *
-     * @param Request $request
-     * @return Response
-     */
-    public function create(Request $request): Response
-    {
-        $tenant = app('tenant');
-        $user = Auth::user();
-
-        if (!$tenant) {
-            abort(404, 'Tenant not found');
-        }
-
-        // Check permission
-        if (!$user->hasPermissionForTenant($tenant, 'metadata.tenant.field.create')) {
-            abort(403, 'You do not have permission to create tenant metadata fields.');
-        }
-
-        // Get all active categories for the dropdown
-        $categories = $tenant->brands()
-            ->with(['categories' => function ($query) {
-                $query->active()
-                    ->orderBy('name');
-            }])
-            ->get()
-            ->pluck('categories')
-            ->flatten()
-            ->filter(fn ($category) => $category->isActive())
-            ->map(fn ($category) => [
-                'id' => $category->id,
-                'name' => $category->name,
-                'brand_id' => $category->brand_id,
-                'brand_name' => $category->brand->name ?? null,
-            ])
-            ->values();
-
-        // Get preselected category from query parameter
-        $preselectedCategoryId = $request->query('category_id') ? (int) $request->query('category_id') : null;
-
-        return Inertia::render('Tenant/MetadataFields/Create', [
-            'categories' => $categories,
-            'preselectedCategoryId' => $preselectedCategoryId,
-        ]);
     }
 
     /**
@@ -136,8 +85,8 @@ class TenantMetadataFieldController extends Controller
             return response()->json(['error' => 'Tenant not found'], 404);
         }
 
-        // Check permission - owners and admins have full access
-        if (!$this->canManageFields($user, $tenant, 'metadata.tenant.field.create')) {
+        // Check permission - owners, admins, or metadata.tenant.field.manage/create
+        if (!$this->canManageFields($user, $tenant, 'metadata.tenant.field.manage') && !$this->canManageFields($user, $tenant, 'metadata.tenant.field.create')) {
             abort(403, 'You do not have permission to create tenant metadata fields.');
         }
 
@@ -162,12 +111,21 @@ class TenantMetadataFieldController extends Controller
         try {
             $fieldId = $this->fieldService->createField($tenant, $validated);
 
+            if ($request->header('X-Inertia')) {
+                return back()->with('success', 'Metadata field created successfully.');
+            }
+
             return response()->json([
                 'success' => true,
                 'field_id' => $fieldId,
                 'message' => 'Metadata field created successfully',
             ], 201);
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            if ($request->header('X-Inertia')) {
+                throw ValidationException::withMessages([
+                    'error' => [$e->getMessage()],
+                ]);
+            }
             return response()->json([
                 'error' => $e->getMessage(),
                 'limit_type' => $e->limitType,
@@ -175,6 +133,9 @@ class TenantMetadataFieldController extends Controller
                 'max_allowed' => $e->maxAllowed,
             ], 403);
         } catch (ValidationException $e) {
+            if ($request->header('X-Inertia')) {
+                throw $e;
+            }
             return response()->json([
                 'error' => 'Validation failed',
                 'errors' => $e->errors(),
@@ -186,6 +147,11 @@ class TenantMetadataFieldController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
+            if ($request->header('X-Inertia')) {
+                throw ValidationException::withMessages([
+                    'error' => [$e->getMessage()],
+                ]);
+            }
             return response()->json([
                 'error' => $e->getMessage(),
             ], 400);

@@ -8,7 +8,19 @@ export default function FlashMessage() {
     const [type, setType] = useState('success')
 
     useEffect(() => {
-        // Check for flash messages
+        // Validation errors always show (from form submission)
+        if (errors && Object.keys(errors).length > 0) {
+            const firstError = Object.values(errors)[0]
+            setMessage(Array.isArray(firstError) ? firstError[0] : firstError)
+            setType('error')
+            setVisible(true)
+            return
+        }
+        // Only show flash toast if response contains explicit show_toast flag - avoids ghost toasts on category selection
+        if (!flash?.show_toast) {
+            setVisible(false)
+            return
+        }
         if (flash?.success) {
             setMessage(flash.success)
             setType('success')
@@ -25,11 +37,9 @@ export default function FlashMessage() {
             setMessage(flash.info)
             setType('info')
             setVisible(true)
-        } else if (errors && Object.keys(errors).length > 0) {
-            // Show first error if there are validation errors
-            const firstError = Object.values(errors)[0]
-            setMessage(Array.isArray(firstError) ? firstError[0] : firstError)
-            setType('error')
+        } else if (flash?.status) {
+            setMessage(flash.status)
+            setType('info')
             setVisible(true)
         } else {
             setVisible(false)

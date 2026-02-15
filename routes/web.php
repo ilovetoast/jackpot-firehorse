@@ -116,7 +116,6 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         
         // Phase C3: Tenant metadata field management
         Route::get('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'index'])->name('tenant.metadata.fields.index');
-        Route::get('/tenant/metadata/fields/create', [\App\Http\Controllers\TenantMetadataFieldController::class, 'create'])->name('tenant.metadata.fields.create');
         Route::get('/tenant/metadata/fields/{field}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'show'])->name('tenant.metadata.fields.show');
         Route::post('/tenant/metadata/fields', [\App\Http\Controllers\TenantMetadataFieldController::class, 'store'])->name('tenant.metadata.fields.store');
         Route::put('/tenant/metadata/fields/{field}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'update'])->name('tenant.metadata.fields.update');
@@ -169,6 +168,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::get('/api/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getRegistry'])->name('tenant.metadata.registry.api');
         Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
         Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
+        Route::patch('/api/tenant/metadata/fields/{field}/categories/{category}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'patchCategoryFieldVisibility'])->name('tenant.metadata.category.field.visibility');
         Route::post('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'suppressForCategory'])->name('tenant.metadata.category.suppress');
         Route::delete('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'unsuppressForCategory'])->name('tenant.metadata.category.unsuppress');
         Route::get('/api/tenant/metadata/fields/{field}/categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getSuppressedCategories'])->name('tenant.metadata.category.list');
@@ -544,6 +544,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             
             // Brand user management routes
             Route::get('/brands/{brand}/users/available', [\App\Http\Controllers\BrandController::class, 'availableUsers'])->name('brands.users.available');
+            Route::get('/api/brands/{brand}/category-form-data', [\App\Http\Controllers\BrandController::class, 'categoryFormData'])->name('api.brands.category-form-data');
             Route::post('/brands/{brand}/users/invite', [\App\Http\Controllers\BrandController::class, 'inviteUser'])->name('brands.users.invite');
             Route::post('/brands/{brand}/users/{user}/add', [\App\Http\Controllers\BrandController::class, 'addUser'])->name('brands.users.add');
             Route::put('/brands/{brand}/users/{user}/role', [\App\Http\Controllers\BrandController::class, 'updateUserRole'])->name('brands.users.update-role');
@@ -572,11 +573,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::post('/brands/{brand}/categories', [\App\Http\Controllers\CategoryController::class, 'store'])->name('brands.categories.store');
             Route::post('/brands/{brand}/categories/add-system-template', [\App\Http\Controllers\CategoryController::class, 'addSystemTemplate'])->name('brands.categories.add-system-template');
             Route::put('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'update'])->name('brands.categories.update');
+            Route::patch('/api/brands/{brand}/categories/{category}/visibility', [\App\Http\Controllers\CategoryController::class, 'updateVisibility'])->name('brands.categories.visibility');
             Route::delete('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'destroy'])->name('brands.categories.destroy');
+            Route::put('/api/brands/{brand}/categories/reorder', [\App\Http\Controllers\CategoryController::class, 'reorder'])->name('brands.categories.reorder');
             Route::post('/brands/{brand}/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('brands.categories.update-order');
             Route::get('/brands/{brand}/categories/{category}/upgrade/preview', [\App\Http\Controllers\CategoryController::class, 'previewUpgrade'])->name('brands.categories.upgrade.preview');
             Route::post('/brands/{brand}/categories/{category}/upgrade', [\App\Http\Controllers\CategoryController::class, 'applyUpgrade'])->name('brands.categories.upgrade.apply');
             Route::post('/brands/{brand}/categories/{category}/accept-deletion', [\App\Http\Controllers\CategoryController::class, 'acceptDeletion'])->name('brands.categories.accept-deletion');
+            Route::patch('/brands/{brand}/categories/{category}/fields/reorder', [\App\Http\Controllers\CategoryController::class, 'reorderFields'])->name('brands.categories.fields.reorder');
 
             // Support ticket routes (tenant-scoped)
             Route::resource('support/tickets', \App\Http\Controllers\TenantTicketController::class)->only(['index', 'create', 'store', 'show']);

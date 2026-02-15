@@ -10,6 +10,7 @@ use App\Services\CategoryUpgradeService;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use App\Traits\HandlesFlashMessages;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -197,8 +198,27 @@ class CategoryController extends Controller
         try {
             $category = $this->categoryService->create($tenant, $brand, $validated);
 
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => true,
+                    'category' => [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'slug' => $category->slug,
+                        'asset_type' => $category->asset_type->value,
+                        'is_system' => $category->is_system,
+                        'is_private' => $category->is_private,
+                        'is_hidden' => $category->is_hidden,
+                        'sort_order' => $category->sort_order,
+                    ],
+                ]);
+            }
+
             return redirect()->route('brands.edit', $brand)->with('success', 'Category created successfully.');
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json(['message' => $e->getMessage(), 'error' => $e->getMessage()], 422);
+            }
             return back()->withErrors([
                 'plan_limit' => $e->getMessage(),
             ])->onlyInput('name', 'slug');
@@ -248,6 +268,8 @@ class CategoryController extends Controller
                 'name' => 'required|string|max:255',
                 'slug' => 'nullable|string|max:255',
                 'icon' => 'nullable|string|max:255',
+                'is_hidden' => 'nullable|boolean',
+                'asset_type' => 'nullable|string|in:asset,deliverable',
                 'is_private' => 'nullable|boolean',
                 'access_rules' => 'nullable|array',
                 'access_rules.*.type' => 'required|string|in:role,user',
@@ -264,12 +286,88 @@ class CategoryController extends Controller
         try {
             $this->categoryService->update($category, $validated);
 
-            return redirect()->route('brands.edit', $brand)->with('success', 'Category updated successfully.');
+            if ($request->header('X-Inertia')) {
+                // No flash: success toast is shown via router.put onSuccess callback to avoid ghost toasts on category selection
+                return back();
+            }
+            if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'success' => true,
+                    'category' => [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'slug' => $category->slug ?? \Illuminate\Support\Str::slug($category->name),
+                        'asset_type' => $category->asset_type?->value ?? 'asset',
+                        'is_system' => $category->is_system,
+                        'is_hidden' => $category->is_hidden,
+                        'is_private' => $category->is_private,
+                        'sort_order' => $category->sort_order,
+                    ],
+                ]);
+            }
+            // No flash for non-Inertia either - avoids ghost toasts when navigating
+            return back();
         } catch (\Exception $e) {
+            if ($request->header('X-Inertia')) {
+                return back()->withErrors(['error' => $e->getMessage()]);
+            }
             return back()->withErrors([
                 'error' => $e->getMessage(),
             ])->onlyInput('name', 'slug');
         }
+    }
+
+    /**
+     * Update category visibility (is_hidden) only. Used by Metadata page eye toggle.
+     */
+    public function updateVisibility(Request $request, Brand $brand, Category $category)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        if ($category->tenant_id !== $tenant->id || $category->brand_id !== $brand->id) {
+            abort(403, 'Category does not belong to this tenant/brand.');
+        }
+
+        $this->authorize('update', $category);
+
+        $validated = $request->validate([
+            'is_hidden' => 'required|boolean',
+        ]);
+
+        $category->update(['is_hidden' => $validated['is_hidden']]);
+
+        return response()->json(['success' => true, 'is_hidden' => $category->is_hidden]);
+    }
+
+    /**
+     * Reorder metadata fields for a category.
+     * PATCH /brands/{brand}/categories/{category}/fields/reorder
+     * Payload: { field_order: [array of field IDs in new order] }
+     */
+    public function reorderFields(Request $request, Brand $brand, Category $category)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        if ($brand->tenant_id !== $tenant->id || $category->brand_id !== $brand->id) {
+            abort(403, 'Category does not belong to this brand.');
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.registry.view') && ! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')) {
+            abort(403, 'You do not have permission to manage category fields.');
+        }
+
+        $validated = $request->validate([
+            'field_order' => 'required|array',
+            'field_order.*' => 'integer',
+        ]);
+
+        // TODO: Persist field_order to database (metadata_field_category_visibility or similar)
+        return response()->json(['success' => true]);
     }
 
     /**
@@ -319,6 +417,49 @@ class CategoryController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Reorder categories by sort_order (Metadata page drag-and-drop).
+     * Scoped by asset_type; uses sort_order column.
+     */
+    public function reorder(Request $request, Brand $brand)
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'Only administrators, owners, and brand managers can reorder categories.');
+        }
+
+        $validated = $request->validate([
+            'asset_type' => 'required|string|in:asset,deliverable,ai_generated',
+            'categories' => 'required|array',
+            'categories.*.id' => 'required|integer|exists:categories,id',
+            'categories.*.sort_order' => 'required|integer',
+        ]);
+
+        $assetType = $validated['asset_type'];
+        $categories = $validated['categories'];
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($tenant, $brand, $assetType, $categories) {
+            foreach ($categories as $item) {
+                $category = Category::find($item['id']);
+                if ($category
+                    && $category->tenant_id === $tenant->id
+                    && $category->brand_id === $brand->id
+                    && ($category->asset_type->value ?? $category->asset_type) === $assetType
+                ) {
+                    $category->update(['sort_order' => $item['sort_order']]);
+                }
+            }
+        });
+
+        return response()->json(['success' => true]);
     }
 
     /**
@@ -492,13 +633,27 @@ class CategoryController extends Controller
         }
 
         try {
-            $this->categoryUpgradeService->applyUpgrade($category, $validated['approved_fields']);
+            $updated = $this->categoryUpgradeService->applyUpgrade($category, $validated['approved_fields']);
 
             // Return JSON for AJAX requests, redirect for regular requests
             if ($request->wantsJson() || $request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 return response()->json([
                     'success' => true,
                     'message' => 'Category upgraded successfully.',
+                    'category' => [
+                        'id' => $updated->id,
+                        'name' => $updated->name,
+                        'slug' => $updated->slug ?? \Illuminate\Support\Str::slug($updated->name),
+                        'brand_id' => $updated->brand_id,
+                        'asset_type' => $updated->asset_type?->value ?? 'asset',
+                        'is_system' => $updated->is_system,
+                        'is_hidden' => $updated->is_hidden,
+                        'is_private' => $updated->is_private,
+                        'sort_order' => $updated->sort_order,
+                        'system_version' => $updated->system_version,
+                        'upgrade_available' => $updated->upgrade_available ?? false,
+                        'deletion_available' => $updated->deletion_available ?? false,
+                    ],
                 ]);
             }
 

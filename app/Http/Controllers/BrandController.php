@@ -375,7 +375,7 @@ class BrandController extends Controller
         $this->authorize('update', $brand);
 
         // Get categories for this brand
-        $categories = $brand->categories()->orderBy('asset_type')->orderBy('order')->orderBy('name')->get();
+        $categories = $brand->categories()->orderBy('asset_type')->ordered()->orderBy('name')->get();
 
         // Get system category templates and find ones that don't exist yet for this brand
         $systemTemplates = $this->systemCategoryService->getAllTemplates();
@@ -748,6 +748,51 @@ class BrandController extends Controller
         ]);
 
         return response()->json($availableUsers->values());
+    }
+
+    /**
+     * Get category form data (limits, brand users, brand roles) for Add Category modal.
+     * Used by Metadata Registry Add Category slide-over.
+     *
+     * GET /api/brands/{brand}/category-form-data
+     */
+    public function categoryFormData(Brand $brand)
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'You do not have permission to manage categories.');
+        }
+
+        $limits = $this->planService->getPlanLimits($tenant);
+        $currentCount = $brand->categories()->custom()->count();
+        $canCreate = $this->categoryService->canCreate($tenant, $brand);
+
+        $brandUsers = $brand->users()
+            ->wherePivotNull('removed_at')
+            ->get()
+            ->map(fn ($u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+            ]);
+
+        $brandRoles = User::getValidBrandRoles();
+
+        return response()->json([
+            'category_limits' => [
+                'current' => $currentCount,
+                'max' => $limits['max_categories'],
+                'can_create' => $canCreate,
+            ],
+            'brand_users' => $brandUsers->values(),
+            'brand_roles' => $brandRoles,
+        ]);
     }
 
     /**

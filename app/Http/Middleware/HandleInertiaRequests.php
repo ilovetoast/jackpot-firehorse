@@ -289,16 +289,37 @@ class HandleInertiaRequests extends Middleware
         // Remove this in a future cleanup after confirming the new polling approach works
         $processingAssets = [];
 
+        // Category selection (GET /app/assets?category=... or /app/deliverables?category=...) must not carry flash - avoids ghost toasts
+        $isCategorySelection = $request->isMethod('GET')
+            && ($request->is('app/assets') || $request->is('app/deliverables'))
+            && $request->has('category');
+
+        $flashKeys = ['success', 'error', 'warning', 'info', 'status', 'download_policy_saved', 'show_toast'];
+        $success = $request->session()->get('success');
+        $error = $request->session()->get('error');
+        $warning = $request->session()->get('warning');
+        $info = $request->session()->get('info');
+        $status = $request->session()->get('status');
+        $flash = $isCategorySelection
+            ? array_fill_keys($flashKeys, null)
+            : [
+                'success' => $success,
+                'error' => $error,
+                'warning' => $warning,
+                'info' => $info,
+                'status' => $status,
+                'download_policy_saved' => $request->session()->get('download_policy_saved'),
+                'show_toast' => ! empty($success) || ! empty($error) || ! empty($warning) || ! empty($info) || ! empty($status),
+            ];
+
+        // Clear flash after consumption so it does not persist to subsequent requests
+        if (! $isCategorySelection) {
+            $request->session()->forget(['success', 'error', 'warning', 'info', 'status', 'download_policy_saved']);
+        }
+
         $shared = [
             ...$parentShared,
-            'flash' => [
-                'success' => $request->session()->get('success'),
-                'error' => $request->session()->get('error'),
-                'warning' => $request->session()->get('warning'),
-                'info' => $request->session()->get('info'),
-                'status' => $request->session()->get('status'), // For password reset status messages
-                'download_policy_saved' => $request->session()->get('download_policy_saved'),
-            ],
+            'flash' => $flash,
             // Phase 2.5: Environment detection for dev-only features
             'env' => [
                 'is_production' => config('app.env') === 'production',
