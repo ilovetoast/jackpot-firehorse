@@ -2,6 +2,24 @@ import { useState, useRef, useEffect } from 'react'
 import { usePermission } from '../hooks/usePermission'
 import { usePresencePolling } from '../hooks/usePresencePolling'
 
+function pageToLabel(path) {
+  if (!path || typeof path !== 'string') return null
+  const p = path.toLowerCase()
+  if (p.startsWith('/app/assets')) return 'Assets'
+  if (p.startsWith('/app/deliverables')) return 'Executions'
+  if (p.startsWith('/app/dashboard')) return 'Dashboard'
+  if (p.startsWith('/app/collections')) return 'Collections'
+  if (p.startsWith('/app/downloads')) return 'Downloads'
+  if (p.startsWith('/app/companies')) return 'Company'
+  if (p.startsWith('/app/brands')) return 'Brands'
+  if (p.startsWith('/app/analytics')) return 'Analytics'
+  if (p.startsWith('/app/generative')) return 'Generative'
+  if (p.startsWith('/app/billing')) return 'Billing'
+  if (p.startsWith('/app/profile')) return 'Profile'
+  if (p.startsWith('/app/agency')) return 'Agency'
+  return null
+}
+
 function formatActiveAgo(lastSeen) {
   if (!lastSeen || typeof lastSeen !== 'number') return ''
   const sec = Math.floor(Date.now() / 1000 - lastSeen)
@@ -12,7 +30,31 @@ function formatActiveAgo(lastSeen) {
   return `Active ${Math.floor(min / 60)} hr ago`
 }
 
-export default function OnlineUsersIndicator({ textColor = '#6b7280', className = '' }) {
+function darkenHex(hex, amount = 20) {
+  if (!hex) return '#4f46e5'
+  const h = hex.replace('#', '')
+  let r = parseInt(h.substring(0, 2), 16)
+  let g = parseInt(h.substring(2, 4), 16)
+  let b = parseInt(h.substring(4, 6), 16)
+  r = Math.max(0, r - amount)
+  g = Math.max(0, g - amount)
+  b = Math.max(0, b - amount)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
+function lightenHex(hex, amount = 40) {
+  if (!hex) return '#818cf8'
+  const h = hex.replace('#', '')
+  let r = parseInt(h.substring(0, 2), 16)
+  let g = parseInt(h.substring(2, 4), 16)
+  let b = parseInt(h.substring(4, 6), 16)
+  r = Math.min(255, r + amount)
+  g = Math.min(255, g + amount)
+  b = Math.min(255, b + amount)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
+export default function OnlineUsersIndicator({ textColor = '#6b7280', primaryColor = '#6366f1', isLightBackground = true, className = '' }) {
   const { can } = usePermission()
   const canSeePresence = can('team.manage') || can('brand_settings.manage')
   const { online } = usePresencePolling(canSeePresence)
@@ -45,16 +87,18 @@ export default function OnlineUsersIndicator({ textColor = '#6b7280', className 
         ref={triggerRef}
         type="button"
         onClick={() => setPopoverOpen((v) => !v)}
-        className="flex items-center gap-1.5 w-full px-3 py-2 text-xs rounded-md cursor-pointer hover:opacity-80 transition-opacity"
+        className="flex items-center gap-1.5 w-full px-3 py-2 text-xs font-medium uppercase tracking-wide rounded-md cursor-pointer hover:opacity-80 transition-opacity"
         style={{ color: textColor }}
         aria-label={`${online.length} online`}
       >
         <span
           className="w-2 h-2 rounded-full flex-shrink-0"
-          style={{ backgroundColor: '#22c55e' }}
+          style={{
+            backgroundColor: isLightBackground ? darkenHex(primaryColor) : lightenHex(primaryColor),
+          }}
           aria-hidden
         />
-        <span>{online.length} online</span>
+        <span>{online.length} ONLINE</span>
       </button>
 
       {popoverOpen && (
@@ -76,7 +120,7 @@ export default function OnlineUsersIndicator({ textColor = '#6b7280', className 
                 <div className="font-medium">{u.name || 'Unknown'}</div>
                 <div className="text-xs text-gray-500 mt-0.5">
                   {u.role ? `${u.role} • ` : ''}
-                  {u.page ? `${u.page} • ` : ''}
+                  {pageToLabel(u.page) ? `${pageToLabel(u.page)} • ` : ''}
                   {formatActiveAgo(u.last_seen)}
                 </div>
               </div>

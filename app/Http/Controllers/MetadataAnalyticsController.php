@@ -35,6 +35,9 @@ class MetadataAnalyticsController extends Controller
         }
 
         $user = Auth::user();
+        if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to view analytics.');
+        }
         $userRole = $user->getRoleForTenant($tenant);
         $isAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
 
@@ -94,6 +97,9 @@ class MetadataAnalyticsController extends Controller
         }
 
         $user = Auth::user();
+        if (!$user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            return response()->json(['error' => 'You do not have permission to view analytics.'], 403);
+        }
         $userRole = $user->getRoleForTenant($tenant);
         $isAdmin = in_array(strtolower($userRole ?? ''), ['owner', 'admin']);
 

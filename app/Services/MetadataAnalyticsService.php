@@ -39,11 +39,11 @@ class MetadataAnalyticsService
     ): array {
         return [
             'overview' => $this->getOverview($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'coverage' => $this->getCoverage($tenantId, $brandId, $categoryId, $includeInternal),
-            'required_compliance' => $this->getRequiredCompliance($tenantId, $brandId, $categoryId),
+            'coverage' => $this->getCoverage($tenantId, $brandId, $categoryId, $includeInternal, $startDate, $endDate),
+            'required_compliance' => $this->getRequiredCompliance($tenantId, $brandId, $categoryId, $startDate, $endDate),
             'ai_effectiveness' => $this->getAiEffectiveness($tenantId, $brandId, $categoryId, $startDate, $endDate),
-            'freshness' => $this->getFreshness($tenantId, $brandId, $categoryId),
-            'rights_risk' => $this->getRightsRisk($tenantId, $brandId, $categoryId),
+            'freshness' => $this->getFreshness($tenantId, $brandId, $categoryId, $startDate, $endDate),
+            'rights_risk' => $this->getRightsRisk($tenantId, $brandId, $categoryId, $startDate, $endDate),
             'governance_gaps' => $this->getGovernanceGaps($tenantId, $brandId, $categoryId),
         ];
     }
@@ -148,13 +148,17 @@ class MetadataAnalyticsService
      * @param int|null $brandId
      * @param int|null $categoryId
      * @param bool $includeInternal
+     * @param string|null $startDate
+     * @param string|null $endDate
      * @return array
      */
     protected function getCoverage(
         int $tenantId,
         ?int $brandId,
         ?int $categoryId,
-        bool $includeInternal
+        bool $includeInternal,
+        ?string $startDate = null,
+        ?string $endDate = null
     ): array {
         // Get total assets
         $assetQuery = DB::table('assets')
@@ -168,6 +172,14 @@ class MetadataAnalyticsService
 
         if ($categoryId) {
             $assetQuery->whereJsonContains('metadata->category_id', $categoryId);
+        }
+
+        if ($startDate) {
+            $assetQuery->where('assets.created_at', '>=', $startDate);
+        }
+
+        if ($endDate) {
+            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
         }
 
         $totalAssets = $assetQuery->count();
@@ -212,6 +224,14 @@ class MetadataAnalyticsService
                 $assetsWithField->whereJsonContains('assets.metadata->category_id', $categoryId);
             }
 
+            if ($startDate) {
+                $assetsWithField->where('assets.created_at', '>=', $startDate);
+            }
+
+            if ($endDate) {
+                $assetsWithField->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+            }
+
             $count = $assetsWithField->distinct('assets.id')->count('assets.id');
             $percentage = round(($count / $totalAssets) * 100, 2);
 
@@ -248,12 +268,16 @@ class MetadataAnalyticsService
      * @param int $tenantId
      * @param int|null $brandId
      * @param int|null $categoryId
+     * @param string|null $startDate
+     * @param string|null $endDate
      * @return array
      */
     protected function getRequiredCompliance(
         int $tenantId,
         ?int $brandId,
-        ?int $categoryId
+        ?int $categoryId,
+        ?string $startDate = null,
+        ?string $endDate = null
     ): array {
         // This requires resolving schema per category
         // For now, return basic metrics
@@ -270,6 +294,14 @@ class MetadataAnalyticsService
 
         if ($categoryId) {
             $assetQuery->whereJsonContains('metadata->category_id', $categoryId);
+        }
+
+        if ($startDate) {
+            $assetQuery->where('assets.created_at', '>=', $startDate);
+        }
+
+        if ($endDate) {
+            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
         }
 
         $totalAssets = $assetQuery->count();
@@ -398,12 +430,16 @@ class MetadataAnalyticsService
      * @param int $tenantId
      * @param int|null $brandId
      * @param int|null $categoryId
+     * @param string|null $startDate
+     * @param string|null $endDate
      * @return array
      */
     protected function getFreshness(
         int $tenantId,
         ?int $brandId,
-        ?int $categoryId
+        ?int $categoryId,
+        ?string $startDate = null,
+        ?string $endDate = null
     ): array {
         // Get last updated timestamp per field
         $lastUpdated = DB::table('asset_metadata')
@@ -422,6 +458,14 @@ class MetadataAnalyticsService
             $lastUpdated->whereJsonContains('assets.metadata->category_id', $categoryId);
         }
 
+        if ($startDate) {
+            $lastUpdated->where('assets.created_at', '>=', $startDate);
+        }
+
+        if ($endDate) {
+            $lastUpdated->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+        }
+
         $lastUpdated = $lastUpdated
             ->select(
                 'metadata_fields.key as field_key',
@@ -433,10 +477,20 @@ class MetadataAnalyticsService
 
         // Assets with stale metadata (> 90 days)
         $staleThreshold = now()->subDays(90);
-        $staleAssets = DB::table('assets')
+        $staleAssetsQuery = DB::table('assets')
             ->where('tenant_id', $tenantId)
             ->whereNull('deleted_at')
-            ->where('status', 'visible')
+            ->where('status', 'visible');
+
+        if ($startDate) {
+            $staleAssetsQuery->where('assets.created_at', '>=', $startDate);
+        }
+
+        if ($endDate) {
+            $staleAssetsQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
+        }
+
+        $staleAssets = $staleAssetsQuery
             ->whereExists(function ($query) use ($staleThreshold, $brandId, $categoryId) {
                 $query->select(DB::raw(1))
                     ->from('asset_metadata')
@@ -476,12 +530,16 @@ class MetadataAnalyticsService
      * @param int $tenantId
      * @param int|null $brandId
      * @param int|null $categoryId
+     * @param string|null $startDate
+     * @param string|null $endDate
      * @return array
      */
     protected function getRightsRisk(
         int $tenantId,
         ?int $brandId,
-        ?int $categoryId
+        ?int $categoryId,
+        ?string $startDate = null,
+        ?string $endDate = null
     ): array {
         // Find expiration_date field
         $expirationField = DB::table('metadata_fields')
@@ -510,6 +568,14 @@ class MetadataAnalyticsService
 
         if ($categoryId) {
             $assetQuery->whereJsonContains('metadata->category_id', $categoryId);
+        }
+
+        if ($startDate) {
+            $assetQuery->where('assets.created_at', '>=', $startDate);
+        }
+
+        if ($endDate) {
+            $assetQuery->where('assets.created_at', '<=', $endDate . ' 23:59:59');
         }
 
         // Assets with expired expiration_date
@@ -577,6 +643,14 @@ class MetadataAnalyticsService
 
             if ($categoryId) {
                 $distribution->whereJsonContains('assets.metadata->category_id', $categoryId);
+            }
+
+            if ($startDate) {
+                $distribution->where('assets.created_at', '>=', $startDate);
+            }
+
+            if ($endDate) {
+                $distribution->where('assets.created_at', '<=', $endDate . ' 23:59:59');
             }
 
             $distribution = $distribution

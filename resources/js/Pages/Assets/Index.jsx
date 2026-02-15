@@ -785,6 +785,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                         <div className="flex-shrink-0 px-2 pb-3">
                             <OnlineUsersIndicator
                                 textColor={textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
+                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                isLightBackground={isLightColor(sidebarColor)}
                             />
                         </div>
                     </div>

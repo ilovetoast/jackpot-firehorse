@@ -1,5 +1,5 @@
 import { usePage, router } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import {
@@ -11,6 +11,36 @@ import {
     ShieldCheckIcon,
 } from '@heroicons/react/24/outline'
 
+const DATE_PRESETS = [
+    { id: '7d', label: 'Last 7 days', days: 7 },
+    { id: '30d', label: 'Last 30 days', days: 30 },
+    { id: '90d', label: 'Last 90 days', days: 90 },
+    { id: 'all', label: 'All time', days: null },
+]
+
+function toYMD(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getPresetDates(preset) {
+    if (!preset || preset.days === null) return { start_date: '', end_date: '' }
+    const end = new Date()
+    const start = new Date()
+    start.setDate(start.getDate() - preset.days)
+    return { start_date: toYMD(start), end_date: toYMD(end) }
+}
+
+function getActivePresetId(startDate, endDate) {
+    if (!startDate || !endDate) return 'all'
+    const start = new Date(startDate + 'T12:00:00')
+    const end = new Date(endDate + 'T12:00:00')
+    const days = Math.round((end - start) / (24 * 60 * 60 * 1000))
+    if (endDate === toYMD(new Date()) && [7, 30, 90].includes(days)) {
+        return days === 7 ? '7d' : days === 30 ? '30d' : '90d'
+    }
+    return null // custom range
+}
+
 export default function MetadataAnalytics({ analytics, filters, is_admin }) {
     const { auth, tenant } = usePage().props
 
@@ -21,10 +51,30 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
         include_internal: filters?.include_internal || false,
     })
 
+    useEffect(() => {
+        setLocalFilters({
+            category_id: filters?.category_id || '',
+            start_date: filters?.start_date || '',
+            end_date: filters?.end_date || '',
+            include_internal: filters?.include_internal || false,
+        })
+    }, [filters?.start_date, filters?.end_date, filters?.category_id, filters?.include_internal])
+
+    const activePresetId = getActivePresetId(localFilters.start_date, localFilters.end_date)
+
+    const handlePresetClick = (preset) => {
+        const { start_date, end_date } = getPresetDates(preset)
+        const newFilters = { ...localFilters, start_date, end_date }
+        setLocalFilters(newFilters)
+        router.get('/app/analytics/metadata', newFilters, {
+            preserveState: true,
+            preserveScroll: true,
+        })
+    }
+
     const handleFilterChange = (key, value) => {
         const newFilters = { ...localFilters, [key]: value }
         setLocalFilters(newFilters)
-        
         router.get('/app/analytics/metadata', newFilters, {
             preserveState: true,
             preserveScroll: true,
@@ -60,28 +110,30 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
 
                 {/* Filters */}
                 <div className="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="flex flex-wrap items-center gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Start Date
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Time range
                             </label>
-                            <input
-                                type="date"
-                                value={localFilters.start_date}
-                                onChange={(e) => handleFilterChange('start_date', e.target.value)}
-                                className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                End Date
-                            </label>
-                            <input
-                                type="date"
-                                value={localFilters.end_date}
-                                onChange={(e) => handleFilterChange('end_date', e.target.value)}
-                                className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                            />
+                            <div className="flex flex-wrap gap-2">
+                                {DATE_PRESETS.map((preset) => {
+                                    const isActive = activePresetId === preset.id
+                                    return (
+                                        <button
+                                            key={preset.id}
+                                            type="button"
+                                            onClick={() => handlePresetClick(preset)}
+                                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                                isActive
+                                                    ? 'bg-primary text-white'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            {preset.label}
+                                        </button>
+                                    )
+                                })}
+                            </div>
                         </div>
                         {is_admin && (
                             <div className="flex items-end">
@@ -90,7 +142,7 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                                         type="checkbox"
                                         checked={localFilters.include_internal}
                                         onChange={(e) => handleFilterChange('include_internal', e.target.checked)}
-                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        className="rounded border-gray-300 text-primary focus:ring-primary"
                                     />
                                     <span className="ml-2 text-sm text-gray-700">
                                         Include internal fields
@@ -156,7 +208,7 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                                             </div>
                                             <div className="w-full bg-gray-200 rounded-full h-2">
                                                 <div
-                                                    className="bg-indigo-600 h-2 rounded-full transition-all"
+                                                    className="bg-primary h-2 rounded-full transition-all"
                                                     style={{ width: `${field.coverage_percentage}%` }}
                                                 />
                                             </div>

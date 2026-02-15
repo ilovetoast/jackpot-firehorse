@@ -18,10 +18,15 @@ class PresenceService
         return 'presence:index:'.$tenantId.':'.($brandId ?? 'all');
     }
 
+    protected function connection()
+    {
+        return Redis::connection(config('database.redis.presence_connection', 'default'));
+    }
+
     public function heartbeat($user, $tenant, $brand = null, array $payload = []): void
     {
         try {
-            $redis = Redis::connection();
+            $redis = $this->connection();
 
             $userKey = $this->userKey($tenant->id, $brand?->id, $user->id);
             $indexKey = $this->indexKey($tenant->id, $brand?->id);
@@ -46,7 +51,7 @@ class PresenceService
     public function online($tenant, $brand = null): array
     {
         try {
-            $redis = Redis::connection();
+            $redis = $this->connection();
 
             $indexKey = $this->indexKey($tenant->id, $brand?->id);
             $userIds = $redis->smembers($indexKey);

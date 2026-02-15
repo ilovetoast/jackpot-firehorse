@@ -354,7 +354,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/assets', [\App\Http\Controllers\AssetController::class, 'index'])->name('assets.index');
             Route::get('/assets/processing', [\App\Http\Controllers\AssetController::class, 'activeProcessingJobs'])->name('assets.processing');
             
-            // Metadata Analytics (Phase 7)
+            // Metadata Analytics (Phase 7) — redirect /analytics to the actual page
+            Route::get('/analytics', fn () => redirect()->route('analytics.metadata'))->name('analytics');
             Route::get('/analytics/metadata', [\App\Http\Controllers\MetadataAnalyticsController::class, 'index'])->name('analytics.metadata');
             Route::get('/analytics/metadata/data', [\App\Http\Controllers\MetadataAnalyticsController::class, 'data'])->name('analytics.metadata.data');
             Route::get('/assets/thumbnail-status/batch', [\App\Http\Controllers\AssetController::class, 'batchThumbnailStatus'])->name('assets.thumbnail-status.batch');
