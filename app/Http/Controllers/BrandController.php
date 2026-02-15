@@ -420,11 +420,36 @@ class BrandController extends Controller
             ->map(function ($user) use ($brand) {
                 return [
                     'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
                     'name' => $user->name,
                     'email' => $user->email,
+                    'avatar_url' => $user->avatar_url,
                     'role' => $user->getRoleForBrand($brand) ?? 'viewer',
                 ];
             });
+
+        // Available users (tenant users not yet on this brand) and pending invitations for Members tab
+        $tenantUsers = $tenant->users;
+        $assignedUserIds = $brand->users()
+            ->wherePivotNull('removed_at')
+            ->pluck('users.id')
+            ->toArray();
+        $availableUsers = $tenantUsers->reject(fn ($u) => in_array($u->id, $assignedUserIds))->map(fn ($u) => [
+            'id' => $u->id,
+            'first_name' => $u->first_name,
+            'last_name' => $u->last_name,
+            'name' => $u->name,
+            'email' => $u->email,
+            'avatar_url' => $u->avatar_url,
+        ])->values();
+        $pendingInvitations = $brand->invitations()->whereNull('accepted_at')->get()->map(fn ($inv) => [
+            'id' => $inv->id,
+            'email' => $inv->email,
+            'role' => $inv->role,
+            'sent_at' => $inv->sent_at?->toISOString(),
+            'created_at' => $inv->created_at->toISOString(),
+        ]);
 
         // Get all valid brand roles dynamically (not hardcoded)
         // Show all valid brand roles so they can be assigned even if no users have them yet
@@ -443,7 +468,11 @@ class BrandController extends Controller
                 'name' => $brand->name,
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
+                'logo_id' => $brand->logo_id,
+                'logo_thumbnail_url' => $brand->logo_id ? route('assets.thumbnail.final', ['asset' => $brand->logo_id, 'style' => 'medium']) : null,
                 'icon_path' => $brand->icon_path,
+                'icon_id' => $brand->icon_id,
+                'icon_thumbnail_url' => $brand->icon_id ? route('assets.thumbnail.final', ['asset' => $brand->icon_id, 'style' => 'medium']) : null,
                 'icon' => $brand->icon,
                 'icon_bg_color' => $brand->icon_bg_color,
                 'is_default' => $brand->is_default,
@@ -452,8 +481,12 @@ class BrandController extends Controller
                 'secondary_color' => $brand->secondary_color,
                 'accent_color' => $brand->accent_color,
                 'nav_color' => $brand->nav_color,
+                'workspace_button_style' => $brand->workspace_button_style ?? $brand->settings['button_style'] ?? 'primary',
                 'logo_filter' => $brand->logo_filter ?? 'none',
                 'settings' => $brand->settings,
+                'download_landing_settings' => $brand->download_landing_settings ?? [],
+                'logo_assets' => [], // Populated client-side when fetching logos
+                'background_asset_details' => [], // Populated when needed for preview
             ],
             'categories' => $categories->map(function ($category) {
                 // Get access rules for private categories
@@ -496,6 +529,8 @@ class BrandController extends Controller
             ],
             'brand_users' => $brandUsers,
             'brand_roles' => $brandRoles,
+            'available_users' => $availableUsers,
+            'pending_invitations' => $pendingInvitations,
             'private_category_limits' => [
                 'current' => $currentPrivateCount,
                 'max' => $maxPrivateCategories,
@@ -528,51 +563,71 @@ class BrandController extends Controller
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
             'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
+            'logo_id' => 'nullable|uuid|exists:assets,id',
             'icon' => 'nullable|mimes:png,webp,svg,avif|max:2048',
+            'icon_id' => 'nullable|uuid|exists:assets,id',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'show_in_selector' => 'nullable|boolean',
             'primary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'secondary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'accent_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
+            'workspace_button_style' => 'nullable|string|in:primary,secondary,accent',
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
         ]);
 
-        // Handle logo file upload
+        // Handle logo: asset_id (from pipeline) or file upload (legacy)
         if ($request->hasFile('logo')) {
-            // Delete old logo if it exists and is stored locally
             if ($brand->logo_path && str_starts_with($brand->logo_path, '/storage/')) {
                 $oldPath = str_replace('/storage/', '', $brand->logo_path);
                 Storage::disk('public')->delete($oldPath);
             }
-            
             $logoPath = $request->file('logo')->store("brands/{$brand->tenant_id}", 'public');
             $validated['logo_path'] = Storage::url($logoPath);
-            unset($validated['logo']); // Remove the file from validated data
+            $validated['logo_id'] = null;
+            unset($validated['logo']);
+        } elseif ($request->filled('logo_id')) {
+            $logoAsset = \App\Models\Asset::where('id', $request->input('logo_id'))
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+            if (!$logoAsset) {
+                abort(403, 'Logo asset does not belong to this brand.');
+            }
+            $validated['logo_id'] = $request->input('logo_id');
+            $validated['logo_path'] = null;
         } else {
-            // Keep existing logo_path if no new file is uploaded
             $validated['logo_path'] = $brand->logo_path;
+            $validated['logo_id'] = $brand->logo_id;
         }
 
-        // Handle icon file upload
+        // Handle icon: asset_id (from pipeline) or file upload (legacy)
         if ($request->hasFile('icon')) {
-            // Delete old icon if it exists and is stored locally
             if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
                 $oldPath = str_replace('/storage/', '', $brand->icon_path);
                 Storage::disk('public')->delete($oldPath);
             }
-            
             $iconPath = $request->file('icon')->store("brands/{$brand->tenant_id}", 'public');
             $validated['icon_path'] = Storage::url($iconPath);
-            unset($validated['icon']); // Remove the file from validated data
-            // Clear icon when uploading a file
+            $validated['icon_id'] = null;
+            $validated['icon'] = null;
+            unset($validated['icon']);
+        } elseif ($request->filled('icon_id')) {
+            $iconAsset = \App\Models\Asset::where('id', $request->input('icon_id'))
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+            if (!$iconAsset) {
+                abort(403, 'Icon asset does not belong to this brand.');
+            }
+            $validated['icon_id'] = $request->input('icon_id');
+            $validated['icon_path'] = null;
             $validated['icon'] = null;
         } else {
-            // Keep existing icon_path if no new file is uploaded
             $validated['icon_path'] = $brand->icon_path ?? null;
-            // Clear icon when not uploading
+            $validated['icon_id'] = $brand->icon_id;
             $validated['icon'] = null;
         }
         
@@ -584,20 +639,34 @@ class BrandController extends Controller
             $validated['icon_bg_color'] = $brand->icon_bg_color;
         }
 
+        // Handle download_landing_settings (D10, Phase 1.4: includes custom_color)
+        $dls = $request->input('download_landing_settings');
+        if (is_array($dls)) {
+            $current = $brand->download_landing_settings ?? [];
+            $validated['download_landing_settings'] = array_merge($current, $dls);
+        }
+
+        // Handle workspace_button_style (dedicated column; fallback from settings.button_style for backward compat)
+        if ($request->has('workspace_button_style')) {
+            $validated['workspace_button_style'] = $request->input('workspace_button_style') ?: 'primary';
+        } elseif (isset($validated['settings']['button_style'])) {
+            $validated['workspace_button_style'] = $validated['settings']['button_style'] ?: 'primary';
+        }
+
         // Phase M-2: Handle settings separately (merge with existing)
         $settings = $validated['settings'] ?? [];
         unset($validated['settings']);
-        
+
         // Always merge settings to ensure all settings are preserved
         $currentSettings = $brand->settings ?? [];
-        if (!empty($settings)) {
+        if (! empty($settings)) {
             // Merge new settings with existing settings
             $mergedSettings = array_merge($currentSettings, $settings);
         } else {
             // If no settings provided, keep existing settings
             $mergedSettings = $currentSettings;
         }
-        
+
         // Always set settings (even if empty) to ensure the column is updated
         $validated['settings'] = $mergedSettings;
 
@@ -1049,5 +1118,68 @@ class BrandController extends Controller
                 'name' => $brand->name,
             ],
         ]);
+    }
+
+    /**
+     * D10.1: Return assets eligible for download landing background (photography category, brand-scoped).
+     * Used by Public Page Theme Background Visuals picker. No load_more — first page only.
+     */
+    public function downloadBackgroundCandidates(Brand $brand)
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'brand_settings.manage')) {
+            abort(403, 'You do not have permission to manage brand settings.');
+        }
+
+        $category = \App\Models\Category::where('slug', 'photography')
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+
+        if (! $category) {
+            return response()->json(['assets' => []]);
+        }
+
+        $eligibilityService = app(\App\Services\AssetEligibilityService::class);
+        $assets = \App\Models\Asset::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', \App\Enums\AssetType::ASSET)
+            ->whereNull('deleted_at')
+            ->where('metadata->category_id', (int) $category->id)
+            ->whereNull('archived_at')
+            ->whereNotNull('published_at')
+            ->orderBy('created_at', 'desc')
+            ->limit(24)
+            ->with(['user'])
+            ->get()
+            ->filter(fn ($a) => $eligibilityService->isEligibleForDownloadBackground($a))
+            ->values()
+            ->map(function ($asset) use ($tenant, $brand) {
+                $metadata = $asset->metadata ?? [];
+                $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
+                    : ($asset->thumbnail_status ?? 'pending');
+                $finalThumbnailUrl = null;
+                if ($thumbnailStatus === 'completed') {
+                    $style = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
+                    $finalThumbnailUrl = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => $style]);
+                }
+                return [
+                    'id' => $asset->id,
+                    'original_filename' => $asset->original_filename,
+                    'thumbnail_url' => $finalThumbnailUrl,
+                    'final_thumbnail_url' => $finalThumbnailUrl,
+                    'preview_thumbnail_url' => null,
+                ];
+            });
+
+        return response()->json(['assets' => $assets]);
     }
 }

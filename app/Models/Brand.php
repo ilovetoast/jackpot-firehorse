@@ -33,7 +33,9 @@ class Brand extends Model
         'name',
         'slug',
         'logo_path',
+        'logo_id',
         'icon_path',
+        'icon_id',
         'icon',
         'icon_bg_color',
         'is_default',
@@ -42,6 +44,7 @@ class Brand extends Model
         'secondary_color',
         'accent_color',
         'nav_color',
+        'workspace_button_style',
         'logo_filter',
         'settings',
         'download_landing_settings', // D10: JSON { enabled, logo_asset_id, color_role, background_asset_ids, default_headline, default_subtext }

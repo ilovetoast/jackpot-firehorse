@@ -349,6 +349,9 @@ class HandleInertiaRequests extends Middleware
                     ->toArray()
                 : [],
             'auth' => [
+                // C9.2: Roles for upload AI controls (Admin/Brand Manager) — used by UploadAssetDialog, AssetDrawer
+                'brand_role' => ($user && $activeBrand) ? ($user->getRoleForBrand($activeBrand) ?? null) : null,
+                'tenant_role' => ($user && $tenant) ? ($user->getRoleForTenant($tenant) ?? null) : null,
                 'user' => $user ? [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
@@ -378,7 +381,10 @@ class HandleInertiaRequests extends Middleware
                     'slug' => $activeBrand->slug,
                     'logo_path' => $activeBrand->logo_path,
                     'primary_color' => $activeBrand->primary_color,
+                    'secondary_color' => $activeBrand->secondary_color,
+                    'accent_color' => $activeBrand->accent_color,
                     'nav_color' => $activeBrand->nav_color,
+                    'workspace_button_style' => $activeBrand->workspace_button_style ?? $activeBrand->settings['button_style'] ?? 'primary',
                     'logo_filter' => $activeBrand->logo_filter ?? 'none',
                     'settings' => $activeBrand->settings ?? [], // Phase J.3.1: Include brand settings for approval checks
                 ] : null,

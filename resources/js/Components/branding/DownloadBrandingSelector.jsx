@@ -1,10 +1,12 @@
 /**
  * D10 — Reusable brand-level download landing branding selector.
- * D10.1: Background selection uses MiniAssetPicker (Photography/Graphics, ≥1920×1080).
+ * D10.1: Background selection uses AssetImagePicker (Photography, ≥1920×1080).
+ * Phase 1.1: Logo uses AssetImagePicker (Logos category).
+ * Phase 1.3: Public page theme — Brand Mark, Accent Styling, Background Visuals.
  */
 import { useState } from 'react'
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import MiniAssetPicker from '../media/MiniAssetPicker'
+import { XMarkIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import AssetImagePicker from '../media/AssetImagePicker'
 
 const COLOR_ROLES = [
   { role: 'primary', label: 'Primary' },
@@ -14,25 +16,26 @@ const COLOR_ROLES = [
 
 export default function DownloadBrandingSelector({
   logoAssets = [],
+  brandLogoPath = null,
   selectedLogoAssetId = null,
   onLogoChange,
+  fetchLogoAssets,
   primaryColor = '#6366f1',
   secondaryColor = '#64748b',
   accentColor = '#6366f1',
   selectedColorRole = 'primary',
+  customColor = '',
   onColorRoleChange,
+  onCustomColorChange,
   backgroundAssets = [],
   backgroundAssetIds = [],
   onRemoveBackground,
-  onBackgroundsConfirm,
+  onBackgroundsConfirm, // (assetIds: string[], assets?: Array<{ id, thumbnail_url?, original_filename? }>) => void
   fetchBackgroundCandidates,
   maxBackgrounds = 5,
-  defaultHeadline = '',
-  defaultSubtext = '',
-  onHeadlineChange,
-  onSubtextChange,
   disabled = false,
 }) {
+  const [showLogoPicker, setShowLogoPicker] = useState(false)
   const [showMiniPicker, setShowMiniPicker] = useState(false)
 
   const palette = [
@@ -41,21 +44,15 @@ export default function DownloadBrandingSelector({
     { role: 'accent', label: 'Accent', hex: accentColor || '#6366f1' },
   ]
 
-  const disabledAssetReason = (asset) => {
-    if (asset.width != null && asset.height != null && (asset.width < 1920 || asset.height < 1080)) {
-      return 'Must be at least 1920×1080'
-    }
-    return null
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Enable toggle is handled by parent */}
-
-      {/* Logo selector — tile grid */}
+    <div className="space-y-10">
+      {/* Brand Mark — optional override */}
       <div>
-        <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">Logo</label>
-        <div className="flex flex-wrap gap-2">
+        <h4 className="text-sm font-medium text-gray-900 mb-1">Brand Mark</h4>
+        <p className="text-sm text-gray-500 mb-4">
+          Choose from library. Fallback to brand identity logo if empty.
+        </p>
+        <div className="flex flex-wrap gap-2 items-center">
           <button
             type="button"
             onClick={() => !disabled && onLogoChange?.(null)}
@@ -69,7 +66,45 @@ export default function DownloadBrandingSelector({
           >
             None
           </button>
-          {(logoAssets || []).map((a) => (
+          {selectedLogoAssetId != null && (() => {
+            const sel = (logoAssets || []).find((a) => a.id === selectedLogoAssetId)
+            return sel ? (
+              <div key={sel.id} className="relative">
+                <div className="w-16 h-16 rounded-lg border-2 border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 overflow-hidden flex-shrink-0">
+                  {sel.thumbnail_url ? (
+                    <img src={sel.thumbnail_url} alt="" className="w-full h-full object-contain bg-gray-300" />
+                  ) : (
+                    <span className="text-xs text-gray-400 flex items-center justify-center h-full">Logo</span>
+                  )}
+                </div>
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={() => onLogoChange?.(null)}
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-90 hover:opacity-100 shadow"
+                    aria-label="Remove logo"
+                  >
+                    <XMarkIcon className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="w-16 h-16 rounded-lg border-2 border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 flex items-center justify-center text-xs text-gray-500 bg-gray-50">
+                Selected
+              </div>
+            )
+          })()}
+          {fetchLogoAssets && !disabled && (
+            <button
+              type="button"
+              onClick={() => setShowLogoPicker(true)}
+              className="rounded-lg border-2 border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:border-indigo-400 hover:text-indigo-600 flex items-center gap-2"
+            >
+              <PhotoIcon className="w-4 h-4" />
+              Choose from library
+            </button>
+          )}
+          {!fetchLogoAssets && (logoAssets || []).map((a) => (
             <button
               key={a.id}
               type="button"
@@ -83,52 +118,135 @@ export default function DownloadBrandingSelector({
               title={a.original_filename || 'Logo'}
             >
               {a.thumbnail_url ? (
-                <img src={a.thumbnail_url} alt="" className="w-full h-full object-contain bg-white" />
+                <img src={a.thumbnail_url} alt="" className="w-full h-full object-contain bg-gray-300" />
               ) : (
                 <span className="text-xs text-gray-400 p-1">Logo</span>
               )}
             </button>
           ))}
         </div>
+        {fetchLogoAssets && (
+          <AssetImagePicker
+            open={showLogoPicker}
+            onClose={() => setShowLogoPicker(false)}
+            fetchAssets={fetchLogoAssets}
+            onSelect={(result) => {
+              if (result.asset_id) onLogoChange?.(result.asset_id)
+              setShowLogoPicker(false)
+            }}
+            title="Select logo"
+            defaultCategoryLabel="Logos"
+            contextCategory="logos"
+            aspectRatio={{ width: 265, height: 64 }}
+            minWidth={100}
+            minHeight={40}
+          />
+        )}
       </div>
 
-      {/* Color selector — palette tiles */}
+      {/* Accent Styling — same component as Workspace color selector */}
       <div>
-        <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">Accent color</label>
-        <div className="flex flex-wrap gap-2">
+        <h4 className="text-sm font-medium text-gray-900 mb-1">Accent Styling</h4>
+        <p className="text-sm text-gray-500 mb-4">
+          Choose a color from your brand palette for CTAs and accents.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {COLOR_ROLES.map(({ role, label }) => {
             const tile = palette.find((p) => p.role === role) || { hex: '#6366f1' }
-            return (
+            const hasColor = role === 'primary' || (role === 'secondary' && secondaryColor) || (role === 'accent' && accentColor)
+            return hasColor ? (
               <button
                 key={role}
                 type="button"
                 onClick={() => !disabled && onColorRoleChange?.(role)}
-                className={`w-14 h-14 rounded-lg border-2 flex flex-col items-center justify-center text-xs font-medium transition-colors ${
-                  selectedColorRole === role ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1' : 'border-gray-200 hover:border-gray-300'
+                className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                  selectedColorRole === role ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
                 }`}
-                style={{ backgroundColor: tile.hex }}
                 disabled={disabled}
                 title={label}
               >
-                <span className="sr-only">{label}</span>
-                <span className="mt-1 text-[10px] text-white drop-shadow-md" style={{ textShadow: '0 0 1px #000' }}>
-                  {label}
-                </span>
+                <div className="w-full h-12 rounded-md mb-1.5" style={{ backgroundColor: tile.hex }} />
+                <span className="text-xs font-medium text-gray-900">{label}</span>
+                {selectedColorRole === role && (
+                  <div className="absolute top-1.5 right-1.5">
+                    <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                  </div>
+                )}
               </button>
+            ) : (
+              <div key={role} className="flex flex-col items-center p-3 rounded-lg border-2 border-gray-100 opacity-50">
+                <div className="w-full h-12 rounded-md mb-1.5 bg-gray-50 border-2 border-dashed border-gray-200" />
+                <span className="text-xs font-medium text-gray-400">{label}</span>
+              </div>
             )
           })}
+          {/* Custom option — same as Workspace */}
+          <button
+            type="button"
+            onClick={() => !disabled && onColorRoleChange?.('custom')}
+            className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+              selectedColorRole === 'custom' ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
+            }`}
+            disabled={disabled}
+            title="Custom"
+          >
+            <div
+              className="w-full h-12 rounded-md mb-1.5 border-2 border-dashed border-gray-300 flex items-center justify-center"
+              style={{ backgroundColor: (selectedColorRole === 'custom' && (customColor || primaryColor)) ? (customColor || primaryColor) : '#f3f4f6' }}
+            >
+              {selectedColorRole === 'custom' && (customColor || primaryColor) ? null : (
+                <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" /></svg>
+              )}
+            </div>
+            <span className="text-xs font-medium text-gray-900">Custom</span>
+            {selectedColorRole === 'custom' && (
+              <div className="absolute top-1.5 right-1.5">
+                <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+              </div>
+            )}
+          </button>
         </div>
+        {selectedColorRole === 'custom' && (
+          <div className="mt-3 flex gap-2 items-center">
+            <input
+              type="color"
+              value={(customColor || primaryColor || '#6366f1').startsWith('#') ? (customColor || primaryColor || '#6366f1') : '#' + (customColor || primaryColor || '6366f1')}
+              onChange={(e) => onCustomColorChange?.(e.target.value)}
+              className="h-8 w-14 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+            />
+            <input
+              type="text"
+              value={customColor || ''}
+              onChange={(e) => onCustomColorChange?.(e.target.value)}
+              className="block w-24 rounded-md border py-1.5 px-2 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600"
+              placeholder="#6366f1"
+            />
+          </div>
+        )}
       </div>
 
-      {/* Background images — D10.1: Mini Asset Picker (Photography/Graphics, ≥1920×1080) */}
+      {/* Background Visuals */}
       <div>
-        <label className="block text-sm font-medium leading-6 text-gray-900 mb-2">Background images (max {maxBackgrounds})</label>
-        <div className="flex flex-wrap gap-2 items-center">
+        <h4 className="text-sm font-medium text-gray-900 mb-1">Background Visuals</h4>
+        <p className="text-sm text-gray-500 mb-4">
+          Background images (max {maxBackgrounds}). Randomized per visit.
+        </p>
+        <div className="flex flex-wrap gap-3 items-center">
+          {!disabled && (
+            <button
+              type="button"
+              onClick={() => setShowMiniPicker(true)}
+              className="rounded-lg border-2 border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-gray-600 hover:border-indigo-400 hover:text-indigo-600 flex items-center gap-2"
+            >
+              <PhotoIcon className="w-4 h-4" />
+              Choose from library
+            </button>
+          )}
           {(backgroundAssets || []).map((a) => (
             <div key={a.id} className="relative group">
-              <div className="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-100">
-                {a.thumbnail_url ? (
-                  <img src={a.thumbnail_url} alt="" className="w-full h-full object-cover" />
+              <div className="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-100 shadow-sm">
+                {(a.thumbnail_url || a.url) ? (
+                  <img src={a.thumbnail_url || a.url} alt="" className="w-full h-full object-cover" />
                 ) : (
                   <span className="text-xs text-gray-400 flex items-center justify-center h-full">—</span>
                 )}
@@ -145,58 +263,32 @@ export default function DownloadBrandingSelector({
               )}
             </div>
           ))}
-          {!disabled && (
-            <button
-              type="button"
-              onClick={() => setShowMiniPicker(true)}
-              className="rounded-lg border-2 border-dashed border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:border-indigo-400 hover:text-indigo-600"
-            >
-              Select background images
-            </button>
-          )}
         </div>
-        <p className="mt-1 text-xs text-gray-500">Random image shown per visit.</p>
+        <p className="mt-2 text-xs text-gray-500">
+          {(backgroundAssets || []).length}/{maxBackgrounds} selected
+        </p>
 
-        <MiniAssetPicker
+        <AssetImagePicker
           open={showMiniPicker}
           onClose={() => setShowMiniPicker(false)}
           fetchAssets={fetchBackgroundCandidates}
-          maxSelection={maxBackgrounds}
-          initialSelectedIds={backgroundAssetIds}
-          disabledAssetReason={disabledAssetReason}
-          onConfirm={(ids) => {
-            onBackgroundsConfirm?.(ids)
+          onSelect={(result) => {
+            const ids = result?.asset_ids
+            if (ids != null) {
+              onBackgroundsConfirm?.(ids, result?.assets)
+            }
             setShowMiniPicker(false)
           }}
           title="Select background images"
+          defaultCategoryLabel="Photography"
+          contextCategory="photography"
+          maxSelection={maxBackgrounds}
+          singleSelect={false}
+          initialSelectedIds={backgroundAssetIds}
         />
       </div>
 
-      {/* Default copy */}
-      <div>
-        <label htmlFor="download_default_headline" className="block text-sm font-medium leading-6 text-gray-900">Default headline</label>
-        <input
-          id="download_default_headline"
-          type="text"
-          value={defaultHeadline}
-          onChange={(e) => onHeadlineChange?.(e.target.value)}
-          placeholder="e.g. Press Kit"
-          disabled={disabled}
-          className="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm disabled:opacity-60"
-        />
-      </div>
-      <div>
-        <label htmlFor="download_default_subtext" className="block text-sm font-medium leading-6 text-gray-900">Default subtext</label>
-        <input
-          id="download_default_subtext"
-          type="text"
-          value={defaultSubtext}
-          onChange={(e) => onSubtextChange?.(e.target.value)}
-          placeholder="e.g. Approved brand assets"
-          disabled={disabled}
-          className="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm disabled:opacity-60"
-        />
-      </div>
+      {/* TODO: Remove deprecated public page headline/subtext fields in future migration. */}
     </div>
   )
 }

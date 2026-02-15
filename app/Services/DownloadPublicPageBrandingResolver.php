@@ -158,10 +158,10 @@ class DownloadPublicPageBrandingResolver
 
         $logoUrl = null;
         $logoAssetId = $settings['logo_asset_id'] ?? null;
-        if ($logoAssetId && Route::has('assets.thumbnail.final')) {
+        if ($logoAssetId && Route::has('downloads.public.logo')) {
             $logoAsset = Asset::where('id', $logoAssetId)->where('brand_id', $brand->id)->first();
-            if ($logoAsset) {
-                $logoUrl = route('assets.thumbnail.final', ['asset' => $logoAsset->id, 'style' => 'medium']);
+            if ($logoAsset && $logoAsset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+                $logoUrl = route('downloads.public.logo', ['download' => $download->id]);
             }
         }
 
@@ -186,9 +186,11 @@ class DownloadPublicPageBrandingResolver
 
     protected function accentColorFromRole(Brand $brand, string $role): string
     {
+        $settings = $brand->download_landing_settings ?? [];
         $color = match ($role) {
             'secondary' => $brand->secondary_color ?? $brand->primary_color ?? '#64748b',
             'accent' => $brand->accent_color ?? $brand->primary_color ?? '#6366f1',
+            'custom' => $settings['custom_color'] ?? $brand->primary_color ?? '#4F46E5',
             default => $brand->primary_color ?? '#4F46E5',
         };
 

@@ -102,6 +102,19 @@ return [
         ],
 
         /*
+         * Medium display (logo/public page).
+         * Same dimensions as medium but preserves transparency for white logos.
+         * Used for public page logo and theme preview — no gray background block.
+         */
+        'medium_display' => [
+            'width' => 1024,
+            'height' => 1024,
+            'quality' => 90,
+            'fit' => 'contain',
+            'preserve_transparency' => true,
+        ],
+
+        /*
          * Large high-resolution preview.
          * Used for full-screen previews and high-quality displays.
          * Maximum dimension capped at 4096px to prevent excessive processing.

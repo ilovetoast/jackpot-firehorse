@@ -29,6 +29,36 @@ export function getLuminance(hexColor) {
 }
 
 /**
+ * Get the workspace button/accent color based on workspace_button_style setting.
+ * Used for Add Asset button and primary actions in DAM (Assets, Deliverables, Collections).
+ * @param {Object} brand - Brand object with workspace_button_style, primary_color, secondary_color, accent_color
+ * @returns {string} Hex color for the workspace primary action
+ */
+export function getWorkspaceButtonColor(brand) {
+    if (!brand) return '#6366f1'
+    const style = brand.workspace_button_style ?? 'primary'
+    if (style === 'primary') return brand.primary_color || '#6366f1'
+    if (style === 'secondary') return brand.secondary_color || '#64748b'
+    return brand.accent_color || '#6366f1' // accent
+}
+
+/**
+ * Convert hex color to rgba string with given opacity.
+ * @param {string} hexColor - Hex color (e.g. "#6366f1" or "6366f1")
+ * @param {number} alpha - Opacity 0-1 (e.g. 0.25 for 25%)
+ * @returns {string} rgba(r, g, b, alpha)
+ */
+export function hexToRgba(hexColor, alpha = 1) {
+    if (!hexColor) return `rgba(99, 102, 241, ${alpha})` // indigo fallback
+    let hex = String(hexColor).replace('#', '')
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('')
+    const r = parseInt(hex.substring(0, 2), 16)
+    const g = parseInt(hex.substring(2, 4), 16)
+    const b = parseInt(hex.substring(4, 6), 16)
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/**
  * Get appropriate text color (white or black) based on background color
  * Uses WCAG contrast ratio guidelines - returns white for dark backgrounds, black for light
  * @param {string} backgroundColor - Hex color string

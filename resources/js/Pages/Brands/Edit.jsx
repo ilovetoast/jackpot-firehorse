@@ -2,15 +2,21 @@ import { useForm, Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect, useRef } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
-import ImageCropModal from '../../Components/ImageCropModal'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import CategoryUpgradeModal from '../../Components/CategoryUpgradeModal'
 import CategoryIconSelector from '../../Components/CategoryIconSelector'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 import { getImageBackgroundStyle } from '../../utils/imageUtils'
+import { getContrastTextColor } from '../../utils/colorUtils'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandAvatar from '../../Components/BrandAvatar'
 import DownloadBrandingSelector from '../../Components/branding/DownloadBrandingSelector'
+import AssetImagePickerField from '../../Components/media/AssetImagePickerField'
+import BrandMembersSection from '../../Components/brand/BrandMembersSection'
+import PublicPageTheme from '../../Components/branding/PublicPageTheme'
+
+// Phase 1: Categories and Metadata sections hidden from Brand Identity page (will be re-homed later)
+const SHOW_CATEGORIES_AND_METADATA = false
 
 // CategoryCard component matching Categories/Index clean design
 function CategoryCard({ category, brandId, brand_users, brand_roles, private_category_limits, can_edit_system_categories, onUpgradeClick, editingId, setEditingId, onEditStart, onEditSave, onEditCancel }) {
@@ -499,15 +505,12 @@ function CategoryCard({ category, brandId, brand_users, brand_roles, private_cat
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, private_category_limits, can_edit_system_categories, tenant_settings, current_plan }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, can_edit_system_categories, tenant_settings, current_plan }) {
     const { auth } = usePage().props
-    const [cropModalOpen, setCropModalOpen] = useState(false)
-    const [iconCropModalOpen, setIconCropModalOpen] = useState(false)
-    const [imageToCrop, setImageToCrop] = useState(null)
-    const [iconImageToCrop, setIconImageToCrop] = useState(null)
     const [iconBackgroundStyle, setIconBackgroundStyle] = useState({ background: 'transparent', isWhite: false })
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const [activeSection, setActiveSection] = useState('basic-information')
+    const [activeTab, setActiveTab] = useState('identity') // identity | workspace | public-pages | members
     const [upgradeModalOpen, setUpgradeModalOpen] = useState(false)
     const [selectedCategoryForUpgrade, setSelectedCategoryForUpgrade] = useState(null)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
@@ -542,19 +545,36 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         })
     }
     
+    // Derive icon_bg_style from stored icon_bg_color (preserve saved values, no schema change)
+    const normalizeHex = (h) => (h || '').replace(/^#/, '').toLowerCase()
+    const deriveIconBgStyle = (stored, primary, secondary, accent) => {
+        const s = normalizeHex(stored)
+        if (!s) return 'primary'
+        if (s === normalizeHex(primary)) return 'primary'
+        if (s === normalizeHex(secondary)) return 'secondary'
+        if (s === normalizeHex(accent)) return 'accent'
+        return 'custom'
+    }
+    const [iconBgStyle, setIconBgStyle] = useState(() =>
+        deriveIconBgStyle(brand.icon_bg_color, brand.primary_color, brand.secondary_color, brand.accent_color)
+    )
+
     const { data, setData, put, processing, errors } = useForm({
         name: brand.name,
         slug: brand.slug,
         logo: null,
-        logo_preview: brand.logo_path || '',
+        logo_id: brand.logo_id ?? null,
+        logo_preview: brand.logo_thumbnail_url || brand.logo_path || '',
         icon: null,
-        icon_preview: brand.icon_path || '',
+        icon_id: brand.icon_id ?? null,
+        icon_preview: brand.icon_thumbnail_url || brand.icon_path || '',
         icon_bg_color: brand.icon_bg_color || brand.primary_color || '#6366f1',
         show_in_selector: brand.show_in_selector !== undefined ? brand.show_in_selector : true,
         primary_color: brand.primary_color || '',
         secondary_color: brand.secondary_color || '',
         accent_color: brand.accent_color || '',
         nav_color: brand.nav_color || brand.primary_color || '',
+        workspace_button_style: brand.workspace_button_style ?? brand.settings?.button_style ?? 'primary',
         settings: {
             // Preserve any other settings that might exist first
             ...(brand.settings || {}),
@@ -567,6 +587,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             enabled: brand.download_landing_settings?.enabled === true,
             logo_asset_id: brand.download_landing_settings?.logo_asset_id ?? null,
             color_role: brand.download_landing_settings?.color_role || 'primary',
+            custom_color: brand.download_landing_settings?.custom_color || '',
             default_headline: brand.download_landing_settings?.default_headline || '',
             default_subtext: brand.download_landing_settings?.default_subtext || '',
             background_asset_ids: Array.isArray(brand.download_landing_settings?.background_asset_ids) ? brand.download_landing_settings.background_asset_ids : [],
@@ -611,6 +632,13 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         }
     }, [data.logo_preview, data.icon_preview])
 
+    // Sync icon_bg_color when palette changes and style is not custom
+    useEffect(() => {
+        if (iconBgStyle === 'primary') setData('icon_bg_color', data.primary_color || brand.primary_color || '')
+        else if (iconBgStyle === 'secondary') setData('icon_bg_color', data.secondary_color || brand.secondary_color || '')
+        else if (iconBgStyle === 'accent') setData('icon_bg_color', data.accent_color || brand.accent_color || '')
+    }, [iconBgStyle, data.primary_color, data.secondary_color, data.accent_color])
+
     // Detect if icon is white and set background style
     useEffect(() => {
         if (data.icon_preview && !data.icon_preview.includes('svg')) {
@@ -644,7 +672,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
     // Update active section on scroll
     useEffect(() => {
         const handleScroll = () => {
-            const sections = ['basic-information', 'brand-colors', 'sidebar-settings', 'downloads-landing', 'metadata', 'categories']
+            const sections = ['basic-information', 'brand-colors', 'public-pages', 'workspace-appearance', 'metadata', 'categories']
             const scrollPosition = window.scrollY + 100
 
             for (let i = sections.length - 1; i >= 0; i--) {
@@ -681,23 +709,74 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     >
                         ← Back to Brands
                     </Link>
-                    <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-900">Edit Brand</h1>
-                    <p className="mt-2 text-sm text-gray-700">Update brand information and settings</p>
+                    <h1 className="mt-4 text-2xl font-bold tracking-tight text-gray-900">Brand Settings</h1>
+                    <p className="mt-1 text-sm text-gray-600">
+                        Manage identity, workspace appearance, and team access.
+                    </p>
+
+                    {/* Tab navigation — pill-style segmented control */}
+                    <nav className="mt-6 p-1 rounded-xl bg-gray-100 inline-flex gap-0.5 shadow-sm" aria-label="Brand settings tabs">
+                        {[
+                            { id: 'identity', label: 'Identity' },
+                            { id: 'workspace', label: 'Workspace Appearance' },
+                            { id: 'public-pages', label: 'Public Pages' },
+                            { id: 'members', label: 'Members' },
+                        ].map((tab) => (
+                            <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out ${
+                                    activeTab === tab.id
+                                        ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60'
+                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
+                        ))}
+                    </nav>
                 </div>
 
-                <form onSubmit={submit} className="space-y-8">
-                    {/* Basic Information */}
-                    <div id="basic-information" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-1">
-                            <h3 className="text-base font-semibold leading-6 text-gray-900">Basic Information</h3>
-                            <p className="mt-2 text-sm text-gray-500">
-                                Set your brand name, logo, and basic display settings.
-                            </p>
+                {activeTab === 'members' ? (
+                    /* Members tab: outside form to avoid nested <form> (UserInviteForm has its own form) */
+                    <div id="members" className="scroll-mt-8 space-y-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-1">
+                                    <h2 className="text-xl font-semibold text-gray-900">Members</h2>
+                                    <p className="mt-3 text-sm text-gray-600 leading-relaxed max-w-xl">
+                                        Invite team members and manage their access to this brand.
+                                    </p>
+                                </div>
+                                <div className="mt-8">
+                                    <BrandMembersSection
+                                        brandId={brand.id}
+                                        users={brand_users || []}
+                                        availableUsers={available_users || []}
+                                        pendingInvitations={pending_invitations || []}
+                                        brandRoles={brand_roles || []}
+                                    />
+                                </div>
+                            </div>
                         </div>
-                        <div className="lg:col-span-2">
-                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
-                                    <div className="space-y-6">
+                    </div>
+                ) : (
+                <form onSubmit={submit} className="space-y-8">
+                    {/* Tab: Identity */}
+                    {activeTab === 'identity' && (
+                    <>
+                    {/* Section 1: Brand Identity */}
+                    <div id="basic-information" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
+                            <div className="px-6 py-8 sm:px-8 sm:py-10">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Brand Identity</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        These settings define how your brand appears in creative, exports, and brand guidelines.
+                                    </p>
+                                </div>
+                                <div className="mt-6 space-y-6">
                                 <div>
                                     <label htmlFor="name" className="block text-sm font-medium leading-6 text-gray-900">
                                         Brand Name
@@ -740,283 +819,210 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     </p>
                                 </div>
 
-                                {/* Brand Images Section */}
+                                {/* Brand Images Section — Part 1.4: Equal boxes, Live Preview below */}
                                 <div className="pt-6 border-t border-gray-200">
-                                    <h4 className="text-sm font-semibold text-gray-900 mb-4">Brand Images</h4>
+                                    <h4 className="text-sm font-semibold text-gray-900 mb-1">Brand Images</h4>
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        This logo will be used in creative generation and brand guidelines.
+                                    </p>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* Logo Upload */}
-                                        <div>
-                                            <label htmlFor="logo" className="block text-sm font-medium leading-6 text-gray-900">
+                                        {/* Logo — equal height box */}
+                                        <div className="flex flex-col">
+                                            <label htmlFor="logo" className="block text-sm font-medium text-gray-900 mb-2">
                                                 Logo
                                             </label>
-                                            <p className="mt-1 mb-3 text-xs text-gray-500">
-                                                PNG, WebP, or SVG up to 2MB. Used in navigation and brand displays.
-                                            </p>
-                                            <div>
-                                                <input
-                                                    type="file"
-                                                    name="logo"
-                                                    id="logo"
-                                                    accept="image/png,image/webp,image/svg+xml,image/avif"
-                                                    onChange={(e) => {
-                                                        const file = e.target.files?.[0]
-                                                        if (file) {
-                                                            // Check if it's an SVG (can't crop SVGs)
-                                                            if (file.type === 'image/svg+xml') {
-                                                                setData('logo', file)
-                                                                const previewUrl = URL.createObjectURL(file)
-                                                                setData('logo_preview', previewUrl)
-                                                            } else {
-                                                                // For PNG/WebP, show crop modal
-                                                                const previewUrl = URL.createObjectURL(file)
-                                                                setImageToCrop(previewUrl)
-                                                                setCropModalOpen(true)
-                                                            }
+                                            <div className="flex-1 min-h-[180px]">
+                                                <AssetImagePickerField
+                                                    value={{
+                                                        preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_path) : null),
+                                                        asset_id: data.logo_id ?? null,
+                                                        file: data.logo,
+                                                    }}
+                                                    onChange={(v) => {
+                                                        if (v == null) {
+                                                            setData('logo_id', null)
+                                                            setData('logo_preview', null)
+                                                            setData('logo', null)
+                                                        } else if (v?.asset_id) {
+                                                            setData('logo_id', v.asset_id)
+                                                            setData('logo_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                            setData('logo', null)
+                                                        } else if (v?.file) {
+                                                            setData('logo', v.file)
+                                                            setData('logo_preview', v.preview_url)
+                                                            setData('logo_id', null)
                                                         }
                                                     }}
-                                                    className="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                                                    fetchAssets={(opts) => {
+                                                        const params = new URLSearchParams({ format: 'json' })
+                                                        if (opts?.category) params.set('category', opts.category)
+                                                        return fetch(`/app/assets?${params}`, {
+                                                            credentials: 'same-origin',
+                                                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                        }).then((r) => r.json())
+                                                    }}
+                                                    getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                                    title="Select logo"
+                                                    defaultCategoryLabel="Logos"
+                                                    contextCategory="logos"
+                                                    aspectRatio={{ width: 265, height: 64 }}
+                                                    minWidth={265}
+                                                    minHeight={64}
+                                                    placeholder="Click to choose from library or upload"
+                                                    helperText="Recommended: 265×64 px or similar aspect ratio"
+                                                    className="h-full"
                                                 />
-                                                {data.logo_preview && (
-                                                    <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <p className="text-xs font-medium text-gray-700">Preview</p>
-                                                            {data.logo_preview && !data.logo_preview.startsWith('blob:') && !data.logo_preview.includes('svg') && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={async () => {
-                                                                        // Fetch the existing logo image to crop it
-                                                                        try {
-                                                                            const response = await fetch(data.logo_preview)
-                                                                            const blob = await response.blob()
-                                                                            const imageUrl = URL.createObjectURL(blob)
-                                                                            setImageToCrop(imageUrl)
-                                                                            setCropModalOpen(true)
-                                                                        } catch (error) {
-                                                                            console.error('Error loading logo for cropping:', error)
-                                                                            alert('Unable to load logo for cropping. Please try uploading a new file.')
-                                                                        }
-                                                                    }}
-                                                                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                                                                >
-                                                                    Re-crop
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                        <img
-                                                            src={data.logo_preview}
-                                                            alt="Logo preview"
-                                                            className="h-16 w-auto border border-gray-200 rounded bg-white p-2"
-                                                            onError={(e) => {
-                                                                e.target.style.display = 'none'
+                                            </div>
+                                            {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
+                                        </div>
+
+                                        {/* Icon — equal height box */}
+                                        <div className="flex flex-col">
+                                            <label htmlFor="icon" className="block text-sm font-medium text-gray-900 mb-2">
+                                                Icon
+                                            </label>
+                                            <p className="text-xs text-gray-500 mb-2">
+                                                Square (1:1) format. Used in compact displays.
+                                            </p>
+                                            <div className="flex-1 min-h-[180px]">
+                                                <AssetImagePickerField
+                                                    value={{
+                                                        preview_url: data.icon_preview ?? (data.icon_id && data.icon_id === brand.icon_id ? (brand.icon_thumbnail_url ?? brand.icon_path) : null),
+                                                        asset_id: data.icon_id ?? null,
+                                                        file: data.icon,
+                                                    }}
+                                                    onChange={(v) => {
+                                                        if (v == null) {
+                                                            setData('icon_id', null)
+                                                            setData('icon_preview', null)
+                                                            setData('icon', null)
+                                                        } else if (v?.asset_id) {
+                                                            setData('icon_id', v.asset_id)
+                                                            setData('icon_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                            setData('icon', null)
+                                                        } else if (v?.file) {
+                                                            setData('icon', v.file)
+                                                            setData('icon_preview', v.preview_url)
+                                                            setData('icon_id', null)
+                                                        }
+                                                    }}
+                                                    fetchAssets={(opts) => {
+                                                        const params = new URLSearchParams({ format: 'json' })
+                                                        if (opts?.category) params.set('category', opts.category)
+                                                        return fetch(`/app/assets?${params}`, {
+                                                            credentials: 'same-origin',
+                                                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                        }).then((r) => r.json())
+                                                    }}
+                                                    getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                                    title="Select icon"
+                                                    defaultCategoryLabel="Logos"
+                                                    contextCategory="logos"
+                                                    aspectRatio={{ width: 1, height: 1 }}
+                                                    minWidth={64}
+                                                    minHeight={64}
+                                                    placeholder="Click to choose from library or upload"
+                                                    helperText="Square format recommended"
+                                                    className="h-full"
+                                                />
+                                            </div>
+                                            {errors.icon && <p className="mt-2 text-sm text-red-600">{errors.icon}</p>}
+                                        </div>
+                                    </div>
+
+                                    {/* Live Preview — full width below both columns */}
+                                    <div className="mt-6 p-4 bg-gray-50/80 rounded-xl border border-gray-200/80">
+                                        <p className="text-sm font-medium text-gray-700 mb-4">Live Preview</p>
+                                        <div className="flex items-center gap-6">
+                                            <BrandAvatar
+                                                iconPath={data.icon_preview ?? brand.icon_thumbnail_url ?? brand.icon_path}
+                                                name={brand.name}
+                                                primaryColor={data.primary_color ?? brand.primary_color ?? '#6366f1'}
+                                                iconBgColor={(() => {
+                                                    if (iconBgStyle === 'primary') return data.primary_color ?? brand.primary_color ?? '#6366f1'
+                                                    if (iconBgStyle === 'secondary') return data.secondary_color ?? brand.secondary_color ?? '#64748b'
+                                                    if (iconBgStyle === 'accent') return data.accent_color ?? brand.accent_color ?? '#6366f1'
+                                                    return data.icon_bg_color ?? brand.icon_bg_color ?? data.primary_color ?? '#6366f1'
+                                                })()}
+                                                showIcon={true}
+                                                size="xl"
+                                                className="shadow-md"
+                                            />
+                                            <div className="flex-1">
+                                                <label className="block text-xs font-medium text-gray-700 mb-2">
+                                                    Background Style
+                                                </label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {['primary', 'secondary', 'accent', 'custom'].map((style) => (
+                                                        <button
+                                                            key={style}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setIconBgStyle(style)
+                                                                if (style === 'primary') setData('icon_bg_color', data.primary_color || brand.primary_color || '')
+                                                                else if (style === 'secondary') setData('icon_bg_color', data.secondary_color || brand.secondary_color || '')
+                                                                else if (style === 'accent') setData('icon_bg_color', data.accent_color || brand.accent_color || '')
+                                                                else if (style === 'custom') setData('icon_bg_color', data.icon_bg_color || data.primary_color || '#6366f1')
                                                             }}
+                                                            className={`px-3 py-1.5 rounded-md text-xs font-medium border-2 transition-all ${
+                                                                iconBgStyle === style
+                                                                    ? 'border-indigo-600 ring-2 ring-indigo-600 ring-offset-1 bg-indigo-50 text-indigo-700'
+                                                                    : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                                                            }`}
+                                                        >
+                                                            {style.charAt(0).toUpperCase() + style.slice(1)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                {iconBgStyle === 'custom' && (
+                                                    <div className="mt-3 flex gap-2 items-center">
+                                                        <input
+                                                            type="color"
+                                                            value={(() => {
+                                                                const v = data.icon_bg_color || data.primary_color || '#6366f1'
+                                                                return v.startsWith('#') ? v : '#' + v
+                                                            })()}
+                                                            onChange={(e) => setData('icon_bg_color', e.target.value)}
+                                                            className="h-8 w-14 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            name="icon_bg_color"
+                                                            value={data.icon_bg_color || ''}
+                                                            onChange={(e) => setData('icon_bg_color', e.target.value)}
+                                                            className="block w-24 rounded-md border py-1.5 px-2 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600"
+                                                            placeholder="#6366f1"
+                                                            pattern="^#[0-9A-Fa-f]{6}$"
                                                         />
                                                     </div>
                                                 )}
-                                                {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
+                                                {errors.icon_bg_color && <p className="mt-1 text-xs text-red-600">{errors.icon_bg_color}</p>}
                                             </div>
                                         </div>
-
-                                        {/* Icon Upload and Preview */}
-                                        <div>
-                                            <label htmlFor="icon" className="block text-sm font-medium leading-6 text-gray-900">
-                                                Icon
-                                            </label>
-                                            <p className="mt-1 mb-4 text-xs text-gray-500">
-                                                PNG, WebP, or SVG up to 2MB. Square (1:1) format. Used in compact displays.
+                                        {!(data.icon_preview ?? brand.icon_thumbnail_url ?? brand.icon_path) && (
+                                            <p className="text-xs text-gray-400 text-center py-4 mt-2">
+                                                Upload an icon to see preview
                                             </p>
-                                            
-                                            {/* File Upload */}
-                                            <div className="mb-4">
-                                                <input
-                                                    type="file"
-                                                    name="icon"
-                                                    id="icon"
-                                                    accept="image/png,image/webp,image/svg+xml,image/avif"
-                                                    onChange={(e) => {
-                                                        const file = e.target.files?.[0]
-                                                        if (file) {
-                                                            // Check if it's an SVG (can't crop SVGs)
-                                                            if (file.type === 'image/svg+xml') {
-                                                                setData('icon', file)
-                                                                const previewUrl = URL.createObjectURL(file)
-                                                                setData('icon_preview', previewUrl)
-                                                            } else {
-                                                                // For PNG/WebP, show crop modal
-                                                                const previewUrl = URL.createObjectURL(file)
-                                                                setIconImageToCrop(previewUrl)
-                                                                setIconCropModalOpen(true)
-                                                            }
-                                                        }
-                                                    }}
-                                                    className="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                                                />
-                                                {errors.icon && <p className="mt-2 text-sm text-red-600">{errors.icon}</p>}
-                                            </div>
-
-                                            {/* Preview Box with Color Selector */}
-                                            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                                <div className="flex items-center justify-between mb-4">
-                                                    <p className="text-sm font-medium text-gray-700">Live Preview</p>
-                                                    {data.icon_preview && !data.icon_preview.startsWith('blob:') && !data.icon_preview.includes('svg') && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={async () => {
-                                                                // Fetch the existing icon image to crop it
-                                                                try {
-                                                                    const response = await fetch(data.icon_preview)
-                                                                    const blob = await response.blob()
-                                                                    const imageUrl = URL.createObjectURL(blob)
-                                                                    setIconImageToCrop(imageUrl)
-                                                                    setIconCropModalOpen(true)
-                                                                } catch (error) {
-                                                                    console.error('Error loading icon for cropping:', error)
-                                                                    alert('Unable to load icon for cropping. Please try uploading a new file.')
-                                                                }
-                                                            }}
-                                                            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                                                        >
-                                                            Re-crop
-                                                        </button>
-                                                    )}
-                                                </div>
-                                                
-                                                {/* Preview Display */}
-                                                <div className="flex items-center gap-4 mb-4">
-                                                    <BrandAvatar
-                                                        iconPath={data.icon_preview || brand.icon_path}
-                                                        name={brand.name}
-                                                        primaryColor={data.primary_color || brand.primary_color || '#6366f1'}
-                                                        iconBgColor={data.icon_bg_color || data.primary_color || brand.primary_color || brand.icon_bg_color || '#6366f1'}
-                                                        showIcon={true}
-                                                        size="xl"
-                                                        className="shadow-md"
-                                                    />
-                                                    
-                                                    {/* Color Selector inside Preview */}
-                                                    <div className="flex-1">
-                                                        <label htmlFor="icon_bg_color" className="block text-xs font-medium text-gray-700 mb-2">
-                                                            Background Color
-                                                        </label>
-                                                        <div className="flex gap-2">
-                                                            <input
-                                                                type="color"
-                                                                id="icon_bg_color_picker"
-                                                                value={data.icon_bg_color || data.primary_color || brand.primary_color || '#6366f1'}
-                                                                onChange={(e) => setData('icon_bg_color', e.target.value)}
-                                                                className="h-8 w-16 rounded border border-gray-300 cursor-pointer flex-shrink-0"
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                name="icon_bg_color"
-                                                                id="icon_bg_color"
-                                                                value={data.icon_bg_color || ''}
-                                                                onChange={(e) => setData('icon_bg_color', e.target.value)}
-                                                                className="block w-24 rounded-md border-0 py-1.5 px-2 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
-                                                                placeholder={data.primary_color || brand.primary_color || '#6366f1'}
-                                                                pattern="^#[0-9A-Fa-f]{6}$"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setData('icon_bg_color', '')}
-                                                                className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 flex-shrink-0"
-                                                            >
-                                                                Reset
-                                                            </button>
-                                                        </div>
-                                                        {errors.icon_bg_color && <p className="mt-1 text-xs text-red-600">{errors.icon_bg_color}</p>}
-                                                    </div>
-                                                </div>
-                                                
-                                                {!data.icon_preview && !brand.icon_path && (
-                                                    <p className="text-xs text-gray-400 text-center py-4">
-                                                        Upload an icon to see preview
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </div>
+                                        )}
                                     </div>
                                 </div>
 
-                                {/* Logo Image Crop Modal */}
-                                <ImageCropModal
-                                    open={cropModalOpen}
-                                    imageSrc={imageToCrop}
-                                    onClose={() => {
-                                        setCropModalOpen(false)
-                                        if (imageToCrop && imageToCrop.startsWith('blob:')) {
-                                            URL.revokeObjectURL(imageToCrop)
-                                        }
-                                        setImageToCrop(null)
-                                    }}
-                                    onCropComplete={(croppedBlob) => {
-                                        // Create a File object from the blob
-                                        const file = new File([croppedBlob], 'logo.png', { type: 'image/png' })
-                                        setData('logo', file)
-                                        
-                                        // Create preview URL
-                                        const previewUrl = URL.createObjectURL(croppedBlob)
-                                        setData('logo_preview', previewUrl)
-                                        
-                                        // Cleanup
-                                        if (imageToCrop && imageToCrop.startsWith('blob:')) {
-                                            URL.revokeObjectURL(imageToCrop)
-                                        }
-                                        setImageToCrop(null)
-                                        setCropModalOpen(false)
-                                    }}
-                                    aspectRatio={{ width: 265, height: 64 }} // Brand logo aspect ratio
-                                    minWidth={265}
-                                    minHeight={64}
-                                />
-
-                                {/* Icon Image Crop Modal - Square crop */}
-                                <ImageCropModal
-                                    open={iconCropModalOpen}
-                                    imageSrc={iconImageToCrop}
-                                    onClose={() => {
-                                        setIconCropModalOpen(false)
-                                        if (iconImageToCrop && iconImageToCrop.startsWith('blob:')) {
-                                            URL.revokeObjectURL(iconImageToCrop)
-                                        }
-                                        setIconImageToCrop(null)
-                                    }}
-                                    onCropComplete={(croppedBlob) => {
-                                        // Create a File object from the blob
-                                        const file = new File([croppedBlob], 'icon.png', { type: 'image/png' })
-                                        setData('icon', file)
-                                        
-                                        // Create preview URL
-                                        const previewUrl = URL.createObjectURL(croppedBlob)
-                                        setData('icon_preview', previewUrl)
-                                        
-                                        // Cleanup
-                                        if (iconImageToCrop && iconImageToCrop.startsWith('blob:')) {
-                                            URL.revokeObjectURL(iconImageToCrop)
-                                        }
-                                        setIconImageToCrop(null)
-                                        setIconCropModalOpen(false)
-                                    }}
-                                    aspectRatio={{ width: 1, height: 1 }} // Square crop for icon
-                                    minWidth={64}
-                                    minHeight={64}
-                                />
-                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Brand Colors */}
-                    <div id="brand-colors" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-1">
-                            <h3 className="text-base font-semibold leading-6 text-gray-900">Brand Colors</h3>
-                            <p className="mt-2 text-sm text-gray-500">
-                                Define your brand's color palette. These colors will be used throughout the application.
-                            </p>
-                        </div>
-                        <div className="lg:col-span-2">
-                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
+                    {/* Section 2: Brand Colors */}
+                    <div id="brand-colors" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
+                            <div className="px-6 py-8 sm:px-8 sm:py-10">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Brand Colors</h2>
+                                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                                        Define your brand's color palette. These colors will be used throughout the application.
+                                    </p>
+                                </div>
+                                <div className="mt-6">
                                     <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
                                         <div>
                                     <label htmlFor="primary_color" className="block text-sm font-medium leading-6 text-gray-900">
@@ -1149,153 +1155,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         </div>
                     </div>
 
-                    {/* Sidebar Settings */}
-                    <div id="sidebar-settings" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-1">
-                            <h3 className="text-base font-semibold leading-6 text-gray-900">Sidebar Settings</h3>
-                            <p className="mt-2 text-sm text-gray-500">
-                                Customize the sidebar appearance by selecting a color from your brand palette.
-                            </p>
-                        </div>
-                        <div className="lg:col-span-2">
-                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
-                                    <div className="space-y-6">
-                                {/* Sidebar Color */}
-                                <div>
-                                    <label htmlFor="nav_color" className="block text-sm font-medium leading-6 text-gray-900">
-                                        Sidebar Color
-                                    </label>
-                                    <p className="mt-1 text-sm text-gray-500 mb-4">
-                                        Select a color from your brand palette for the sidebar. Leave empty to use primary color.
-                                    </p>
-                                    <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                        {/* Primary Color Option */}
-                                        <button
-                                            type="button"
-                                            onClick={() => setData('nav_color', data.primary_color || '')}
-                                            className={`relative flex flex-col items-center p-4 rounded-lg border-2 transition-all ${
-                                                (data.nav_color && data.nav_color === data.primary_color) 
-                                                    ? 'border-indigo-600 ring-2 ring-indigo-600' 
-                                                    : 'border-gray-200 hover:border-gray-300'
-                                            }`}
-                                        >
-                                            <div
-                                                className="w-full h-16 rounded-md mb-2"
-                                                style={{ backgroundColor: data.primary_color || '#6366f1' }}
-                                            />
-                                            <span className="text-sm font-medium text-gray-900">Primary</span>
-                                            <span className="text-xs text-gray-500 mt-1">{data.primary_color || '#6366f1'}</span>
-                                            {(data.nav_color && data.nav_color === data.primary_color) && (
-                                                <div className="absolute top-2 right-2">
-                                                    <svg className="h-5 w-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
-                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                            )}
-                                        </button>
-
-                                        {/* Secondary Color Option */}
-                                        {data.secondary_color ? (
-                                            <button
-                                                type="button"
-                                                onClick={() => setData('nav_color', data.secondary_color)}
-                                                className={`relative flex flex-col items-center p-4 rounded-lg border-2 transition-all ${
-                                                    data.nav_color === data.secondary_color 
-                                                        ? 'border-indigo-600 ring-2 ring-indigo-600' 
-                                                        : 'border-gray-200 hover:border-gray-300'
-                                                }`}
-                                            >
-                                                <div
-                                                    className="w-full h-16 rounded-md mb-2"
-                                                    style={{ backgroundColor: data.secondary_color }}
-                                                />
-                                                <span className="text-sm font-medium text-gray-900">Secondary</span>
-                                                <span className="text-xs text-gray-500 mt-1">{data.secondary_color}</span>
-                                                {data.nav_color === data.secondary_color && (
-                                                    <div className="absolute top-2 right-2">
-                                                        <svg className="h-5 w-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
-                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                                        </svg>
-                                                    </div>
-                                                )}
-                                            </button>
-                                        ) : (
-                                            <div className="flex flex-col items-center p-4 rounded-lg border-2 border-gray-100 opacity-50">
-                                                <div className="w-full h-16 rounded-md mb-2 bg-gray-50 border-2 border-dashed border-gray-200" />
-                                                <span className="text-sm font-medium text-gray-400">Secondary</span>
-                                                <span className="text-xs text-gray-400 mt-1">Not set</span>
-                                            </div>
-                                        )}
-
-                                        {/* Accent Color Option */}
-                                        {data.accent_color ? (
-                                            <button
-                                                type="button"
-                                                onClick={() => setData('nav_color', data.accent_color)}
-                                                className={`relative flex flex-col items-center p-4 rounded-lg border-2 transition-all ${
-                                                    data.nav_color === data.accent_color 
-                                                        ? 'border-indigo-600 ring-2 ring-indigo-600' 
-                                                        : 'border-gray-200 hover:border-gray-300'
-                                                }`}
-                                            >
-                                                <div
-                                                    className="w-full h-16 rounded-md mb-2"
-                                                    style={{ backgroundColor: data.accent_color }}
-                                                />
-                                                <span className="text-sm font-medium text-gray-900">Accent</span>
-                                                <span className="text-xs text-gray-500 mt-1">{data.accent_color}</span>
-                                                {data.nav_color === data.accent_color && (
-                                                    <div className="absolute top-2 right-2">
-                                                        <svg className="h-5 w-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
-                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                                        </svg>
-                                                    </div>
-                                                )}
-                                            </button>
-                                        ) : (
-                                            <div className="flex flex-col items-center p-4 rounded-lg border-2 border-gray-100 opacity-50">
-                                                <div className="w-full h-16 rounded-md mb-2 bg-gray-50 border-2 border-dashed border-gray-200" />
-                                                <span className="text-sm font-medium text-gray-400">Accent</span>
-                                                <span className="text-xs text-gray-400 mt-1">Not set</span>
-                                            </div>
-                                        )}
-
-                                        {/* Reset Option */}
-                                        <button
-                                            type="button"
-                                            onClick={() => setData('nav_color', '')}
-                                            className={`relative flex flex-col items-center p-4 rounded-lg border-2 transition-all ${
-                                                (!data.nav_color || data.nav_color === '') 
-                                                    ? 'border-indigo-600 ring-2 ring-indigo-600' 
-                                                    : 'border-gray-200 hover:border-gray-300'
-                                            }`}
-                                        >
-                                            <div className="w-full h-16 rounded-md mb-2 bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center">
-                                                <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </div>
-                                            <span className="text-sm font-medium text-gray-900">Use Primary</span>
-                                            <span className="text-xs text-gray-500 mt-1">Default</span>
-                                            {(!data.nav_color || data.nav_color === '') && (
-                                                <div className="absolute top-2 right-2">
-                                                    <svg className="h-5 w-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
-                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                            )}
-                                        </button>
-                                    </div>
-                                    {errors.nav_color && <p className="mt-2 text-sm text-red-600">{errors.nav_color}</p>}
-                                </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Metadata Section */}
+                    {/* Metadata Section - HIDDEN: Will be re-homed later */}
+                    {SHOW_CATEGORIES_AND_METADATA && (
                     <div id="metadata" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-1">
                             <h3 className="text-base font-semibold leading-6 text-gray-900">Metadata</h3>
@@ -1433,78 +1294,226 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
                     </div>
+                    )}
 
-                    {/* D10: Downloads → Landing Page — brand-level visuals (logo from assets, color from palette) */}
-                    <div id="downloads-landing" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-1">
-                            <h3 className="text-base font-semibold leading-6 text-gray-900">Downloads → Landing Page</h3>
-                            <p className="mt-2 text-sm text-gray-500">
-                                Brand-level defaults for download landing pages. Visuals come from brand assets and palette; per-download you only set headline and subtext.
-                            </p>
+                    </>
+                    )}
+
+                    {/* Tab: Public Pages — Public page theming (design system) */}
+                    {activeTab === 'public-pages' && (
+                    <div id="public-pages" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-2">
+                                    <h2 className="text-xl font-semibold text-gray-900">Public Page Theme</h2>
+                                    <p className="mt-3 text-sm text-gray-600 leading-relaxed max-w-xl">
+                                        Define how brand-facing pages look — downloads, shared links, collections, and campaign pages.
+                                    </p>
+                                </div>
+                                <PublicPageTheme
+                                    brand={brand}
+                                    data={data}
+                                    setData={setData}
+                                    route={typeof route === 'function' ? route : (name, params) => {
+                                        const p = params && typeof params === 'object' && !Array.isArray(params) ? params : {}
+                                        if (name === 'brands.download-background-candidates') return `/app/brands/${p.brand ?? params ?? brand.id}/download-background-candidates`
+                                        if (name === 'assets.thumbnail.final') return `/app/assets/${p.asset}/thumbnail/final/${p.style || 'medium'}`
+                                        return '#'
+                                    }}
+                                />
+                            </div>
                         </div>
-                        <div className="lg:col-span-2">
-                            <div className="overflow-hidden bg-white shadow sm:rounded-lg">
-                                <div className="px-4 py-5 sm:p-6">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between">
-                                            <label htmlFor="download_landing_enabled" className="block text-sm font-medium leading-6 text-gray-900">
-                                                Enable landing pages
-                                            </label>
+                    </div>
+                    )}
+
+                    {/* Tab: Workspace Appearance */}
+                    {activeTab === 'workspace' && (
+                    <div id="workspace-appearance" className="scroll-mt-8">
+                        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
+                            <div className="px-6 py-10 sm:px-10 sm:py-12">
+                                <div className="mb-1">
+                                    <h2 className="text-xl font-semibold text-gray-900">Workspace Appearance</h2>
+                                    <p className="mt-3 text-sm text-gray-600 leading-relaxed max-w-xl">
+                                        Control how the DAM interface looks for this brand.
+                                    </p>
+                                </div>
+                                <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-12">
+                                    {/* Button style selection */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Button Style</h4>
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            Color for Add Asset and primary action buttons in the workspace.
+                                        </p>
+                                        <div className="flex gap-2">
+                                            {['primary', 'secondary', 'accent'].map((style) => {
+                                                const hex = style === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : style === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
+                                                return (
+                                                    <button
+                                                        key={style}
+                                                        type="button"
+                                                        onClick={() => setData('workspace_button_style', style)}
+                                                        className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                                                            (data.workspace_button_style ?? data.settings?.button_style ?? 'primary') === style ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
+                                                        }`}
+                                                    >
+                                                        <div className="w-full h-10 rounded-md mb-1.5 flex items-center justify-center text-white text-xs font-medium" style={{ backgroundColor: hex }}>
+                                                            {style.charAt(0).toUpperCase() + style.slice(1)}
+                                                        </div>
+                                                        <span className="text-xs font-medium text-gray-900">{style.charAt(0).toUpperCase() + style.slice(1)}</span>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                    {/* Sidebar color selection */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Sidebar color</h4>
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            Choose a color from your brand palette. Leave empty to use the primary color.
+                                        </p>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                             <button
                                                 type="button"
-                                                onClick={() => setData('download_landing_settings.enabled', !data.download_landing_settings?.enabled)}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-                                                    data.download_landing_settings?.enabled ? 'bg-indigo-600' : 'bg-gray-200'
+                                                onClick={() => setData('nav_color', data.primary_color || '')}
+                                                className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                                                    (data.nav_color && data.nav_color === data.primary_color) ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
                                                 }`}
-                                                role="switch"
-                                                aria-checked={data.download_landing_settings?.enabled}
                                             >
-                                                <span
-                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                        data.download_landing_settings?.enabled ? 'translate-x-5' : 'translate-x-0'
-                                                    }`}
-                                                />
+                                                <div className="w-full h-12 rounded-md mb-1.5" style={{ backgroundColor: data.primary_color || '#6366f1' }} />
+                                                <span className="text-xs font-medium text-gray-900">Primary</span>
+                                                {(data.nav_color && data.nav_color === data.primary_color) && (
+                                                    <div className="absolute top-1.5 right-1.5">
+                                                        <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    </div>
+                                                )}
+                                            </button>
+                                            {data.secondary_color ? (
+                                                <button type="button" onClick={() => setData('nav_color', data.secondary_color)}
+                                                    className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${data.nav_color === data.secondary_color ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'}`}>
+                                                    <div className="w-full h-12 rounded-md mb-1.5" style={{ backgroundColor: data.secondary_color }} />
+                                                    <span className="text-xs font-medium text-gray-900">Secondary</span>
+                                                    {data.nav_color === data.secondary_color && (
+                                                        <div className="absolute top-1.5 right-1.5">
+                                                            <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                        </div>
+                                                    )}
+                                                </button>
+                                            ) : (
+                                                <div className="flex flex-col items-center p-3 rounded-lg border-2 border-gray-100 opacity-50">
+                                                    <div className="w-full h-12 rounded-md mb-1.5 bg-gray-50 border-2 border-dashed border-gray-200" />
+                                                    <span className="text-xs font-medium text-gray-400">Secondary</span>
+                                                </div>
+                                            )}
+                                            {data.accent_color ? (
+                                                <button type="button" onClick={() => setData('nav_color', data.accent_color)}
+                                                    className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${data.nav_color === data.accent_color ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'}`}>
+                                                    <div className="w-full h-12 rounded-md mb-1.5" style={{ backgroundColor: data.accent_color }} />
+                                                    <span className="text-xs font-medium text-gray-900">Accent</span>
+                                                    {data.nav_color === data.accent_color && (
+                                                        <div className="absolute top-1.5 right-1.5">
+                                                            <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                        </div>
+                                                    )}
+                                                </button>
+                                            ) : (
+                                                <div className="flex flex-col items-center p-3 rounded-lg border-2 border-gray-100 opacity-50">
+                                                    <div className="w-full h-12 rounded-md mb-1.5 bg-gray-50 border-2 border-dashed border-gray-200" />
+                                                    <span className="text-xs font-medium text-gray-400">Accent</span>
+                                                </div>
+                                            )}
+                                            <button type="button" onClick={() => setData('nav_color', '')}
+                                                className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${(!data.nav_color || data.nav_color === '') ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'}`}>
+                                                <div className="w-full h-12 rounded-md mb-1.5 bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center">
+                                                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </div>
+                                                <span className="text-xs font-medium text-gray-900">Use Primary</span>
+                                                {(!data.nav_color || data.nav_color === '') && (
+                                                    <div className="absolute top-1.5 right-1.5">
+                                                        <svg className="h-4 w-4 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    </div>
+                                                )}
                                             </button>
                                         </div>
-                                        {data.download_landing_settings?.enabled && (
-                                            <DownloadBrandingSelector
-                                                logoAssets={brand.logo_assets || []}
-                                                selectedLogoAssetId={data.download_landing_settings?.logo_asset_id ?? null}
-                                                onLogoChange={(id) => setData('download_landing_settings.logo_asset_id', id)}
-                                                primaryColor={data.primary_color || '#6366f1'}
-                                                secondaryColor={data.secondary_color || '#64748b'}
-                                                accentColor={data.accent_color || '#6366f1'}
-                                                selectedColorRole={data.download_landing_settings?.color_role || 'primary'}
-                                                onColorRoleChange={(role) => setData('download_landing_settings.color_role', role)}
-                                                backgroundAssets={(data.download_landing_settings?.background_asset_ids || []).map((id) =>
-                                                    (brand.background_asset_details || []).find((a) => a.id === id) || { id, thumbnail_url: null, original_filename: '' }
-                                                )}
-                                                backgroundAssetIds={data.download_landing_settings?.background_asset_ids || []}
-                                                onRemoveBackground={(id) => {
-                                                    const ids = (data.download_landing_settings?.background_asset_ids || []).filter((x) => x !== id)
-                                                    setData('download_landing_settings.background_asset_ids', ids)
-                                                }}
-                                                onBackgroundsConfirm={(ids) => setData('download_landing_settings.background_asset_ids', ids)}
-                                                fetchBackgroundCandidates={() =>
-                                                    fetch(typeof route === 'function' ? route('brands.download-background-candidates', brand.id) : `/app/brands/${brand.id}/download-background-candidates`, {
-                                                        credentials: 'same-origin',
-                                                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                    }).then((r) => r.json())
-                                                }
-                                                maxBackgrounds={5}
-                                                defaultHeadline={data.download_landing_settings?.default_headline || ''}
-                                                defaultSubtext={data.download_landing_settings?.default_subtext || ''}
-                                                onHeadlineChange={(v) => setData('download_landing_settings.default_headline', v)}
-                                                onSubtextChange={(v) => setData('download_landing_settings.default_subtext', v)}
-                                            />
-                                        )}
+                                        {errors.nav_color && <p className="mt-2 text-sm text-red-600">{errors.nav_color}</p>}
+                                    </div>
+                                    {/* DAM Appearance Preview */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Preview</h4>
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            A preview of how the workspace will appear in the DAM.
+                                        </p>
+                                        {(() => {
+                                            const sidebarColor = data.nav_color || data.primary_color || brand.primary_color || '#6366f1'
+                                            const sidebarTextColor = getContrastTextColor(sidebarColor)
+                                            const btnStyle = data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
+                                            const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || '#6366f1')
+                                            return (
+                                                <div className="rounded-lg border border-gray-200 overflow-hidden bg-gray-50 shadow-inner">
+                                                    <div className="flex" style={{ minHeight: 220 }}>
+                                                        {/* Sidebar */}
+                                                        <aside
+                                                            className="w-14 flex flex-col flex-shrink-0"
+                                                            style={{ backgroundColor: sidebarColor, color: sidebarTextColor }}
+                                                        >
+                                                            <div className="p-2 flex items-center justify-center border-b border-current/10">
+                                                                {(data.logo_preview ?? brand.logo_thumbnail_url ?? brand.logo_path) ? (
+                                                                    <img src={data.logo_preview ?? brand.logo_thumbnail_url ?? brand.logo_path} alt="" className="w-8 h-6 object-contain" />
+                                                                ) : (
+                                                                    <div className="w-8 h-6 rounded bg-black/10 flex items-center justify-center" style={{ color: 'inherit' }}>
+                                                                        <span className="text-[8px] font-medium opacity-90">Logo</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <nav className="flex-1 py-2 space-y-0.5">
+                                                                {['Assets', 'Collections', 'Deliverables'].map((label) => (
+                                                                    <div key={label} className="px-2 py-1.5 text-[9px] font-medium truncate opacity-90" style={{ color: 'inherit' }}>
+                                                                        {label}
+                                                                    </div>
+                                                                ))}
+                                                            </nav>
+                                                        </aside>
+                                                        {/* Main content */}
+                                                        <main className="flex-1 flex flex-col bg-white min-w-0">
+                                                            {/* Header row — Add Asset top-left */}
+                                                            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 flex-shrink-0">
+                                                                <span
+                                                                    className="px-2.5 py-1 rounded text-[10px] font-medium text-white"
+                                                                    style={{ backgroundColor: btnColor }}
+                                                                >
+                                                                    Add Asset
+                                                                </span>
+                                                            </div>
+                                                            {/* Search bar + filter row */}
+                                                            <div className="px-3 py-2 space-y-2 border-b border-gray-100 flex-shrink-0">
+                                                                <div className="h-6 bg-gray-100 rounded w-full max-w-[140px]" />
+                                                                <div className="flex gap-1.5">
+                                                                    <div className="h-5 w-12 bg-gray-100 rounded" />
+                                                                    <div className="h-5 w-10 bg-gray-100 rounded" />
+                                                                    <div className="h-5 w-14 bg-gray-100 rounded" />
+                                                                </div>
+                                                            </div>
+                                                            {/* Asset grid blocks */}
+                                                            <div className="flex-1 p-3 overflow-hidden">
+                                                                <div className="grid grid-cols-4 gap-1.5">
+                                                                    {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                                                                        <div key={i} className="aspect-square bg-gray-200 rounded" />
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        </main>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })()}
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    )}
 
-                    {/* Categories Section */}
+                    {/* Categories Section - HIDDEN: Will be re-homed later */}
+                    {SHOW_CATEGORIES_AND_METADATA && (
                     <div id="categories" className="scroll-mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-1">
                             <div className="flex items-center justify-between">
@@ -1937,7 +1946,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                             </div>
                         </div>
                     </div>
-
+                    )}
 
                     {errors.error && (
                         <div className="rounded-md bg-red-50 p-4">
@@ -1962,6 +1971,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                         </button>
                     </div>
                 </form>
+                )}
                 </div>
                     </main>
                     <AppFooter />

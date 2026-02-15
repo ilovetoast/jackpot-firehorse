@@ -11,6 +11,9 @@ export default function CollectionsSidebar({
     selectedCollectionId = null,
     sidebarColor = '#1f2937',
     textColor = '#ffffff',
+    activeBgColor = null, // Accent-based highlight when provided
+    activeTextColor = null, // Contrast text for selected item (when using full accent bg)
+    hoverBgColor = null,
     canCreateCollection = false,
     onCreateCollection = null,
     publicCollectionsEnabled = false,
@@ -18,6 +21,8 @@ export default function CollectionsSidebar({
     const isLight = textColor === '#000000'
     const mutedStyle = { color: isLight ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.6)' }
     const buttonBg = isLight ? 'bg-black/10 hover:bg-black/15' : 'bg-white/20 hover:bg-white/30'
+    const itemActiveBg = activeBgColor || (isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.2)')
+    const itemHoverBg = hoverBgColor || (isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.1)')
     const buttonText = isLight ? 'text-gray-900' : 'text-white'
 
     const handleSelectCollection = (id) => {
@@ -54,32 +59,42 @@ export default function CollectionsSidebar({
                                     const isActive = selectedCollectionId != null && c.id === selectedCollectionId
                                     const showPublic = publicCollectionsEnabled && !!c.is_public
                                     const count = typeof c.assets_count === 'number' ? c.assets_count : null
+                                    const itemTextColor = isActive && activeTextColor ? activeTextColor : textColor
                                     return (
                                         <button
                                             key={c.id}
                                             type="button"
                                             onClick={() => handleSelectCollection(c.id)}
-                                            className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${
-                                                isActive
-                                                    ? isLight
-                                                        ? 'bg-black/10 text-black'
-                                                        : 'bg-white/20 text-white'
-                                                    : isLight
-                                                        ? 'text-gray-800 hover:bg-black/5'
-                                                        : 'text-white/90 hover:bg-white/10'
-                                            }`}
+                                            className="w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2"
+                                            style={{
+                                                backgroundColor: isActive ? itemActiveBg : 'transparent',
+                                                color: itemTextColor,
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                if (!isActive) {
+                                                    e.currentTarget.style.backgroundColor = itemHoverBg
+                                                    e.currentTarget.style.color = textColor
+                                                }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                if (!isActive) {
+                                                    e.currentTarget.style.backgroundColor = 'transparent'
+                                                    e.currentTarget.style.color = textColor
+                                                }
+                                            }}
                                         >
-                                            <RectangleStackIcon className="h-4 w-4 flex-shrink-0" />
+                                            <RectangleStackIcon className="h-4 w-4 flex-shrink-0" style={{ color: itemTextColor }} />
                                             <span className="truncate flex-1 min-w-0">{c.name}</span>
                                             {showPublic && (
                                                 <GlobeAltIcon
                                                     className="h-4 w-4 flex-shrink-0 opacity-80"
+                                                    style={{ color: itemTextColor }}
                                                     title="Public collection — viewable via shareable link"
                                                     aria-hidden="true"
                                                 />
                                             )}
                                             {count !== null && (
-                                                <span className="flex-shrink-0 text-xs opacity-80" aria-label={`${count} assets`}>
+                                                <span className="flex-shrink-0 text-xs opacity-80" style={{ color: itemTextColor }} aria-label={`${count} assets`}>
                                                     {count}
                                                 </span>
                                             )}

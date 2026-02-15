@@ -323,6 +323,51 @@ class AssetThumbnailController extends Controller
     }
 
     /**
+     * Stream logo for public download page (no auth).
+     *
+     * GET /d/{download}/logo
+     *
+     * Resolves the download's brand logo_asset_id, then streams the asset's
+     * medium_display thumbnail (transparent, no gray block) or falls back to medium.
+     *
+     * @param Request $request
+     * @param Download $download
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
+    public function streamLogoForPublicDownload(Request $request, Download $download): \Symfony\Component\HttpFoundation\Response
+    {
+        $download->loadMissing('brand');
+        $brand = $download->brand_id ? $download->brand : null;
+        if (! $brand) {
+            abort(404, 'Logo not available.');
+        }
+        $brand->refresh();
+        $brandSettings = $brand->download_landing_settings ?? [];
+        $logoAssetId = $brandSettings['logo_asset_id'] ?? null;
+        if (! $logoAssetId) {
+            abort(404, 'Logo not available.');
+        }
+        $asset = Asset::where('brand_id', $brand->id)->where('id', $logoAssetId)->first();
+        if (! $asset || $asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            abort(404, 'Logo not available.');
+        }
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium_display') ?: $asset->thumbnailPathForStyle('medium');
+        if (! $thumbnailPath) {
+            abort(404, 'Logo not available.');
+        }
+        try {
+            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
+        } catch (\Throwable $e) {
+            Log::warning('Public download logo thumbnail stream failed', [
+                'download_id' => $download->id,
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404, 'Logo not available.');
+        }
+    }
+
+    /**
      * Legacy endpoint for backward compatibility.
      *
      * GET /app/assets/{asset}/thumbnail/{style}

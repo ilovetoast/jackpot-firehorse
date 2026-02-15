@@ -213,8 +213,6 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             }}
         >
             {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) */}
-            {/* Use ThumbnailPreview component for consistent state machine and fade-in */}
-            {/* FORBIDDEN: Never use green placeholders. ThumbnailPreview handles all states with FileTypeIcon fallback. */}
             <div 
                 className="aspect-[4/3] bg-gray-50 relative overflow-hidden"
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}

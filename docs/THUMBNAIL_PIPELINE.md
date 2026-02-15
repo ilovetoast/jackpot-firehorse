@@ -60,6 +60,12 @@ The thumbnail pipeline supports the following file types:
 
 **⚠️ Warning**: Large or malformed PDFs may cause processing timeouts or memory issues. The system enforces size limits and timeouts to prevent resource exhaustion.
 
+### Thumbnail Styles
+
+- **preview**: LQIP (blurred, small)
+- **thumb**, **medium**, **large**: Standard styles; white logos get gray background for visibility in pickers
+- **medium_display**: Same as medium but preserves transparency (no gray block). Used for public page logo and theme preview. Existing assets need thumbnail regeneration to get this style.
+
 ### Key Components
 
 1. **GenerateThumbnailsJob** (`app/Jobs/GenerateThumbnailsJob.php`)
@@ -187,6 +193,13 @@ These features are **not currently implemented** and should not be added without
 2. **Drawer**: Check polling is active (should auto-update)
 3. **Backend**: Verify `thumbnail_status` is COMPLETED
 4. **Storage**: Check S3 bucket for thumbnail files
+
+### White Logos on Transparent Background
+
+Transparent logos (PNG, WebP, GIF) with white content get a gray-400 background so they remain visible. If existing assets still show white-on-white:
+
+1. **Retry** (any user with `assets.retry_thumbnails`): Open asset drawer → "Retry Thumbnail Generation"
+2. **Regenerate** (admin with `assets.regenerate_thumbnails_admin`): Asset Details → Thumbnail Management → Regenerate Thumbnails
 
 ### Infinite Spinners
 

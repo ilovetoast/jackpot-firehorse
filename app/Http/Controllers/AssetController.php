@@ -58,6 +58,9 @@ class AssetController extends Controller
 
         if (!$tenant || !$brand) {
             // Handle case where tenant or brand is not resolved (e.g., no active tenant/brand)
+            if ($request->get('format') === 'json') {
+                return response()->json(['assets' => [], 'categories' => [], 'categories_by_type' => ['all' => []]]);
+            }
             return Inertia::render('Assets/Index', [
                 'categories' => [],
                 'categories_by_type' => ['all' => []],
@@ -628,6 +631,15 @@ class AssetController extends Controller
             return response()->json([
                 'data' => $mappedAssets,
                 'next_page_url' => $nextPageUrl,
+            ]);
+        }
+
+        // format=json: return plain JSON for pickers/modals (avoids Inertia 409 version mismatch)
+        if ($request->get('format') === 'json') {
+            return response()->json([
+                'assets' => $mappedAssets,
+                'categories' => $allCategories->values()->all(),
+                'categories_by_type' => ['all' => $allCategories->values()->all()],
             ]);
         }
 

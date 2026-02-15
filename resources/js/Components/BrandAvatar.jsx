@@ -12,7 +12,7 @@
  * @param {string} size - Size variant: 'sm', 'md', 'lg', 'xl' or custom className
  * @param {string} className - Additional CSS classes
  */
-import { getContrastTextColor } from '../utils/colorUtils'
+import { getContrastTextColor, getLuminance } from '../utils/colorUtils'
 import { CategoryIcon } from '../Helpers/categoryIcons'
 
 export default function BrandAvatar({ 
@@ -57,6 +57,9 @@ export default function BrandAvatar({
         if (iconPath) {
             // Show uploaded icon with background color if provided
             if (iconBgColor && iconBgColor.trim() !== '') {
+                // Apply invert filter for icon image when background is light (luminance >= 0.5)
+                const luminance = getLuminance(iconBgColor)
+                const isLightBg = luminance >= 0.5
                 return (
                     <div 
                         className={`${baseClasses} ${sizeClass} ${className}`}
@@ -66,6 +69,7 @@ export default function BrandAvatar({
                             src={iconPath}
                             alt={name || 'Brand'}
                             className={`${iconSizeClass} object-contain`}
+                            style={isLightBg ? { filter: 'brightness(0)' } : undefined}
                         />
                     </div>
                 )
@@ -84,6 +88,7 @@ export default function BrandAvatar({
         if (icon) {
             // Only show background color if iconBgColor is explicitly set
             if (iconBgColor && iconBgColor.trim() !== '') {
+                const iconColor = getContrastTextColor(iconBgColor)
                 return (
                     <div 
                         className={`${baseClasses} ${sizeClass} ${className}`}
@@ -92,7 +97,7 @@ export default function BrandAvatar({
                         <CategoryIcon 
                             iconId={icon} 
                             className={iconSizeClass} 
-                            color="text-white"
+                            style={{ color: iconColor }}
                         />
                     </div>
                 )
@@ -108,6 +113,18 @@ export default function BrandAvatar({
                 </div>
             )
         }
+
+        // No icon uploaded yet — show initial with iconBgColor so Background Style preview updates live
+        const bgColor = iconBgColor && iconBgColor.trim() !== '' ? iconBgColor : primaryColor
+        const textColor = getContrastTextColor(bgColor)
+        return (
+            <div 
+                className={`${baseClasses} ${sizeClass} ${className}`}
+                style={{ backgroundColor: bgColor }}
+            >
+                <span className="font-medium" style={{ color: textColor }}>{firstLetter}</span>
+            </div>
+        )
     }
     
     // Show logo if available (when NOT using icon mode). Use contain so full logo is visible (same as graphics).

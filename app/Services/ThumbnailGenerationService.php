@@ -789,27 +789,29 @@ class ThumbnailGenerationService
                 throw new \RuntimeException('Failed to create thumbnail image resource');
             }
             
-            // Detect if image has white content on transparent background
+            // Detect if image has white content on transparent background (PNG, GIF, WebP support transparency)
             $needsDarkBackground = false;
-            if ($sourceType === IMAGETYPE_PNG || $sourceType === IMAGETYPE_GIF) {
-                // Check if image has transparency and white content
-                $needsDarkBackground = $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
-                
+            $preserveTransparency = !empty($styleConfig['preserve_transparency']);
+            $supportsTransparency = in_array($sourceType, [IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP], true);
+            if ($supportsTransparency) {
+                // When preserve_transparency: skip gray fill so logo displays as-is on public pages
+                if (!$preserveTransparency) {
+                    $needsDarkBackground = $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
+                }
                 if ($needsDarkBackground) {
-                    // Use darker gray background (gray-300: #D1D5DB / RGB: 209, 213, 219)
-                    // This makes white content clearly visible on transparent backgrounds
-                    // Gray-300 provides better contrast than gray-200 for white logos/text
-                    $darkGray = imagecolorallocate($thumbImage, 209, 213, 219);
+                    // Use gray-400 (#9CA3AF) for strong contrast with white logos
+                    // Gray-300 was too light; gray-400 makes white-on-transparent clearly visible
+                    $darkGray = imagecolorallocate($thumbImage, 156, 163, 175);
                     imagefill($thumbImage, 0, 0, $darkGray);
                 } else {
-                    // Preserve transparency for PNG and GIF
+                    // Preserve transparency when no white-on-transparent content
                     imagealphablending($thumbImage, false);
                     imagesavealpha($thumbImage, true);
                     $transparent = imagecolorallocatealpha($thumbImage, 0, 0, 0, 127);
                     imagefill($thumbImage, 0, 0, $transparent);
                 }
             } else {
-                // Fill with white background for opaque formats
+                // Fill with white background for opaque formats (JPEG, etc.)
                 $white = imagecolorallocate($thumbImage, 255, 255, 255);
                 imagefill($thumbImage, 0, 0, $white);
             }
@@ -1389,15 +1391,15 @@ class ThumbnailGenerationService
                 }
 
                 // Check if extracted PDF page has white content
-                // Use the already-loaded sourceImage to detect white content
-                $needsDarkBackground = $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
+                // When preserve_transparency: skip gray fill for logo display
+                $preserveTransparency = !empty($styleConfig['preserve_transparency']);
+                $needsDarkBackground = !$preserveTransparency
+                    && $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
                 
                 // Use darker background if white content detected, otherwise white
                 if ($needsDarkBackground) {
-                    // Use darker gray background (gray-300: #D1D5DB / RGB: 209, 213, 219)
-                    // This makes white content clearly visible on transparent backgrounds
-                    // Gray-300 provides better contrast than gray-200 for white logos/text
-                    $darkGray = imagecolorallocate($thumbImage, 209, 213, 219);
+                    // Use gray-400 (#9CA3AF) for strong contrast with white logos
+                    $darkGray = imagecolorallocate($thumbImage, 156, 163, 175);
                     imagefill($thumbImage, 0, 0, $darkGray);
                 } else {
                     // Fill with white background (PDFs may have transparency)
@@ -2191,8 +2193,8 @@ class ThumbnailGenerationService
      * areas where the visible content is not mostly white.
      *
      * Criteria (all required):
-     * - At least 15% of pixels are transparent (so it's "content on transparent", not opaque photo).
-     * - Among visible (opaque) pixels, at least 75% are white/near-white (entirely or nearly entirely white).
+     * - At least 8% of pixels are transparent (so it's "content on transparent", not opaque photo).
+     * - Among visible (opaque) pixels, at least 55% are white/near-white (relaxed for anti-aliasing).
      *
      * @param resource $imageResource GD image resource
      * @param int $width Image width
@@ -2214,17 +2216,21 @@ class ThumbnailGenerationService
             for ($x = 0; $x < $width; $x += $stepX) {
                 $totalSampled++;
                 $color = imagecolorat($imageResource, $x, $y);
-                $alpha = ($color >> 24) & 0x7F;
+                // Support both 7-bit (0-127) and 8-bit (0-255) alpha; GD varies by format
+                $alpha = ($color >> 24) & 0xFF;
                 $red = ($color >> 16) & 0xFF;
                 $green = ($color >> 8) & 0xFF;
                 $blue = $color & 0xFF;
 
-                if ($alpha >= 100) {
+                // Treat as transparent: alpha >= 100 (covers 7-bit 100-127 and 8-bit 200-255)
+                $isTransparent = $alpha >= 100;
+                if ($isTransparent) {
                     $transparentPixelCount++;
                     continue;
                 }
                 $visiblePixelCount++;
-                $isWhite = ($red > 220 && $green > 220 && $blue > 220);
+                // Near-white: allow anti-aliased edges (210 threshold)
+                $isWhite = ($red > 210 && $green > 210 && $blue > 210);
                 if ($isWhite) {
                     $whitePixelCount++;
                 }
@@ -2238,9 +2244,9 @@ class ThumbnailGenerationService
         $transparentRatio = $transparentPixelCount / $totalSampled;
         $whiteRatio = $whitePixelCount / $visiblePixelCount;
 
-        // Only add backdrop when: (1) significant transparency, (2) visible content is nearly entirely white
-        $hasSignificantTransparency = $transparentRatio >= 0.15;
-        $isNearlyAllWhiteContent = $whiteRatio >= 0.75;
+        // Relaxed thresholds: catch more white logos (anti-aliasing, varied layouts)
+        $hasSignificantTransparency = $transparentRatio >= 0.08;
+        $isNearlyAllWhiteContent = $whiteRatio >= 0.55;
         $needsDarkBackground = $hasSignificantTransparency && $isNearlyAllWhiteContent;
 
         Log::debug('[ThumbnailGenerationService] White content detection', [

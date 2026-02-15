@@ -54,6 +54,8 @@ Route::get('/d/{download}', [\App\Http\Controllers\DownloadController::class, 'd
 Route::get('/downloads/{download}/share', fn (\App\Models\Download $download) => redirect()->route('downloads.public', ['download' => $download->id]))->name('downloads.share')->middleware(['web']);
 // D10.1: Public background image for download landing (no auth — so background image loads for guests)
 Route::get('/d/{download}/background', [\App\Http\Controllers\AssetThumbnailController::class, 'streamThumbnailForPublicDownload'])->name('downloads.public.background')->middleware(['web']);
+// D10.1: Public logo for download landing (no auth — transparent, no gray block)
+Route::get('/d/{download}/logo', [\App\Http\Controllers\AssetThumbnailController::class, 'streamLogoForPublicDownload'])->name('downloads.public.logo')->middleware(['web']);
 // Public file delivery only (ZIP redirect) — rate-limited to prevent abuse; landing page remains unthrottled
 Route::get('/d/{download}/file', [\App\Http\Controllers\DownloadController::class, 'deliverFile'])->name('downloads.public.file')->middleware(['web', 'throttle:20,10']);
 // D7: Unlock password-protected download (light rate limit)

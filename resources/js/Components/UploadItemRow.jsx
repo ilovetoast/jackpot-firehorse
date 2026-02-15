@@ -514,11 +514,12 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                         <div className="flex-shrink-0 mr-3">
                             {isImage && previewUrl ? (
                                 // Show file preview for images during upload (blob URL from file object)
-                                <div className="relative h-10 w-10 rounded border border-gray-200 overflow-hidden bg-gray-50">
+                                // Use gray-300 so white-on-transparent logos are visible
+                                <div className="relative h-10 w-10 rounded border border-gray-200 overflow-hidden bg-gray-300">
                                     <img
                                         src={previewUrl}
                                         alt={resolvedFilename}
-                                        className="h-full w-full object-cover"
+                                        className="h-full w-full object-contain"
                                         onError={(e) => {
                                             // If preview fails to load, hide image and show icon instead
                                             e.currentTarget.style.display = 'none'

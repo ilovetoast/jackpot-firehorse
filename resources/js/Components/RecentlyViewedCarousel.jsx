@@ -71,7 +71,6 @@ export default function RecentlyViewedCarousel({ assets = [], title = 'Recently 
         const categoryName = asset.category?.name || asset.category_name || ''
         const categoryLower = categoryName.toLowerCase()
         
-        // Brand-specific colors based on category
         if (categoryLower.includes('logo')) {
             return 'bg-indigo-50'
         } else if (categoryLower.includes('graphic')) {

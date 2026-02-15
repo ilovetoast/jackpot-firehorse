@@ -16,6 +16,7 @@ import AssetDrawer from '../../Components/AssetDrawer'
 import { useBucket } from '../../contexts/BucketContext'
 import { RectangleStackIcon, PlusIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
 import axios from 'axios'
 
 export default function CollectionsIndex({
@@ -36,6 +37,7 @@ export default function CollectionsIndex({
     const selectedCollectionId = selected_collection?.id ?? null
 
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937'
+    const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
         const hex = color.replace('#', '')
@@ -46,6 +48,10 @@ export default function CollectionsIndex({
         return luminance > 0.5
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
+    // Use full accent color for selected collection; hover uses subtle tint
+    const activeBgColor = workspaceAccentColor
+    const activeTextColor = getContrastTextColor(workspaceAccentColor)
+    const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
 
     const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
@@ -170,6 +176,9 @@ export default function CollectionsIndex({
                         selectedCollectionId={selectedCollectionId}
                         sidebarColor={sidebarColor}
                         textColor={textColor}
+                        activeBgColor={activeBgColor}
+                        activeTextColor={activeTextColor}
+                        hoverBgColor={hoverBgColor}
                         canCreateCollection={can_create_collection}
                         onCreateCollection={() => setShowCreateModal(true)}
                         publicCollectionsEnabled={public_collections_enabled}
@@ -204,7 +213,7 @@ export default function CollectionsIndex({
                                             const showPublic = public_collections_enabled && !!c.is_public
                                             const count = typeof c.assets_count === 'number' ? c.assets_count : null
                                             return (
-                                                <button key={c.id} type="button" onClick={() => { router.get('/app/collections', { collection: c.id }, { preserveState: true }); setMobileCollectionsOpen(false) }} className={`flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left gap-2 ${isActive ? (textColor === '#000000' ? 'bg-black/10 text-black' : 'bg-white/20 text-white') : (textColor === '#000000' ? 'text-gray-800 hover:bg-black/5' : 'text-white/90 hover:bg-white/10')}`} style={textColor === '#000000' ? {} : { color: isActive ? '#fff' : 'rgba(255,255,255,0.9)' }}>
+                                                <button key={c.id} type="button" onClick={() => { router.get('/app/collections', { collection: c.id }, { preserveState: true }); setMobileCollectionsOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left gap-2" style={{ backgroundColor: isActive ? activeBgColor : 'transparent', color: isActive ? activeTextColor : textColor }}>
                                                     <RectangleStackIcon className="h-4 w-4 flex-shrink-0" />
                                                     <span className="truncate flex-1 min-w-0">{c.name}</span>
                                                     {showPublic && <GlobeAltIcon className="h-4 w-4 flex-shrink-0 opacity-80" title="Public" aria-hidden="true" />}
@@ -294,7 +303,7 @@ export default function CollectionsIndex({
                                             onToggleInfo={() => setShowInfo((v) => !v)}
                                             cardSize={cardSize}
                                             onCardSizeChange={setCardSize}
-                                            primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                            primaryColor={workspaceAccentColor}
                                             bulkSelectedCount={0}
                                             onBulkEdit={null}
                                             onToggleBulkMode={null}
@@ -318,7 +327,7 @@ export default function CollectionsIndex({
                                                     available_values={{}}
                                                     canManageFields={false}
                                                     assetType="image"
-                                                    primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                                    primaryColor={workspaceAccentColor}
                                                     sortBy={sort}
                                                     sortDirection={sort_direction}
                                                     onSortChange={(newSort, newDir) => {
@@ -356,7 +365,7 @@ export default function CollectionsIndex({
                                             cardSize={cardSize}
                                             showInfo={showInfo}
                                             selectedAssetId={activeAssetId}
-                                            primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                            primaryColor={workspaceAccentColor}
                                             selectedAssetIds={[]}
                                             onAssetSelect={null}
                                             bucketAssetIds={bucketAssetIds}

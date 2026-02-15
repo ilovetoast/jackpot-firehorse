@@ -85,13 +85,15 @@ export default function ImageCropModal({
     }
 
     const handleCropComplete = async () => {
-        if (!croppedAreaPixels) {
-            return
-        }
-
         setProcessing(true)
         try {
-            const croppedImage = await getCroppedImg(imageSrc, croppedAreaPixels)
+            // react-easy-crop may not fire onCropComplete until user interacts; use full image as fallback
+            let pixelCrop = croppedAreaPixels
+            if (!pixelCrop) {
+                const image = await createImage(imageSrc)
+                pixelCrop = { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight }
+            }
+            const croppedImage = await getCroppedImg(imageSrc, pixelCrop)
             onCropComplete(croppedImage)
             onClose()
         } catch (error) {

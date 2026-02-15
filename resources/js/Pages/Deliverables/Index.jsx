@@ -16,6 +16,7 @@ import AssetDrawer from '../../Components/AssetDrawer'
 import { useBucket } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../utils/uiLabels'
+import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
 import {
     TagIcon,
     SparklesIcon,
@@ -305,6 +306,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
 
     // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
     const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
+    const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
         const hex = color.replace('#', '')
@@ -315,8 +317,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         return luminance > 0.5
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
-    const hoverBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)'
-    const activeBgColor = isLightColor(sidebarColor) ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)'
+    // Use full accent color for selected category; hover uses subtle tint
+    const activeBgColor = workspaceAccentColor
+    const activeTextColor = getContrastTextColor(workspaceAccentColor)
+    const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
     
     // Key only by remountKey so category changes do NOT remount (avoids double flash).
     // Assets does not use a category-dependent key; matching that here fixes Executions flashing twice.
@@ -462,23 +466,25 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                                 className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                 style={{
                                                     backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent',
-                                                    color: textColor,
+                                                    color: selectedCategoryId === null ? activeTextColor : textColor,
                                                 }}
                                                 onMouseEnter={(e) => {
                                                     if (selectedCategoryId !== null) {
                                                         e.currentTarget.style.backgroundColor = hoverBgColor
+                                                        e.currentTarget.style.color = textColor
                                                     }
                                                 }}
                                                 onMouseLeave={(e) => {
                                                     if (selectedCategoryId !== null) {
                                                         e.currentTarget.style.backgroundColor = 'transparent'
+                                                        e.currentTarget.style.color = textColor
                                                     }
                                                 }}
                                                 >
-                                                <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }} />
+                                                <TagIcon className="mr-3 flex-shrink-0 h-5 w-5" style={{ color: selectedCategoryId === null ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }} />
                                                 <span className="flex-1">All</span>
                                                 {total_asset_count > 0 && (
-                                                    <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                    <span className="text-xs font-normal opacity-80" style={{ color: selectedCategoryId === null ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)') }}>
                                                         {total_asset_count}
                                                     </span>
                                                 )}
@@ -501,27 +507,29 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                                     className="group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left"
                                                     style={{
                                                         backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent',
-                                                        color: textColor,
+                                                        color: selectedCategoryId === category.id ? activeTextColor : textColor,
                                                     }}
                                                     onMouseEnter={(e) => {
                                                         if (selectedCategoryId !== category.id) {
                                                             e.currentTarget.style.backgroundColor = hoverBgColor
+                                                            e.currentTarget.style.color = textColor
                                                         }
                                                     }}
                                                     onMouseLeave={(e) => {
                                                         if (selectedCategoryId !== category.id) {
                                                             e.currentTarget.style.backgroundColor = 'transparent'
+                                                            e.currentTarget.style.color = textColor
                                                         }
                                                     }}
                                                 >
                                                     <CategoryIcon 
                                                         iconId={category.icon || 'folder'} 
                                                         className="mr-3 flex-shrink-0 h-5 w-5" 
-                                                        style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
+                                                        style={{ color: selectedCategoryId === category.id ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }}
                                                     />
                                                     <span className="flex-1">{category.name}</span>
                                                     {category.asset_count !== undefined && category.asset_count > 0 && (
-                                                        <span className="text-xs font-normal opacity-50" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)' }}>
+                                                        <span className="text-xs font-normal opacity-80" style={{ color: selectedCategoryId === category.id ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)') }}>
                                                             {category.asset_count}
                                                         </span>
                                                     )}
@@ -529,7 +537,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                                         <div className="relative ml-2 group">
                                                             <LockClosedIcon 
                                                                 className="h-4 w-4 flex-shrink-0 cursor-help" 
-                                                                style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }}
+                                                                style={{ color: selectedCategoryId === category.id ? activeTextColor : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)') }}
                                                                 onMouseEnter={() => setTooltipVisible(category.id || `template-${category.slug}-${category.asset_type}`)}
                                                                 onMouseLeave={() => setTooltipVisible(null)}
                                                             />
@@ -576,7 +584,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                         <div className="flex-shrink-0 px-2 pb-3">
                             <OnlineUsersIndicator
                                 textColor={textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'}
-                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                primaryColor={workspaceAccentColor}
                                 isLightBackground={isLightColor(sidebarColor)}
                             />
                         </div>
@@ -602,14 +610,14 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 )}
                                 <div className="space-y-0.5">
                                     {show_all_button && (
-                                        <button onClick={() => { handleCategorySelect(null); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent', color: textColor }}>
-                                            <TagIcon className="mr-3 h-5 w-5 opacity-60" style={{ color: textColor }} /><span className="flex-1">All</span>
+                                        <button onClick={() => { handleCategorySelect(null); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent', color: selectedCategoryId === null ? activeTextColor : textColor }}>
+                                            <TagIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId === null ? activeTextColor : textColor }} /><span className="flex-1">All</span>
                                             {total_asset_count > 0 && <span className="text-xs opacity-50">{total_asset_count}</span>}
                                         </button>
                                     )}
                                     {categories.length > 0 && categories.filter(c => !(c.is_hidden === true || c.is_hidden === 1 || c.is_hidden === '1' || c.is_hidden === 'true')).map((category) => (
-                                        <button key={category.id || `template-${category.slug}-${category.asset_type}`} onClick={() => { handleCategorySelect(category); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent', color: textColor }}>
-                                            <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-60" style={{ color: textColor }} /><span className="flex-1">{category.name}</span>
+                                        <button key={category.id || `template-${category.slug}-${category.asset_type}`} onClick={() => { handleCategorySelect(category); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent', color: selectedCategoryId === category.id ? activeTextColor : textColor }}>
+                                            <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId === category.id ? activeTextColor : textColor }} /><span className="flex-1">{category.name}</span>
                                             {category.asset_count > 0 && <span className="text-xs opacity-50">{category.asset_count}</span>}
                                         </button>
                                     ))}
@@ -644,11 +652,10 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                     >
                         {/* Drag and drop overlay */}
                         {isDraggingOver && (() => {
-                            const primaryColor = auth.activeBrand?.primary_color || '#6366f1'
                             // Ensure color has # prefix, then add 60% opacity (99 in hex = ~60%)
-                            const colorWithOpacity = primaryColor.startsWith('#') 
-                                ? `${primaryColor}99` 
-                                : `#${primaryColor}99`
+                            const colorWithOpacity = workspaceAccentColor.startsWith('#') 
+                                ? `${workspaceAccentColor}99` 
+                                : `#${workspaceAccentColor}99`
                             
                             return (
                                 <div 
@@ -677,7 +684,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 onToggleInfo={() => setShowInfo(v => !v)}
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
-                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                primaryColor={workspaceAccentColor}
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={available_values}
@@ -718,7 +725,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                         available_values={available_values}
                                         canManageFields={(auth?.permissions || []).includes('manage categories') || ['admin', 'owner'].includes(auth?.tenant_role?.toLowerCase() || '')}
                                         assetType="image"
-                                        primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                        primaryColor={workspaceAccentColor}
                                         sortBy={sort}
                                         sortDirection={sort_direction}
                                         onSortChange={(newSort, newDir) => {
@@ -758,7 +765,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 cardSize={cardSize}
                                 showInfo={showInfo}
                                 selectedAssetId={activeAssetId}
-                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                primaryColor={workspaceAccentColor}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
                             />
@@ -814,7 +821,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
-                                primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                                primaryColor={workspaceAccentColor}
                             />
                         </div>
                     )}
@@ -838,7 +845,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}
-                            primaryColor={auth.activeBrand?.primary_color || '#6366f1'}
+                            primaryColor={workspaceAccentColor}
                         />
                     </div>
                 )}
