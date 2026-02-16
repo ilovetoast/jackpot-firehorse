@@ -579,8 +579,21 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         
         const files = Array.from(e.dataTransfer.files || [])
         if (files.length > 0) {
-            // Filter to only image files (or adjust as needed)
-            const imageFiles = files.filter(file => file.type.startsWith('image/') || file.type.startsWith('video/') || file.type === 'application/pdf')
+            // Filter to supported DAM file types (images, video, PDF, PSD, AI, SVG, Office, etc.)
+            const supportedMimes = [
+                'image/', 'video/', 'application/pdf', 'application/postscript',
+                'application/vnd.adobe.illustrator', 'application/illustrator',
+                'image/vnd.adobe.photoshop', 'image/svg+xml',
+                'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+                'application/vnd.openxmlformats-officedocument.',
+            ]
+            const supportedExts = ['ai', 'psd', 'psb', 'svg', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']
+            const isSupported = (f) => {
+                if (supportedMimes.some(m => f.type && (f.type.startsWith(m) || f.type === m))) return true
+                const ext = (f.name || '').split('.').pop()?.toLowerCase()
+                return ext && supportedExts.includes(ext)
+            }
+            const imageFiles = files.filter(isSupported)
             if (imageFiles.length > 0) {
                 handleOpenUploadDialog(imageFiles)
             }

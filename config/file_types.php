@@ -236,7 +236,11 @@ return [
             'name' => 'Illustrator',
             'description' => 'Adobe Illustrator files',
             
-            'mime_types' => ['application/postscript'],
+            'mime_types' => [
+                'application/postscript',
+                'application/vnd.adobe.illustrator',
+                'application/illustrator',
+            ],
             'extensions' => ['ai'],
             
             'capabilities' => [
