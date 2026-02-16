@@ -16,7 +16,8 @@ return new class extends Migration
         Schema::create('brand_visual_references', function (Blueprint $table) {
             $table->id();
             $table->foreignId('brand_id')->constrained()->onDelete('cascade');
-            $table->foreignId('asset_id')->nullable()->constrained()->onDelete('set null');
+            $table->uuid('asset_id')->nullable();
+            $table->foreign('asset_id')->references('id')->on('assets')->onDelete('set null');
             $table->json('embedding_vector')->nullable();
             $table->string('type', 50)->index(); // logo | photography_reference
             $table->timestamps();

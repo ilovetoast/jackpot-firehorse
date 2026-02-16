@@ -56,10 +56,10 @@ class BrandComplianceService
         if (! $this->completionService->isComplete($asset)) {
             $this->upsertScore($asset, $brand, [
                 'overall_score' => null,
-                'color_score' => null,
-                'typography_score' => null,
-                'tone_score' => null,
-                'imagery_score' => null,
+                'color_score' => 0,
+                'typography_score' => 0,
+                'tone_score' => 0,
+                'imagery_score' => 0,
                 'breakdown_payload' => [
                     'color' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
                     'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
