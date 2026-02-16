@@ -31,6 +31,7 @@ export default function AssetGrid({
     showInfo = true,
     selectedAssetId = null,
     primaryColor = '#6366f1',
+    cardVariant = 'default', // 'default' | 'cinematic' — cinematic = transparent cards over background
     selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
     onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
     bucketAssetIds = [], // Phase D1: Download bucket IDs
@@ -64,6 +65,7 @@ export default function AssetGrid({
                     showInfo={showInfo}
                     isSelected={selectedAssetId === asset.id}
                     primaryColor={primaryColor}
+                    cardVariant={cardVariant}
                     isBulkSelected={selectedAssetIds.includes(asset.id)} // Phase 2 – Step 7
                     onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null} // Phase 2 – Step 7
                     isInBucket={bucketAssetIds.includes(asset.id)} // Phase D1

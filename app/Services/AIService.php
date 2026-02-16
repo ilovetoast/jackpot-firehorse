@@ -417,6 +417,9 @@ class AIService
         if (isset($options['derivative_failure_id'])) {
             return ['entity_type' => 'asset', 'entity_id' => (string) ($options['asset_id'] ?? $options['derivative_failure_id'])];
         }
+        if (isset($options['brand_bootstrap_run_id'])) {
+            return ['entity_type' => 'brand_bootstrap_run', 'entity_id' => (string) $options['brand_bootstrap_run_id']];
+        }
 
         return ['entity_type' => 'job', 'entity_id' => null];
     }

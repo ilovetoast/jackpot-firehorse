@@ -84,8 +84,10 @@ class BillingController extends Controller
             'ai_suggestions' => $aiUsageStatus['suggestions']['usage'] ?? 0,
         ];
 
-        // Fetch Stripe price data for each plan
-        $plans = collect(config('plans'))->map(function ($plan, $key) use ($currentPlan, $currentUsage) {
+        // Fetch Stripe price data for each plan (exclude agency_silver — internal/staging only, not purchasable)
+        $plans = collect(config('plans'))
+            ->except('agency_silver')
+            ->map(function ($plan, $key) use ($currentPlan, $currentUsage) {
             $priceData = null;
             $monthlyPrice = null;
             

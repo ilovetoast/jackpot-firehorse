@@ -296,6 +296,8 @@ class BulkMetadataService
                         'asset_id' => $asset->id,
                         'asset_title' => $asset->title ?? $asset->original_filename,
                     ];
+
+                    \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
                 } catch (\Exception $e) {
                     Log::error('[BulkMetadataService] Failed to process asset', [
                         'asset_id' => $asset->id,

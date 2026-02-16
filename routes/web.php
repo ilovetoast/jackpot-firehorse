@@ -47,6 +47,9 @@ Route::post('/b/{brand_slug}/collections/{collection_slug}/download', [\App\Http
 Route::get('/b/{brand_slug}/collections/{collection_slug}/zip', [\App\Http\Controllers\PublicCollectionController::class, 'streamZip'])->name('public.collections.zip')->middleware(['signed', 'throttle:10,1']);
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/thumbnail', [\App\Http\Controllers\PublicCollectionController::class, 'thumbnail'])->name('public.collections.assets.thumbnail');
 Route::get('/b/{brand_slug}/collections/{collection_slug}/assets/{asset}/download', [\App\Http\Controllers\PublicCollectionController::class, 'download'])->name('public.collections.assets.download');
+// Public collection branding (logo, background) — no auth; from Brand Settings > Public Pages
+Route::get('/b/{brand_slug}/collections/{collection_slug}/logo', [\App\Http\Controllers\AssetThumbnailController::class, 'streamLogoForPublicCollection'])->name('public.collections.logo')->middleware(['web']);
+Route::get('/b/{brand_slug}/collections/{collection_slug}/background', [\App\Http\Controllers\AssetThumbnailController::class, 'streamBackgroundForPublicCollection'])->name('public.collections.background')->middleware(['web']);
 
 // Phase D1: Public download link (no auth — anyone with link can download)
 Route::get('/d/{download}', [\App\Http\Controllers\DownloadController::class, 'download'])->name('downloads.public')->middleware(['web']);
@@ -405,6 +408,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/api/pending-metadata-approvals', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingMetadataApprovals'])->name('api.pending-metadata-approvals');
             
             // Asset metadata manual editing (Phase 2 – Step 6)
+            Route::post('/assets/{asset}/rescore', [\App\Http\Controllers\AssetMetadataController::class, 'rescore'])->name('assets.rescore');
             Route::get('/assets/{asset}/metadata/editable', [\App\Http\Controllers\AssetMetadataController::class, 'getEditableMetadata'])->name('assets.metadata.editable');
             Route::get('/assets/{asset}/metadata/all', [\App\Http\Controllers\AssetMetadataController::class, 'getAllMetadata'])->name('assets.metadata.all');
             Route::post('/assets/{asset}/metadata/edit', [\App\Http\Controllers\AssetMetadataController::class, 'editMetadata'])->name('assets.metadata.edit');
@@ -498,7 +502,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::delete('/collections/{collection}/grants/{collection_user}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'revoke'])->name('collections.grants.revoke');
             Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
-            Route::get('/brand-guidelines', [\App\Http\Controllers\BrandGuidelinesController::class, 'index'])->name('brand-guidelines.index');
+            Route::get('/brand-guidelines', [\App\Http\Controllers\BrandGuidelinesController::class, 'redirectToActive'])->name('brand-guidelines.index');
             Route::post('/downloads/{download}/revoke', [\App\Http\Controllers\DownloadController::class, 'revoke'])->name('downloads.revoke');
             Route::post('/downloads/{download}/extend', [\App\Http\Controllers\DownloadController::class, 'extend'])->name('downloads.extend');
             Route::post('/downloads/{download}/change-access', [\App\Http\Controllers\DownloadController::class, 'changeAccess'])->name('downloads.change-access');
@@ -544,7 +548,22 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/brands/{brand}/download-branding-assets', [\App\Http\Controllers\BrandController::class, 'downloadBrandingAssets'])->name('brands.download-branding-assets');
             Route::get('/brands/{brand}/download-background-candidates', [\App\Http\Controllers\BrandController::class, 'downloadBackgroundCandidates'])->name('brands.download-background-candidates');
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
-            
+
+            // Brand DNA (internal settings)
+            Route::get('/brands/{brand}/dna', [\App\Http\Controllers\BrandDNAController::class, 'index'])->name('brands.dna.index');
+            Route::get('/brands/{brand}/guidelines', [\App\Http\Controllers\BrandGuidelinesController::class, 'index'])->name('brands.guidelines.index');
+            Route::post('/brands/{brand}/dna', [\App\Http\Controllers\BrandDNAController::class, 'store'])->name('brands.dna.store');
+            Route::get('/brands/{brand}/dna/versions/{version}', [\App\Http\Controllers\BrandDNAController::class, 'showVersion'])->name('brands.dna.versions.show');
+            Route::post('/brands/{brand}/dna/versions', [\App\Http\Controllers\BrandDNAController::class, 'createVersion'])->name('brands.dna.versions.store');
+            Route::post('/brands/{brand}/dna/versions/{version}/activate', [\App\Http\Controllers\BrandDNAController::class, 'activateVersion'])->name('brands.dna.versions.activate');
+
+            // Brand Bootstrap (foundation only)
+            Route::get('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'index'])->name('brands.dna.bootstrap.index');
+            Route::post('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'store'])->name('brands.dna.bootstrap.store');
+            Route::get('/brands/{brand}/dna/bootstrap/{run}', [\App\Http\Controllers\BrandBootstrapController::class, 'show'])->name('brands.dna.bootstrap.show');
+            Route::post('/brands/{brand}/dna/bootstrap/{run}/approve', [\App\Http\Controllers\BrandBootstrapController::class, 'approve'])->name('brands.dna.bootstrap.approve');
+            Route::delete('/brands/{brand}/dna/bootstrap/{run}', [\App\Http\Controllers\BrandBootstrapController::class, 'destroy'])->name('brands.dna.bootstrap.destroy');
+
             // Brand user management routes
             Route::get('/brands/{brand}/users/available', [\App\Http\Controllers\BrandController::class, 'availableUsers'])->name('brands.users.available');
             Route::get('/api/brands/{brand}/category-form-data', [\App\Http\Controllers\BrandController::class, 'categoryFormData'])->name('api.brands.category-form-data');

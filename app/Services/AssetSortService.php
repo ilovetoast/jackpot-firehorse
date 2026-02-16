@@ -24,6 +24,8 @@ class AssetSortService
     public const SORT_QUALITY = 'quality';
     public const SORT_MODIFIED = 'modified';
     public const SORT_ALPHABETICAL = 'alphabetical';
+    public const SORT_COMPLIANCE_HIGH = 'compliance_high';
+    public const SORT_COMPLIANCE_LOW = 'compliance_low';
 
     /** @deprecated Use SORT_FEATURED; normalized from request for backward compatibility */
     public const SORT_STARRED = 'starred';
@@ -67,7 +69,36 @@ class AssetSortService
             return;
         }
 
+        if ($sort === self::SORT_COMPLIANCE_HIGH) {
+            $this->applyComplianceSort($query, self::DIRECTION_DESC);
+            return;
+        }
+
+        if ($sort === self::SORT_COMPLIANCE_LOW) {
+            $this->applyComplianceSort($query, self::DIRECTION_ASC);
+            return;
+        }
+
         $this->applyCreatedSort($query, $direction);
+    }
+
+    /**
+     * Compliance: sort by brand_compliance_scores.overall_score. Requires left join.
+     * Skips join if already present (e.g. from compliance filter scope).
+     */
+    private function applyComplianceSort(Builder $query, string $direction): void
+    {
+        $joins = $query->getQuery()->joins ?? [];
+        $hasBcs = collect($joins)->contains(fn ($j) => ($j->table ?? '') === 'brand_compliance_scores');
+        if (!$hasBcs) {
+            $query->leftJoin('brand_compliance_scores', function ($join) {
+                $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
+                    ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
+            });
+        }
+        $query->orderByRaw('brand_compliance_scores.overall_score IS NULL ' . ($direction === self::DIRECTION_DESC ? 'ASC' : 'DESC'));
+        $query->orderBy('brand_compliance_scores.overall_score', $direction);
+        $query->orderBy('assets.created_at', $direction);
     }
 
     /**
@@ -148,7 +179,7 @@ class AssetSortService
      */
     public function normalizeSort(?string $sort): string
     {
-        $allowed = [self::SORT_FEATURED, self::SORT_CREATED, self::SORT_QUALITY, self::SORT_MODIFIED, self::SORT_ALPHABETICAL];
+        $allowed = [self::SORT_FEATURED, self::SORT_CREATED, self::SORT_QUALITY, self::SORT_MODIFIED, self::SORT_ALPHABETICAL, self::SORT_COMPLIANCE_HIGH, self::SORT_COMPLIANCE_LOW];
         $sort = $sort ? strtolower(trim($sort)) : '';
         if ($sort === self::SORT_STARRED) {
             return self::SORT_FEATURED;

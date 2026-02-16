@@ -24,7 +24,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 
-export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '' }) {
+export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '' }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -299,7 +299,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             { 
                 preserveState: true, 
                 preserveScroll: true,
-                only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug']
+                only: ['filterable_schema', 'available_values', 'assets', 'next_page_url', 'selected_category', 'selected_category_slug', 'compliance_filter', 'show_compliance_filter']
             }
         )
     }
@@ -733,7 +733,16 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                             urlParams.set('sort', newSort)
                                             urlParams.set('sort_direction', newDir)
                                             urlParams.delete('page')
-                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction'] })
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'sort', 'sort_direction', 'compliance_filter'] })
+                                        }}
+                                        showComplianceFilter={show_compliance_filter}
+                                        complianceFilter={compliance_filter}
+                                        onComplianceFilterChange={(val) => {
+                                            const urlParams = new URLSearchParams(window.location.search)
+                                            if (val) urlParams.set('compliance_filter', val)
+                                            else urlParams.delete('compliance_filter')
+                                            urlParams.delete('page')
+                                            router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: ['assets', 'next_page_url', 'compliance_filter', 'show_compliance_filter'] })
                                         }}
                                         assetResultCount={assetsList?.length ?? 0}
                                         totalInCategory={assetsList?.length ?? 0}

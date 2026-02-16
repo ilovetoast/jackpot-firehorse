@@ -715,7 +715,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     </p>
 
                     {/* Tab navigation — pill-style segmented control */}
-                    <nav className="mt-6 p-1 rounded-xl bg-gray-100 inline-flex gap-0.5 shadow-sm" aria-label="Brand settings tabs">
+                    <nav className="mt-6 p-1 rounded-xl bg-gray-100 inline-flex flex-wrap gap-0.5 shadow-sm" aria-label="Brand settings tabs">
                         {[
                             { id: 'identity', label: 'Identity' },
                             { id: 'workspace', label: 'Workspace Appearance' },
@@ -735,6 +735,18 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                 {tab.label}
                             </button>
                         ))}
+                        <Link
+                            href={typeof route === 'function' ? route('brands.dna.index', { brand: brand.id }) : `/app/brands/${brand.id}/dna`}
+                            className="px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
+                        >
+                            Brand DNA
+                        </Link>
+                        <Link
+                            href={typeof route === 'function' ? route('brands.guidelines.index', { brand: brand.id }) : `/app/brands/${brand.id}/guidelines`}
+                            className="px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ease-out text-gray-600 hover:text-gray-900 hover:bg-gray-50/80"
+                        >
+                            Brand Guidelines
+                        </Link>
                     </nav>
                 </div>
 

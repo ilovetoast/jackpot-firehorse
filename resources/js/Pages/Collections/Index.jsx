@@ -343,6 +343,7 @@ export default function CollectionsIndex({
                                             onPublicChange={() => {
                                                 router.reload()
                                             }}
+                                            primaryColor={auth?.activeBrand?.primary_color}
                                         />
                                     )}
                                     <div className="mb-8">

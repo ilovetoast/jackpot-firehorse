@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon, TagIcon } from '@heroicons/react/24/outline'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon, TagIcon, ArrowPathRoundedSquareIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
@@ -26,6 +26,11 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
     const [assetTags, setAssetTags] = useState([])
     const [tagsLoading, setTagsLoading] = useState(false)
+    const [complianceScore, setComplianceScore] = useState(null)
+    const [complianceBreakdown, setComplianceBreakdown] = useState(null)
+    const [complianceExpanded, setComplianceExpanded] = useState(false)
+    const [brandDnaEnabled, setBrandDnaEnabled] = useState(false)
+    const [rescoreLoading, setRescoreLoading] = useState(false)
     
     // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
 
@@ -67,6 +72,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setFields(data.fields || [])
                 const count = data.pending_metadata_count || 0
                 setPendingMetadataCount(count)
+                setComplianceScore(data.compliance_score ?? null)
+                setComplianceBreakdown(data.compliance_breakdown ?? null)
+                setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 if (onPendingCountChange) {
                     onPendingCountChange(count)
                 }
@@ -123,6 +131,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 .then((res) => res.json())
                 .then((data) => {
                     setFields(data.fields || [])
+                    setComplianceScore(data.compliance_score ?? null)
+                    setComplianceBreakdown(data.compliance_breakdown ?? null)
+                    setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 })
                 .catch((err) => {
                     console.error('[AssetMetadataDisplay] Failed to refresh metadata', err)
@@ -202,10 +213,123 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
         )
     }
 
+    // Compliance badge color: 90+ green, 70-89 amber, <70 red
+    const getComplianceBadgeClass = (score) => {
+        if (score >= 90) return 'bg-green-50 text-green-700 ring-green-600/20'
+        if (score >= 70) return 'bg-amber-50 text-amber-700 ring-amber-600/20'
+        return 'bg-red-50 text-red-700 ring-red-600/20'
+    }
+
     // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
             <div>
+                {complianceScore === null && (
+                    <div className="mb-3">
+                        <p className="text-xs text-gray-500 italic">Brand compliance not yet evaluated.</p>
+                        {brandDnaEnabled && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!assetId || rescoreLoading) return
+                                    setRescoreLoading(true)
+                                    try {
+                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                'Accept': 'application/json',
+                                            },
+                                            credentials: 'same-origin',
+                                        })
+                                        const data = await res.json()
+                                        if (data.status === 'queued') {
+                                            setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                        }
+                                    } finally {
+                                        setRescoreLoading(false)
+                                    }
+                                }}
+                                disabled={rescoreLoading}
+                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                            >
+                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
+                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
+                            </button>
+                        )}
+                    </div>
+                )}
+                {complianceScore !== null && (
+                    <div className="mb-3">
+                        <button
+                            type="button"
+                            onClick={() => setComplianceExpanded(!complianceExpanded)}
+                            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset cursor-pointer hover:opacity-90 ${getComplianceBadgeClass(complianceScore)}`}
+                        >
+                            On-Brand Score: {complianceScore}%
+                            <span className="text-[10px] opacity-75">{complianceExpanded ? '▼' : '▶'}</span>
+                        </button>
+                        <p className="mt-1 text-[11px] text-gray-500">
+                            This score reflects how well this execution aligns with your active Brand DNA scoring rules.
+                            {complianceBreakdown && (() => {
+                                const evaluated = ['color', 'typography', 'tone', 'imagery'].filter((k) => complianceBreakdown[k]?.status === 'scored')
+                                if (evaluated.length === 1) return ` Based on ${evaluated[0].charAt(0).toUpperCase() + evaluated[0].slice(1)} only.`
+                                if (evaluated.length > 1) return ` Based on ${evaluated.map((k) => k.charAt(0).toUpperCase() + k.slice(1)).join(', ')}.`
+                                return ''
+                            })()}
+                        </p>
+                        {complianceExpanded && complianceBreakdown && (
+                            <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs space-y-2">
+                                {['color', 'typography', 'tone', 'imagery'].map((key) => {
+                                    const item = complianceBreakdown[key]
+                                    if (!item) return null
+                                    const score = item.score ?? item
+                                    const label = key.charAt(0).toUpperCase() + key.slice(1)
+                                    return (
+                                        <div key={key}>
+                                            <span className="font-medium text-gray-700">{label}: {score}%</span>
+                                            {item.reason && <p className="mt-0.5 text-gray-600">{item.reason}</p>}
+                                        </div>
+                                    )
+                                })}
+                                {brandDnaEnabled && (
+                                    <div className="pt-2 border-t border-gray-200">
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                if (!assetId || rescoreLoading) return
+                                                setRescoreLoading(true)
+                                                try {
+                                                    const res = await fetch(`/app/assets/${assetId}/rescore`, {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                            'Accept': 'application/json',
+                                                        },
+                                                        credentials: 'same-origin',
+                                                    })
+                                                    const data = await res.json()
+                                                    if (data.status === 'queued') {
+                                                        setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                                    }
+                                                } finally {
+                                                    setRescoreLoading(false)
+                                                }
+                                            }}
+                                            disabled={rescoreLoading}
+                                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                                        >
+                                            <ArrowPathRoundedSquareIcon className="h-3.5 w-3.5" />
+                                            {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
                 {fields.length === 0 ? (
                     <div className="text-sm text-gray-500 italic">No editable metadata fields available</div>
                 ) : (

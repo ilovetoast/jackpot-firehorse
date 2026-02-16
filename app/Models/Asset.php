@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -431,6 +432,52 @@ class Asset extends Model
     {
         return $this->belongsToMany(Collection::class, 'asset_collections')
             ->withTimestamps();
+    }
+
+    /**
+     * Scope: join with brand_compliance_scores for compliance-based filtering/sorting.
+     */
+    public function scopeWithCompliance(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->leftJoin('brand_compliance_scores', function ($join) {
+            $join->on('assets.id', '=', 'brand_compliance_scores.asset_id')
+                ->whereColumn('assets.brand_id', 'brand_compliance_scores.brand_id');
+        });
+    }
+
+    /** Scope: overall_score >= 85 */
+    public function scopeHighAlignment(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->withCompliance()->where('brand_compliance_scores.overall_score', '>=', 85);
+    }
+
+    /** Scope: overall_score >= 75 */
+    public function scopeStrong(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->withCompliance()->where('brand_compliance_scores.overall_score', '>=', 75);
+    }
+
+    /** Scope: overall_score < 60 */
+    public function scopeNeedsReview(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->withCompliance()->where('brand_compliance_scores.overall_score', '<', 60);
+    }
+
+    /** Scope: overall_score < 40 */
+    public function scopeFailing(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->withCompliance()->where('brand_compliance_scores.overall_score', '<', 40);
+    }
+
+    /** Scope: no compliance score row */
+    public function scopeUnscored(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->whereNotExists(function ($q) {
+            $q->select(DB::raw(1))
+                ->from('brand_compliance_scores')
+                ->whereColumn('brand_compliance_scores.asset_id', 'assets.id')
+                ->whereColumn('brand_compliance_scores.brand_id', 'assets.brand_id');
+        });
     }
 
     /**

@@ -54,6 +54,8 @@ class DeliverableController extends Controller
                 'next_page_url' => null,
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
+                'compliance_filter' => '',
+                'show_compliance_filter' => false,
                 'q' => '',
             ]);
         }
@@ -235,10 +237,11 @@ class DeliverableController extends Controller
         }
 
         // Query deliverables - match Assets page behavior with lifecycle filters
-        $assetsQuery = Asset::where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('type', AssetType::DELIVERABLE)
-            ->whereNull('deleted_at');
+        // Use qualified column names to avoid ambiguity when compliance join is added
+        $assetsQuery = Asset::where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->where('assets.type', AssetType::DELIVERABLE)
+            ->whereNull('assets.deleted_at');
 
         // Restrict to viewable categories only (search and grid must not bypass locked/private folders)
         if (empty($viewableCategoryIds)) {
@@ -270,6 +273,22 @@ class DeliverableController extends Controller
 
         // Phase M: Base query for "has values" check (tenant, brand, category, lifecycle only; filters/search applied below)
         $baseQueryForFilterVisibility = (clone $assetsQuery);
+
+        // Compliance filter (Brand DNA alignment)
+        $complianceFilter = $request->input('compliance_filter');
+        if (in_array($complianceFilter, ['superb', 'strong', 'needs_review', 'failing', 'unscored'], true)) {
+            if ($complianceFilter === 'superb') {
+                $assetsQuery->withCompliance()->where('brand_compliance_scores.overall_score', '>=', 90);
+            } elseif ($complianceFilter === 'strong') {
+                $assetsQuery->strong();
+            } elseif ($complianceFilter === 'needs_review') {
+                $assetsQuery->needsReview();
+            } elseif ($complianceFilter === 'failing') {
+                $assetsQuery->failing();
+            } elseif ($complianceFilter === 'unscored') {
+                $assetsQuery->unscored();
+            }
+        }
 
         // Apply metadata filters from request (same as AssetController: JSON 'filters' or flat params; tags/collection preserved for load_more)
         $fileType = 'image';
@@ -845,6 +864,10 @@ class DeliverableController extends Controller
             ]);
         }
 
+        // Brand DNA: show compliance filter only when enabled with active version
+        $brandModel = $brand->brandModel;
+        $showComplianceFilter = $brandModel && $brandModel->is_enabled && $brandModel->active_version_id !== null;
+
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
             'total_asset_count' => $totalDeliverableCount, // Total count for "All" and sidebar parity with Assets
@@ -857,6 +880,8 @@ class DeliverableController extends Controller
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
             'sort' => $sort,
             'sort_direction' => $sortDirection,
+            'compliance_filter' => $request->input('compliance_filter', ''),
+            'show_compliance_filter' => $showComplianceFilter,
             'q' => $request->input('q', ''),
         ]);
     }

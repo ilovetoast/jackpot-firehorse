@@ -18,7 +18,7 @@ import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default' }) {
     const { auth } = usePage().props
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
@@ -195,6 +195,13 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         boxShadow: `0 10px 15px -3px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3), 0 4px 6px -2px rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2), 0 0 0 1px ${primaryColor}`,
     } : {}
     
+    const isCinematic = cardVariant === 'cinematic'
+    const cardBgClass = isCinematic ? 'bg-white/10 backdrop-blur-md' : 'bg-white'
+    const cardBorderClass = isCinematic
+        ? (isSelected ? 'border-2 border-white/60' : 'border-white/20 hover:border-white/40')
+        : (isSelected ? 'border-2' : 'border-gray-200 hover:border-gray-300')
+    const cardShadowClass = isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-md hover:shadow-lg'
+
     return (
         <div
             onClick={handleClick}
@@ -202,11 +209,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
-            className={`group relative bg-white rounded-lg border overflow-hidden transition-all duration-200 cursor-pointer ${
-                isSelected 
-                    ? 'border-2' 
-                    : 'border-gray-200 hover:border-gray-300 shadow-md hover:shadow-lg'
-            }`}
+            className={`group relative ${cardBgClass} rounded-lg border overflow-hidden transition-all duration-200 cursor-pointer ${cardBorderClass} ${cardShadowClass}`}
             style={{
                 ...shadowStyle,
                 '--primary-color': primaryColor,
@@ -214,7 +217,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         >
             {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) */}
             <div 
-                className="aspect-[4/3] bg-gray-50 relative overflow-hidden"
+                className={`aspect-[4/3] relative overflow-hidden ${isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
                 onMouseLeave={() => {
                     setIsHovering(false)
@@ -324,9 +327,9 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             
             {/* Title section - Conditionally hidden based on showInfo prop */}
             {showInfo && (
-                <div className="p-3 border-t border-gray-100">
+                <div className={`p-3 border-t ${isCinematic ? 'border-white/20' : 'border-gray-100'}`}>
                     <h3 
-                        className="text-sm font-medium text-gray-900 truncate transition-colors duration-200 group-hover:text-[var(--primary-color)]"
+                        className={`text-sm font-medium truncate transition-colors duration-200 group-hover:text-[var(--primary-color)] ${isCinematic ? 'text-white drop-shadow-sm' : 'text-gray-900'}`}
                     >
                         {asset.title || asset.original_filename || 'Untitled Asset'}
                     </h3>

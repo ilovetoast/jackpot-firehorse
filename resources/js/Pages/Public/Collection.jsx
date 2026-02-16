@@ -1,7 +1,9 @@
 /**
- * Public collection page (C8). No auth. Brand header, collection name/description, asset grid, download per asset.
+ * Public collection page (C8). No auth. Cinematic layout with centered hero.
  * C11: Public Collection label, clear empty state (read-only, limited to visible assets).
- * D6: Download collection affordance (secondary CTA) — opens panel to create ZIP of all collection assets.
+ * D6: Download collection affordance — opens panel to create ZIP of all collection assets.
+ * Branding: Logo, accent/primary colors, background visuals from Brand Settings > Public Pages.
+ * Layout: Centered logo + copy + CTA; blurred background image with gradients; tiles directly over background.
  */
 import { useState } from 'react'
 import { DocumentIcon, ArrowDownTrayIcon, XMarkIcon } from '@heroicons/react/24/outline'
@@ -11,8 +13,16 @@ export default function PublicCollection({
     collection = {},
     assets = [],
     public_collection_downloads_enabled: downloadCollectionEnabled = false,
+    branding_options = {},
 }) {
     const { name, description, brand_name, brand_slug, slug } = collection
+    const accentColor = branding_options?.accent_color || branding_options?.primary_color || '#4F46E5'
+    const primaryColor = branding_options?.primary_color || accentColor
+    const logoUrl = branding_options?.logo_url || null
+    const backgroundImageUrl = branding_options?.background_image_url || null
+    const themeDark = branding_options?.theme_dark ?? false
+    const hasBackground = !!backgroundImageUrl
+
     const [downloadPanelOpen, setDownloadPanelOpen] = useState(false)
     const [downloadSubmitting, setDownloadSubmitting] = useState(false)
     const [downloadError, setDownloadError] = useState(null)
@@ -22,7 +32,6 @@ export default function PublicCollection({
         setDownloadPanelOpen(true)
     }
 
-    // On-the-fly collection ZIP: form submits in new tab so redirect to zip URL triggers file download there; this tab stays on collection.
     const handleDownloadCollectionSubmit = (e) => {
         e.preventDefault()
         setDownloadError(null)
@@ -32,63 +41,99 @@ export default function PublicCollection({
         setDownloadPanelOpen(false)
     }
 
-    // Handle asset click - for public collections, clicking downloads the asset (tracked server-side, opens in new window)
     const handleAssetClick = (asset) => {
         if (asset.download_url) {
             window.open(asset.download_url, '_blank', 'noopener,noreferrer')
         }
     }
 
-    return (
-        <div className="min-h-screen bg-gray-50">
-            {/* Brand header — no AppNav */}
-            <header className="bg-white border-b border-gray-200">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                            <p className="text-sm font-medium text-gray-500">{brand_name || 'Brand'}</p>
-                            <div className="mt-1 flex items-center gap-2 flex-wrap">
-                                <h1 className="text-2xl font-bold text-gray-900">{name || 'Collection'}</h1>
-                                <span
-                                    className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-                                    title="This collection is viewable via a shareable link. Access is limited to the assets shown."
-                                >
-                                    Public collection
-                                </span>
-                            </div>
-                            {description && (
-                                <p className="mt-2 text-sm text-gray-600 max-w-2xl">{description}</p>
-                            )}
-                        </div>
-                        {/* D6: Download collection — secondary CTA, top-right */}
-                        {downloadCollectionEnabled && assets && assets.length > 0 ? (
-                            <button
-                                type="button"
-                                onClick={openDownloadPanel}
-                                className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                            >
-                                <ArrowDownTrayIcon className="mr-2 h-5 w-5 text-gray-500" aria-hidden="true" />
-                                Download collection
-                            </button>
-                        ) : !downloadCollectionEnabled && assets && assets.length > 0 ? (
-                            <span
-                                className="inline-flex items-center rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-400 cursor-not-allowed"
-                                title="Upgrade to enable public collection downloads"
-                            >
-                                <ArrowDownTrayIcon className="mr-2 h-5 w-5" aria-hidden="true" />
-                                Download collection
-                            </span>
-                        ) : null}
-                    </div>
-                </div>
-            </header>
+    // Base: white or black based on brand identity
+    const baseBg = themeDark ? '#0a0a0a' : '#ffffff'
+    // Gradient from top: fades the background image into the base
+    const gradientFrom = themeDark ? 'rgba(10,10,10,0.3)' : 'rgba(255,255,255,0.4)'
+    const gradientTo = themeDark ? 'rgba(10,10,10,0.95)' : 'rgba(255,255,255,0.95)'
+    const textColor = themeDark ? 'text-white' : 'text-gray-900'
+    const textMuted = themeDark ? 'text-white/80' : 'text-gray-600'
+    const textMutedLight = themeDark ? 'text-white/60' : 'text-gray-500'
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    return (
+        <div
+            className="min-h-screen relative"
+            style={{ backgroundColor: baseBg, '--accent': accentColor }}
+        >
+            {/* Blurred background image — opaque and fading into base */}
+            {hasBackground && (
+                <>
+                    <div
+                        className="fixed inset-0 bg-cover bg-center bg-no-repeat blur-2xl scale-105"
+                        style={{
+                            backgroundImage: `url(${backgroundImageUrl})`,
+                            opacity: 0.5,
+                        }}
+                        aria-hidden
+                    />
+                    <div
+                        className="fixed inset-0"
+                        style={{
+                            background: `linear-gradient(to bottom, ${gradientFrom} 0%, transparent 25%, transparent 60%, ${gradientTo} 100%)`,
+                        }}
+                        aria-hidden
+                    />
+                </>
+            )}
+
+            {/* Centered hero: logo, copy, download button */}
+            <section className="relative z-10 pt-12 pb-8 px-4 flex flex-col items-center text-center">
+                {logoUrl && (
+                    <div className="mb-6">
+                        <img
+                            src={logoUrl}
+                            alt=""
+                            className="h-16 w-auto object-contain mx-auto max-h-24"
+                            onError={(e) => { e.target.style.display = 'none' }}
+                        />
+                    </div>
+                )}
+                <p className={`text-sm font-medium ${textMuted}`}>{brand_name || 'Brand'}</p>
+                <h1 className={`mt-1 text-3xl font-bold ${textColor}`}>{name || 'Collection'}</h1>
+                <span
+                    className="mt-2 inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-medium text-white"
+                    style={{ backgroundColor: primaryColor }}
+                    title="This collection is viewable via a shareable link."
+                >
+                    Public collection
+                </span>
+                {description && (
+                    <p className={`mt-3 text-sm max-w-xl mx-auto ${textMuted}`}>{description}</p>
+                )}
+                {downloadCollectionEnabled && assets && assets.length > 0 ? (
+                    <button
+                        type="button"
+                        onClick={openDownloadPanel}
+                        className="mt-6 inline-flex items-center rounded-lg px-6 py-3 text-base font-semibold text-white shadow-lg hover:opacity-90 transition-opacity"
+                        style={{ backgroundColor: accentColor }}
+                    >
+                        <ArrowDownTrayIcon className="mr-2 h-5 w-5" aria-hidden="true" />
+                        Download collection
+                    </button>
+                ) : !downloadCollectionEnabled && assets && assets.length > 0 ? (
+                    <span
+                        className={`mt-6 inline-flex items-center rounded-lg px-6 py-3 text-base font-medium ${textMutedLight} cursor-not-allowed border border-current`}
+                        title="Upgrade to enable public collection downloads"
+                    >
+                        <ArrowDownTrayIcon className="mr-2 h-5 w-5" aria-hidden="true" />
+                        Download collection
+                    </span>
+                ) : null}
+            </section>
+
+            {/* Asset grid — no container background; tiles sit directly over the page */}
+            <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
                 {!assets || assets.length === 0 ? (
-                    <div className="text-center py-12 text-gray-500">
-                        <DocumentIcon className="mx-auto h-12 w-12 text-gray-300" aria-hidden="true" />
-                        <p className="mt-2 font-medium text-gray-600">No assets to view</p>
-                        <p className="mt-1 text-sm text-gray-500 max-w-md mx-auto">
+                    <div className={`text-center py-16 ${textMuted}`}>
+                        <DocumentIcon className={`mx-auto h-14 w-14 ${textMutedLight}`} aria-hidden="true" />
+                        <p className={`mt-3 font-medium ${textColor}`}>No assets to view</p>
+                        <p className={`mt-1 text-sm max-w-md mx-auto ${textMuted}`}>
                             This public collection has no visible assets. Access is limited to the assets shown here.
                         </p>
                     </div>
@@ -99,21 +144,22 @@ export default function PublicCollection({
                         cardSize={220}
                         showInfo={true}
                         selectedAssetId={null}
-                        primaryColor="#6366f1"
+                        primaryColor={accentColor}
+                        cardVariant={hasBackground ? 'cinematic' : 'default'}
                     />
                 )}
             </main>
 
-            {/* D6: Download collection panel — locked to collection scope, public access, default name/expiration */}
+            {/* Download collection panel */}
             {downloadPanelOpen && (
                 <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="Download collection" role="dialog" aria-modal="true">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onClick={() => !downloadSubmitting && setDownloadPanelOpen(false)} />
-                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" aria-hidden="true" onClick={() => !downloadSubmitting && setDownloadPanelOpen(false)} />
+                        <div className="relative transform overflow-hidden rounded-xl bg-white px-4 pb-4 pt-5 text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                             <div className="absolute right-0 top-0 pr-4 pt-4">
                                 <button
                                     type="button"
-                                    className="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none"
+                                    className="rounded-md text-gray-400 hover:text-gray-600 focus:outline-none"
                                     onClick={() => !downloadSubmitting && setDownloadPanelOpen(false)}
                                     disabled={downloadSubmitting}
                                 >
@@ -146,7 +192,8 @@ export default function PublicCollection({
                                             <button
                                                 type="submit"
                                                 disabled={downloadSubmitting}
-                                                className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 sm:col-start-2"
+                                                className="inline-flex w-full justify-center rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-md hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 sm:col-start-2"
+                                                style={{ backgroundColor: accentColor }}
                                             >
                                                 {downloadSubmitting ? 'Preparing…' : 'Download collection'}
                                             </button>
@@ -154,7 +201,7 @@ export default function PublicCollection({
                                                 type="button"
                                                 onClick={() => setDownloadPanelOpen(false)}
                                                 disabled={downloadSubmitting}
-                                                className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0 disabled:opacity-50"
+                                                className="mt-3 inline-flex w-full justify-center rounded-lg bg-white px-4 py-3 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0 disabled:opacity-50"
                                             >
                                                 Cancel
                                             </button>

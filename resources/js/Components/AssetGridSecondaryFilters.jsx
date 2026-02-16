@@ -55,6 +55,9 @@ import UserSelect from './UserSelect'
  * @param {number} [props.totalInCategory] - Total assets loaded so far (for "x of y" display)
  * @param {boolean} [props.hasMoreAvailable] - If true, show "x of y+" when more can be loaded
  * @param {React.ReactNode} [props.barTrailingContent] - Optional content on the right of the bar (same line as count and Sort), e.g. Select Multiple / Select all
+ * @param {boolean} [props.showComplianceFilter] - If true, show Brand DNA compliance filter (Deliverables only)
+ * @param {string} [props.complianceFilter] - Current compliance filter value
+ * @param {Function} [props.onComplianceFilterChange] - (value) => void
  */
 export default function AssetGridSecondaryFilters({
     filterable_schema = [],
@@ -70,6 +73,9 @@ export default function AssetGridSecondaryFilters({
     totalInCategory = null,
     hasMoreAvailable = false,
     barTrailingContent = null,
+    showComplianceFilter = false,
+    complianceFilter = '',
+    onComplianceFilterChange = null,
 }) {
     const pageProps = usePage().props
     const { auth, available_file_types = [] } = pageProps
@@ -574,6 +580,12 @@ export default function AssetGridSecondaryFilters({
                             <option value="quality">Quality</option>
                             <option value="modified">Modified</option>
                             <option value="alphabetical">Alphabetical</option>
+                            {showComplianceFilter && (
+                                <>
+                                    <option value="compliance_high">Highest Brand Score</option>
+                                    <option value="compliance_low">Lowest Brand Score</option>
+                                </>
+                            )}
                         </select>
                         <button
                             type="button"
@@ -600,6 +612,24 @@ export default function AssetGridSecondaryFilters({
             >
                 <div className="min-h-0 overflow-hidden">
                     <div className="px-3 py-3 sm:px-4 border-t border-gray-200">
+                    {/* Brand DNA Compliance Filter - Deliverables only */}
+                    {showComplianceFilter && onComplianceFilterChange && (
+                        <div className="mb-3 pb-3 border-b border-gray-200">
+                            <label className="text-xs font-medium text-gray-700 mb-2 block" style={{ paddingLeft: '0' }}>Brand Alignment</label>
+                            <select
+                                value={complianceFilter || 'all'}
+                                onChange={(e) => onComplianceFilterChange(e.target.value === 'all' ? '' : e.target.value)}
+                                className="rounded border border-gray-300 bg-white py-1.5 pl-2 pr-8 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            >
+                                <option value="all">All</option>
+                                <option value="superb">Superb (≥90)</option>
+                                <option value="strong">Strong (≥75)</option>
+                                <option value="needs_review">Needs Review (&lt;60)</option>
+                                <option value="failing">Failing (&lt;40)</option>
+                                <option value="unscored">Unscored</option>
+                            </select>
+                        </div>
+                    )}
                     {/* Phase L.5.1: Lifecycle Filters - All three filters */}
                     {/* SECURITY: Only available to users with appropriate permissions */}
                     {(canPublish || canBypassApproval || canArchive) && (

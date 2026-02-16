@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
+use App\Models\Collection;
 use App\Models\Download;
+use App\Services\FeatureGate;
 use Aws\S3\S3Client;
 use Illuminate\Support\Arr;
 use Aws\S3\Exception\S3Exception;
@@ -67,8 +69,9 @@ class AssetThumbnailController extends Controller
     /**
      * Create a new AssetThumbnailController instance.
      */
-    public function __construct()
-    {
+    public function __construct(
+        protected FeatureGate $featureGate
+    ) {
         // Lazy-load S3 client only when needed
     }
 
@@ -364,6 +367,146 @@ class AssetThumbnailController extends Controller
                 'error' => $e->getMessage(),
             ]);
             abort(404, 'Logo not available.');
+        }
+    }
+
+    /**
+     * Public logo for public collection page. No auth.
+     *
+     * GET /b/{brand_slug}/collections/{collection_slug}/logo
+     *
+     * Resolves logo_asset_id from download_landing_settings, or falls back to brand
+     * identity (logo_id) when empty. Streams the asset's medium_display or medium thumbnail.
+     */
+    public function streamLogoForPublicCollection(string $brand_slug, string $collection_slug): \Symfony\Component\HttpFoundation\Response
+    {
+        $collection = Collection::query()
+            ->where('slug', $collection_slug)
+            ->where('is_public', true)
+            ->with(['brand', 'tenant'])
+            ->whereHas('brand', fn ($q) => $q->where('slug', $brand_slug))
+            ->first();
+
+        if (! $collection) {
+            abort(404, 'Logo not available.');
+        }
+
+        $tenant = $collection->tenant;
+        if (! $tenant || ! $this->featureGate->publicCollectionsEnabled($tenant)) {
+            abort(404, 'Logo not available.');
+        }
+
+        $brand = $collection->brand;
+        if (! $brand) {
+            abort(404, 'Logo not available.');
+        }
+
+        $brand->refresh();
+        $settings = $brand->download_landing_settings ?? [];
+        $logoAssetId = $settings['logo_asset_id'] ?? null;
+
+        if (! $logoAssetId) {
+            $logoAssetId = $brand->logo_id ?? null;
+        }
+
+        if (! $logoAssetId) {
+            abort(404, 'Logo not available.');
+        }
+
+        $asset = Asset::where('brand_id', $brand->id)->where('id', $logoAssetId)->first();
+        if (! $asset || $asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            abort(404, 'Logo not available.');
+        }
+
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium_display') ?: $asset->thumbnailPathForStyle('medium');
+        if (! $thumbnailPath) {
+            abort(404, 'Logo not available.');
+        }
+
+        try {
+            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
+        } catch (\Throwable $e) {
+            Log::warning('Public collection logo stream failed', [
+                'collection_id' => $collection->id,
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404, 'Logo not available.');
+        }
+    }
+
+    /**
+     * Public background image for public collection page. No auth.
+     *
+     * GET /b/{brand_slug}/collections/{collection_slug}/background
+     *
+     * Resolves background_asset_ids from download_landing_settings, picks one at random,
+     * streams that asset's medium thumbnail. Randomized per visit.
+     */
+    public function streamBackgroundForPublicCollection(string $brand_slug, string $collection_slug): \Symfony\Component\HttpFoundation\Response
+    {
+        $collection = Collection::query()
+            ->where('slug', $collection_slug)
+            ->where('is_public', true)
+            ->with(['brand', 'tenant'])
+            ->whereHas('brand', fn ($q) => $q->where('slug', $brand_slug))
+            ->first();
+
+        if (! $collection) {
+            abort(404, 'Background not available.');
+        }
+
+        $tenant = $collection->tenant;
+        if (! $tenant || ! $this->featureGate->publicCollectionsEnabled($tenant)) {
+            abort(404, 'Background not available.');
+        }
+
+        $brand = $collection->brand;
+        if (! $brand) {
+            abort(404, 'Background not available.');
+        }
+
+        $brand->refresh();
+        $settings = $brand->download_landing_settings ?? [];
+        $backgroundIds = $settings['background_asset_ids'] ?? [];
+        if (! is_array($backgroundIds) || empty($backgroundIds)) {
+            abort(404, 'Background not available.');
+        }
+
+        $backgroundIds = array_values($backgroundIds);
+        $chosenId = Arr::random($backgroundIds);
+        $asset = Asset::where('brand_id', $brand->id)->where('id', $chosenId)->first();
+        if (! $asset && count($backgroundIds) > 1) {
+            foreach ($backgroundIds as $id) {
+                if ((string) $id === (string) $chosenId) {
+                    continue;
+                }
+                $asset = Asset::where('brand_id', $brand->id)->where('id', $id)->first();
+                if ($asset) {
+                    break;
+                }
+            }
+        }
+
+        if (! $asset || $asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            abort(404, 'Background not available.');
+        }
+
+        $this->validateStyle('medium');
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+        if (! $thumbnailPath) {
+            abort(404, 'Background not available.');
+        }
+
+        try {
+            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
+        } catch (\Throwable $e) {
+            Log::warning('Public collection background stream failed', [
+                'collection_id' => $collection->id,
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404, 'Background not available.');
         }
     }
 

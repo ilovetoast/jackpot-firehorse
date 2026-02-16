@@ -316,6 +316,26 @@ You MUST NOT:
 - Trigger tickets directly (downstream systems decide)
 PROMPT
         ],
+        'brand_bootstrap_inference' => [
+            'name' => 'Brand Bootstrap Inference',
+            'description' => 'Infers structured Brand DNA from scraped website data',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, system-triggered after scrape completes
+            ],
+        ],
+        'brand_bootstrap_signal_extraction' => [
+            'name' => 'Brand Bootstrap Signal Extraction',
+            'description' => 'Extracts strategic brand signals from normalized website data',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, system-triggered in pipeline
+            ],
+        ],
     ],
 
     /*

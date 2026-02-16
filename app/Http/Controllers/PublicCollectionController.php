@@ -8,9 +8,10 @@ use App\Models\Collection;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionZipBuilderService;
 use App\Services\DownloadNameResolver;
-use App\Services\TenantBucketService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
+use App\Services\PublicCollectionPageBrandingResolver;
+use App\Services\TenantBucketService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -32,7 +33,8 @@ class PublicCollectionController extends Controller
         protected CollectionZipBuilderService $zipBuilder,
         protected FeatureGate $featureGate,
         protected PlanService $planService,
-        protected DownloadNameResolver $downloadNameResolver
+        protected DownloadNameResolver $downloadNameResolver,
+        protected PublicCollectionPageBrandingResolver $brandingResolver
     ) {
     }
 
@@ -72,6 +74,8 @@ class PublicCollectionController extends Controller
 
         $publicCollectionDownloadsEnabled = $this->featureGate->publicCollectionDownloadsEnabled($tenant);
 
+        $brandingOptions = $this->brandingResolver->resolve($brand, $collection);
+
         return Inertia::render('Public/Collection', [
             'collection' => [
                 'id' => $collection->id,
@@ -83,6 +87,7 @@ class PublicCollectionController extends Controller
             ],
             'assets' => $assets,
             'public_collection_downloads_enabled' => $publicCollectionDownloadsEnabled,
+            'branding_options' => $brandingOptions,
         ]);
     }
 

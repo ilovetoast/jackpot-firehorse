@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\Route;
 
 class Brand extends Model
@@ -155,6 +156,11 @@ class Brand extends Model
             $seeder = app(\App\Services\SystemCategorySeeder::class);
             $seeder->seedForBrand($brand);
         });
+
+        // Brand DNA: auto-create BrandModel (one per brand, no versions yet)
+        static::created(function ($brand) {
+            $brand->brandModel()->create(['is_enabled' => false]);
+        });
     }
 
     /**
@@ -173,6 +179,30 @@ class Brand extends Model
     public function owningTenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class, 'owning_tenant_id');
+    }
+
+    /**
+     * Get the Brand DNA / Brand Guidelines model (one per brand).
+     */
+    public function brandModel(): HasOne
+    {
+        return $this->hasOne(BrandModel::class);
+    }
+
+    /**
+     * Get compliance aggregates for execution alignment (Phase 8).
+     */
+    public function complianceAggregate(): HasOne
+    {
+        return $this->hasOne(BrandComplianceAggregate::class);
+    }
+
+    /**
+     * Get bootstrap runs for this brand.
+     */
+    public function bootstrapRuns(): HasMany
+    {
+        return $this->hasMany(BrandBootstrapRun::class);
     }
 
     /**

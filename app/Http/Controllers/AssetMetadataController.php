@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EventType;
+use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\ActivityRecorder;
@@ -245,6 +246,8 @@ class AssetMetadataController extends Controller
             'user_id' => $user->id,
         ]);
 
+        \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+
         return response()->json(['message' => 'Suggestion approved']);
     }
 
@@ -384,6 +387,8 @@ class AssetMetadataController extends Controller
             'suggestion_id' => $suggestionId,
             'user_id' => $user->id,
         ]);
+
+        \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
 
         return response()->json(['message' => 'Suggestion edited and accepted']);
     }
@@ -945,12 +950,49 @@ class AssetMetadataController extends Controller
         // Calculate pending metadata count (unique fields with pending metadata)
         $pendingMetadataCount = count($pendingFieldIds);
 
+        // Brand Compliance score (if Brand DNA enabled)
+        $complianceScore = null;
+        $complianceBreakdown = null;
+        $brandDnaEnabled = false;
+        if ($asset->brand_id) {
+            $brandModel = $brand->brandModel;
+            $brandDnaEnabled = $brandModel && $brandModel->is_enabled && $brandModel->activeVersion !== null;
+            $score = \App\Models\BrandComplianceScore::where('brand_id', $asset->brand_id)
+                ->where('asset_id', $asset->id)
+                ->first();
+            if ($score) {
+                $complianceScore = $score->overall_score;
+                $complianceBreakdown = $score->breakdown_payload;
+            }
+        }
+
         return response()->json([
             'fields' => $editableFields,
             'approval_required' => $approvalRequired,
             'approver_capable' => $approverCapable,
             'pending_metadata_count' => $pendingMetadataCount,
+            'compliance_score' => $complianceScore,
+            'compliance_breakdown' => $complianceBreakdown,
+            'brand_dna_enabled' => $brandDnaEnabled,
         ]);
+    }
+
+    /**
+     * Manually trigger brand compliance rescore for an asset.
+     * POST /assets/{asset}/rescore
+     */
+    public function rescore(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        ScoreAssetComplianceJob::dispatch($asset->id);
+
+        return response()->json(['status' => 'queued']);
     }
 
     /**
@@ -1595,6 +1637,8 @@ class AssetMetadataController extends Controller
             'metadata_field_id' => $fieldId,
             'user_id' => $user->id,
         ]);
+
+        \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
 
         return response()->json(['message' => 'Metadata updated']);
     }

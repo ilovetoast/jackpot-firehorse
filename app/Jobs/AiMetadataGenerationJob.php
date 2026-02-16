@@ -218,6 +218,9 @@ class AiMetadataGenerationJob implements ShouldQueue
                 'is_manual_rerun' => $this->isManualRerun,
             ]);
 
+            // 10. Trigger Brand Compliance scoring (if Brand DNA enabled)
+            \App\Jobs\ScoreAssetComplianceJob::dispatch($asset->id);
+
         } catch (PlanLimitExceededException $e) {
             // Already handled above, but catch here for safety
             if (isset($agentRun)) {

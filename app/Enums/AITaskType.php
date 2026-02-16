@@ -47,7 +47,13 @@ class AITaskType
 
     // Phase T-1: Asset derivative failure analysis
     public const ASSET_DERIVATIVE_FAILURE_ANALYSIS = 'asset_derivative_failure_analysis';
-    
+
+    // Phase 6: Brand Bootstrap AI inference
+    public const BRAND_BOOTSTRAP_INFERENCE = 'brand_bootstrap_inference';
+
+    // Phase 7: Brand Bootstrap signal extraction
+    public const BRAND_BOOTSTRAP_SIGNAL_EXTRACTION = 'brand_bootstrap_signal_extraction';
+
     /**
      * Get all task types as an array.
      *
@@ -71,6 +77,8 @@ class AITaskType
             self::DOWNLOAD_ZIP_FAILURE_ANALYSIS,
             self::UPLOAD_FAILURE_ANALYSIS,
             self::ASSET_DERIVATIVE_FAILURE_ANALYSIS,
+            self::BRAND_BOOTSTRAP_INFERENCE,
+            self::BRAND_BOOTSTRAP_SIGNAL_EXTRACTION,
         ];
     }
     
