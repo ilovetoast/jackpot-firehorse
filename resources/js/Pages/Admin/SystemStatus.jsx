@@ -78,11 +78,18 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
         if (!value || typeof value !== 'string') return value
         const date = new Date(value.trim())
         if (isNaN(date.getTime())) return value
-        return date.toLocaleString(undefined, {
-            dateStyle: 'medium',
-            timeStyle: 'medium',
-            timeZoneName: 'short',
-        })
+        try {
+            return date.toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+            })
+        } catch (e) {
+            return value
+        }
     }
 
     // Truncate text
