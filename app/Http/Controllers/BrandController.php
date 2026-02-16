@@ -249,9 +249,6 @@ class BrandController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
-            'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
-            'icon' => 'nullable|mimes:png,webp,svg,avif|max:2048',
-            'icon_id' => 'nullable|string|max:255',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'primary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'secondary_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
@@ -260,27 +257,11 @@ class BrandController extends Controller
             'settings' => 'nullable|array',
         ]);
 
-        // Handle logo file upload
-        if ($request->hasFile('logo')) {
-            $logoPath = $request->file('logo')->store("brands/{$tenant->id}", 'public');
-            $validated['logo_path'] = Storage::url($logoPath);
-            unset($validated['logo']); // Remove the file from validated data
-        } else {
-            // No logo uploaded, set to null
-            $validated['logo_path'] = null;
-        }
-
-        // Handle icon file upload
-        if ($request->hasFile('icon')) {
-            $iconPath = $request->file('icon')->store("brands/{$tenant->id}", 'public');
-            $validated['icon_path'] = Storage::url($iconPath);
-            unset($validated['icon']); // Remove the file from validated data
-            // Clear icon when uploading a file
-            $validated['icon'] = null;
-        } else {
-            // Keep existing icon_path if no new file is uploaded
-            $validated['icon_path'] = null; // Will be set from existing brand if updating
-        }
+        // Logos and icons are added via Edit after brand creation (must be assets)
+        $validated['logo_path'] = null;
+        $validated['logo_id'] = null;
+        $validated['icon_path'] = null;
+        $validated['icon_id'] = null;
         
         // Handle icon_bg_color
         if ($request->has('icon_bg_color')) {
@@ -562,10 +543,8 @@ class BrandController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'slug' => 'nullable|string|max:255',
-            'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
             'logo_id' => 'nullable|uuid|exists:assets,id',
             'clear_logo' => 'nullable|boolean',
-            'icon' => 'nullable|mimes:png,webp,svg,avif|max:2048',
             'icon_id' => 'nullable|uuid|exists:assets,id',
             'clear_icon' => 'nullable|boolean',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
@@ -580,7 +559,7 @@ class BrandController extends Controller
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
         ]);
 
-        // Handle logo: explicit clear, asset_id (from pipeline), or file upload (legacy)
+        // Handle logo: explicit clear or asset_id (all logos must be assets, no direct file upload)
         if ($request->boolean('clear_logo')) {
             if ($brand->logo_path && str_starts_with($brand->logo_path, '/storage/')) {
                 $oldPath = str_replace('/storage/', '', $brand->logo_path);
@@ -588,16 +567,6 @@ class BrandController extends Controller
             }
             $validated['logo_path'] = null;
             $validated['logo_id'] = null;
-            unset($validated['logo']);
-        } elseif ($request->hasFile('logo')) {
-            if ($brand->logo_path && str_starts_with($brand->logo_path, '/storage/')) {
-                $oldPath = str_replace('/storage/', '', $brand->logo_path);
-                Storage::disk('public')->delete($oldPath);
-            }
-            $logoPath = $request->file('logo')->store("brands/{$brand->tenant_id}", 'public');
-            $validated['logo_path'] = Storage::url($logoPath);
-            $validated['logo_id'] = null;
-            unset($validated['logo']);
         } elseif ($request->filled('logo_id')) {
             $logoAsset = \App\Models\Asset::where('id', $request->input('logo_id'))
                 ->where('tenant_id', $tenant->id)
@@ -613,7 +582,7 @@ class BrandController extends Controller
             $validated['logo_id'] = $brand->logo_id;
         }
 
-        // Handle icon: explicit clear, asset_id (from pipeline), or file upload (legacy)
+        // Handle icon: explicit clear or asset_id (all icons must be assets, no direct file upload)
         if ($request->boolean('clear_icon')) {
             if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
                 $oldPath = str_replace('/storage/', '', $brand->icon_path);
@@ -622,17 +591,6 @@ class BrandController extends Controller
             $validated['icon_path'] = null;
             $validated['icon_id'] = null;
             $validated['icon'] = null;
-            unset($validated['icon']);
-        } elseif ($request->hasFile('icon')) {
-            if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
-                $oldPath = str_replace('/storage/', '', $brand->icon_path);
-                Storage::disk('public')->delete($oldPath);
-            }
-            $iconPath = $request->file('icon')->store("brands/{$brand->tenant_id}", 'public');
-            $validated['icon_path'] = Storage::url($iconPath);
-            $validated['icon_id'] = null;
-            $validated['icon'] = null;
-            unset($validated['icon']);
         } elseif ($request->filled('icon_id')) {
             $iconAsset = \App\Models\Asset::where('id', $request->input('icon_id'))
                 ->where('tenant_id', $tenant->id)

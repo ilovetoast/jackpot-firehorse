@@ -286,13 +286,12 @@ export default function AssetImagePicker({
           }
         } catch (err) {
           console.error('[AssetImagePicker] Upload to pipeline failed:', err)
+          // Do not fall back to file - all logos/icons must be stored as assets
         } finally {
           setLoading(false)
         }
       }
-      // Fallback: return file for legacy handling
-      const previewUrl = URL.createObjectURL(uploadedFile)
-      onSelect?.({ file: uploadedFile, preview_url: previewUrl })
+      // No fallback: upload must succeed. User can retry or select from library.
     }
     onClose()
   }

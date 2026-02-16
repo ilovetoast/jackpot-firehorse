@@ -1,19 +1,13 @@
 import { useForm, Link, usePage } from '@inertiajs/react'
-import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
-import ImageCropModal from '../../Components/ImageCropModal'
 
 export default function BrandsCreate() {
     const { auth } = usePage().props
-    const [cropModalOpen, setCropModalOpen] = useState(false)
-    const [imageToCrop, setImageToCrop] = useState(null)
     
     const { data, setData, post, processing, errors } = useForm({
         name: '',
         slug: '',
-        logo: null,
-        logo_preview: '',
         show_in_selector: true,
         primary_color: '',
         secondary_color: '',
@@ -26,24 +20,9 @@ export default function BrandsCreate() {
     const submit = (e) => {
         e.preventDefault()
         post('/app/brands', {
-            forceFormData: true, // Important for file uploads
-            onSuccess: () => {
-                // Cleanup preview URL
-                if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
-                    URL.revokeObjectURL(data.logo_preview)
-                }
-            },
+            onSuccess: () => {},
         })
     }
-
-    // Cleanup preview URL on unmount
-    useEffect(() => {
-        return () => {
-            if (data.logo_preview && data.logo_preview.startsWith('blob:')) {
-                URL.revokeObjectURL(data.logo_preview)
-            }
-        }
-    }, [data.logo_preview])
 
     return (
         <div className="min-h-full">
@@ -61,7 +40,7 @@ export default function BrandsCreate() {
                     <p className="mt-2 text-sm text-gray-700">Create a new brand for your organization</p>
                 </div>
 
-                <form onSubmit={submit} className="space-y-6" encType="multipart/form-data">
+                <form onSubmit={submit} className="space-y-6">
                     {/* Basic Information */}
                     <div className="overflow-hidden bg-white shadow sm:rounded-lg">
                         <div className="px-4 py-5 sm:p-6">
@@ -110,85 +89,9 @@ export default function BrandsCreate() {
                                     </p>
                                 </div>
 
-                                <div>
-                                    <label htmlFor="logo" className="block text-sm font-medium leading-6 text-gray-900">
-                                        Logo
-                                    </label>
-                                    <div className="mt-2">
-                                        <input
-                                            type="file"
-                                            name="logo"
-                                            id="logo"
-                                            accept="image/png,image/webp,image/svg+xml,image/avif"
-                                            onChange={(e) => {
-                                                const file = e.target.files?.[0]
-                                                if (file) {
-                                                    // Check if it's an SVG (can't crop SVGs)
-                                                    if (file.type === 'image/svg+xml') {
-                                                        setData('logo', file)
-                                                        const previewUrl = URL.createObjectURL(file)
-                                                        setData('logo_preview', previewUrl)
-                                                    } else {
-                                                        // For PNG/WebP, show crop modal
-                                                        const previewUrl = URL.createObjectURL(file)
-                                                        setImageToCrop(previewUrl)
-                                                        setCropModalOpen(true)
-                                                    }
-                                                }
-                                            }}
-                                            className="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                                        />
-                                        <p className="mt-2 text-sm text-gray-500">
-                                            Upload a logo image (PNG with transparent background, WebP, or SVG up to 2MB)
-                                        </p>
-                                        {data.logo_preview && (
-                                            <div className="mt-4">
-                                                <p className="text-sm font-medium text-gray-700 mb-2">Preview:</p>
-                                                <img
-                                                    src={data.logo_preview}
-                                                    alt="Logo preview"
-                                                    className="h-20 w-auto border border-gray-200 rounded"
-                                                    onError={(e) => {
-                                                        e.target.style.display = 'none'
-                                                    }}
-                                                />
-                                            </div>
-                                        )}
-                                        {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
-                                    </div>
-                                </div>
-
-                                {/* Image Crop Modal */}
-                                <ImageCropModal
-                                    open={cropModalOpen}
-                                    imageSrc={imageToCrop}
-                                    onClose={() => {
-                                        setCropModalOpen(false)
-                                        if (imageToCrop && imageToCrop.startsWith('blob:')) {
-                                            URL.revokeObjectURL(imageToCrop)
-                                        }
-                                        setImageToCrop(null)
-                                    }}
-                                    onCropComplete={(croppedBlob) => {
-                                        // Create a File object from the blob
-                                        const file = new File([croppedBlob], 'logo.png', { type: 'image/png' })
-                                        setData('logo', file)
-                                        
-                                        // Create preview URL
-                                        const previewUrl = URL.createObjectURL(croppedBlob)
-                                        setData('logo_preview', previewUrl)
-                                        
-                                        // Cleanup
-                                        if (imageToCrop && imageToCrop.startsWith('blob:')) {
-                                            URL.revokeObjectURL(imageToCrop)
-                                        }
-                                        setImageToCrop(null)
-                                        setCropModalOpen(false)
-                                    }}
-                                    aspectRatio={{ width: 265, height: 64 }} // Brand logo aspect ratio
-                                    minWidth={265}
-                                    minHeight={64}
-                                />
+                                <p className="text-sm text-gray-500">
+                                    Add your logo and icon after creating the brand via Brand Settings → Identity.
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -424,25 +327,9 @@ export default function BrandsCreate() {
                                     >
                                         <div className="px-4 py-3 flex items-center justify-between">
                                             <div className="flex items-center">
-                                                {data.logo_preview && (
-                                                    <img
-                                                        src={data.logo_preview}
-                                                        alt="Logo preview"
-                                                        className="h-8 w-auto"
-                                                        style={{
-                                                            filter: data.logo_filter === 'white' 
-                                                                ? 'brightness(0) invert(1)' 
-                                                                : data.logo_filter === 'black'
-                                                                ? 'brightness(0)'
-                                                                : 'none'
-                                                        }}
-                                                    />
-                                                )}
-                                                {!data.logo_preview && (
-                                                    <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
-                                                        {data.name?.charAt(0).toUpperCase() || 'B'}
-                                                    </div>
-                                                )}
+                                                <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
+                                                    {data.name?.charAt(0).toUpperCase() || 'B'}
+                                                </div>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-medium" style={{ 
