@@ -73,6 +73,18 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
         }
     }
 
+    // Format UTC timestamp (e.g. from DEPLOYED_AT) in user's local timezone
+    const formatInLocalTimezone = (value) => {
+        if (!value || typeof value !== 'string') return value
+        const date = new Date(value.trim())
+        if (isNaN(date.getTime())) return value
+        return date.toLocaleString(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'medium',
+            timeZoneName: 'short',
+        })
+    }
+
     // Truncate text
     const truncate = (text, maxLength = 100) => {
         if (!text || text.length <= maxLength) return text
@@ -119,16 +131,20 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                 </div>
                                 {deployedAt && Object.keys(deployedAt).length > 0 ? (
                                     <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-                                        {Object.entries(deployedAt).map(([key, value]) => (
-                                            <div key={key}>
-                                                <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    {key.replace(/([A-Z])/g, ' $1').trim()}
-                                                </dt>
-                                                <dd className="mt-0.5 text-sm font-mono text-gray-900 break-all">
-                                                    {value}
-                                                </dd>
-                                            </div>
-                                        ))}
+                                        {Object.entries(deployedAt).map(([key, value]) => {
+                                            const isDeployedAt = key.trim().toLowerCase() === 'deployed at'
+                                            const displayValue = isDeployedAt ? formatInLocalTimezone(value) : value
+                                            return (
+                                                <div key={key}>
+                                                    <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        {key.replace(/([A-Z])/g, ' $1').trim()}
+                                                    </dt>
+                                                    <dd className="mt-0.5 text-sm font-mono text-gray-900 break-all">
+                                                        {displayValue}
+                                                    </dd>
+                                                </div>
+                                            )
+                                        })}
                                     </dl>
                                 ) : (
                                     <p className="text-sm text-gray-500">
