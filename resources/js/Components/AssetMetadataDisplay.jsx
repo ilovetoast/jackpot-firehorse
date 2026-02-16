@@ -5,8 +5,9 @@
  * Uses WidgetResolver for centralized widget rendering logic.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon, TagIcon, ArrowPathRoundedSquareIcon } from '@heroicons/react/24/outline'
+import { Activity } from 'lucide-react'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
@@ -55,11 +56,11 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
             .finally(() => setTagsLoading(false))
     }, [assetId])
 
-    // Fetch editable metadata
-    const fetchMetadata = () => {
+    // Fetch editable metadata (silent = true skips loading state, used for polling)
+    const fetchMetadata = (silent = false) => {
         if (!assetId) return
 
-        setLoading(true)
+        if (!silent) setLoading(true)
         fetch(`/app/assets/${assetId}/metadata/editable`, {
             method: 'GET',
             headers: {
@@ -101,6 +102,48 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
         return () => {
             window.removeEventListener('metadata-updated', handleUpdate)
         }
+    }, [assetId])
+
+    // Brand Compliance: Poll when evaluation_status === 'pending' so UI refreshes after job completes.
+    // Use silent fetch to avoid flashing loading state every 2s. Cap at 90s to prevent infinite polling.
+    const pollIntervalRef = useRef(null)
+    const pollStartRef = useRef(null)
+    useEffect(() => {
+        if (evaluationStatus !== 'pending' || !assetId) {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current)
+                pollIntervalRef.current = null
+            }
+            pollStartRef.current = null
+            return
+        }
+        pollStartRef.current = pollStartRef.current ?? Date.now()
+        const POLL_INTERVAL_MS = 2000
+        const POLL_MAX_MS = 90000 // 90 seconds
+        pollIntervalRef.current = setInterval(() => {
+            if (Date.now() - pollStartRef.current > POLL_MAX_MS) {
+                if (pollIntervalRef.current) {
+                    clearInterval(pollIntervalRef.current)
+                    pollIntervalRef.current = null
+                }
+                pollStartRef.current = null
+                setEvaluationStatus('timeout')
+                return
+            }
+            fetchMetadata(true)
+        }, POLL_INTERVAL_MS)
+        return () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current)
+                pollIntervalRef.current = null
+            }
+            pollStartRef.current = null
+        }
+    }, [evaluationStatus, assetId])
+
+    // Reset poll timer when switching to a different asset
+    useEffect(() => {
+        pollStartRef.current = null
     }, [assetId])
 
     // Refetch tags when tags are updated (e.g. from Tag Manager below)
@@ -227,9 +270,47 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     return (
         <>
             <div>
+                {evaluationStatus === 'timeout' && (
+                    <div className="mb-3 flex items-center gap-2">
+                        <p className="text-xs text-amber-600">Evaluation taking longer than expected.</p>
+                        {brandDnaEnabled && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!assetId || rescoreLoading) return
+                                    setRescoreLoading(true)
+                                    pollStartRef.current = null
+                                    try {
+                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                'Accept': 'application/json',
+                                            },
+                                            credentials: 'same-origin',
+                                        })
+                                        const data = await res.json()
+                                        if (data.status === 'queued') {
+                                            setEvaluationStatus('pending')
+                                        }
+                                    } finally {
+                                        setRescoreLoading(false)
+                                    }
+                                }}
+                                disabled={rescoreLoading}
+                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                            >
+                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
+                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
+                            </button>
+                        )}
+                    </div>
+                )}
                 {evaluationStatus === 'pending' && (
-                    <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">⏳ Evaluating...</p>
+                    <div className="mb-3 flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-indigo-500 animate-pulse" aria-hidden />
+                        <p className="text-xs text-gray-500 italic">Analyzing brand alignment...</p>
                         {brandDnaEnabled && (
                             <button
                                 type="button"
@@ -248,7 +329,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                         })
                                         const data = await res.json()
                                         if (data.status === 'queued') {
-                                            setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                            setEvaluationStatus('pending')
                                         }
                                     } finally {
                                         setRescoreLoading(false)
@@ -284,7 +365,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                         })
                                         const data = await res.json()
                                         if (data.status === 'queued') {
-                                            setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                            setEvaluationStatus('pending')
                                         }
                                     } finally {
                                         setRescoreLoading(false)
@@ -321,7 +402,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                         })
                                         const data = await res.json()
                                         if (data.status === 'queued') {
-                                            setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                            setEvaluationStatus('pending')
                                         }
                                     } finally {
                                         setRescoreLoading(false)

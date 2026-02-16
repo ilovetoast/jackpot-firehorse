@@ -4,10 +4,12 @@ namespace Tests\Feature;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
+use App\Enums\EventType;
 use App\Enums\StorageBucketStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Jobs\ScoreAssetComplianceJob;
+use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
@@ -519,5 +521,101 @@ class BrandComplianceTest extends TestCase
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
         ]);
+    }
+
+    /**
+     * Timeline event created when rescore is requested (user-triggered).
+     */
+    public function test_timeline_event_created_when_rescore_requested(): void
+    {
+        Queue::fake();
+
+        $asset = $this->createAsset();
+
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson("/app/assets/{$asset->id}/rescore");
+
+        $this->assertDatabaseHas('activity_events', [
+            'subject_type' => Asset::class,
+            'subject_id' => (string) $asset->id,
+            'event_type' => EventType::ASSET_BRAND_COMPLIANCE_REQUESTED,
+        ]);
+        $event = ActivityEvent::where('subject_type', Asset::class)
+            ->where('subject_id', $asset->id)
+            ->where('event_type', EventType::ASSET_BRAND_COMPLIANCE_REQUESTED)
+            ->first();
+        $this->assertNotNull($event);
+        $this->assertSame('user', $event->actor_type);
+        $this->assertSame($this->user->id, $event->actor_id);
+    }
+
+    /**
+     * Timeline event created when evaluation completes with evaluated status.
+     */
+    public function test_timeline_event_created_when_evaluated(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
+
+        $this->assertDatabaseHas('activity_events', [
+            'subject_type' => Asset::class,
+            'subject_id' => (string) $asset->id,
+            'event_type' => EventType::ASSET_BRAND_COMPLIANCE_EVALUATED,
+        ]);
+        $event = ActivityEvent::where('subject_type', Asset::class)
+            ->where('subject_id', $asset->id)
+            ->where('event_type', EventType::ASSET_BRAND_COMPLIANCE_EVALUATED)
+            ->first();
+        $this->assertNotNull($event);
+        $this->assertSame(100, $event->metadata['overall_score'] ?? null);
+        $this->assertSame('evaluated', $event->metadata['evaluation_status'] ?? null);
+    }
+
+    /**
+     * No duplicate timeline event when same evaluation_status written consecutively.
+     */
+    public function test_no_duplicate_timeline_event_for_same_status(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        // No dominant colors -> incomplete both times
+
+        $service = app(BrandComplianceService::class);
+        $service->scoreAsset($asset, $this->brand);
+        $service->scoreAsset($asset, $this->brand);
+
+        $count = ActivityEvent::where('subject_type', Asset::class)
+            ->where('subject_id', $asset->id)
+            ->where('event_type', EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE)
+            ->count();
+        $this->assertSame(1, $count, 'Should have exactly one incomplete event, not duplicated');
+    }
+
+    /**
+     * Timeline event created when evaluation_status is incomplete.
+     */
+    public function test_incomplete_status_creates_timeline_event(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        // No dominant colors -> incomplete
+
+        app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
+
+        $this->assertDatabaseHas('activity_events', [
+            'subject_type' => Asset::class,
+            'subject_id' => (string) $asset->id,
+            'event_type' => EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE,
+        ]);
+        $event = ActivityEvent::where('subject_type', Asset::class)
+            ->where('subject_id', $asset->id)
+            ->where('event_type', EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE)
+            ->first();
+        $this->assertNotNull($event);
+        $this->assertSame('incomplete', $event->metadata['evaluation_status'] ?? null);
     }
 }

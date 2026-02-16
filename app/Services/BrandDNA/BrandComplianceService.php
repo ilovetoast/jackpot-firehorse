@@ -2,9 +2,12 @@
 
 namespace App\Services\BrandDNA;
 
+use App\Enums\EventType;
+use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
+use App\Services\ActivityRecorder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -95,6 +98,9 @@ class BrandComplianceService
                 'breakdown_payload' => $breakdown,
                 'evaluation_status' => 'not_applicable',
             ]);
+            $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE, [
+                'evaluation_status' => 'not_applicable',
+            ]);
 
             return null;
         }
@@ -108,6 +114,9 @@ class BrandComplianceService
                 'tone_score' => $breakdown['tone']['score'],
                 'imagery_score' => $breakdown['imagery']['score'],
                 'breakdown_payload' => $breakdown,
+                'evaluation_status' => 'incomplete',
+            ]);
+            $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE, [
                 'evaluation_status' => 'incomplete',
             ]);
 
@@ -135,6 +144,10 @@ class BrandComplianceService
         ];
 
         $this->upsertScore($asset, $brand, $result);
+        $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_EVALUATED, [
+            'overall_score' => $overallScore,
+            'evaluation_status' => 'evaluated',
+        ]);
 
         return $result;
     }
@@ -466,6 +479,38 @@ class BrandComplianceService
         BrandComplianceScore::where('brand_id', $brand->id)
             ->where('asset_id', $asset->id)
             ->delete();
+    }
+
+    /**
+     * Log a brand compliance timeline event, with duplicate prevention.
+     * If the latest event for this asset already has the same event_type, skip insertion.
+     */
+    protected function logComplianceTimelineEvent(Asset $asset, string $eventType, array $metadata): void
+    {
+        try {
+            $latest = ActivityEvent::where('tenant_id', $asset->tenant_id)
+                ->where('subject_type', Asset::class)
+                ->where('subject_id', $asset->id)
+                ->whereIn('event_type', [
+                    EventType::ASSET_BRAND_COMPLIANCE_EVALUATED,
+                    EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE,
+                    EventType::ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE,
+                ])
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if ($latest && $latest->event_type === $eventType) {
+                return;
+            }
+
+            ActivityRecorder::logAsset($asset, $eventType, $metadata);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('[BrandComplianceService] Failed to log timeline event', [
+                'asset_id' => $asset->id,
+                'event_type' => $eventType,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     protected function upsertScore(Asset $asset, Brand $brand, array $result): void

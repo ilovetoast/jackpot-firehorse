@@ -280,12 +280,14 @@ class ActivityRecorder
      * @param \App\Models\Asset $asset The asset this event is about
      * @param string $event Event type (e.g., 'asset.upload.finalized', 'asset.thumbnail.completed')
      * @param array $metadata Additional metadata (e.g., ['styles' => ['thumb', 'medium']])
+     * @param \Illuminate\Database\Eloquent\Model|string|null $actor Optional actor (User model, 'system', or null for system)
      * @return ActivityEvent|null Returns null if logging fails (caller can ignore)
      */
     public static function logAsset(
         \App\Models\Asset $asset,
         string $event,
-        array $metadata = []
+        array $metadata = [],
+        Model|string|null $actor = null
     ): ?ActivityEvent {
         // Activity logging must never throw - wrap in try/catch
         try {
@@ -301,12 +303,14 @@ class ActivityRecorder
                 return null;
             }
 
-            // Use system() method which sets actor to 'system' (null actor_id)
-            // This is appropriate for background jobs that process assets
-            return self::system(
+            $resolvedActor = $actor ?? 'system';
+
+            return self::record(
                 tenant: $tenantId,
                 eventType: $event,
                 subject: $asset,
+                actor: $resolvedActor,
+                brand: null,
                 metadata: $metadata
             );
         } catch (\Exception $e) {

@@ -12,6 +12,7 @@
  * @param {Function} props.onVideoPreviewRetry - Callback for video preview retry
  */
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { Activity, AlertCircle, Slash, RefreshCw } from 'lucide-react'
 
 export default function AssetTimeline({ events = [], loading = false, onThumbnailRetry = null, thumbnailRetryCount = 0, onVideoPreviewRetry = null }) {
     // Format event type to human-readable description
@@ -47,6 +48,12 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
             'asset.system_metadata.generated': `System metadata generated${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
             'asset.system_metadata.regenerated': `System metadata regenerated${metadata?.fields_count ? ` (${metadata.fields_count} fields)` : ''}`,
             'asset.color_analysis.completed': `Color analysis completed${metadata?.buckets_count ? ` (${metadata.buckets_count} colors)` : ''}`,
+            'asset.brand_compliance.requested': 'Brand alignment analysis started',
+            'asset.brand_compliance.evaluated': metadata?.overall_score != null
+                ? `Brand alignment score: ${metadata.overall_score}%`
+                : 'Brand alignment evaluated',
+            'asset.brand_compliance.incomplete': 'Brand alignment incomplete — missing required metadata',
+            'asset.brand_compliance.not_applicable': 'Brand alignment not configured for this brand',
         }
         
         return eventMap[eventType] || eventType
@@ -72,11 +79,37 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                 e.event_type === 'asset.video_preview.skipped'
             )
         }
-        // Add other started event types here if needed
+        if (eventType === 'asset.brand_compliance.requested') {
+            return allEvents.some(e => 
+                e.event_type === 'asset.brand_compliance.evaluated' ||
+                e.event_type === 'asset.brand_compliance.incomplete' ||
+                e.event_type === 'asset.brand_compliance.not_applicable'
+            )
+        }
         return false
     }
 
     const getEventIcon = (eventType, allEvents = []) => {
+        // Brand compliance events (Lucide icons)
+        if (eventType === 'asset.brand_compliance.evaluated') {
+            return { icon: Activity, color: 'text-green-500', bgColor: 'bg-green-50' }
+        }
+        if (eventType === 'asset.brand_compliance.incomplete') {
+            return { icon: AlertCircle, color: 'text-amber-500', bgColor: 'bg-amber-50' }
+        }
+        if (eventType === 'asset.brand_compliance.not_applicable') {
+            return { icon: Slash, color: 'text-gray-500', bgColor: 'bg-gray-50' }
+        }
+        if (eventType === 'asset.brand_compliance.requested') {
+            const hasCompleted = hasCompletionEvent(eventType, allEvents)
+            return {
+                icon: RefreshCw,
+                color: 'text-blue-500',
+                bgColor: 'bg-blue-50',
+                animated: !hasCompleted,
+            }
+        }
+
         // AI failures should show red X icon
         if (eventType.includes('failed') || 
             eventType === 'asset.ai_metadata.failed' || 

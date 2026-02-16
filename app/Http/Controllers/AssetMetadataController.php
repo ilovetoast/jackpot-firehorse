@@ -965,6 +965,9 @@ class AssetMetadataController extends Controller
                 $complianceScore = $score->overall_score;
                 $complianceBreakdown = $score->breakdown_payload;
                 $evaluationStatus = $score->evaluation_status ?? 'pending';
+            } elseif (! $brandDnaEnabled) {
+                // No score row and Brand DNA disabled: nothing to evaluate
+                $evaluationStatus = 'not_applicable';
             }
         }
 
@@ -991,6 +994,20 @@ class AssetMetadataController extends Controller
 
         if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
             return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        try {
+            ActivityRecorder::logAsset(
+                $asset,
+                EventType::ASSET_BRAND_COMPLIANCE_REQUESTED,
+                [],
+                Auth::user()
+            );
+        } catch (\Exception $e) {
+            Log::error('Failed to log brand compliance requested event', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         ScoreAssetComplianceJob::dispatch($asset->id);

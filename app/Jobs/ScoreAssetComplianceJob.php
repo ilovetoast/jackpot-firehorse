@@ -48,8 +48,10 @@ class ScoreAssetComplianceJob implements ShouldQueue
 
                 return;
             }
-            $service->deleteScoreIfExists($asset, $brand);
-            Log::info('[ScoreAssetComplianceJob] Metadata incomplete after retries, score not written', [
+            // After retries exhausted: run scoreAsset so it upserts evaluation_status=incomplete.
+            // This ensures UI transitions from pending → incomplete instead of staying stuck.
+            $service->scoreAsset($asset, $brand);
+            Log::info('[ScoreAssetComplianceJob] Metadata incomplete after retries, scoreAsset upserted incomplete', [
                 'asset_id' => $this->assetId,
                 'attempts' => $this->attempts(),
             ]);

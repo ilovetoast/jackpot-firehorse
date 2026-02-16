@@ -244,11 +244,11 @@ return [
             'extensions' => ['ai'],
             
             'capabilities' => [
-                'thumbnail' => false, // @todo Implement
+                'thumbnail' => true, // Via Imagick (PDF-compatible AI files)
                 'metadata' => false,
-                'preview' => false,
+                'preview' => true,
                 'ai_analysis' => false,
-                'download_only' => true,
+                'download_only' => false,
             ],
             
             'handlers' => [

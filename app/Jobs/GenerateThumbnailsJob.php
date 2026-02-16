@@ -1105,12 +1105,12 @@ class GenerateThumbnailsJob implements ShouldQueue
         if (str_starts_with($mimeType, 'video/') || in_array($extension, ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'])) {
             return 'unsupported_format:video_ffmpeg_missing';
         }
-        
+
         // BMP - GD library has limited BMP support, not reliable
         if ($mimeType === 'image/bmp' || $extension === 'bmp') {
             return 'unsupported_format:bmp';
         }
-        
+
         // Generic fallback
         return 'unsupported_file_type';
     }

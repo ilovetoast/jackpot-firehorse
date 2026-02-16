@@ -1659,25 +1659,119 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Generate thumbnail for AI files (best-effort preview).
+     * Generate thumbnail for Adobe Illustrator (.ai) files.
      *
-     * NOTE: Adobe Illustrator files are complex and may not be fully supported.
-     * This is a placeholder implementation.
+     * Modern AI files (Illustrator 9+) are PDF-compatible. ImageMagick with Ghostscript
+     * can render them. Uses same approach as PSD - Imagick flattens and converts.
      *
      * @param string $sourcePath
      * @param array $styleConfig
-     * @return string|null Path to generated thumbnail, or null if not supported
+     * @return string Path to generated thumbnail
+     * @throws \RuntimeException If generation fails
      */
-    protected function generateAiThumbnail(string $sourcePath, array $styleConfig): ?string
+    protected function generateAiThumbnail(string $sourcePath, array $styleConfig): string
     {
-        // TODO: Implement AI thumbnail generation (best-effort)
-        // AI files may contain embedded previews or require conversion
-        
-        Log::info('AI thumbnail generation not yet implemented', [
+        // Verify Imagick extension is loaded
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException('Illustrator thumbnail generation requires Imagick PHP extension');
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating Illustrator thumbnail', [
             'source_path' => $sourcePath,
+            'ai_size_bytes' => filesize($sourcePath),
+            'style_config' => $styleConfig,
         ]);
-        
-        return null;
+
+        try {
+            if (!is_readable($sourcePath)) {
+                throw new \RuntimeException("Illustrator file is not readable: {$sourcePath}");
+            }
+
+            $imagick = new \Imagick();
+            $imagick->setResolution(72, 72);
+
+            try {
+                // AI files are PDF-compatible; ImageMagick reads first page via Ghostscript
+                $imagick->readImage($sourcePath . '[0]');
+            } catch (\ImagickException $e) {
+                Log::error('[ThumbnailGenerationService] Failed to read AI file with Imagick', [
+                    'source_path' => $sourcePath,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException("Failed to read Illustrator file: {$e->getMessage()}", 0, $e);
+            }
+
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+
+            $sourceWidth = $imagick->getImageWidth();
+            $sourceHeight = $imagick->getImageHeight();
+
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('Illustrator file has invalid dimensions');
+            }
+
+            Log::info('[ThumbnailGenerationService] Illustrator file read successfully', [
+                'source_path' => $sourcePath,
+                'source_width' => $sourceWidth,
+                'source_height' => $sourceHeight,
+            ]);
+
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+
+            if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                $imagick->blurImage(0, 2);
+            }
+
+            $outputFormat = config('assets.thumbnail.output_format', 'webp');
+            $quality = $styleConfig['quality'] ?? 85;
+            $imagick->setImageFormat($outputFormat);
+            $imagick->setImageCompressionQuality($quality);
+
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $outputPath = tempnam(sys_get_temp_dir(), 'ai_thumb_') . '.' . $extension;
+
+            $imagick->writeImage($outputPath);
+            $imagick->clear();
+            $imagick->destroy();
+
+            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+                throw new \RuntimeException('Illustrator thumbnail generation failed - output file is missing or empty');
+            }
+
+            Log::info('[ThumbnailGenerationService] Illustrator thumbnail generated successfully', [
+                'source_path' => $sourcePath,
+                'output_path' => $outputPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+            ]);
+
+            return $outputPath;
+        } catch (\ImagickException $e) {
+            Log::error('[ThumbnailGenerationService] Illustrator thumbnail failed (ImagickException)', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("Illustrator thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] Illustrator thumbnail error', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("Illustrator thumbnail generation error: {$e->getMessage()}", 0, $e);
+        }
     }
 
     /**

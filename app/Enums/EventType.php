@@ -140,6 +140,12 @@ class EventType
     public const ASSET_PROMOTED = 'asset.promoted';
     public const ASSET_READY = 'asset.ready';
 
+    // Brand Compliance evaluation events (Asset Timeline)
+    public const ASSET_BRAND_COMPLIANCE_REQUESTED = 'asset.brand_compliance.requested';
+    public const ASSET_BRAND_COMPLIANCE_EVALUATED = 'asset.brand_compliance.evaluated';
+    public const ASSET_BRAND_COMPLIANCE_INCOMPLETE = 'asset.brand_compliance.incomplete';
+    public const ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE = 'asset.brand_compliance.not_applicable';
+
     // Asset download events (explicit logging required)
     public const ASSET_DOWNLOAD_CREATED = 'asset.download.created';
     public const ASSET_DOWNLOAD_COMPLETED = 'asset.download.completed';
@@ -301,6 +307,10 @@ class EventType
             self::ASSET_VIDEO_PREVIEW_SKIPPED,
             self::ASSET_PROMOTED,
             self::ASSET_READY,
+            self::ASSET_BRAND_COMPLIANCE_REQUESTED,
+            self::ASSET_BRAND_COMPLIANCE_EVALUATED,
+            self::ASSET_BRAND_COMPLIANCE_INCOMPLETE,
+            self::ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE,
             self::ASSET_DOWNLOAD_CREATED,
             self::ASSET_DOWNLOAD_COMPLETED,
             self::ASSET_DOWNLOAD_FAILED,

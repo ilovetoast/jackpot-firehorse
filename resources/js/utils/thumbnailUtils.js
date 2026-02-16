@@ -33,6 +33,9 @@ export const THUMBNAIL_SUPPORTED_TYPES = [
     'image/vnd.adobe.photoshop', // PSD/PSB files
     'image/svg+xml', // SVG passthrough - original served as thumbnail
     'application/pdf',
+    'application/postscript', // Illustrator (.ai) - PDF-compatible
+    'application/vnd.adobe.illustrator',
+    'application/illustrator',
     // BMP excluded: GD library has limited BMP support, not reliable
     // 'image/bmp',
     // HEIC/HEIF excluded: backend pipeline may not support these yet
@@ -62,6 +65,7 @@ export const THUMBNAIL_SUPPORTED_EXTENSIONS = [
     'psb',
     'svg', // SVG passthrough - original served as thumbnail
     'pdf',
+    'ai', // Adobe Illustrator - PDF-compatible
     // BMP excluded: GD library has limited BMP support
     // 'bmp',
     // HEIC/HEIF excluded: backend pipeline may not support these yet
