@@ -274,6 +274,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                       extension_loaded('imagick')) {
                 // PSD files are now supported via Imagick
                 $isNowSupported = true;
+            } elseif ($skipReason === 'unsupported_format:svg' &&
+                      ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
+                // SVG is now supported via passthrough (no GD/Imagick needed)
+                $isNowSupported = true;
             }
             
             if ($isNowSupported) {
@@ -1105,11 +1109,6 @@ class GenerateThumbnailsJob implements ShouldQueue
         // BMP - GD library has limited BMP support, not reliable
         if ($mimeType === 'image/bmp' || $extension === 'bmp') {
             return 'unsupported_format:bmp';
-        }
-        
-        // SVG - GD library does not support SVG (requires Imagick or other tools)
-        if ($mimeType === 'image/svg+xml' || $extension === 'svg') {
-            return 'unsupported_format:svg';
         }
         
         // Generic fallback

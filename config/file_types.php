@@ -309,6 +309,40 @@ return [
             ],
         ],
 
+        'svg' => [
+            'name' => 'SVG',
+            'description' => 'Scalable Vector Graphics (passthrough - original served as thumbnail)',
+            
+            'mime_types' => ['image/svg+xml'],
+            'extensions' => ['svg'],
+            
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+            ],
+            
+            'handlers' => [
+                'thumbnail' => 'generateSvgThumbnail',
+            ],
+            
+            'requirements' => [], // No PHP extensions needed - passthrough uses original file
+            
+            'errors' => [
+                'processing_failed' => 'Unable to process SVG file. The file may be corrupted.',
+                'corrupted' => 'Unable to read SVG file. The file may be corrupted.',
+            ],
+            
+            'frontend_hints' => [
+                'can_preview_inline' => true,
+                'preview_component' => 'image',
+                'show_placeholder' => false,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
         'video' => [
             'name' => 'Video',
             'description' => 'Video files (MP4, MOV, AVI, etc.)',
@@ -373,13 +407,6 @@ return [
             'skip_reason' => 'unsupported_format:bmp',
             'message' => 'BMP format is not supported. GD library has limited BMP support.',
             'disable_upload_reason' => 'BMP format is not supported for thumbnail generation.',
-        ],
-        'svg' => [
-            'mime_types' => ['image/svg+xml'],
-            'extensions' => ['svg'],
-            'skip_reason' => 'unsupported_format:svg',
-            'message' => 'SVG format is not supported. GD library does not support SVG.',
-            'disable_upload_reason' => 'SVG format is not supported for thumbnail generation.',
         ],
     ],
 
@@ -450,6 +477,7 @@ return [
     */
 
     'mime_to_extension' => [
+        'image/svg+xml' => 'svg',
         'image/jpeg' => 'jpg',
         'image/jpg' => 'jpg',
         'image/png' => 'png',

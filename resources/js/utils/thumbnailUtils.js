@@ -17,7 +17,6 @@
  * 
  * Excluded formats:
  * - BMP: GD library has limited BMP support, not reliable
- * - SVG: GD library does not support SVG
  * - HEIC/HEIF: backend pipeline may not support these yet
  * 
  * These formats will be marked as SKIPPED with appropriate skip reasons.
@@ -32,11 +31,10 @@ export const THUMBNAIL_SUPPORTED_TYPES = [
     'image/tif',
     'image/avif',
     'image/vnd.adobe.photoshop', // PSD/PSB files
+    'image/svg+xml', // SVG passthrough - original served as thumbnail
     'application/pdf',
     // BMP excluded: GD library has limited BMP support, not reliable
     // 'image/bmp',
-    // SVG excluded: GD library does not support SVG (requires Imagick or other tools)
-    // 'image/svg+xml',
     // HEIC/HEIF excluded: backend pipeline may not support these yet
     // 'image/heic',
     // 'image/heif',
@@ -62,11 +60,10 @@ export const THUMBNAIL_SUPPORTED_EXTENSIONS = [
     'avif',
     'psd',
     'psb',
+    'svg', // SVG passthrough - original served as thumbnail
     'pdf',
     // BMP excluded: GD library has limited BMP support
     // 'bmp',
-    // SVG excluded: GD library does not support SVG
-    // 'svg',
     // HEIC/HEIF excluded: backend pipeline may not support these yet
     // 'heic',
     // 'heif',

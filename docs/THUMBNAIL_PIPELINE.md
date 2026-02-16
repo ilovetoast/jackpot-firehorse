@@ -39,11 +39,14 @@ The thumbnail pipeline supports the following file types:
 - **GIF** (`image/gif`) - Full support with transparency
 - **WEBP** (`image/webp`) - Full support
 
+**Other image types:**
+- **TIFF/TIF** - Via Imagick ✓
+- **AVIF** - Via Imagick ✓
+- **PSD/PSB** - Via Imagick ✓
+- **SVG** - Passthrough (original served as thumbnail) ✓
+
 **Excluded image types:**
-- TIFF/TIF - Requires Imagick (not supported)
-- AVIF - Backend pipeline does not support AVIF yet
 - BMP - GD library has limited BMP support, not reliable
-- SVG - GD library does not support SVG (requires Imagick)
 
 ### PDFs (via spatie/pdf-to-image)
 - **PDF** (`application/pdf`) - **Page 1 only** ✓ IMPLEMENTED

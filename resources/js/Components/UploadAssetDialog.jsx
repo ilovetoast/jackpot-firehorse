@@ -4170,7 +4170,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         <p className="text-sm text-blue-800">
                                             {filesWithoutThumbnailSupport.length === 1
                                                 ? 'This file type doesn\'t support thumbnails yet. You\'ll see a file-type icon instead of a preview in the grid.'
-                                                : `${filesWithoutThumbnailSupport.length} of your files are types we don't support thumbnails for yet (e.g. video, SVG). You'll see a file-type icon instead of a preview for those assets.`}
+                                                : `${filesWithoutThumbnailSupport.length} of your files are types we don't support thumbnails for yet (e.g. video, HEIC). You'll see a file-type icon instead of a preview for those assets.`}
                                         </p>
                                     </div>
                                 )}

@@ -156,6 +156,9 @@ class ThumbnailRetryService
                       ($mimeType === 'image/avif' || $extension === 'avif') &&
                       extension_loaded('imagick')) {
                 $isNowSupported = true;
+            } elseif ($skipReason === 'unsupported_format:svg' &&
+                      ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
+                $isNowSupported = true;
             }
             
             if ($isNowSupported) {

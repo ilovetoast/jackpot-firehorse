@@ -20,7 +20,7 @@ class ClearOldThumbnailSkipReasons extends Command
      * @var string
      */
     protected $signature = 'thumbnails:clear-skip-reasons 
-                            {--format= : Specific format to clear (tiff, avif, psd, or all)}
+                            {--format= : Specific format to clear (tiff, avif, psd, svg, or all)}
                             {--dry-run : Show what would be cleared without making changes}
                             {--force : Force regeneration by setting status to PENDING}';
 
@@ -29,7 +29,7 @@ class ClearOldThumbnailSkipReasons extends Command
      *
      * @var string
      */
-    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, AVIF, PSD)';
+    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, AVIF, PSD, SVG)';
 
     /**
      * Execute the console command.
@@ -101,6 +101,14 @@ class ClearOldThumbnailSkipReasons extends Command
                     $shouldClear = true;
                     $formatName = 'PSD';
                 }
+            }
+
+            // Check SVG (passthrough - no extensions needed)
+            if (($format === 'all' || $format === 'svg') && 
+                $skipReason === 'unsupported_format:svg' &&
+                ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
+                $shouldClear = true;
+                $formatName = 'SVG';
             }
 
             if ($shouldClear) {

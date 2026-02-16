@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Route;
 
 class Brand extends Model
 {
@@ -63,6 +64,40 @@ class Brand extends Model
         'settings' => 'array',
         'download_landing_settings' => 'array', // R3.2
     ];
+    }
+
+    /**
+     * Resolve logo_path from logo_id when logo_path is null.
+     * When logo references an asset (logo_id), returns the thumbnail URL so the logo displays
+     * in nav, brand selector, etc. For SVG assets, the thumbnail route serves the original
+     * (passthrough); for raster, it serves the generated thumbnail.
+     */
+    public function getLogoPathAttribute($value): ?string
+    {
+        if ($value !== null && $value !== '') {
+            return $value;
+        }
+        $logoId = $this->attributes['logo_id'] ?? null;
+        if ($logoId && Route::has('assets.thumbnail.final')) {
+            return route('assets.thumbnail.final', ['asset' => $logoId, 'style' => 'medium']);
+        }
+        return null;
+    }
+
+    /**
+     * Resolve icon_path from icon_id when icon_path is null.
+     * When icon references an asset (icon_id), returns the thumbnail URL for display.
+     */
+    public function getIconPathAttribute($value): ?string
+    {
+        if ($value !== null && $value !== '') {
+            return $value;
+        }
+        $iconId = $this->attributes['icon_id'] ?? null;
+        if ($iconId && Route::has('assets.thumbnail.final')) {
+            return route('assets.thumbnail.final', ['asset' => $iconId, 'style' => 'medium']);
+        }
+        return null;
     }
 
     /**

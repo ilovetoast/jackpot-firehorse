@@ -372,6 +372,18 @@ class ThumbnailGenerationService
             } catch (\ImagickException $e) {
                 throw new \RuntimeException("Downloaded file is not a valid AVIF image: {$e->getMessage()}");
             }
+        } elseif ($fileType === 'svg') {
+            // SVG validation: Basic XML structure check
+            $content = file_get_contents($tempPath, false, null, 0, 500);
+            if ($content === false || !preg_match('/<\s*(svg|\?xml)/i', $content)) {
+                throw new \RuntimeException("Downloaded file does not appear to be a valid SVG (size: {$sourceFileSize} bytes)");
+            }
+            Log::info('[ThumbnailGenerationService] Source SVG file downloaded and verified', [
+                'asset_id' => $asset->id,
+                'temp_path' => $tempPath,
+                'source_file_size' => $sourceFileSize,
+                'file_type' => 'svg',
+            ]);
         } elseif ($fileType === 'image') {
             // Image validation: Verify file is actually an image (not corrupted or wrong format)
             // CRITICAL: Get dimensions from ORIGINAL source file using getimagesize()
@@ -712,6 +724,43 @@ class ThumbnailGenerationService
         }
         
         return $this->$handler($sourcePath, $styleConfig);
+    }
+
+    /**
+     * Generate thumbnail for SVG files (passthrough).
+     *
+     * SVG is vector format - we serve the original file as the thumbnail.
+     * Copies the source SVG to a temp file for upload to S3 at each style path.
+     *
+     * @param string $sourcePath
+     * @param array $styleConfig
+     * @return string Path to generated thumbnail (copy of original)
+     * @throws \RuntimeException If generation fails
+     */
+    protected function generateSvgThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        if (!file_exists($sourcePath)) {
+            throw new \RuntimeException("Source SVG file does not exist: {$sourcePath}");
+        }
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException("Source SVG file is empty (size: 0 bytes)");
+        }
+        // Basic SVG validation - must start with <svg or <?xml
+        $content = file_get_contents($sourcePath, false, null, 0, 200);
+        if ($content === false || !preg_match('/<\s*(svg|\?xml)/i', $content)) {
+            throw new \RuntimeException("Source file does not appear to be a valid SVG (size: {$sourceFileSize} bytes)");
+        }
+        $tempPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.svg';
+        if (!copy($sourcePath, $tempPath)) {
+            throw new \RuntimeException("Failed to copy SVG file for thumbnail");
+        }
+        Log::info('[ThumbnailGenerationService] SVG passthrough thumbnail prepared', [
+            'source_path' => $sourcePath,
+            'temp_path' => $tempPath,
+            'source_file_size' => $sourceFileSize,
+        ]);
+        return $tempPath;
     }
 
     /**
@@ -2164,12 +2213,14 @@ class ThumbnailGenerationService
      */
     protected function getThumbnailMetadata(string $thumbnailPath): array
     {
-        $info = getimagesize($thumbnailPath);
-        
+        $info = @getimagesize($thumbnailPath);
+        // For SVG and other non-raster formats, getimagesize returns false
+        $width = $info !== false ? ($info[0] ?? null) : null;
+        $height = $info !== false ? ($info[1] ?? null) : null;
         return [
-            'width' => $info[0] ?? null,
-            'height' => $info[1] ?? null,
-            'size_bytes' => filesize($thumbnailPath),
+            'width' => $width,
+            'height' => $height,
+            'size_bytes' => file_exists($thumbnailPath) ? filesize($thumbnailPath) : 0,
         ];
     }
 
