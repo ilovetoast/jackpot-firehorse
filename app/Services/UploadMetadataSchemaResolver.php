@@ -377,12 +377,14 @@ class UploadMetadataSchemaResolver
         $formatted = [];
 
         foreach ($fields as $field) {
+            $isRequired = $field['is_required'] ?? $field['required'] ?? false;
             $formatted[] = [
                 'field_id' => $field['field_id'],
                 'key' => $field['key'],
                 'display_label' => $field['display_label'],
                 'type' => $field['type'],
-                'is_required' => false, // Stub for future implementation
+                'is_required' => $isRequired,
+                'required' => $isRequired, // Alias for upload validation (validateRequiredMetadataFields uses f.required)
                 'can_edit' => $field['can_edit'] ?? true, // Default to true if not set (backward compatibility)
                 'options' => $field['options'] ?? [],
             ];

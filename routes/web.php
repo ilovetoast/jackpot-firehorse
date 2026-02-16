@@ -121,6 +121,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::put('/tenant/metadata/fields/{field}', [\App\Http\Controllers\TenantMetadataFieldController::class, 'update'])->name('tenant.metadata.fields.update');
         Route::post('/tenant/metadata/fields/{field}/disable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'disable'])->name('tenant.metadata.fields.disable');
         Route::post('/tenant/metadata/fields/{field}/enable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'enable'])->name('tenant.metadata.fields.enable');
+        Route::post('/tenant/metadata/fields/{field}/archive', [\App\Http\Controllers\TenantMetadataFieldController::class, 'archive'])->name('tenant.metadata.fields.archive');
         Route::post('/tenant/metadata/fields/{field}/ai-eligible', [\App\Http\Controllers\TenantMetadataFieldController::class, 'updateAiEligible'])->name('tenant.metadata.fields.ai-eligible');
         
         // Allowed values (options) management

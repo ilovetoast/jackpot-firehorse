@@ -2,6 +2,14 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { router } from '@inertiajs/react'
 import { ArrowPathIcon, XMarkIcon, ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline'
+import OptionIconSelector, { OptionIcon } from './OptionIconSelector'
+import {
+    toSnakeCase,
+    validateSnakeCase,
+    isDuplicateValue,
+    normalizeOptions,
+    prepareOptionsForSubmit,
+} from '../utils/optionEditorUtils'
 
 /**
  * Metadata Field Modal Component
@@ -30,9 +38,12 @@ export default function MetadataFieldModal({
         show_on_upload: true,
         show_on_edit: true,
         show_in_filters: true,
+        is_primary: false,
+        is_required: false,
         group_key: '',
     })
-    const [newOption, setNewOption] = useState({ value: '', label: '' })
+    const [newOption, setNewOption] = useState({ value: '', system_label: '', color: '', icon: '' })
+    const [optionError, setOptionError] = useState(null)
     const [errors, setErrors] = useState({})
     const [submitting, setSubmitting] = useState(false)
     const [loadingField, setLoadingField] = useState(false)
@@ -116,17 +127,22 @@ export default function MetadataFieldModal({
                             // Store original enabled categories for comparison when saving
                             setOriginalEnabledCategories(enabledCategoryIds)
                             
+                            const categoryOverrides = categoryData.category_overrides || {}
+                            const isPrimary = enabledCategoryIds.some(catId => categoryOverrides[catId]?.is_primary === true)
+                            const isRequired = enabledCategoryIds.some(catId => categoryOverrides[catId]?.is_required === true)
                             setFormData({
                                 key: fieldData.field.key || '',
                                 system_label: fieldData.field.system_label || fieldData.field.label || '',
                                 type: fieldData.field.type || 'text',
                                 selectedCategories: enabledCategoryIds, // Use enabled categories, not category_ids
-                                options: fieldData.field.options || [],
+                                options: normalizeOptions(fieldData.field.options || []),
                                 ai_eligible: fieldData.field.ai_eligible || false,
                                 is_filterable: fieldData.field.is_filterable !== false,
                                 show_on_upload: fieldData.field.show_on_upload !== false,
                                 show_on_edit: fieldData.field.show_on_edit !== false,
                                 show_in_filters: fieldData.field.show_in_filters !== false,
+                                is_primary: isPrimary,
+                                is_required: isRequired,
                                 group_key: fieldData.field.group_key || '',
                             })
                         }
@@ -162,17 +178,22 @@ export default function MetadataFieldModal({
                                 ? fullFieldData.ai_eligible 
                                 : (field.ai_eligible !== undefined ? field.ai_eligible : false)
                             
+                            const categoryOverrides = categoryData.category_overrides || {}
+                            const isPrimary = enabledCategoryIds.some(catId => categoryOverrides[catId]?.is_primary === true)
+                            const isRequired = enabledCategoryIds.some(catId => categoryOverrides[catId]?.is_required === true)
                             setFormData({
                                 key: field.key || '',
                                 system_label: field.label || field.system_label || '',
                                 type: field.field_type || field.type || 'text',
                                 selectedCategories: enabledCategoryIds,
-                                options: fieldOptions,
+                                options: normalizeOptions(fieldOptions),
                                 ai_eligible: aiEligibleValue,
                                 is_filterable: field.is_filterable !== false,
                                 show_on_upload: field.show_on_upload !== false,
                                 show_on_edit: field.show_on_edit !== false,
                                 show_in_filters: field.show_in_filters !== false,
+                                is_primary: isPrimary,
+                                is_required: isRequired,
                                 group_key: field.group_key || '',
                             })
                             setLoadingField(false)
@@ -185,12 +206,14 @@ export default function MetadataFieldModal({
                                 system_label: field.label || field.system_label || '',
                                 type: field.field_type || field.type || 'text',
                                 selectedCategories: [],
-                                options: field.options || field.allowed_values || [],
+                                options: normalizeOptions(field.options || field.allowed_values || []),
                                 ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
                                 is_filterable: field.is_filterable !== false,
                                 show_on_upload: field.show_on_upload !== false,
                                 show_on_edit: field.show_on_edit !== false,
                                 show_in_filters: field.show_in_filters !== false,
+                                is_primary: false,
+                                is_required: false,
                                 group_key: field.group_key || '',
                             })
                             setLoadingField(false)
@@ -202,12 +225,14 @@ export default function MetadataFieldModal({
                         system_label: field.label || field.system_label || '',
                         type: field.field_type || field.type || 'text',
                         selectedCategories: [],
-                        options: field.options || field.allowed_values || [],
+                        options: normalizeOptions(field.options || field.allowed_values || []),
                         ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
                         is_filterable: field.is_filterable !== false,
                         show_on_upload: field.show_on_upload !== false,
                         show_on_edit: field.show_on_edit !== false,
                         show_in_filters: field.show_in_filters !== false,
+                        is_primary: false,
+                        is_required: false,
                         group_key: field.group_key || '',
                     })
                     setLoadingField(false)
@@ -229,6 +254,8 @@ export default function MetadataFieldModal({
                 show_on_upload: true,
                 show_on_edit: true,
                 show_in_filters: true,
+                is_primary: false,
+                is_required: false,
                 group_key: '',
             })
             setErrors({})
@@ -264,6 +291,23 @@ export default function MetadataFieldModal({
             return
         }
 
+        // Validate options for select/multiselect
+        if (requiresOptions) {
+            const prepared = prepareOptionsForSubmit(formData.options)
+            if (prepared.length === 0) {
+                setErrors({ options: 'At least one option is required.', error: 'Please add at least one option.' })
+                setSubmitting(false)
+                return
+            }
+            const values = prepared.map((o) => o.value.toLowerCase())
+            const dupes = values.filter((v, i) => values.indexOf(v) !== i)
+            if (dupes.length > 0) {
+                setErrors({ options: 'Duplicate values are not allowed.', error: 'Remove duplicate option values.' })
+                setSubmitting(false)
+                return
+            }
+        }
+
         // Ensure key starts with custom__ prefix for new fields
         const fieldKey = isEditing 
             ? formData.key 
@@ -272,6 +316,7 @@ export default function MetadataFieldModal({
         const submitData = {
             ...formData,
             key: fieldKey,
+            options: prepareOptionsForSubmit(formData.options),
         }
 
         let skipFinally = false
@@ -346,6 +391,21 @@ export default function MetadataFieldModal({
                     
                     // Wait for all suppression updates to complete
                     await Promise.all(suppressionPromises)
+                    
+                    // Apply is_primary and is_required to each selected category
+                    const visibilityPromises = newEnabledCategories.map(categoryId =>
+                        fetch(`/app/api/tenant/metadata/fields/${field.id}/visibility`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken || '' },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({
+                                is_primary: formData.is_primary,
+                                is_required: formData.is_required,
+                                category_id: categoryId,
+                            }),
+                        })
+                    )
+                    await Promise.all(visibilityPromises)
                 }
                 
                 onSuccess?.()
@@ -365,7 +425,6 @@ export default function MetadataFieldModal({
                 const data = await response.json()
                 if (response.ok) {
                     if (field.id) {
-                        const allCategoryIds = categories.map(cat => cat.id)
                         const newEnabledCategories = formData.selectedCategories || []
                         const categoriesToSuppress = originalEnabledCategories.filter(catId => !newEnabledCategories.includes(catId))
                         const categoriesToUnsuppress = newEnabledCategories.filter(catId => !originalEnabledCategories.includes(catId))
@@ -373,6 +432,20 @@ export default function MetadataFieldModal({
                             ...categoriesToSuppress.map(catId => fetch(`/app/api/tenant/metadata/fields/${field.id}/categories/${catId}/suppress`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken || '' }, credentials: 'same-origin' })),
                             ...categoriesToUnsuppress.map(catId => fetch(`/app/api/tenant/metadata/fields/${field.id}/categories/${catId}/suppress`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken || '' }, credentials: 'same-origin' })),
                         ])
+                        // Apply is_primary and is_required to each selected category
+                        const visibilityPromises = newEnabledCategories.map(categoryId =>
+                            fetch(`/app/api/tenant/metadata/fields/${field.id}/visibility`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken || '' },
+                                credentials: 'same-origin',
+                                body: JSON.stringify({
+                                    is_primary: formData.is_primary,
+                                    is_required: formData.is_required,
+                                    category_id: categoryId,
+                                }),
+                            })
+                        )
+                        await Promise.all(visibilityPromises)
                     }
                     onSuccess?.()
                     onClose()
@@ -408,13 +481,42 @@ export default function MetadataFieldModal({
     }
 
     const addOption = () => {
-        if (newOption.value && newOption.label) {
-            setFormData({
-                ...formData,
-                options: [...formData.options, { ...newOption }],
-            })
-            setNewOption({ value: '', label: '' })
+        setOptionError(null)
+        const value = toSnakeCase(newOption.value) || newOption.value.trim().toLowerCase()
+        const system_label = newOption.system_label.trim()
+
+        if (!system_label) {
+            setOptionError('Label is required')
+            return
         }
+
+        if (!value) {
+            setOptionError('Value is required (lowercase snake_case)')
+            return
+        }
+
+        const snakeCheck = validateSnakeCase(value)
+        if (!snakeCheck.valid) {
+            setOptionError(snakeCheck.message)
+            return
+        }
+
+        if (isDuplicateValue(formData.options, value)) {
+            setOptionError('This value already exists')
+            return
+        }
+
+        const opt = {
+            value,
+            system_label,
+            color: newOption.color && /^#[0-9A-Fa-f]{6}$/.test(newOption.color) ? newOption.color : null,
+            icon: newOption.icon || null,
+        }
+        setFormData({
+            ...formData,
+            options: [...formData.options, opt],
+        })
+        setNewOption({ value: '', system_label: '', color: '', icon: '' })
     }
 
     const removeOption = (index) => {
@@ -770,14 +872,34 @@ export default function MetadataFieldModal({
                                         Options <span className="text-red-500">*</span>
                                     </label>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Add values that users can select for this field
+                                        Add values that users can select. Value must be lowercase snake_case (e.g. high_quality).
                                     </p>
                                     <div className="mt-3 space-y-3">
                                         {formData.options.length > 0 && (
                                             <div className="space-y-2">
                                                 {formData.options.map((option, index) => (
                                                     <div key={index} className="flex items-center gap-2 rounded-md border border-gray-200 p-2">
-                                                        <div className="flex-1 grid grid-cols-2 gap-2">
+                                                        {/* Preview chip */}
+                                                        <div className="flex-shrink-0">
+                                                            <span
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border border-gray-200"
+                                                                style={
+                                                                    option.color
+                                                                        ? { backgroundColor: `${option.color}20`, color: option.color, borderColor: option.color }
+                                                                        : { backgroundColor: '#f3f4f6', color: '#374151' }
+                                                                }
+                                                            >
+                                                                {option.color && (
+                                                                    <span
+                                                                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                                        style={{ backgroundColor: option.color }}
+                                                                    />
+                                                                )}
+                                                                {option.icon && <OptionIcon icon={option.icon} className="h-3.5 w-3.5" />}
+                                                                {option.system_label || option.value}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
                                                             <div>
                                                                 <span className="text-xs text-gray-500">Value</span>
                                                                 <input
@@ -791,7 +913,7 @@ export default function MetadataFieldModal({
                                                                 <span className="text-xs text-gray-500">Label</span>
                                                                 <input
                                                                     type="text"
-                                                                    value={option.label}
+                                                                    value={option.system_label || option.label}
                                                                     readOnly
                                                                     className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 sm:text-sm sm:leading-6 bg-gray-50"
                                                                 />
@@ -808,37 +930,104 @@ export default function MetadataFieldModal({
                                                 ))}
                                             </div>
                                         )}
-                                        <div className="flex items-end gap-2 rounded-md border border-gray-200 p-2 bg-gray-50">
-                                            <div className="flex-1 grid grid-cols-2 gap-2">
+                                        {/* Add new option */}
+                                        <div className="rounded-md border border-gray-200 p-3 bg-gray-50 space-y-3">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                 <div>
-                                                    <label className="text-xs text-gray-500">Value</label>
+                                                    <label className="text-xs text-gray-500">Value (snake_case)</label>
                                                     <input
                                                         type="text"
                                                         value={newOption.value}
-                                                        onChange={(e) => setNewOption({ ...newOption, value: e.target.value })}
-                                                        placeholder="e.g., high"
+                                                        onChange={(e) => {
+                                                            const v = e.target.value
+                                                            setNewOption((prev) => ({ ...prev, value: v }))
+                                                            setOptionError(null)
+                                                        }}
+                                                        onBlur={(e) => {
+                                                            const v = e.target.value
+                                                            if (v) setNewOption((prev) => ({ ...prev, value: toSnakeCase(v) }))
+                                                        }}
+                                                        placeholder="e.g., high_quality"
                                                         className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="text-xs text-gray-500">Label</label>
+                                                    <label className="text-xs text-gray-500">Label <span className="text-red-500">*</span></label>
                                                     <input
                                                         type="text"
-                                                        value={newOption.label}
-                                                        onChange={(e) => setNewOption({ ...newOption, label: e.target.value })}
+                                                        value={newOption.system_label}
+                                                        onChange={(e) => {
+                                                            setNewOption((prev) => ({ ...prev, system_label: e.target.value }))
+                                                            setOptionError(null)
+                                                        }}
                                                         placeholder="e.g., High Quality"
                                                         className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
                                                     />
                                                 </div>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={addOption}
-                                                disabled={!newOption.value || !newOption.label}
-                                                className="px-3 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                Add
-                                            </button>
+                                            <div className="flex flex-wrap items-end gap-3">
+                                                <div>
+                                                    <label className="text-xs text-gray-500 block mb-1">Color (optional)</label>
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="color"
+                                                            value={newOption.color || '#6366f1'}
+                                                            onChange={(e) => setNewOption((prev) => ({ ...prev, color: e.target.value }))}
+                                                            className="h-8 w-8 rounded border border-gray-300 cursor-pointer p-0"
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={newOption.color || ''}
+                                                            onChange={(e) => setNewOption((prev) => ({ ...prev, color: e.target.value }))}
+                                                            placeholder="#6366f1"
+                                                            className="w-24 rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 text-sm"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-gray-500 block mb-1">Icon (optional)</label>
+                                                    <OptionIconSelector
+                                                        value={newOption.icon}
+                                                        onChange={(icon) => setNewOption((prev) => ({ ...prev, icon }))}
+                                                        className="py-1.5"
+                                                    />
+                                                </div>
+                                                <div className="flex-1" />
+                                                <div className="flex items-center gap-2">
+                                                    {optionError && <span className="text-sm text-red-600">{optionError}</span>}
+                                                    <button
+                                                        type="button"
+                                                        onClick={addOption}
+                                                        disabled={!newOption.system_label.trim()}
+                                                        className="px-3 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        Add
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {/* Preview chip for new option */}
+                                            {(newOption.system_label || newOption.value) && (
+                                                <div className="pt-1 border-t border-gray-200">
+                                                    <span className="text-xs text-gray-500">Preview: </span>
+                                                    <span
+                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border border-gray-200"
+                                                        style={
+                                                            newOption.color && /^#[0-9A-Fa-f]{6}$/.test(newOption.color)
+                                                                ? { backgroundColor: `${newOption.color}20`, color: newOption.color, borderColor: newOption.color }
+                                                                : { backgroundColor: '#f3f4f6', color: '#374151' }
+                                                        }
+                                                    >
+                                                        {newOption.color && /^#[0-9A-Fa-f]{6}$/.test(newOption.color) && (
+                                                            <span
+                                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                                style={{ backgroundColor: newOption.color }}
+                                                            />
+                                                        )}
+                                                        {newOption.icon && <OptionIcon icon={newOption.icon} className="h-3.5 w-3.5" />}
+                                                        {newOption.system_label || toSnakeCase(newOption.value) || newOption.value || '…'}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     {errors.options && <p className="mt-2 text-sm text-red-600">{errors.options}</p>}
@@ -909,6 +1098,46 @@ export default function MetadataFieldModal({
                                                 <p className="text-gray-500">Allow filtering assets by this field</p>
                                             </div>
                                         </div>
+                                        {formData.show_in_filters && (
+                                            <div className="relative flex items-start pl-7">
+                                                <div className="flex h-6 items-center">
+                                                    <input
+                                                        id="is_primary"
+                                                        name="is_primary"
+                                                        type="checkbox"
+                                                        checked={formData.is_primary}
+                                                        onChange={(e) => setFormData({ ...formData, is_primary: e.target.checked })}
+                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                    />
+                                                </div>
+                                                <div className="ml-3 text-sm leading-6">
+                                                    <label htmlFor="is_primary" className="font-medium text-gray-900">
+                                                        Primary Filter
+                                                    </label>
+                                                    <p className="text-gray-500">Show this field inline in the asset grid filter bar (otherwise under &quot;More filters&quot;)</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {formData.show_on_upload && (
+                                            <div className="relative flex items-start pl-7">
+                                                <div className="flex h-6 items-center">
+                                                    <input
+                                                        id="is_required"
+                                                        name="is_required"
+                                                        type="checkbox"
+                                                        checked={formData.is_required}
+                                                        onChange={(e) => setFormData({ ...formData, is_required: e.target.checked })}
+                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                                                    />
+                                                </div>
+                                                <div className="ml-3 text-sm leading-6">
+                                                    <label htmlFor="is_required" className="font-medium text-gray-900">
+                                                        Required
+                                                    </label>
+                                                    <p className="text-gray-500">Must be filled when adding assets to selected categories</p>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </fieldset>
                             </div>

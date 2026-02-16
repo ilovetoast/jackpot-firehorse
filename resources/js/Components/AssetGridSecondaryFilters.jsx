@@ -32,9 +32,7 @@ import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
 import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters } from '../utils/filterUrlUtils'
-import DominantColorsFilter from './DominantColorsFilter'
-import ColorSwatchFilter from './ColorSwatchFilter'
-import TagPrimaryFilter from './TagPrimaryFilter'
+import { FilterFieldInput } from './FilterFieldInput'
 import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
 
@@ -455,10 +453,25 @@ export default function AssetGridSecondaryFilters({
                                 const filter = filters[fieldKey]
                                 if (!filter || filter.value === null || filter.value === '') return null
                                 if (Array.isArray(filter.value) && filter.value.length === 0) return null
-                                const valueLabel = Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? '')
+                                const field = (filterable_schema || []).find((f) => (f.field_key || f.key) === fieldKey)
+                                let valueLabel = Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? '')
+                                let optionColor = null
+                                if (field && (field.type === 'select' || field.type === 'multiselect') && field.options?.length) {
+                                    const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
+                                    const opt = field.options.find((o) => String(o.value) === String(rawVal))
+                                    if (opt) {
+                                        valueLabel = opt.display_label ?? opt.label ?? valueLabel
+                                        if (opt.color && /^#[0-9A-Fa-f]{6}$/.test(opt.color)) optionColor = opt.color
+                                    }
+                                }
                                 return (
                                     <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
-                                        {getFieldLabel(fieldKey)}: {valueLabel}
+                                        {getFieldLabel(fieldKey)}: {optionColor ? (
+                                            <span className="inline-flex items-center gap-1">
+                                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: optionColor }} />
+                                                {valueLabel}
+                                            </span>
+                                        ) : valueLabel}
                                         <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}><XMarkIcon className="h-3 w-3" /></button>
                                     </span>
                                 )
@@ -497,15 +510,29 @@ export default function AssetGridSecondaryFilters({
                                 if (!filter || filter.value === null || filter.value === '') return null
                                 const field = visibleSecondaryFilters.find((f) => (f.field_key || f.key) === fieldKey)
                                 if (!field) return null
-                                // Boolean/toggle (e.g. Starred): show "Yes"/"No" instead of "true"/"false"; never show operator like "equals"
+                                // Boolean/toggle (e.g. Starred): show "Yes"/"No" instead of "true"/"false"
                                 const isBooleanToggle = fieldKey === 'starred' || ((field.type === 'boolean') && (field.display_widget === 'toggle'))
                                 const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
-                                const valueLabel = isBooleanToggle
+                                let valueLabel = isBooleanToggle
                                     ? (rawVal === true || rawVal === 'true' || rawVal === 1 || rawVal === '1' ? 'Yes' : 'No')
                                     : (Array.isArray(filter.value) ? (filter.value[0] ?? '') : String(filter.value ?? ''))
+                                // For select/multiselect: look up option label and color
+                                let optionColor = null
+                                if ((field.type === 'select' || field.type === 'multiselect') && field.options?.length) {
+                                    const opt = field.options.find((o) => String(o.value) === String(rawVal))
+                                    if (opt) {
+                                        valueLabel = opt.display_label ?? opt.label ?? valueLabel
+                                        if (opt.color && /^#[0-9A-Fa-f]{6}$/.test(opt.color)) optionColor = opt.color
+                                    }
+                                }
                                 return (
                                     <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
-                                        {field.display_label || field.label}: {valueLabel}
+                                        {field.display_label || field.label}: {optionColor ? (
+                                            <span className="inline-flex items-center gap-1">
+                                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: optionColor }} />
+                                                {valueLabel}
+                                            </span>
+                                        ) : valueLabel}
                                         <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}><XMarkIcon className="h-3 w-3" /></button>
                                     </span>
                                 )
@@ -750,7 +777,22 @@ export default function AssetGridSecondaryFilters({
                                             className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded"
                                         >
                                             <span>
-                                                {field.display_label || field.label}: {String(filter.value)}
+                                                {field.display_label || field.label}: {(() => {
+                                                    const rawVal = Array.isArray(filter.value) ? filter.value[0] : filter.value
+                                                    if ((field.type === 'select' || field.type === 'multiselect') && field.options?.length) {
+                                                        const opt = field.options.find((o) => String(o.value) === String(rawVal))
+                                                        if (opt) {
+                                                            const label = opt.display_label ?? opt.label ?? String(filter.value)
+                                                            return opt.color && /^#[0-9A-Fa-f]{6}$/.test(opt.color) ? (
+                                                                <span className="inline-flex items-center gap-1">
+                                                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: opt.color }} />
+                                                                    {label}
+                                                                </span>
+                                                            ) : label
+                                                        }
+                                                    }
+                                                    return String(filter.value)
+                                                })()}
                                             </span>
                                             <button
                                                 type="button"
@@ -783,6 +825,7 @@ export default function AssetGridSecondaryFilters({
                                     operator={currentOperator}
                                     availableValues={available_values[fieldKey] || []}
                                     onChange={(operator, value) => handleFilterChange(fieldKey, operator, value)}
+                                    variant="secondary"
                                 />
                             )
                             })}
@@ -835,409 +878,4 @@ export default function AssetGridSecondaryFilters({
             </div>
         </div>
     )
-}
-
-/**
- * Filter Field Input Component
- * 
- * Renders a single filter field input based on field type.
- * Only shows options that exist in available_values (computed from current asset set).
- */
-function FilterFieldInput({ field, value, operator, onChange, availableValues = [] }) {
-    const fieldKey = field.field_key || field.key
-    const fieldType = field.type || 'text'
-    
-    // STEP 5: Dev warning if dominant_color_bucket rendered without color filter_type
-    if (fieldKey === 'dominant_color_bucket' && field.filter_type !== 'color') {
-        console.error('[AssetGridSecondaryFilters] dominant_color_bucket rendered without color filter_type', field)
-    }
-    
-    // STEP 2 & 3: Color swatch filters (filter_type === 'color') - no operator dropdown, always equals, OR semantics
-    const isColorFilter = field.filter_type === 'color'
-    const isCollectionFilter = fieldKey === 'collection'
-    const isToggleBoolean = (fieldKey === 'starred' || field.display_widget === 'toggle') && fieldType === 'boolean'
-    const isTagsFilter = fieldKey === 'tags'
-    const isExpirationDateFilter = fieldKey === 'expiration_date'
-
-    // Only show options that exist in available_values (same rule as primary filters).
-    // Exceptions: lifecycle (Pending Publication, Unpublished, Archived) are separate checkboxes and always shown.
-    const filteredOptions = useMemo(() => {
-        if (!field.options || !Array.isArray(field.options)) {
-            return null
-        }
-        if (!availableValues || availableValues.length === 0) {
-            return []
-        }
-        const filtered = field.options.filter(option => {
-            const optionValue = option.value
-            const optionId = option.option_id
-            return availableValues.some(av =>
-                String(av).toLowerCase() === String(optionValue).toLowerCase() ||
-                (optionId !== undefined && String(av).toLowerCase() === String(optionId).toLowerCase())
-            )
-        })
-        return filtered
-    }, [field.options, availableValues, fieldKey])
-    
-    const handleOperatorChange = (e) => {
-        onChange(e.target.value, value)
-    }
-    
-    const handleValueChange = (newValueOrOperator, maybeValue) => {
-        if (isTagsFilter && maybeValue !== undefined) {
-            onChange(newValueOrOperator, maybeValue)
-            return
-        }
-        if (isColorFilter) {
-            if (newValueOrOperator && typeof newValueOrOperator === 'object' && 'operator' in newValueOrOperator && 'value' in newValueOrOperator) {
-                onChange(newValueOrOperator.operator, newValueOrOperator.value)
-            } else {
-                const arrayValue = Array.isArray(newValueOrOperator) ? newValueOrOperator : (newValueOrOperator != null ? [newValueOrOperator] : null)
-                onChange('equals', arrayValue)
-            }
-        } else if (isCollectionFilter) {
-            onChange('equals', newValueOrOperator)
-        } else if (isToggleBoolean) {
-            onChange('equals', newValueOrOperator)
-        } else {
-            onChange(operator, newValueOrOperator)
-        }
-    }
-    
-    // STEP 3: For color filters, hardcode operator to 'equals' and normalize value to array
-    // C9.2: Collection = single select, no operator dropdown, always 'equals'
-    // Toggle boolean: no operator dropdown
-    const effectiveOperator = isColorFilter || isCollectionFilter || isToggleBoolean ? 'equals' : operator
-    const effectiveValue = isColorFilter
-        ? (Array.isArray(value) ? value : (value != null ? [value] : null))
-        : (isCollectionFilter ? (Array.isArray(value) ? value : (value != null ? [value] : null)) : (isToggleBoolean ? value : value))
-    
-    const isDominantColors = (fieldKey === 'dominant_colors')
-    
-    return (
-        <div className="space-y-1">
-            <label className="block text-xs font-medium text-gray-700">
-                {field.display_label || field.label}
-            </label>
-            {(isDominantColors || isColorFilter || isCollectionFilter || isToggleBoolean || isTagsFilter || isExpirationDateFilter) ? (
-                <FilterValueInput
-                    field={field}
-                    operator={effectiveOperator}
-                    value={effectiveValue}
-                    filteredOptions={filteredOptions}
-                    availableValues={availableValues}
-                    onChange={handleValueChange}
-                />
-            ) : (
-                <div className="flex items-center gap-2">
-                    {/* STEP 3: Hide operator dropdown for color/collection/toggle boolean filters */}
-                    {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isTagsFilter && !isExpirationDateFilter && field.operators && field.operators.length > 1 && (
-                        <select
-                            value={effectiveOperator}
-                            onChange={handleOperatorChange}
-                            className="flex-shrink-0 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                        >
-                            {field.operators.map((op) => (
-                                <option key={op.value} value={op.value}>
-                                    {op.label}
-                                </option>
-                            ))}
-                        </select>
-                    )}
-                    <FilterValueInput
-                        field={field}
-                        operator={effectiveOperator}
-                        value={effectiveValue}
-                        filteredOptions={filteredOptions}
-                        availableValues={availableValues}
-                        onChange={handleValueChange}
-                    />
-                </div>
-            )}
-        </div>
-    )
-}
-
-/**
- * Filter Value Input Component
- * 
- * Renders the appropriate input based on field type.
- * Uses filteredOptions to only show options that exist in available_values.
- */
-function FilterValueInput({ field, operator, value, onChange, filteredOptions = null, availableValues = [] }) {
-    const fieldType = field.type || 'text'
-    const fieldKey = field.field_key || field.key
-    const pageProps = usePage().props
-    const tenantId = pageProps.tenant?.id || pageProps.auth?.activeCompany?.id || pageProps.auth?.user?.current_tenant_id
-
-    // Tags: autocomplete, multi-select; label "Tags" only from parent FilterFieldInput
-    if (fieldKey === 'tags') {
-        return (
-            <TagPrimaryFilter
-                value={Array.isArray(value) ? value : (value ? [value] : [])}
-                onChange={onChange}
-                tenantId={tenantId}
-                placeholder="Search..."
-                compact={true}
-                fullWidth={true}
-            />
-        )
-    }
-
-    // Boolean with display_widget=toggle (e.g. Starred) — same layout as upload/edit/primary filters
-    if (fieldKey === 'starred' || (fieldType === 'boolean' && field.display_widget === 'toggle')) {
-        const isOn = value === true || value === 'true'
-        return (
-            <label className="flex items-center gap-2 cursor-pointer">
-                <div className="relative inline-flex items-center flex-shrink-0">
-                    <input
-                        type="checkbox"
-                        checked={!!isOn}
-                        onChange={(e) => onChange('equals', e.target.checked ? true : null)}
-                        className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600" />
-                </div>
-                <span className="text-xs text-gray-600">{isOn ? 'Yes' : 'Any'}</span>
-            </label>
-        )
-    }
-    
-    // Expiration date: preset options (Expired, Expires within X days) — best practice for date filters
-    if (fieldKey === 'expiration_date') {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const toISO = (d) => d.toISOString().slice(0, 10)
-        const addDays = (n) => {
-            const d = new Date(today)
-            d.setDate(d.getDate() + n)
-            return toISO(d)
-        }
-        const todayStr = toISO(today)
-        const presets = [
-            { value: '', label: 'Any' },
-            { value: 'expired', label: 'Expired', operator: 'before', operand: todayStr },
-            { value: 'within_7', label: 'Expires within 7 days', operator: 'range', operand: [todayStr, addDays(7)] },
-            { value: 'within_30', label: 'Expires within 30 days', operator: 'range', operand: [todayStr, addDays(30)] },
-            { value: 'within_60', label: 'Expires within 60 days', operator: 'range', operand: [todayStr, addDays(60)] },
-            { value: 'within_90', label: 'Expires within 90 days', operator: 'range', operand: [todayStr, addDays(90)] },
-        ]
-        let currentPreset = ''
-        if (operator === 'before' && value === todayStr) currentPreset = 'expired'
-        else if (operator === 'range' && Array.isArray(value) && value.length === 2) {
-            const end = value[1]
-            if (end === addDays(7)) currentPreset = 'within_7'
-            else if (end === addDays(30)) currentPreset = 'within_30'
-            else if (end === addDays(60)) currentPreset = 'within_60'
-            else if (end === addDays(90)) currentPreset = 'within_90'
-        }
-        return (
-            <select
-                value={currentPreset}
-                onChange={(e) => {
-                    const key = e.target.value
-                    if (!key) {
-                        onChange('equals', null)
-                        return
-                    }
-                    const preset = presets.find(p => p.value === key && p.operator)
-                    if (preset) onChange(preset.operator, preset.operand)
-                }}
-                className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-            >
-                {presets.map((p) => (
-                    <option key={p.value || 'any'} value={p.value}>{p.label}</option>
-                ))}
-            </select>
-        )
-    }
-
-    // C9.2: Collection = single dropdown (not "Contains any" multiselect) in secondary filters too
-    if (fieldKey === 'collection') {
-        const opts = Array.isArray(filteredOptions) ? filteredOptions : (field.options || [])
-        const label = (opt) => opt.display_label ?? opt.label ?? opt.value
-        return (
-            <select
-                value={Array.isArray(value) ? value[0] ?? '' : (value ?? '')}
-                onChange={(e) => {
-                    const v = e.target.value
-                    onChange(v ? [v] : null)
-                }}
-                className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-            >
-                <option value="">Any</option>
-                {opts.map((option) => (
-                    <option key={option.value} value={option.value}>
-                        {label(option)}
-                    </option>
-                ))}
-            </select>
-        )
-    }
-    
-    // Special handling for dominant_colors field - render color tiles
-    if (fieldKey === 'dominant_colors') {
-        // availableValues for dominant_colors will be an array of color objects: [{hex, rgb, coverage}, ...]
-        // The backend extracts individual color objects from the multiselect arrays
-        // Pass availableValues directly - DominantColorsFilter handles both formats
-        return (
-            <DominantColorsFilter
-                value={value}
-                onChange={onChange}
-                availableValues={availableValues}
-                compact={true}
-            />
-        )
-    }
-
-    // Color swatch filter (e.g. dominant_color_bucket): filter_type === 'color', options have swatch hex
-    if (field.filter_type === 'color') {
-        return (
-            <ColorSwatchFilter
-                field={field}
-                value={value}
-                onChange={onChange}
-                filteredOptions={filteredOptions}
-                compact={true}
-            />
-        )
-    }
-    
-    // Only available options: use filteredOptions when array (may be [] or [...])
-    const options = Array.isArray(filteredOptions) ? filteredOptions : (field.options || [])
-    
-    switch (fieldType) {
-        case 'text':
-            return (
-                <input
-                    type="text"
-                    value={value || ''}
-                    onChange={(e) => onChange(e.target.value)}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="Enter value..."
-                />
-            )
-        
-        case 'number':
-            if (operator === 'range') {
-                return (
-                    <div className="flex items-center gap-1 flex-1">
-                        <input
-                            type="number"
-                            value={Array.isArray(value) ? value[0] : ''}
-                            onChange={(e) => onChange([e.target.value || null, Array.isArray(value) ? value[1] : null])}
-                            className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                            placeholder="Min"
-                        />
-                        <span className="text-xs text-gray-500">-</span>
-                        <input
-                            type="number"
-                            value={Array.isArray(value) ? value[1] : ''}
-                            onChange={(e) => onChange([Array.isArray(value) ? value[0] : null, e.target.value || null])}
-                            className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                            placeholder="Max"
-                        />
-                    </div>
-                )
-            }
-            return (
-                <input
-                    type="number"
-                    value={value || ''}
-                    onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="Enter number..."
-                />
-            )
-        
-        case 'boolean':
-            return (
-                <select
-                    value={value === null ? '' : String(value)}
-                    onChange={(e) => onChange(e.target.value === 'true' ? true : e.target.value === 'false' ? false : null)}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                    <option value="">Any</option>
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
-                </select>
-            )
-        
-        case 'select':
-        case 'rating':
-            return (
-                <select
-                    value={value ?? ''}
-                    onChange={(e) => onChange(e.target.value || null)}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                    <option value="">Any</option>
-                    {options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                            {option.display_label || option.label || option.value}
-                        </option>
-                    ))}
-                </select>
-            )
-        
-        case 'multiselect':
-            return (
-                <select
-                    multiple
-                    value={Array.isArray(value) ? value : []}
-                    onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, (opt) => opt.value)
-                        onChange(selected.length > 0 ? selected : null)
-                    }}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    size={Math.min((options?.length || 0) + 1, 5)}
-                >
-                    {options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                            {option.display_label || option.value}
-                        </option>
-                    ))}
-                </select>
-            )
-        
-        case 'date':
-            if (operator === 'range') {
-                return (
-                    <div className="flex items-center gap-1 flex-1">
-                        <input
-                            type="date"
-                            value={Array.isArray(value) ? value[0] : ''}
-                            onChange={(e) => onChange([e.target.value || null, Array.isArray(value) ? value[1] : null])}
-                            className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                        <span className="text-xs text-gray-500">-</span>
-                        <input
-                            type="date"
-                            value={Array.isArray(value) ? value[1] : ''}
-                            onChange={(e) => onChange([Array.isArray(value) ? value[0] : null, e.target.value || null])}
-                            className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                    </div>
-                )
-            }
-            return (
-                <input
-                    type="date"
-                    value={value || ''}
-                    onChange={(e) => onChange(e.target.value || null)}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                />
-            )
-        
-        default:
-            return (
-                <input
-                    type="text"
-                    value={value || ''}
-                    onChange={(e) => onChange(e.target.value)}
-                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="Enter value..."
-                />
-            )
-    }
 }

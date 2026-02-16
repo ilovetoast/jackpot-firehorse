@@ -111,6 +111,7 @@ class MetadataSchemaResolver
                     ->orWhere('applies_to', 'all');
             })
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             // Phase C3: Filter tenant fields by tenant_id, include all system fields
             ->where(function ($query) use ($tenantId) {
                 // Include all system fields (scope='system', tenant_id IS NULL)
@@ -124,7 +125,8 @@ class MetadataSchemaResolver
                     $query->orWhere(function ($q) use ($tenantId) {
                         $q->where('scope', 'tenant')
                             ->where('tenant_id', $tenantId)
-                            ->where('is_active', true); // Only active tenant fields
+                            ->where('is_active', true) // Only active tenant fields
+                            ->whereNull('archived_at'); // Exclude archived
                     });
                 }
             })
@@ -194,6 +196,9 @@ class MetadataSchemaResolver
         if (\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
             $selectColumns[] = 'is_edit_hidden'; // C9.2: Edit visibility (Quick View checkbox)
         }
+        if (\Schema::hasColumn('metadata_field_visibility', 'is_required')) {
+            $selectColumns[] = 'is_required'; // Category-scoped required field for upload
+        }
         
         $query = DB::table('metadata_field_visibility')
             ->where('tenant_id', $tenantId)
@@ -240,6 +245,7 @@ class MetadataSchemaResolver
                     'is_edit_hidden' => (bool) ($row->is_edit_hidden ?? false), // C9.2: Edit visibility
                     'is_filter_hidden' => (bool) $row->is_filter_hidden,
                     'is_primary' => isset($row->is_primary) ? ($row->is_primary === 1 || $row->is_primary === true) : null,
+                    'is_required' => isset($row->is_required) ? ($row->is_required === 1 || $row->is_required === true) : null,
                 ];
             }
         }
@@ -345,12 +351,12 @@ class MetadataSchemaResolver
         // Resolve effective_is_primary from category override
         // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
         // A field may be primary in Photography but secondary in Logos.
-        // 
+        //
         // Resolution order:
         // 1. Category override (metadata_field_visibility.is_primary where category_id is set) - highest priority
         // 2. Fallback to global metadata_fields.is_primary (backward compatibility, deprecated)
         // 3. Default to false if neither exists
-        // 
+        //
         // This ensures that filter placement is category-specific, not global.
         // Never use global is_primary directly - always resolve through category context.
         $effectiveIsPrimary = false;
@@ -361,6 +367,14 @@ class MetadataSchemaResolver
             // Fallback to global is_primary (backward compatibility)
             // TODO: Deprecate metadata_fields.is_primary - migrate all fields to category overrides
             $effectiveIsPrimary = (bool) $field->is_primary;
+        }
+
+        // Resolve effective_is_required from category override
+        // ARCHITECTURAL RULE: Required status MUST be category-scoped (like is_primary).
+        // A field may be required in Photography but optional in Logos.
+        $effectiveIsRequired = false;
+        if (isset($visibilityOverrides['is_required']) && $visibilityOverrides['is_required'] !== null) {
+            $effectiveIsRequired = (bool) $visibilityOverrides['is_required'];
         }
 
         // Resolve display label (stub for future label override table)
@@ -396,6 +410,10 @@ class MetadataSchemaResolver
             // effective_is_primary: true = primary for this category, false = secondary for this category
             // Resolution: category override > global is_primary (deprecated) > false
             'is_primary' => $effectiveIsPrimary,
+            // Category-scoped required field for upload
+            // effective_is_required: true = must be filled when adding assets to this category
+            'is_required' => $effectiveIsRequired,
+            'required' => $effectiveIsRequired, // Alias for upload validation compatibility
             'options' => $options,
         ];
     }
@@ -439,6 +457,9 @@ class MetadataSchemaResolver
                     'option_id' => $option->id,
                     'value' => $option->value,
                     'display_label' => $option->system_label, // TODO: Apply label overrides in future step
+                    'label' => $option->system_label,
+                    'color' => $option->color ?? null,
+                    'icon' => $option->icon ?? null,
                 ];
             }
         }

@@ -537,8 +537,12 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => false,
         ]);
 
-        // Dominant Color Bucket (system automated) — drawer only, never in More filters
-        // Stores quantized LAB bucket: "L{L}_A{A}_B{B}" format. Visible in asset drawer; not filterable.
+        // Dominant Color Bucket (system automated) — filter-only field.
+        // Stores quantized LAB bucket: "L{L}_A{A}_B{B}" format.
+        // Config filter_only_enforced_fields + dominant_colors_visibility enforce:
+        // - Never in Quick View, Upload, Primary filters
+        // - Secondary filters only when is_filter_hidden=false (user enables)
+        // - Uses ColorSwatchFilter (filter_type=color)
         $this->getOrCreateField([
             'key' => 'dominant_color_bucket',
             'system_label' => 'Dominant Color Bucket',
@@ -546,11 +550,11 @@ class MetadataFieldsSeeder extends Seeder
             'applies_to' => 'image',
             'scope' => 'system',
             'group_key' => 'technical',
-            'is_filterable' => false, // Never in More filters (drawer only)
+            'is_filterable' => true, // Filter-only; visibility via metadata_field_visibility
             'is_user_editable' => false,
             'is_ai_trainable' => false,
             'is_upload_visible' => false,
-            'is_internal_only' => false, // Visible in drawer
+            'is_internal_only' => false,
             'ai_eligible' => false,
         ]);
 
@@ -785,10 +789,12 @@ class MetadataFieldsSeeder extends Seeder
         ];
 
         foreach ($automaticFields as $fieldKey) {
-            // Dominant color fields: visible in drawer, never in More filters (always_hidden_fields in config)
-            $isDominantColor = in_array($fieldKey, ['dominant_color_bucket', 'dominant_colors'], true);
-            $showOnEdit = true; // All automatic fields visible in drawer (read-only)
-            $showInFilters = !$isDominantColor; // Dominant colors never in filters
+            // dominant_colors: display-only, never in filters (always_hidden_fields)
+            // dominant_color_bucket: filter-only, secondary filters when enabled (filter_only_enforced_fields)
+            $isDominantColors = ($fieldKey === 'dominant_colors');
+            $isDominantColorBucket = ($fieldKey === 'dominant_color_bucket');
+            $showOnEdit = $isDominantColorBucket ? false : true; // dominant_color_bucket never in Quick View
+            $showInFilters = $isDominantColors ? false : true;  // dominant_colors never in filters; bucket filter-only
 
             DB::table('metadata_fields')
                 ->where('key', $fieldKey)

@@ -1047,9 +1047,21 @@ class AssetMetadataController extends Controller
             ->get()
             ->keyBy('id');
         
-        // Check category enablement only (big blue toggle) - ignore tenant-level Quick View
+        // Check category enablement only (big blue toggle)
         $systemVisibilityService = app(\App\Services\SystemMetadataVisibilityService::class);
         $systemCategoryId = $category->system_category_id;
+
+        // Load category-level visibility overrides (is_edit_hidden = Quick View)
+        $editVisibilityOverrides = [];
+        if (\Illuminate\Support\Facades\Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
+            $editVisibilityOverrides = DB::table('metadata_field_visibility')
+                ->where('tenant_id', $asset->tenant_id)
+                ->where('brand_id', $asset->brand_id)
+                ->where('category_id', $category->id)
+                ->whereIn('metadata_field_id', $fields->keys()->toArray())
+                ->pluck('is_edit_hidden', 'metadata_field_id')
+                ->toArray();
+        }
         
         // Load option visibility for select/multiselect fields
         $optionVisibility = [];
@@ -1097,7 +1109,7 @@ class AssetMetadataController extends Controller
                 if ($categoryVisibilityOverrides[$fieldId]) {
                     continue; // Field disabled for this category (big blue toggle OFF)
                 }
-                // Category override says visible - include it (regardless of Quick View)
+                // Category override says visible - include it
             } else {
                 // No category override - check system-level category suppression
                 if ($systemCategoryId !== null) {
@@ -1111,6 +1123,15 @@ class AssetMetadataController extends Controller
                     }
                 }
             }
+
+            // Respect show_on_edit (Quick View): exclude filter-only fields (e.g. dominant_color_bucket)
+            $effectiveShowOnEdit = (bool) ($field->show_on_edit ?? true);
+            if (isset($editVisibilityOverrides[$fieldId]) && $editVisibilityOverrides[$fieldId]) {
+                $effectiveShowOnEdit = false; // Category override: is_edit_hidden=true
+            }
+            if (!$effectiveShowOnEdit) {
+                continue; // Never in Quick View
+            }
             
             // Resolve field options
             $options = [];
@@ -1123,10 +1144,18 @@ class AssetMetadataController extends Controller
                 foreach ($optionRows as $option) {
                     $isHidden = $optionVisibility[$option->id] ?? false;
                     if (!$isHidden) {
-                        $options[] = [
+                        $opt = [
                             'value' => $option->value,
                             'display_label' => $option->system_label ?? $option->value,
+                            'label' => $option->system_label ?? $option->value,
                         ];
+                        if (!empty($option->color)) {
+                            $opt['color'] = $option->color;
+                        }
+                        if (!empty($option->icon)) {
+                            $opt['icon'] = $option->icon;
+                        }
+                        $options[] = $opt;
                     }
                 }
             }

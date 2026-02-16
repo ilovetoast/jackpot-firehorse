@@ -2,6 +2,7 @@
  * Asset Metadata Display Component
  *
  * Phase 2 – Step 6: Displays metadata read-only with edit actions.
+ * Uses WidgetResolver for centralized widget rendering logic.
  */
 
 import { useState, useEffect } from 'react'
@@ -10,6 +11,7 @@ import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
+import { resolve, isExcludedFromGenericLoop, isDominantColorsSwatches, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
 export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null, primaryColor }) {
     const { auth } = usePage().props
@@ -157,10 +159,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
             return null // Return null instead of "Not set" text
         }
 
-        // Special handling for dominant_colors - return null, handled separately in render
-        const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
-        if (isDominantColors) {
-            return null // Don't format, will be handled by dominantColorsArray check
+        // dominant_colors: return null, handled by DominantColorsSwatches in render
+        if (isDominantColorsSwatches(field, CONTEXT.DISPLAY)) {
+            return null
         }
 
         if (field.type === 'multiselect' && Array.isArray(value)) {
@@ -209,21 +210,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     <div className="text-sm text-gray-500 italic">No editable metadata fields available</div>
                 ) : (
                     <dl className="space-y-2 md:space-y-3">
-                        {fields.filter(field => {
-                            // Exclude tags (shown in dedicated Tags row below, from API)
-                            if (field.key === 'tags' || field.field_key === 'tags') {
-                                return false;
-                            }
-                            // Exclude dimensions (it's file info, not metadata, shown in file info area)
-                            if (field.key === 'dimensions' || field.field_key === 'dimensions') {
-                                return false;
-                            }
-                            // C9.1: Exclude collection field (handled via collectionDisplay below)
-                            if (field.key === 'collection' || field.field_key === 'collection') {
-                                return false;
-                            }
-                            return true;
-                        }).sort((a, b) => {
+                        {fields.filter(field => !isExcludedFromGenericLoop(field)).sort((a, b) => {
                             // Sort: non-auto fields first, auto fields last
                             const aIsAuto = a.readonly || a.population_mode === 'automatic'
                             const bIsAuto = b.readonly || b.population_mode === 'automatic'
@@ -233,8 +220,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             return 0 // Both same type, maintain original order
                         }).flatMap((field) => {
                             const fieldHasValue = hasValue(field.current_value)
-                            const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
-                            const isRating = field.type === 'rating' || field.key === 'quality_rating' || field.field_key === 'quality_rating'
+                            const widget = resolve(field, CONTEXT.DISPLAY)
+                            const isRating = widget === WIDGET.STAR_RATING
+                            const isDominantColors = widget === WIDGET.DOMINANT_COLORS_SWATCHES
                             // For dominant_colors, check if we have a valid array
                             let dominantColorsArray = null
                             if (isDominantColors && field.current_value) {

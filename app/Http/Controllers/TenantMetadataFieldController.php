@@ -74,9 +74,9 @@ class TenantMetadataFieldController extends Controller
      * POST /tenant/metadata/fields
      *
      * @param Request $request
-     * @return JsonResponse
+     * @return JsonResponse|\Illuminate\Http\RedirectResponse
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request): JsonResponse|\Illuminate\Http\RedirectResponse
     {
         $tenant = app('tenant');
         $user = Auth::user();
@@ -255,14 +255,19 @@ class TenantMetadataFieldController extends Controller
 
         // If it's a system field, return it with options and ai_eligible
         if (($fieldRecord->scope ?? null) === 'system') {
-            $options = DB::table('metadata_options')
+            $optionEditingRestricted = \App\Services\MetadataOptionEditGuard::isRestricted($fieldRecord);
+
+            $options = $optionEditingRestricted ? [] : DB::table('metadata_options')
                 ->where('metadata_field_id', $field)
-                ->select('id', 'value', 'system_label as label')
+                ->select('id', 'value', 'system_label', 'color', 'icon')
                 ->orderBy('system_label')
                 ->get()
-                ->map(fn($opt) => [
+                ->map(fn ($opt) => [
                     'value' => $opt->value,
-                    'label' => $opt->label,
+                    'label' => $opt->system_label,
+                    'system_label' => $opt->system_label,
+                    'color' => $opt->color ?? null,
+                    'icon' => $opt->icon ?? null,
                 ])
                 ->toArray();
 
@@ -276,6 +281,8 @@ class TenantMetadataFieldController extends Controller
                     'field_type' => $fieldRecord->type,
                     'scope' => 'system',
                     'is_system' => true,
+                    'display_widget' => $fieldRecord->display_widget ?? null,
+                    'option_editing_restricted' => $optionEditingRestricted,
                     'options' => $options,
                     'allowed_values' => $options,
                     'ai_eligible' => (bool) ($fieldRecord->ai_eligible ?? false),
@@ -395,6 +402,63 @@ class TenantMetadataFieldController extends Controller
     }
 
     /**
+     * Archive a tenant metadata field (soft delete).
+     * System fields cannot be archived.
+     *
+     * POST /tenant/metadata/fields/{field}/archive
+     *
+     * @param Request $request
+     * @param int $field
+     * @return JsonResponse
+     */
+    public function archive(Request $request, int $field): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$this->canManageFields($user, $tenant)) {
+            abort(403, 'You do not have permission to manage tenant metadata fields.');
+        }
+
+        $validated = $request->validate([
+            'remove_from_assets' => 'nullable|boolean',
+        ]);
+        $removeFromAssets = (bool) ($validated['remove_from_assets'] ?? false);
+
+        try {
+            $this->fieldService->archiveField($tenant, $field, $removeFromAssets);
+
+            if ($request->header('X-Inertia')) {
+                return back()->with('success', 'Metadata field archived successfully.');
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Metadata field archived successfully',
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Failed to archive tenant metadata field', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'field_id' => $field,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to archive field',
+            ], 500);
+        }
+    }
+
+    /**
      * Add an allowed value (option) to a metadata field.
      *
      * POST /tenant/metadata/fields/{field}/values
@@ -417,11 +481,20 @@ class TenantMetadataFieldController extends Controller
             abort(403, 'You do not have permission to manage field values.');
         }
 
-        // Verify field belongs to tenant
+        // Product integrity: reject option editing for system fields with custom rendering
+        $fieldById = DB::table('metadata_fields')->where('id', $field)->first();
+        if ($fieldById && \App\Services\MetadataOptionEditGuard::isRestricted($fieldById)) {
+            return response()->json([
+                'error' => 'This field uses a system-managed display and does not support manual options.',
+            ], 422);
+        }
+
+        // Verify field belongs to tenant (exclude archived)
         $fieldRecord = DB::table('metadata_fields')
             ->where('id', $field)
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if (!$fieldRecord) {
@@ -431,8 +504,13 @@ class TenantMetadataFieldController extends Controller
         // Validate request
         $validated = $request->validate([
             'value' => 'required|string|max:255',
-            'label' => 'required|string|max:255',
+            'label' => 'required_without:system_label|nullable|string|max:255',
+            'system_label' => 'required_without:label|nullable|string|max:255',
+            'color' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
+            'icon' => 'nullable|string|max:64',
         ]);
+
+        $systemLabel = $validated['system_label'] ?? $validated['label'] ?? '';
 
         // Check if value already exists
         $existing = DB::table('metadata_options')
@@ -447,14 +525,21 @@ class TenantMetadataFieldController extends Controller
         }
 
         try {
-            $optionId = DB::table('metadata_options')->insertGetId([
+            $insertData = [
                 'metadata_field_id' => $field,
                 'value' => $validated['value'],
-                'system_label' => $validated['label'],
+                'system_label' => $systemLabel,
                 'is_system' => false,
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ];
+            if (!empty($validated['color'])) {
+                $insertData['color'] = $validated['color'];
+            }
+            if (!empty($validated['icon'])) {
+                $insertData['icon'] = $validated['icon'];
+            }
+            $optionId = DB::table('metadata_options')->insertGetId($insertData);
 
             Log::info('Metadata field value added', [
                 'tenant_id' => $tenant->id,
@@ -504,11 +589,20 @@ class TenantMetadataFieldController extends Controller
             abort(403, 'You do not have permission to manage field values.');
         }
 
-        // Verify field belongs to tenant
+        // Product integrity: reject option editing for system fields with custom rendering
+        $fieldById = DB::table('metadata_fields')->where('id', $field)->first();
+        if ($fieldById && \App\Services\MetadataOptionEditGuard::isRestricted($fieldById)) {
+            return response()->json([
+                'error' => 'This field uses a system-managed display and does not support manual options.',
+            ], 422);
+        }
+
+        // Verify field belongs to tenant (exclude archived)
         $fieldRecord = DB::table('metadata_fields')
             ->where('id', $field)
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if (!$fieldRecord) {

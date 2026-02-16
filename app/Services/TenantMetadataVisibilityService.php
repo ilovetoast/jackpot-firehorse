@@ -368,6 +368,9 @@ class TenantMetadataVisibilityService
         if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
             $selectColumns[] = 'is_edit_hidden';
         }
+        if (Schema::hasColumn('metadata_field_visibility', 'is_required')) {
+            $selectColumns[] = 'is_required';
+        }
         $overrides = $query->select($selectColumns)->get();
 
         $result = [];
@@ -377,6 +380,7 @@ class TenantMetadataVisibilityService
                 'is_upload_hidden' => (bool) $override->is_upload_hidden,
                 'is_filter_hidden' => (bool) $override->is_filter_hidden,
                 'is_primary' => isset($override->is_primary) ? ($override->is_primary === 1 || $override->is_primary === true) : null,
+                'is_required' => isset($override->is_required) ? ($override->is_required === 1 || $override->is_required === true) : null,
                 'show_on_upload' => ! (bool) $override->is_upload_hidden,
                 'show_on_edit' => isset($override->is_edit_hidden) ? ! (bool) $override->is_edit_hidden : true,
                 'show_in_filters' => ! (bool) $override->is_filter_hidden,
@@ -415,6 +419,7 @@ class TenantMetadataVisibilityService
         $targetCategoryId = $targetCategory->id;
         $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
         $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+        $hasRequired = Schema::hasColumn('metadata_field_visibility', 'is_required');
         $count = 0;
 
         foreach ($sourceRows as $row) {
@@ -436,6 +441,9 @@ class TenantMetadataVisibilityService
             }
             if ($hasEditHidden && isset($row->is_edit_hidden)) {
                 $data['is_edit_hidden'] = $row->is_edit_hidden;
+            }
+            if ($hasRequired && isset($row->is_required)) {
+                $data['is_required'] = $row->is_required;
             }
 
             if ($existing) {
@@ -522,6 +530,7 @@ class TenantMetadataVisibilityService
             })
             ->where('is_active', true)
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->get(['id', 'key']);
 
         $rows = [];
@@ -598,7 +607,7 @@ class TenantMetadataVisibilityService
         $brandId = $category->brand_id;
         $categoryId = $category->id;
 
-        // All metadata fields for this tenant (system + tenant-scoped)
+        // All metadata fields for this tenant (system + tenant-scoped, exclude archived)
         $fields = DB::table('metadata_fields')
             ->where(function ($q) use ($tenant) {
                 $q->where('scope', 'system')
@@ -608,6 +617,7 @@ class TenantMetadataVisibilityService
             })
             ->where('is_active', true)
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->get(['id', 'key']);
 
         $rows = [];
@@ -720,12 +730,16 @@ class TenantMetadataVisibilityService
         // Dominant color fields: special visibility for image categories
         if ($isImageCategory && isset($dominantColorsVisibility[$fieldKey])) {
             $v = $dominantColorsVisibility[$fieldKey];
-            return [
+            $result = [
                 'is_hidden' => $v['is_hidden'] ?? false,
                 'is_upload_hidden' => $v['is_upload_hidden'] ?? true,
                 'is_filter_hidden' => $v['is_filter_hidden'] ?? true,
                 'is_primary' => $v['is_primary'] ?? null,
             ];
+            if (array_key_exists('is_edit_hidden', $v)) {
+                $result['is_edit_hidden'] = $v['is_edit_hidden'];
+            }
+            return $result;
         }
 
         // Explicit per-slug config for this field
@@ -895,6 +909,7 @@ class TenantMetadataVisibilityService
             })
             ->where('is_active', true)
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->pluck('id')
             ->flip()
             ->all();

@@ -435,7 +435,7 @@ export default function AssetDetailPanel({
         if (!metadata?.fields) return []
         const filtered = metadata.fields.filter((f) => {
             const key = f.key || f.field_key
-            return key !== 'tags' && key !== 'collection' && key !== 'dominant_color_bucket'
+            return key !== 'tags' && key !== 'collection'
         })
         const byGroup = {}
         filtered.forEach((f) => {

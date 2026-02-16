@@ -25,6 +25,7 @@ import {
     ChevronRightIcon,
     CloudArrowUpIcon,
     EllipsisVerticalIcon,
+    ExclamationCircleIcon,
     EyeIcon,
     FolderIcon,
     FunnelIcon,
@@ -33,11 +34,14 @@ import {
     PlusIcon,
     RectangleStackIcon,
     Squares2X2Icon,
+    SparklesIcon,
     StarIcon,
+    TrashIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
+import ArchiveFieldModal from '../../../Components/ArchiveFieldModal'
 import MetadataFieldModal from '../../../Components/MetadataFieldModal'
 import AddCategorySlideOver from '../../../Components/Metadata/AddCategorySlideOver'
 import AdvancedSettingsSlideOver from '../../../Components/Metadata/AdvancedSettingsSlideOver'
@@ -68,6 +72,7 @@ import CategoryList from '../../../Components/Metadata/CategoryList'
  * which fields are enabled for each category.
  */
 const METADATA_REGISTRY_URL = typeof route === 'function' ? route('tenant.metadata.registry.index') : '/app/tenant/metadata/registry'
+const CORE_FIELD_KEYS = ['collection', 'tags']
 
 export default function ByCategoryView({ 
     registry, 
@@ -75,7 +80,7 @@ export default function ByCategoryView({
     selectedBrandId,
     onBrandChange,
     categories, 
-    canManageVisibility,
+    canManageVisibility = true, // Default true so toggles are clickable; API enforces permission
     canManageFields = false,
     customFieldsLimit = null,
     metadataFieldFamilies = {},
@@ -98,6 +103,8 @@ export default function ByCategoryView({
     const [confirmApplyOtherBrandsOpen, setConfirmApplyOtherBrandsOpen] = useState(false)
     const [applyOtherBrandsTargets, setApplyOtherBrandsTargets] = useState([]) // { brand_name, category_name }[]
     const [applyOtherBrandsLoading, setApplyOtherBrandsLoading] = useState(false)
+    const [confirmDisableCoreOpen, setConfirmDisableCoreOpen] = useState(false)
+    const [pendingDisable, setPendingDisable] = useState(null) // { fieldId, categoryId, fieldLabel, categoryName }
     // Phase 3a: Named profiles
     const [saveProfileName, setSaveProfileName] = useState('')
     const [profileAvailableToAllBrands, setProfileAvailableToAllBrands] = useState(false)
@@ -111,6 +118,10 @@ export default function ByCategoryView({
     const [localCategories, setLocalCategories] = useState(categories)
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
     const [categoryToDelete, setCategoryToDelete] = useState(null)
+    const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false)
+    const [pendingArchiveField, setPendingArchiveField] = useState(null) // { field, onConfirm }
+    const [archiveRemoveFromAssets, setArchiveRemoveFromAssets] = useState(false)
+    const [archiveLoading, setArchiveLoading] = useState(false)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
     const [editingCategoryName, setEditingCategoryName] = useState('')
     const [expandedAvailable, setExpandedAvailable] = useState(false)
@@ -363,19 +374,21 @@ export default function ByCategoryView({
     }, [selectedCategoryId, manageableFields.length, automatedFields.length])
 
     // Toggle field visibility for selected category (enable/disable per category)
-    const toggleCategoryField = async (fieldId, categoryId, isSuppressed) => {
-        if (!canManageVisibility) return
-
+    // API enforces metadata.tenant.visibility.manage; we allow the click so toggles are always interactive
+    // meta: optional { fieldLabel, categoryName } for contextual success toast
+    const toggleCategoryField = useCallback(async (fieldId, categoryId, isSuppressed, meta = {}) => {
         // isSuppressed=true means enabling (remove suppression), isSuppressed=false means disabling (add suppression)
         const willBeEnabled = !!isSuppressed
-        const newSuppressed = willBeEnabled
-            ? (fieldCategoryData[fieldId]?.suppressed || []).filter(id => id !== categoryId)
-            : [...(fieldCategoryData[fieldId]?.suppressed || []), categoryId]
 
-        // 1. Optimistically update local state immediately
+        // 1. Optimistically update local state immediately (use functional update to avoid stale closure)
+        let newSuppressed
         setFieldCategoryData(prev => {
             const current = prev[fieldId] || { suppressed: [], visible: [] }
-            const visibleCategories = categoriesForBrand.filter(cat => !newSuppressed.includes(cat.id))
+            const eq = (a, b) => String(a) === String(b)
+            newSuppressed = willBeEnabled
+                ? (current.suppressed || []).filter(id => !eq(id, categoryId))
+                : [...(current.suppressed || []), categoryId]
+            const visibleCategories = categoriesForBrand.filter(cat => !newSuppressed.some(sid => eq(sid, cat.id)))
             return {
                 ...prev,
                 [fieldId]: {
@@ -389,6 +402,7 @@ export default function ByCategoryView({
             setFieldOrder(prev => ({ ...prev, [categoryId]: [] }))
         }
 
+        let succeeded = false
         try {
             const url = `/app/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/visibility`
             const response = await fetch(url, {
@@ -403,37 +417,69 @@ export default function ByCategoryView({
                 body: JSON.stringify({ is_hidden: !willBeEnabled }),
             })
 
-            console.log('[ByCategory] Toggle category field: request fired', { fieldId, categoryId, willBeEnabled })
-            console.log('[ByCategory] Toggle category field: response status', response.status)
-
-            if (response.ok) {
-                // Success: state already updated optimistically; no re-fetch, no page reload
-            } else {
+            if (!response.ok) {
                 // Revert optimistic update on error
                 setFieldCategoryData(prev => {
                     const current = prev[fieldId] || { suppressed: [], visible: [] }
-                    const reverted = willBeEnabled ? [...current.suppressed, categoryId] : current.suppressed.filter(id => id !== categoryId)
-                    const visibleCategories = categoriesForBrand.filter(cat => !reverted.includes(cat.id))
+                    const eq = (a, b) => String(a) === String(b)
+                    const reverted = willBeEnabled
+                        ? [...(current.suppressed || []), categoryId]
+                        : (current.suppressed || []).filter(id => !eq(id, categoryId))
+                    const visibleCategories = categoriesForBrand.filter(cat => !reverted.some(sid => eq(sid, cat.id)))
                     return {
                         ...prev,
                         [fieldId]: { suppressed: reverted, visible: visibleCategories.map(cat => cat.id) },
                     }
                 })
+            } else {
+                succeeded = true
             }
         } catch (error) {
             console.error('Failed to toggle category field:', error)
-            // Revert optimistic update
             setFieldCategoryData(prev => {
                 const current = prev[fieldId] || { suppressed: [], visible: [] }
-                const reverted = willBeEnabled ? [...current.suppressed, categoryId] : current.suppressed.filter(id => id !== categoryId)
-                const visibleCategories = categoriesForBrand.filter(cat => !reverted.includes(cat.id))
+                const eq = (a, b) => String(a) === String(b)
+                const reverted = willBeEnabled
+                    ? [...(current.suppressed || []), categoryId]
+                    : (current.suppressed || []).filter(id => !eq(id, categoryId))
+                const visibleCategories = categoriesForBrand.filter(cat => !reverted.some(sid => eq(sid, cat.id)))
                 return {
                     ...prev,
                     [fieldId]: { suppressed: reverted, visible: visibleCategories.map(cat => cat.id) },
                 }
             })
         }
-    }
+
+        if (succeeded && meta.fieldLabel && meta.categoryName) {
+            setSuccessMessage(`${meta.fieldLabel} ${willBeEnabled ? 'enabled' : 'disabled'} for ${meta.categoryName}.`)
+            setTimeout(() => setSuccessMessage(null), 3000)
+        }
+    }, [categoriesForBrand, fieldOrder])
+
+    // Wrapper: intercept core field disable to show confirmation; otherwise call toggleCategoryField with contextual meta
+    const handleToggleWithConfirm = useCallback((fieldId, categoryId, isSuppressed, field, categoryName) => {
+        const fieldLabel = field?.label || field?.system_label || field?.key || 'Field'
+        const name = categoryName ?? categoriesForBrand.find(c => String(c.id) === String(categoryId))?.name ?? 'Category'
+        if (!isSuppressed && field && CORE_FIELD_KEYS.includes(field.key)) {
+            setPendingDisable({ fieldId, categoryId, fieldLabel, categoryName: name })
+            setConfirmDisableCoreOpen(true)
+        } else {
+            toggleCategoryField(fieldId, categoryId, isSuppressed, { fieldLabel, categoryName: name })
+        }
+    }, [toggleCategoryField, categoriesForBrand])
+
+    const wrapToggle = useCallback((field, categoryId) => (fieldId, categoryIdArg, isSuppressed) => {
+        const catName = categoriesForBrand.find(c => String(c.id) === String(categoryIdArg ?? categoryId))?.name ?? 'Category'
+        handleToggleWithConfirm(fieldId, categoryIdArg ?? categoryId, isSuppressed, field, catName)
+    }, [handleToggleWithConfirm, categoriesForBrand])
+
+    const handleConfirmDisableCore = useCallback(() => {
+        if (!pendingDisable) return
+        const { fieldId, categoryId, fieldLabel, categoryName } = pendingDisable
+        toggleCategoryField(fieldId, categoryId, false, { fieldLabel, categoryName })
+        setPendingDisable(null)
+        setConfirmDisableCoreOpen(false)
+    }, [pendingDisable, toggleCategoryField])
 
     // Toggle visibility for Upload/Edit/Filter
     const toggleVisibility = async (fieldId, context, currentValue) => {
@@ -520,6 +566,94 @@ export default function ByCategoryView({
                     return { ...prev, [fieldId]: { ...fieldData, overrides: updatedOverrides } }
                 })
             }
+        }
+    }
+
+    // Toggle required field for category (must be filled when adding assets)
+    // ARCHITECTURAL RULE: Required status MUST be category-scoped (like is_primary).
+    const toggleRequired = async (fieldId, categoryId, currentValue) => {
+        if (!canManageVisibility || !categoryId) return
+
+        const newValue = !currentValue
+
+        setFieldCategoryData(prev => {
+            const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+            const updatedOverrides = {
+                ...fieldData.overrides,
+                [categoryId]: {
+                    ...fieldData.overrides[categoryId],
+                    is_required: newValue,
+                }
+            }
+            return {
+                ...prev,
+                [fieldId]: {
+                    ...fieldData,
+                    overrides: updatedOverrides,
+                }
+            }
+        })
+
+        try {
+            const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    is_required: newValue,
+                    category_id: categoryId,
+                }),
+            })
+
+            if (response.ok) {
+                setSuccessMessage(`Required field ${newValue ? 'enabled' : 'disabled'} for this category`)
+                setTimeout(() => setSuccessMessage(null), 3000)
+            } else {
+                setFieldCategoryData(prev => {
+                    const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                    const updatedOverrides = {
+                        ...fieldData.overrides,
+                        [categoryId]: {
+                            ...fieldData.overrides[categoryId],
+                            is_required: currentValue,
+                        }
+                    }
+                    return {
+                        ...prev,
+                        [fieldId]: {
+                            ...fieldData,
+                            overrides: updatedOverrides,
+                        }
+                    }
+                })
+                setSuccessMessage('Failed to update required field setting')
+                setTimeout(() => setSuccessMessage(null), 3000)
+            }
+        } catch (error) {
+            console.error('Failed to update required field setting:', error)
+            setFieldCategoryData(prev => {
+                const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
+                const updatedOverrides = {
+                    ...fieldData.overrides,
+                    [categoryId]: {
+                        ...fieldData.overrides[categoryId],
+                        is_required: currentValue,
+                    }
+                }
+                return {
+                    ...prev,
+                    [fieldId]: {
+                        ...fieldData,
+                        overrides: updatedOverrides,
+                    }
+                }
+            })
+            setSuccessMessage('Failed to update required field setting')
+            setTimeout(() => setSuccessMessage(null), 3000)
         }
     }
 
@@ -689,9 +823,10 @@ export default function ByCategoryView({
         const enabledAutomated = []
         const availableAutomated = []
 
+        const eq = (a, b) => String(a) === String(b)
         manageableFields.forEach(field => {
             const categoryData = (previewOverlay[field.id] ?? fieldCategoryData[field.id]) || { suppressed: [], visible: [] }
-            const isEnabled = !categoryData.suppressed.includes(selectedCategoryId)
+            const isEnabled = !(categoryData.suppressed || []).some(sid => eq(sid, selectedCategoryId))
             
             if (isEnabled) {
                 enabled.push(field)
@@ -703,7 +838,7 @@ export default function ByCategoryView({
         // Separate automated fields
         automatedFields.forEach(field => {
             const categoryData = (previewOverlay[field.id] ?? fieldCategoryData[field.id]) || { suppressed: [], visible: [] }
-            const isEnabled = !categoryData.suppressed.includes(selectedCategoryId)
+            const isEnabled = !(categoryData.suppressed || []).some(sid => eq(sid, selectedCategoryId))
             
             if (isEnabled) {
                 enabledAutomated.push(field)
@@ -765,18 +900,16 @@ export default function ByCategoryView({
         const { active, over } = event
         if (!over || active.id === over.id || !selectedCategoryId || !brandId) return
 
-        const { otherSystemEnabled, typeFamilyEnabled, customEnabledForCategory } = fieldsByFamily
-        const oldIndex = otherSystemEnabled.findIndex(f => String(f.id) === String(active.id))
-        const newIndex = otherSystemEnabled.findIndex(f => String(f.id) === String(over.id))
+        const { otherEnabled, typeFamilyEnabled } = fieldsByFamily
+        const oldIndex = otherEnabled.findIndex(f => String(f.id) === String(active.id))
+        const newIndex = otherEnabled.findIndex(f => String(f.id) === String(over.id))
         if (oldIndex === -1 || newIndex === -1) return
 
-        const reorderedOtherSystem = arrayMove(otherSystemEnabled, oldIndex, newIndex)
-        const order = fieldOrder[selectedCategoryId] || []
-        const customIdsInOrder = order.filter(id => customEnabledForCategory.some(f => f.id === id))
+        const reorderedOther = arrayMove(otherEnabled, oldIndex, newIndex)
         const newFieldIds = buildFullFieldOrder(
             typeFamilyEnabled.map(f => f.id),
-            reorderedOtherSystem.map(f => f.id),
-            customIdsInOrder.length > 0 ? customIdsInOrder : customEnabledForCategory.map(f => f.id)
+            reorderedOther.map(f => f.id),
+            [] // custom fields are now part of otherEnabled
         )
 
         setFieldOrder(prev => ({
@@ -799,47 +932,7 @@ export default function ByCategoryView({
             .then(res => { if (!res.ok) throw new Error('Failed to reorder') })
             .catch(e => console.error('[ByCategory] Field reorder failed:', e))
             .finally(() => setFieldReorderLoading(false))
-    }, [selectedCategoryId, brandId, fieldsByFamily, fieldOrder, buildFullFieldOrder])
-
-    const handleCustomFieldsDragEnd = useCallback((event) => {
-        const { active, over } = event
-        if (!over || active.id === over.id || !selectedCategoryId || !brandId) return
-
-        const { otherSystemEnabled, typeFamilyEnabled, customEnabledForCategory } = fieldsByFamily
-        const oldIndex = customEnabledForCategory.findIndex(f => String(f.id) === String(active.id))
-        const newIndex = customEnabledForCategory.findIndex(f => String(f.id) === String(over.id))
-        if (oldIndex === -1 || newIndex === -1) return
-
-        const reorderedCustom = arrayMove(customEnabledForCategory, oldIndex, newIndex)
-        const order = fieldOrder[selectedCategoryId] || []
-        const otherSystemIdsInOrder = order.filter(id => otherSystemEnabled.some(f => f.id === id))
-        const newFieldIds = buildFullFieldOrder(
-            typeFamilyEnabled.map(f => f.id),
-            otherSystemIdsInOrder.length > 0 ? otherSystemIdsInOrder : otherSystemEnabled.map(f => f.id),
-            reorderedCustom.map(f => f.id)
-        )
-
-        setFieldOrder(prev => ({
-            ...prev,
-            [selectedCategoryId]: newFieldIds
-        }))
-
-        setFieldReorderLoading(true)
-        fetch(`/app/brands/${brandId}/categories/${selectedCategoryId}/fields/reorder`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': getCsrfToken(),
-                'X-Requested-With': 'XMLHttpRequest',
-                Accept: 'application/json',
-            },
-            credentials: 'same-origin',
-            body: JSON.stringify({ field_order: newFieldIds }),
-        })
-            .then(res => { if (!res.ok) throw new Error('Failed to reorder') })
-            .catch(e => console.error('[ByCategory] Custom field reorder failed:', e))
-            .finally(() => setFieldReorderLoading(false))
-    }, [selectedCategoryId, brandId, fieldsByFamily, fieldOrder, buildFullFieldOrder])
+    }, [selectedCategoryId, brandId, fieldsByFamily, buildFullFieldOrder])
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -884,6 +977,47 @@ export default function ByCategoryView({
         })
         onBrandChange(brandId)
     }, [selectedCategory?.slug, onBrandChange])
+
+    const handleArchiveField = useCallback((field) => {
+        setPendingArchiveField(field)
+        setArchiveRemoveFromAssets(false)
+        setConfirmArchiveOpen(true)
+    }, [])
+
+    const handleConfirmArchive = useCallback(async () => {
+        if (!pendingArchiveField) return
+        setArchiveLoading(true)
+        try {
+            const res = await fetch(`/app/tenant/metadata/fields/${pendingArchiveField.id}/archive`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ remove_from_assets: archiveRemoveFromAssets }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (res.ok && data.success) {
+                setConfirmArchiveOpen(false)
+                setPendingArchiveField(null)
+                setArchiveRemoveFromAssets(false)
+                refreshMetadataRegistry()
+                setSuccessMessage('Metadata field archived successfully.')
+                setTimeout(() => setSuccessMessage(null), 3000)
+            } else {
+                setSuccessMessage(data?.error || 'Failed to archive field')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (e) {
+            setSuccessMessage(e?.message || 'Network error')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setArchiveLoading(false)
+        }
+    }, [pendingArchiveField, archiveRemoveFromAssets, refreshMetadataRegistry])
 
     const handleEditField = async (field) => {
         setLoadingFieldData(true)
@@ -1515,6 +1649,10 @@ export default function ByCategoryView({
                             <div className="space-y-0.5">
                                 {getFieldsForCategory.enabled.length > 0 || (fieldsByFamily.typeFamilyEnabled.length + fieldsByFamily.typeFamilyAvailable.length) > 0 ? (
                                     <>
+                                        <div className="flex items-center px-3 py-1.5 text-xs font-medium text-gray-500" aria-hidden>
+                                            <div className="flex-1" />
+                                            <span>Status</span>
+                                        </div>
                                         {typeFamilyConfig && (fieldsByFamily.typeFamilyEnabled.length > 0 || fieldsByFamily.typeFamilyAvailable.length > 0) && (
                                             <FamilyRow
                                                 familyKey="type"
@@ -1524,9 +1662,10 @@ export default function ByCategoryView({
                                                 categoryId={selectedCategoryId}
                                                 expanded={!!expandedFamilies['type']}
                                                 onToggleExpand={() => toggleFamilyExpanded('type')}
-                                                onToggle={toggleCategoryField}
+                                                wrapToggle={wrapToggle}
                                                 onVisibilityToggle={toggleVisibility}
                                                 onPrimaryToggle={togglePrimary}
+                                                onRequiredToggle={toggleRequired}
                                                 onAiEligibleToggle={toggleAiEligible}
                                                 onEdit={canManageFields ? handleEditField : null}
                                                 canManage={canManageVisibility && !previewProfileName}
@@ -1543,20 +1682,22 @@ export default function ByCategoryView({
                                             onDragEnd={handleEnabledFieldsDragEnd}
                                         >
                                             <SortableContext
-                                                items={fieldsByFamily.otherSystemEnabled.map(f => f.id)}
+                                                items={fieldsByFamily.otherEnabled.map(f => f.id)}
                                                 strategy={verticalListSortingStrategy}
                                             >
-                                                {fieldsByFamily.otherSystemEnabled.map((field) => (
+                                                {fieldsByFamily.otherEnabled.map((field) => (
                                                     <SortableFieldRow
                                                         key={field.id}
                                                         field={field}
                                                         categoryId={selectedCategoryId}
                                                         isEnabled={true}
-                                                        onToggle={toggleCategoryField}
+                                                        onToggle={wrapToggle(field, selectedCategoryId)}
                                                         onVisibilityToggle={toggleVisibility}
                                                         onPrimaryToggle={togglePrimary}
+                                                        onRequiredToggle={toggleRequired}
                                                         onAiEligibleToggle={toggleAiEligible}
                                                         onEdit={canManageFields ? handleEditField : null}
+                                                        onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
                                                         canManage={canManageVisibility && !previewProfileName}
                                                         canManageFields={canManageFields}
                                                         systemFields={systemFields}
@@ -1599,7 +1740,7 @@ export default function ByCategoryView({
                                             field={field}
                                             categoryId={selectedCategoryId}
                                             isEnabled={true}
-                                            onToggle={toggleCategoryField}
+                                            onToggle={wrapToggle(field, selectedCategoryId)}
                                             onVisibilityToggle={toggleVisibility}
                                             canManage={canManageVisibility && !previewProfileName}
                                             systemFields={systemFields}
@@ -1612,7 +1753,7 @@ export default function ByCategoryView({
                                             field={field}
                                             categoryId={selectedCategoryId}
                                             isEnabled={false}
-                                            onToggle={toggleCategoryField}
+                                            onToggle={wrapToggle(field, selectedCategoryId)}
                                             onVisibilityToggle={toggleVisibility}
                                             canManage={canManageVisibility && !previewProfileName}
                                             systemFields={systemFields}
@@ -1645,9 +1786,10 @@ export default function ByCategoryView({
                                             field={field}
                                             categoryId={selectedCategoryId}
                                             isEnabled={false}
-                                            onToggle={toggleCategoryField}
+                                            onToggle={wrapToggle(field, selectedCategoryId)}
                                             onVisibilityToggle={toggleVisibility}
                                             onPrimaryToggle={togglePrimary}
+                                            onRequiredToggle={toggleRequired}
                                             onAiEligibleToggle={toggleAiEligible}
                                             canManage={canManageVisibility && !previewProfileName}
                                             systemFields={systemFields}
@@ -1661,85 +1803,28 @@ export default function ByCategoryView({
                             </div>
                         )}
 
-                        {/* Custom Fields — reorderable when enabled, centered empty state when none */}
-                        {canManageFields && (tenant_fields.length === 0 || fieldsByFamily.customEnabledForCategory.length > 0) && (
+                        {/* Custom Fields — empty state when no custom fields exist yet */}
+                        {canManageFields && tenant_fields.length === 0 && (
                             <div className="mt-8">
-                                {fieldsByFamily.customEnabledForCategory.length > 0 ? (
-                                    <>
-                                        <div className="flex items-center justify-between mb-3">
-                                            <h3 className="text-sm font-medium text-gray-700">
-                                                Custom Fields
-                                                <span className="font-normal text-gray-500 ml-1">({fieldsByFamily.customEnabledForCategory.length})</span>
-                                            </h3>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setEditingField(null); setModalOpen(true) }}
-                                                disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                title={customFieldsLimit && !customFieldsLimit.can_create
-                                                    ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
-                                                    : 'Add custom metadata field'}
-                                            >
-                                                <PlusIcon className="h-4 w-4" />
-                                                Add Field
-                                            </button>
-                                        </div>
-                                        <div className="space-y-0.5">
-                                            <DndContext
-                                                sensors={sensors}
-                                                collisionDetection={closestCenter}
-                                                onDragEnd={handleCustomFieldsDragEnd}
-                                            >
-                                                <SortableContext
-                                                    items={fieldsByFamily.customEnabledForCategory.map(f => f.id)}
-                                                    strategy={verticalListSortingStrategy}
-                                                >
-                                                    {fieldsByFamily.customEnabledForCategory.map((field) => (
-                                                        <SortableFieldRow
-                                                            key={field.id}
-                                                            field={field}
-                                                            categoryId={selectedCategoryId}
-                                                            isEnabled={true}
-                                                            onToggle={toggleCategoryField}
-                                                            onVisibilityToggle={toggleVisibility}
-                                                            onPrimaryToggle={togglePrimary}
-                                                            onAiEligibleToggle={toggleAiEligible}
-                                                            onEdit={handleEditField}
-                                                            canManage={canManageVisibility && !previewProfileName}
-                                                            canManageFields={canManageFields}
-                                                            systemFields={systemFields}
-                                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                                            isHighlighted={field.id === highlightedFieldId}
-                                                        />
-                                                    ))}
-                                                </SortableContext>
-                                            </DndContext>
-                                            {fieldReorderLoading && (
-                                                <p className="text-xs text-gray-400 mt-1">Saving order…</p>
-                                            )}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="py-12 flex justify-center">
-                                        <div className="max-w-md w-full rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-6 py-8 text-center">
-                                            <p className="text-sm text-gray-500 mb-3">
-                                                Custom fields let you define structured metadata specific to this category.
-                                            </p>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setEditingField(null); setModalOpen(true) }}
-                                                disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                title={customFieldsLimit && !customFieldsLimit.can_create
-                                                    ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
-                                                    : 'Add custom metadata field'}
-                                            >
-                                                <PlusIcon className="h-4 w-4" />
-                                                Add Custom Field
-                                            </button>
-                                        </div>
+                                <div className="py-12 flex justify-center">
+                                    <div className="max-w-md w-full rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-6 py-8 text-center">
+                                        <p className="text-sm text-gray-500 mb-3">
+                                            Custom fields let you define structured metadata specific to this category.
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setEditingField(null); setModalOpen(true) }}
+                                            disabled={customFieldsLimit && !customFieldsLimit.can_create}
+                                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title={customFieldsLimit && !customFieldsLimit.can_create
+                                                ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
+                                                : 'Add custom metadata field'}
+                                        >
+                                            <PlusIcon className="h-4 w-4" />
+                                            Add Custom Field
+                                        </button>
                                     </div>
-                                )}
+                                </div>
                             </div>
                         )}
                             </div>
@@ -1829,6 +1914,27 @@ export default function ByCategoryView({
                 cancelText="Cancel"
                 variant="warning"
                 loading={copyOrResetLoading}
+            />
+            {/* Disable core field confirmation */}
+            <ConfirmDialog
+                open={confirmDisableCoreOpen}
+                onClose={() => { setConfirmDisableCoreOpen(false); setPendingDisable(null) }}
+                onConfirm={handleConfirmDisableCore}
+                title="Disable Core Field?"
+                message="Disabling this field may affect filtering, organization, and AI suggestions."
+                confirmText="Disable"
+                cancelText="Cancel"
+                variant="warning"
+            />
+            {/* Archive custom field confirmation */}
+            <ArchiveFieldModal
+                open={confirmArchiveOpen}
+                onClose={() => { setConfirmArchiveOpen(false); setPendingArchiveField(null); setArchiveRemoveFromAssets(false) }}
+                onConfirm={handleConfirmArchive}
+                fieldLabel={pendingArchiveField?.label || pendingArchiveField?.system_label || pendingArchiveField?.key}
+                loading={archiveLoading}
+                removeFromAssets={archiveRemoveFromAssets}
+                onRemoveFromAssetsChange={setArchiveRemoveFromAssets}
             />
             {/* Advanced Settings slide-over */}
             <AdvancedSettingsSlideOver
@@ -1936,9 +2042,10 @@ function FamilyRow({
     categoryId,
     expanded,
     onToggleExpand,
-    onToggle,
+    wrapToggle,
     onVisibilityToggle,
     onPrimaryToggle,
+    onRequiredToggle,
     onAiEligibleToggle,
     onEdit,
     canManage,
@@ -2009,7 +2116,7 @@ function FamilyRow({
                         onClick={() => canManage && members.length > 0 && handleFamilyVisibility('upload', allUpload)}
                         disabled={!canManage || members.length === 0}
                         title={mixedUpload ? 'Some fields differ. Click to set all.' : 'Upload: Show in upload form when adding assets'}
-                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allUpload ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allUpload ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                     >
                         <CloudArrowUpIcon className="w-4 h-4" />
                     </button>
@@ -2018,7 +2125,7 @@ function FamilyRow({
                         onClick={() => canManage && members.length > 0 && handleFamilyVisibility('edit', allEdit)}
                         disabled={!canManage || members.length === 0}
                         title={mixedEdit ? 'Some fields differ. Click to set all.' : 'Quick View: Show in asset details drawer and modal'}
-                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allEdit ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allEdit ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                     >
                         <EyeIcon className="w-4 h-4" />
                     </button>
@@ -2027,7 +2134,7 @@ function FamilyRow({
                         onClick={() => canManage && members.length > 0 && handleFamilyVisibility('filter', allFilter)}
                         disabled={!canManage || members.length === 0}
                         title={mixedFilter ? 'Some fields differ. Click to set all.' : 'Filter: Show in asset grid filter bar'}
-                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allFilter ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                        className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${allFilter ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                     >
                         <FunnelIcon className="w-4 h-4" />
                     </button>
@@ -2041,9 +2148,10 @@ function FamilyRow({
                                 field={field}
                                 categoryId={categoryId}
                                 isEnabled={true}
-                                onToggle={onToggle}
+                                onToggle={wrapToggle(field, categoryId)}
                                 onVisibilityToggle={onVisibilityToggle}
                                 onPrimaryToggle={onPrimaryToggle}
+                                onRequiredToggle={onRequiredToggle}
                                 onAiEligibleToggle={onAiEligibleToggle}
                                 onEdit={onEdit}
                                 canManage={canManage}
@@ -2061,9 +2169,10 @@ function FamilyRow({
                                 field={field}
                                 categoryId={categoryId}
                                 isEnabled={false}
-                                onToggle={onToggle}
+                                onToggle={wrapToggle(field, categoryId)}
                                 onVisibilityToggle={onVisibilityToggle}
                                 onPrimaryToggle={onPrimaryToggle}
+                                onRequiredToggle={onRequiredToggle}
                                 onAiEligibleToggle={onAiEligibleToggle}
                                 onEdit={onEdit}
                                 canManage={canManage}
@@ -2118,14 +2227,16 @@ function SortableFieldRow(props) {
  * Phase G.5: Improved presentation with toggle, checkboxes, and drag-and-drop
  */
 function FieldRow({ 
-    field, 
-    categoryId, 
-    isEnabled, 
-    onToggle, 
+    field,
+    categoryId,
+    isEnabled,
+    onToggle,
     onVisibilityToggle,
     onPrimaryToggle,
+    onRequiredToggle,
     onAiEligibleToggle,
     onEdit,
+    onArchive,
     canManage, 
     canManageFields = false,
     systemFields,
@@ -2178,15 +2289,31 @@ function FieldRow({
         ? resolvePrimaryPlacement(field, categoryId, fieldCategoryData)
         : field.is_primary ?? false
 
-    // Check if this is the tags field
-    const isTagsField = field.key === 'tags'
+    // Resolve effective_is_required for this category (category-scoped, like is_primary)
+    const resolveRequired = (f, catId, categoryData) => {
+        if (!catId || !categoryData) return f.is_required ?? false
+        const override = categoryData.overrides?.[catId]
+        if (override && override.is_required !== null && override.is_required !== undefined) {
+            return override.is_required
+        }
+        return f.is_required ?? false
+    }
+    const effectiveIsRequired = categoryId && fieldCategoryData
+        ? resolveRequired(field, categoryId, fieldCategoryData)
+        : field.is_required ?? false
+
     const aiEligible = field.ai_eligible ?? false
+
+    const iconButtonClass = (active) =>
+        `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            active ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 opacity-60 hover:opacity-80'
+        }`
 
     return (
         <div 
             className={`group px-3 py-1.5 rounded-md text-sm transition-colors duration-200 ease-out ${
-                isDragging ? 'opacity-50' : isHighlighted ? 'bg-indigo-50' : 'hover:bg-gray-50/80'
-            }`}
+                isDragging ? 'opacity-50' : ''
+            } ${isEnabled ? 'bg-gray-50' : ''} ${isHighlighted ? 'bg-gray-100' : ''} ${!isEnabled ? 'hover:bg-gray-50/80' : ''}`}
             draggable={isDraggable && canManage && !isSystem}
             onDragStart={isDraggable && !isSystem ? (e) => onDragStart(e, field.id) : undefined}
             onDragOver={isDraggable && !isSystem ? onDragOver : undefined}
@@ -2213,83 +2340,116 @@ function FieldRow({
                         <span className="text-sm font-semibold text-gray-900 truncate">
                             {field.label || field.system_label || field.key || 'Unnamed Field'}
                         </span>
-                        {aiEligible && (
-                            <span className="px-1.5 py-0.5 text-xs font-medium bg-amber-100/80 text-amber-800 rounded flex-shrink-0" title="AI suggestions">
-                                {isTagsField ? 'AI Tagging' : 'AI'}
-                            </span>
-                        )}
                     </div>
 
-                    {/* Middle: Icon visibility toggles — visible on row hover */}
+                    {/* Middle: Visibility icons — always visible; active = accent + soft bg, inactive = muted 60% */}
                     {isEnabled && (
-                        <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-70 focus-within:opacity-70 transition-opacity duration-200">
+                        <div className="flex items-center gap-0.5 flex-shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
                             <button
                                 type="button"
-                                onClick={() => canManage && onVisibilityToggle(field.id, 'upload', effectiveUpload)}
+                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'upload', effectiveUpload) }}
                                 disabled={!canManage}
                                 title="Upload: Show in upload form when adding assets"
-                                className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveUpload ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                className={iconButtonClass(effectiveUpload)}
                             >
                                 <CloudArrowUpIcon className="w-4 h-4" />
                             </button>
                             <button
                                 type="button"
-                                onClick={() => canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
                                 disabled={!canManage}
                                 title="Quick View: Show in asset details drawer and modal"
-                                className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveEdit ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                className={iconButtonClass(effectiveEdit)}
                             >
                                 <EyeIcon className="w-4 h-4" />
                             </button>
                             <button
                                 type="button"
-                                onClick={() => canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter) }}
                                 disabled={!canManage}
                                 title="Filter: Show in asset grid filter bar"
-                                className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveFilter ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                className={iconButtonClass(effectiveFilter)}
                             >
                                 <FunnelIcon className="w-4 h-4" />
                             </button>
-                            {effectiveFilter && (
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); effectiveFilter && canManage && categoryId && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary) }}
+                                disabled={!canManage || !effectiveFilter || !categoryId}
+                                title={!effectiveFilter ? 'Enable Filter first to add to primary filter bar' : !categoryId ? 'Select a category first' : 'Primary: Show inline in grid. Off: Under More filters'}
+                                className={iconButtonClass(effectiveFilter && effectiveIsPrimary)}
+                            >
+                                {effectiveIsPrimary ? (
+                                    <StarIconSolid className="w-4 h-4" />
+                                ) : (
+                                    <StarIcon className="w-4 h-4" />
+                                )}
+                            </button>
+                            {onRequiredToggle && (
                                 <button
                                     type="button"
-                                    onClick={() => canManage && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary)}
-                                    disabled={!canManage}
-                                    title="Primary: Show inline in grid. Off: Under More filters"
-                                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${effectiveIsPrimary ? 'text-amber-500 hover:bg-amber-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                                    onClick={(e) => { e.stopPropagation(); effectiveUpload && canManage && categoryId && onRequiredToggle(field.id, categoryId, effectiveIsRequired) }}
+                                    disabled={!canManage || !effectiveUpload || !categoryId}
+                                    title={!effectiveUpload ? 'Enable Upload first to require this field' : !categoryId ? 'Select a category first' : 'Required: Must be filled when adding assets'}
+                                    className={iconButtonClass(effectiveUpload && effectiveIsRequired)}
                                 >
-                                    {effectiveIsPrimary ? (
-                                        <StarIconSolid className="w-4 h-4" />
-                                    ) : (
-                                        <StarIcon className="w-4 h-4" />
-                                    )}
+                                    <ExclamationCircleIcon className="w-4 h-4" />
                                 </button>
                             )}
+                            <span
+                                title="AI Suggestions: AI can suggest values for this field"
+                                className={`inline-flex items-center justify-center gap-1 min-w-8 h-8 px-1.5 rounded-full transition-colors pointer-events-none ${
+                                    aiEligible ? 'text-purple-600 bg-purple-100' : 'text-gray-400 opacity-60'
+                                }`}
+                                aria-hidden
+                            >
+                                {aiEligible && <span className="text-[10px] font-semibold uppercase tracking-wide">AI</span>}
+                                <SparklesIcon className="w-4 h-4 flex-shrink-0" />
+                            </span>
                         </div>
                     )}
                 </div>
 
-                {/* Right: Edit + on/off switch */}
-                <div className="flex-shrink-0 flex items-center gap-1.5">
-                    {onEdit && (canManageFields || !isSystem) && (
+                {/* Right: Status label above toggle column + Edit/Archive + toggle */}
+                <div className="flex-shrink-0 flex flex-col items-end gap-0.5">
+                    <span className="text-xs text-gray-500 font-medium" aria-hidden>
+                        {isEnabled ? 'Enabled' : 'Off'}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                        {onEdit && (canManageFields || !isSystem) && (
+                            <button
+                                onClick={() => onEdit(field)}
+                                className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-gray-600 rounded p-1 transition-opacity"
+                                title="Edit field"
+                            >
+                                <PencilIcon className="w-4 h-4" />
+                            </button>
+                        )}
+                        {onArchive && !isSystem && canManageFields && (
+                            <button
+                                onClick={() => onArchive(field)}
+                                className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-red-600 rounded p-1 transition-opacity"
+                                title="Archive field"
+                            >
+                                <TrashIcon className="w-4 h-4" />
+                            </button>
+                        )}
                         <button
-                            onClick={() => onEdit(field)}
-                            className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-indigo-600 rounded p-1 transition-opacity"
-                            title="Edit field"
+                            type="button"
+                            role="switch"
+                            aria-checked={isEnabled}
+                            onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                onToggle(field.id, categoryId, !isEnabled)
+                            }}
+                            className="relative inline-flex items-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 rounded-full"
                         >
-                            <PencilIcon className="w-4 h-4" />
+                            <div className={`relative w-9 h-5 rounded-full transition-colors ${isEnabled ? 'bg-indigo-600' : 'bg-gray-200'}`}>
+                                <div className={`absolute top-[2px] left-[2px] w-4 h-4 bg-white border border-gray-300 rounded-full transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                            </div>
                         </button>
-                    )}
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={() => onToggle(field.id, categoryId, !isEnabled)}
-                            disabled={!canManage}
-                            className="sr-only peer"
-                        />
-                        <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"></div>
-                    </label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2311,16 +2471,22 @@ function AutomatedFieldRow({
     onVisibilityToggle,
     canManage, 
     systemFields,
-    fieldCategoryData
+    fieldCategoryData,
 }) {
     const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
     const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
     const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? false
 
+    const iconButtonClass = (active) =>
+        `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            active ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 opacity-60 hover:opacity-80'
+        }`
+
     return (
-        <div className="group flex items-center justify-between py-1.5 px-3 rounded-md hover:bg-gray-50/80 transition-colors duration-200 ease-out text-sm">
+        <div
+            className={`group flex items-center justify-between py-1.5 px-3 rounded-md transition-colors duration-200 ease-out text-sm ${isEnabled ? 'bg-gray-50' : ''} ${!isEnabled ? 'hover:bg-gray-50/80' : ''}`}
+        >
             <div className="flex items-center gap-3 flex-1 min-w-0">
-                {/* Field Name with System dot */}
                 <div className="flex items-center gap-2 min-w-0">
                     {isSystem && (
                         <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System automated field" />
@@ -2329,45 +2495,52 @@ function AutomatedFieldRow({
                         {field.label || field.system_label || field.key || 'Unnamed Field'}
                     </span>
                 </div>
-                
-                {/* Icon toggles: Upload (disabled), Quick View, Filter — visible on row hover, 70% opacity */}
                 {isEnabled && (
-                    <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-70 transition-opacity duration-200">
-                        <span title="Upload: Disabled for automated fields (system-filled)" className="w-8 h-8 flex items-center justify-center rounded text-gray-300 cursor-not-allowed">
+                    <div className="flex items-center gap-0.5 flex-shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
+                        <span title="Upload: Disabled for automated fields (system-filled)" className="w-8 h-8 flex items-center justify-center rounded-full text-gray-300 opacity-60 cursor-not-allowed pointer-events-none">
                             <CloudArrowUpIcon className="w-4 h-4" />
                         </span>
                         <button
                             type="button"
-                            onClick={() => canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit)}
+                            onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
                             disabled={!canManage}
                             title="Quick View: Show in asset details drawer and modal"
-                            className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveEdit ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            className={iconButtonClass(effectiveEdit)}
                         >
                             <EyeIcon className="w-4 h-4" />
                         </button>
                         <button
                             type="button"
-                            onClick={() => canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter)}
+                            onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter) }}
                             disabled={!canManage}
                             title="Filter: Show in asset grid filter bar"
-                            className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${effectiveFilter ? 'text-indigo-600 hover:bg-indigo-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            className={iconButtonClass(effectiveFilter)}
                         >
                             <FunnelIcon className="w-4 h-4" />
                         </button>
                     </div>
                 )}
             </div>
-
-            <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                <input
-                    type="checkbox"
-                    checked={isEnabled}
-                    onChange={() => onToggle(field.id, categoryId, !isEnabled)}
-                    disabled={!canManage}
-                    className="sr-only peer"
-                />
-                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"></div>
-            </label>
+            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                <span className="text-xs text-gray-500 font-medium" aria-hidden>
+                    {isEnabled ? 'Enabled' : 'Off'}
+                </span>
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isEnabled}
+                    onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onToggle(field.id, categoryId, !isEnabled)
+                    }}
+                    className="relative inline-flex items-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 rounded-full"
+                >
+                    <div className={`relative w-9 h-5 rounded-full transition-colors ${isEnabled ? 'bg-indigo-600' : 'bg-gray-200'}`}>
+                        <div className={`absolute top-[2px] left-[2px] w-4 h-4 bg-white border border-gray-300 rounded-full transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                </button>
+            </div>
         </div>
     )
 }

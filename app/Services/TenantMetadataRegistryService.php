@@ -58,9 +58,11 @@ class TenantMetadataRegistryService
     {
         // Query system metadata fields
         // Exclude dimensions - it's file info, not metadata, and shouldn't appear in metadata management UI
+        // Exclude archived (system fields are never archived, but defensive)
         $fields = DB::table('metadata_fields')
             ->where('scope', 'system')
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->where('key', '!=', 'dimensions') // Dimensions is file info, not metadata
             ->select([
                 'id',
@@ -167,7 +169,7 @@ class TenantMetadataRegistryService
      */
     protected function getTenantFields(Tenant $tenant): array
     {
-        $fields = $this->tenantFieldService->listFieldsByTenant($tenant, true);
+        $fields = $this->tenantFieldService->listFieldsByTenant($tenant, true, false);
 
         // Get visibility overrides for tenant fields
         $fieldIds = array_column($fields, 'id');

@@ -36,7 +36,14 @@ export interface MetadataField {
      * Available options for select/multiselect fields
      * Undefined for non-select field types
      */
-    options?: Array<{ value: string | number; label: string }>;
+    options?: Array<{
+        value: string | number;
+        label?: string;
+        system_label?: string;
+        display_label?: string;
+        color?: string;
+        icon?: string;
+    }>;
 
     /**
      * Whether this field is system-defined (cannot be removed/modified)

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\PlanLimitExceededException;
+use App\Services\MetadataOptionEditGuard;
 use App\Models\Tenant;
 use App\Services\PlanService;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,30 @@ class TenantMetadataFieldService
     ];
 
     /**
+     * Normalize option color to valid hex or null.
+     */
+    protected function normalizeOptionColor(?string $color): ?string
+    {
+        if (!$color || !is_string($color)) {
+            return null;
+        }
+        $color = trim($color);
+        return preg_match('/^#[0-9A-Fa-f]{6}$/', $color) ? $color : null;
+    }
+
+    /**
+     * Normalize option icon (max 64 chars).
+     */
+    protected function normalizeOptionIcon(?string $icon): ?string
+    {
+        if (!$icon || !is_string($icon)) {
+            return null;
+        }
+        $icon = trim($icon);
+        return strlen($icon) > 0 && strlen($icon) <= 64 ? $icon : null;
+    }
+
+    /**
      * Create a new tenant metadata field.
      *
      * @param Tenant $tenant
@@ -88,11 +113,12 @@ class TenantMetadataFieldService
         // Check plan limit
         $this->checkPlanLimit($tenant);
 
-        // Check if key already exists for this tenant
+        // Check if key already exists for this tenant (exclude archived - archived keys can be reused)
         $existing = DB::table('metadata_fields')
             ->where('tenant_id', $tenant->id)
             ->where('key', $data['key'])
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if ($existing) {
@@ -138,9 +164,10 @@ class TenantMetadataFieldService
             }
         }
 
-        // Validate applies_to
+        // Validate applies_to (default to 'all' if not provided - category selection handles visibility)
         $allowedAppliesTo = ['image', 'video', 'document', 'all'];
-        if (!isset($data['applies_to']) || !in_array($data['applies_to'], $allowedAppliesTo, true)) {
+        $appliesTo = $data['applies_to'] ?? 'all';
+        if (!in_array($appliesTo, $allowedAppliesTo, true)) {
             throw ValidationException::withMessages([
                 'applies_to' => ['Invalid applies_to value. Must be one of: ' . implode(', ', $allowedAppliesTo)],
             ]);
@@ -160,7 +187,7 @@ class TenantMetadataFieldService
             'key' => $data['key'],
             'system_label' => $data['system_label'] ?? $data['key'],
             'type' => $data['type'],
-            'applies_to' => 'all', // Default to all asset types (category selection handles visibility)
+            'applies_to' => $appliesTo,
             'scope' => 'tenant',
             'tenant_id' => $tenant->id,
             'is_filterable' => $data['is_filterable'] ?? false,
@@ -189,10 +216,13 @@ class TenantMetadataFieldService
         // Create options if provided
         if (!empty($data['options']) && in_array($data['type'], ['select', 'multiselect'], true)) {
             foreach ($data['options'] as $option) {
+                $systemLabel = $option['system_label'] ?? $option['label'] ?? '';
                 DB::table('metadata_options')->insert([
                     'metadata_field_id' => $fieldId,
                     'value' => $option['value'],
-                    'system_label' => $option['label'],
+                    'system_label' => $systemLabel,
+                    'color' => $this->normalizeOptionColor($option['color'] ?? null),
+                    'icon' => $this->normalizeOptionIcon($option['icon'] ?? null),
                     'is_system' => false, // Tenant-created options
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -244,11 +274,12 @@ class TenantMetadataFieldService
      */
     public function updateField(Tenant $tenant, int $fieldId, array $data): bool
     {
-        // Verify field belongs to tenant
+        // Verify field belongs to tenant (exclude archived)
         $field = DB::table('metadata_fields')
             ->where('id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if (!$field) {
@@ -298,6 +329,13 @@ class TenantMetadataFieldService
 
         // Update options if provided
         if (isset($data['options']) && is_array($data['options'])) {
+            // Product integrity: reject option updates for system fields with custom rendering
+            if (MetadataOptionEditGuard::isRestricted($field)) {
+                throw ValidationException::withMessages([
+                    'options' => ['This field uses a system-managed display and does not support manual options.'],
+                ]);
+            }
+
             // Delete existing options
             DB::table('metadata_options')
                 ->where('metadata_field_id', $fieldId)
@@ -305,10 +343,13 @@ class TenantMetadataFieldService
 
             // Insert new options
             foreach ($data['options'] as $option) {
+                $systemLabel = $option['system_label'] ?? $option['label'] ?? '';
                 DB::table('metadata_options')->insert([
                     'metadata_field_id' => $fieldId,
                     'value' => $option['value'],
-                    'system_label' => $option['label'],
+                    'system_label' => $systemLabel,
+                    'color' => $this->normalizeOptionColor($option['color'] ?? null),
+                    'icon' => $this->normalizeOptionIcon($option['icon'] ?? null),
                     'is_system' => false,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -342,6 +383,7 @@ class TenantMetadataFieldService
             ->where('id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if (!$field) {
@@ -356,6 +398,9 @@ class TenantMetadataFieldService
             ->map(fn ($opt) => [
                 'value' => $opt->value,
                 'label' => $opt->system_label,
+                'system_label' => $opt->system_label,
+                'color' => $opt->color ?? null,
+                'icon' => $opt->icon ?? null,
             ])
             ->toArray();
 
@@ -393,6 +438,7 @@ class TenantMetadataFieldService
             ->where('id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if (!$field) {
@@ -418,6 +464,97 @@ class TenantMetadataFieldService
     }
 
     /**
+     * Archive a tenant metadata field (soft delete).
+     * System fields (scope='system') cannot be archived.
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @param bool $removeFromAssets If true, remove stored metadata values from assets.
+     * @return bool
+     * @throws \Exception
+     */
+    public function archiveField(Tenant $tenant, int $fieldId, bool $removeFromAssets = false): bool
+    {
+        $field = DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->first();
+
+        if (!$field) {
+            throw new \InvalidArgumentException("Field {$fieldId} does not exist.");
+        }
+
+        if (($field->scope ?? null) === 'system') {
+            throw new \InvalidArgumentException('System fields cannot be archived.');
+        }
+
+        if (($field->tenant_id ?? null) != $tenant->id || ($field->scope ?? null) !== 'tenant') {
+            throw new \InvalidArgumentException("Field {$fieldId} does not belong to tenant {$tenant->id}.");
+        }
+
+        if (($field->archived_at ?? null) !== null) {
+            throw new \InvalidArgumentException("Field {$fieldId} is already archived.");
+        }
+
+        DB::transaction(function () use ($fieldId, $field, $tenant, $removeFromAssets) {
+            if ($removeFromAssets) {
+                $this->removeFieldValuesFromAssets($fieldId, $field->key ?? '', $tenant->id);
+            }
+
+            DB::table('metadata_fields')
+                ->where('id', $fieldId)
+                ->update([
+                    'archived_at' => now(),
+                    'is_active' => false,
+                    'updated_at' => now(),
+                ]);
+        });
+
+        Log::info('Tenant metadata field archived', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'field_key' => $field->key,
+            'remove_from_assets' => $removeFromAssets,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Remove metadata values for a field from all assets in the tenant.
+     * Deletes from asset_metadata and removes key from assets.metadata JSON.
+     *
+     * @param int $fieldId
+     * @param string $fieldKey
+     * @param int $tenantId
+     * @return void
+     */
+    protected function removeFieldValuesFromAssets(int $fieldId, string $fieldKey, int $tenantId): void
+    {
+        // 1. Delete from asset_metadata (canonical)
+        DB::table('asset_metadata')
+            ->where('metadata_field_id', $fieldId)
+            ->delete();
+
+        // 2. Remove from assets.metadata JSON (metadata->fields->{fieldKey})
+        // Process all tenant assets that may have this key (from upload or legacy)
+        $assets = \App\Models\Asset::where('tenant_id', $tenantId)->get();
+
+        foreach ($assets as $asset) {
+            $metadata = $asset->metadata ?? [];
+            if (!is_array($metadata)) {
+                $metadata = json_decode($metadata, true) ?? [];
+            }
+            $fields = $metadata['fields'] ?? [];
+            if (is_array($fields) && array_key_exists($fieldKey, $fields)) {
+                unset($fields[$fieldKey]);
+                $metadata['fields'] = $fields;
+                $asset->metadata = $metadata;
+                $asset->save();
+            }
+        }
+    }
+
+    /**
      * Re-enable a tenant metadata field.
      *
      * @param Tenant $tenant
@@ -427,11 +564,12 @@ class TenantMetadataFieldService
      */
     public function enableField(Tenant $tenant, int $fieldId): bool
     {
-        // Verify field belongs to tenant
+        // Verify field belongs to tenant (exclude archived - cannot re-enable archived fields)
         $field = DB::table('metadata_fields')
             ->where('id', $fieldId)
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
+            ->whereNull('archived_at')
             ->first();
 
         if (!$field) {
@@ -461,9 +599,10 @@ class TenantMetadataFieldService
      *
      * @param Tenant $tenant
      * @param bool $includeInactive Include inactive fields
+     * @param bool $includeArchived Include archived fields (default: false)
      * @return array
      */
-    public function listFieldsByTenant(Tenant $tenant, bool $includeInactive = false): array
+    public function listFieldsByTenant(Tenant $tenant, bool $includeInactive = false, bool $includeArchived = false): array
     {
         $query = DB::table('metadata_fields')
             ->where('tenant_id', $tenant->id)
@@ -473,6 +612,10 @@ class TenantMetadataFieldService
 
         if (!$includeInactive) {
             $query->where('is_active', true);
+        }
+
+        if (!$includeArchived) {
+            $query->whereNull('archived_at');
         }
 
         $fields = $query->get();
@@ -563,12 +706,13 @@ class TenantMetadataFieldService
             );
         }
 
-        // Count active tenant fields
+        // Count active tenant fields (exclude archived)
         $currentCount = DB::table('metadata_fields')
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
             ->where('is_active', true)
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->count();
 
         if ($currentCount >= $maxFields) {

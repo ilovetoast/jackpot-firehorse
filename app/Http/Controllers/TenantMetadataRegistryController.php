@@ -84,6 +84,8 @@ class TenantMetadataRegistryController extends Controller
                 return [
                     'id' => $b->id,
                     'name' => $b->name,
+                    'primary_color' => $b->primary_color,
+                    'accent_color' => $b->accent_color,
                     'category_limits' => [
                         'current' => $currentCount,
                         'max' => $maxCategories,
@@ -145,12 +147,13 @@ class TenantMetadataRegistryController extends Controller
         // Get plan limits for custom metadata fields (reuse $planService, $limits from brands block above)
         $maxCustomFields = $limits['max_custom_metadata_fields'] ?? 0;
         
-        // Count current custom fields
+        // Count current custom fields (exclude archived)
         $currentCustomFieldsCount = \Illuminate\Support\Facades\DB::table('metadata_fields')
             ->where('tenant_id', $tenant->id)
             ->where('scope', 'tenant')
             ->where('is_active', true)
             ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
             ->count();
         
         $canCreateCustomField = $maxCustomFields === 0 || $currentCustomFieldsCount < $maxCustomFields;
@@ -229,6 +232,7 @@ class TenantMetadataRegistryController extends Controller
             'show_on_edit' => 'nullable|boolean',
             'show_in_filters' => 'nullable|boolean',
             'is_primary' => 'nullable|boolean',
+            'is_required' => 'nullable|boolean', // Category-scoped required field for upload
             'category_id' => 'nullable|integer|exists:categories,id', // Category-scoped primary placement
         ]);
 
@@ -239,6 +243,11 @@ class TenantMetadataRegistryController extends Controller
 
         if (!$fieldRecord) {
             return response()->json(['error' => 'Field not found'], 404);
+        }
+
+        // Reject archived fields
+        if (($fieldRecord->archived_at ?? null) !== null) {
+            return response()->json(['error' => 'Cannot modify visibility of an archived field'], 422);
         }
 
         // If tenant field, verify it belongs to this tenant
@@ -315,13 +324,23 @@ class TenantMetadataRegistryController extends Controller
             $isEditHidden = isset($validated['show_on_edit']) ? !filter_var($validated['show_on_edit'], FILTER_VALIDATE_BOOLEAN) : null;
             $isFilterHidden = isset($validated['show_in_filters']) ? !filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
             $isPrimary = isset($validated['is_primary']) ? filter_var($validated['is_primary'], FILTER_VALIDATE_BOOLEAN) : null;
+            $isRequired = isset($validated['is_required']) ? filter_var($validated['is_required'], FILTER_VALIDATE_BOOLEAN) : null;
 
-            // Fields in always_hidden_fields (e.g. dimensions, dominant_color_bucket) must never appear in filters
+            // always_hidden_fields: never in filters (dimensions, dominant_colors)
+            // filter_only_enforced_fields: never in Quick View/Upload/Primary; secondary only when user enables
             $fieldKey = \DB::table('metadata_fields')->where('id', $field)->value('key');
             $alwaysHiddenFields = config('metadata_category_defaults.always_hidden_fields', []);
+            $filterOnlyEnforcedFields = config('metadata_category_defaults.filter_only_enforced_fields', []);
+
             if ($fieldKey && in_array($fieldKey, $alwaysHiddenFields, true)) {
                 $isFilterHidden = true;
                 $isPrimary = false;
+            }
+            if ($fieldKey && in_array($fieldKey, $filterOnlyEnforcedFields, true)) {
+                $isPrimary = false;
+                $isUploadHidden = true;
+                $isEditHidden = true;
+                // Do NOT force is_filter_hidden - user may enable for secondary filters
             }
 
             // NOTE: is_hidden is NOT set here - it's only set by category suppression toggle (toggleCategoryField)
@@ -350,6 +369,9 @@ class TenantMetadataRegistryController extends Controller
                 }
                 if ($isFilterHidden !== null) $updateData['is_filter_hidden'] = $isFilterHidden;
                 if ($isPrimary !== null) $updateData['is_primary'] = $isPrimary;
+                if ($isRequired !== null && \Schema::hasColumn('metadata_field_visibility', 'is_required')) {
+                    $updateData['is_required'] = $isRequired;
+                }
                 
                 \Log::info('[TenantMetadataRegistryController] Updating existing category override', [
                     'record_id' => $existing->id,
@@ -366,6 +388,9 @@ class TenantMetadataRegistryController extends Controller
                 $selectColumns = ['id', 'is_hidden', 'is_upload_hidden', 'is_filter_hidden', 'is_primary'];
                 if (Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden')) {
                     $selectColumns[] = 'is_edit_hidden';
+                }
+                if (Schema::hasColumn('metadata_field_visibility', 'is_required')) {
+                    $selectColumns[] = 'is_required';
                 }
                 
                 $tenantOverride = \DB::table('metadata_field_visibility')
@@ -400,6 +425,9 @@ class TenantMetadataRegistryController extends Controller
                         'field_id' => $field,
                         'category_id' => $categoryId,
                     ]);
+                }
+                if (\Schema::hasColumn('metadata_field_visibility', 'is_required')) {
+                    $insertData['is_required'] = $isRequired !== null ? $isRequired : ($tenantOverride ? (bool) ($tenantOverride->is_required ?? false) : false);
                 }
                 
                 \Log::info('[TenantMetadataRegistryController] Creating new category override', [
