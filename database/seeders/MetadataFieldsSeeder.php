@@ -450,15 +450,20 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => false,
             'is_upload_visible' => false, // Rating fields excluded from upload
             'is_internal_only' => false, // Changed to false - users can edit ratings
+            'population_mode' => 'manual', // Must be manual for stars to be clickable
+            'readonly' => false,
         ]);
         
-        // Update existing quality_rating field to ensure is_internal_only is false
+        // Update existing quality_rating field to ensure is_internal_only is false and always user-editable
+        // population_mode=manual and readonly=false are required for stars to be clickable in the quick panel
         DB::table('metadata_fields')
             ->where('key', 'quality_rating')
             ->update([
                 'is_internal_only' => false,
                 'is_user_editable' => true,
                 'type' => 'rating',
+                'population_mode' => 'manual',
+                'readonly' => false,
                 'updated_at' => now(),
             ]);
 

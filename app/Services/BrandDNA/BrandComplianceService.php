@@ -53,10 +53,12 @@ class BrandComplianceService
         $toneWeight = (float) ($scoringConfig['tone_weight'] ?? 0.3);
         $imageryWeight = (float) ($scoringConfig['imagery_weight'] ?? 0.2);
 
-        $colorResult = $this->scoreColor($asset, $scoringRules);
-        $typographyResult = $this->scoreTypography($asset, $scoringRules);
-        $toneResult = $this->scoreTone($asset, $scoringRules);
-        $imageryResult = $this->scoreImagery($asset, $scoringRules);
+        // Wrap each dimension in try-catch so a failure in one never aborts scoring.
+        // Dominant color (and other metadata) can be null, missing, or malformed.
+        $colorResult = $this->safeScoreDimension(fn () => $this->scoreColor($asset, $scoringRules), 'color');
+        $typographyResult = $this->safeScoreDimension(fn () => $this->scoreTypography($asset, $scoringRules), 'typography');
+        $toneResult = $this->safeScoreDimension(fn () => $this->scoreTone($asset, $scoringRules), 'tone');
+        $imageryResult = $this->safeScoreDimension(fn () => $this->scoreImagery($asset, $scoringRules), 'imagery');
 
         $applicable = [];
         $breakdown = [];
@@ -183,11 +185,32 @@ class BrandComplianceService
     }
 
     /**
+     * Safely run a dimension scorer. On any exception, return not_evaluated so other dimensions can score.
+     */
+    protected function safeScoreDimension(callable $scorer, string $dimension): array
+    {
+        try {
+            return $scorer();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("[BrandComplianceService] Dimension {$dimension} failed", [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [0, "Dimension failed: {$e->getMessage()}", 'not_evaluated'];
+        }
+    }
+
+    /**
      * Check if asset has dominant colors (for scoring readiness).
      */
     public function hasDominantColors(Asset $asset): bool
     {
-        return count($this->getAssetDominantColors($asset)) > 0;
+        try {
+            return count($this->getAssetDominantColors($asset)) > 0;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
@@ -205,21 +228,22 @@ class BrandComplianceService
 
         if (! $row || ! $row->value_json) {
             $metadata = $asset->metadata ?? [];
-            $colors = $metadata['dominant_colors'] ?? [];
+            $colors = $metadata['dominant_colors'] ?? null;
 
             return $this->normalizeAndSortDominantColors($colors);
         }
 
         $decoded = json_decode($row->value_json, true);
-        if (! is_array($decoded)) {
-            return [];
-        }
-
         return $this->normalizeAndSortDominantColors($decoded);
     }
 
-    protected function normalizeAndSortDominantColors(array $colors): array
+    protected function normalizeAndSortDominantColors(mixed $colors): array
     {
+        // Guard: dominant_colors can be null, missing, string, or not hydrated yet.
+        if (! is_array($colors) || empty($colors)) {
+            return [];
+        }
+
         $withWeight = [];
         foreach ($colors as $c) {
             $hex = is_array($c) ? ($c['hex'] ?? null) : $c;

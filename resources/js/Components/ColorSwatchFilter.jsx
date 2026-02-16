@@ -6,7 +6,7 @@
  * Multi-select allowed (future-safe); single value also supported.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 
 export default function ColorSwatchFilter({
     field,
@@ -23,16 +23,6 @@ export default function ColorSwatchFilter({
     }, [field.options, filteredOptions])
 
     const selectedValues = Array.isArray(value) ? value : (value != null ? [value] : [])
-
-    const fieldKey = field?.key ?? field?.field_key
-    useEffect(() => {
-        if (fieldKey === 'dominant_color_bucket' && !Array.isArray(value)) {
-            console.error(
-                'dominant_color_bucket value must be an array',
-                value
-            )
-        }
-    }, [fieldKey, value])
 
     const handleToggle = (bucketValue) => {
         let nextValues = Array.isArray(value) ? [...value] : (value != null ? [value] : [])

@@ -268,6 +268,39 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
+     * Malformed dominant_colors (null, string) must not throw; upsert incomplete.
+     */
+    public function test_malformed_dominant_colors_does_not_throw_upserts_incomplete(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+
+        $asset = $this->createAsset();
+        $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['dominant_colors' => null])]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNull($result);
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'incomplete',
+        ]);
+
+        // String (malformed) also must not throw
+        $asset2 = $this->createAsset();
+        $asset2->update(['metadata' => array_merge($asset2->metadata ?? [], ['dominant_colors' => 'not-an-array'])]);
+
+        $result2 = $service->scoreAsset($asset2, $this->brand);
+        $this->assertNull($result2);
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset2->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'incomplete',
+        ]);
+    }
+
+    /**
      * Rescore endpoint dispatches ScoreAssetComplianceJob.
      */
     public function test_rescore_endpoint_dispatches_job(): void

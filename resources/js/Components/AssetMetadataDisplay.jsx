@@ -523,7 +523,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                                 // Optionally show error toast/notification
                                                             }
                                                         }}
-                                                        editable={!field.readonly && field.population_mode !== 'automatic' && field.can_edit !== false}
+                                                        editable={field.can_edit !== false && (field.key === 'quality_rating' || (!field.readonly && field.population_mode !== 'automatic'))}
                                                         maxStars={5}
                                                         size="md"
                                                     />
