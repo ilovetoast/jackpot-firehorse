@@ -214,9 +214,9 @@ export default function AssetImagePicker({
           const url = getAssetDownloadUrl(selectedAssetId)
           const res = await fetch(url, { credentials: 'same-origin' })
           const blob = await res.blob()
-          const file = new File([blob], asset?.original_filename || 'logo.png', { type: blob.type || 'image/png' })
-          const previewUrl = URL.createObjectURL(file)
-          onSelect?.({ file, preview_url: previewUrl })
+          const previewUrl = URL.createObjectURL(blob)
+          // Pass asset_id so parent can persist; preview_url for immediate display (blob avoids 404 until thumbnails ready)
+          onSelect?.({ asset_id: selectedAssetId, thumbnail_url: thumb ?? null, preview_url: previewUrl })
         } catch (err) {
           console.error('Failed to fetch asset file:', err)
           onSelect?.({ asset_id: selectedAssetId, thumbnail_url: thumb ?? null })
