@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon, TagIcon, ArrowPathRoundedSquareIcon } from '@heroicons/react/24/outline'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon, ArrowPathRoundedSquareIcon } from '@heroicons/react/24/outline'
 import { Activity } from 'lucide-react'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
@@ -25,8 +25,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [overridingFieldId, setOverridingFieldId] = useState(null)
     const [revertingFieldId, setRevertingFieldId] = useState(null)
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
-    const [assetTags, setAssetTags] = useState([])
-    const [tagsLoading, setTagsLoading] = useState(false)
     const [complianceScore, setComplianceScore] = useState(null)
     const [complianceBreakdown, setComplianceBreakdown] = useState(null)
     const [evaluationStatus, setEvaluationStatus] = useState('pending')
@@ -35,26 +33,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [rescoreLoading, setRescoreLoading] = useState(false)
     
     // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
-
-    // Fetch tags for Tags row (all asset types including video)
-    useEffect(() => {
-        if (!assetId) {
-            setAssetTags([])
-            return
-        }
-        setTagsLoading(true)
-        fetch(`/app/api/assets/${assetId}/tags`, {
-            headers: { Accept: 'application/json' },
-            credentials: 'same-origin',
-        })
-            .then((res) => res.ok ? res.json() : [])
-            .then((data) => {
-                const list = data?.tags ?? (Array.isArray(data) ? data : data?.data ?? [])
-                setAssetTags(Array.isArray(list) ? list : [])
-            })
-            .catch(() => setAssetTags([]))
-            .finally(() => setTagsLoading(false))
-    }, [assetId])
 
     // Fetch editable metadata (silent = true skips loading state, used for polling)
     const fetchMetadata = (silent = false) => {
@@ -144,19 +122,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     // Reset poll timer when switching to a different asset
     useEffect(() => {
         pollStartRef.current = null
-    }, [assetId])
-
-    // Refetch tags when tags are updated (e.g. from Tag Manager below)
-    useEffect(() => {
-        const handleTagsUpdate = () => {
-            if (!assetId) return
-            fetch(`/app/api/assets/${assetId}/tags`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
-                .then((res) => (res.ok ? res.json() : { tags: [] }))
-                .then((data) => setAssetTags(Array.isArray(data?.tags) ? data.tags : []))
-                .catch(() => {})
-        }
-        window.addEventListener('tags-updated', handleTagsUpdate)
-        return () => window.removeEventListener('tags-updated', handleTagsUpdate)
     }, [assetId])
 
     // Refresh after edit
@@ -698,41 +663,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                     )}
                                 </div>
                             ] : []
-                        ).concat(
-                            // Tags row (from API; all asset types including video)
-                            [
-                                <div
-                                    key="tags-field"
-                                    className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
-                                >
-                                    <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
-                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
-                                            <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                                <TagIcon className="h-4 w-4" aria-hidden="true" />
-                                                Tags
-                                            </span>
-                                        </dt>
-                                        <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                            {tagsLoading ? (
-                                                <span className="text-gray-400">Loading…</span>
-                                            ) : assetTags.length > 0 ? (
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    {assetTags.map((t) => (
-                                                        <span
-                                                            key={t.id ?? t.tag}
-                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800"
-                                                        >
-                                                            {typeof t === 'string' ? t : (t.tag ?? t.name ?? String(t))}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-400">No tags</span>
-                                            )}
-                                        </dd>
-                                    </div>
-                                </div>
-                            ]
                         )}
                     </dl>
                 )}

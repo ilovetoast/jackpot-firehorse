@@ -8,6 +8,7 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
 use App\Services\ActivityRecorder;
+use App\Services\AssetCompletionService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -17,7 +18,8 @@ use Illuminate\Support\Facades\DB;
 class BrandComplianceService
 {
     public function __construct(
-        private BrandModelService $brandModelService
+        private BrandModelService $brandModelService,
+        private AssetCompletionService $completionService
     ) {}
 
     /**
@@ -25,6 +27,7 @@ class BrandComplianceService
      * Returns null if brand model is disabled or no active version.
      *
      * Evaluation status rules:
+     * - CASE 0: Asset processing not complete → upsert pending_processing, return null
      * - CASE 1: Brand DNA disabled → return null, no row
      * - CASE 2: No scoring dimensions configured → upsert not_applicable, return null
      * - CASE 3: Rules configured but metadata missing → upsert incomplete, return null
@@ -45,6 +48,26 @@ class BrandComplianceService
 
         $activeVersion = $brandModel->activeVersion;
         if (! $activeVersion) {
+            return null;
+        }
+
+        // STEP 1: Asset processing guard — do not score before processing is complete
+        if (! $this->completionService->isComplete($asset)) {
+            $this->upsertScore($asset, $brand, [
+                'overall_score' => null,
+                'color_score' => null,
+                'typography_score' => null,
+                'tone_score' => null,
+                'imagery_score' => null,
+                'breakdown_payload' => [
+                    'color' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
+                    'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
+                    'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
+                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
+                ],
+                'evaluation_status' => 'pending_processing',
+            ]);
+
             return null;
         }
 

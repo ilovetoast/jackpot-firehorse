@@ -261,12 +261,12 @@ class HandleInertiaRequests extends Middleware
         }
 
         // Effective permissions: merged tenant + Spatie + brand role permissions (no collisions)
-        // When tenant is null (e.g. login screen), always return [] — no exceptions
+        // When tenant is null (e.g. admin dashboard without company selected), still include Spatie (site) role permissions
         if ($user) {
             $user->load('tenants');
         }
         $effectivePermissions = [];
-        if ($user && $tenant) {
+        if ($user) {
             try {
                 $brand = app()->bound('brand') ? app('brand') : $activeBrand ?? null;
                 $effectivePermissions = app(AuthPermissionService::class)

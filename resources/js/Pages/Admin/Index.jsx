@@ -132,12 +132,14 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         // No need to reload - the dropdown is controlled by value prop, so it will show the current plan from props
     }
 
-    // Convert permissions to array if it's an object (Laravel sometimes serializes arrays as objects)
-    const permissionsArray = Array.isArray(auth.permissions) 
-        ? auth.permissions 
-        : auth.permissions 
-            ? Object.values(auth.permissions) 
-            : []
+    // Use effective_permissions (tenant + site role permissions); fallback to legacy auth.permissions
+    const permissionsArray = Array.isArray(auth.effective_permissions)
+        ? auth.effective_permissions
+        : Array.isArray(auth.permissions)
+            ? auth.permissions
+            : auth.permissions
+                ? Object.values(auth.permissions)
+                : []
     
     // Check if user has AI dashboard view permission
     const canViewAIDashboard = permissionsArray.includes('ai.dashboard.view')
