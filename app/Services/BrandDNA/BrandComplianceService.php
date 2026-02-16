@@ -5,6 +5,7 @@ namespace App\Services\BrandDNA;
 use App\Enums\EventType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
+use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
 use App\Models\BrandVisualReference;
@@ -493,6 +494,32 @@ class BrandComplianceService
     }
 
     /**
+     * Cosine similarity between two vectors. Uses standard dot product formula.
+     * Returns value in [-1, 1]. Assumes vectors are normalized.
+     */
+    private function cosineSimilarity(array $a, array $b): float
+    {
+        if (empty($a) || empty($b) || count($a) !== count($b)) {
+            return 0.0;
+        }
+        $dot = 0.0;
+        $normA = 0.0;
+        $normB = 0.0;
+        foreach ($a as $i => $v) {
+            $w = $b[$i] ?? 0;
+            $dot += $v * $w;
+            $normA += $v * $v;
+            $normB += $w * $w;
+        }
+        $denom = sqrt($normA) * sqrt($normB);
+        if ($denom < 1e-10) {
+            return 0.0;
+        }
+
+        return (float) ($dot / $denom);
+    }
+
+    /**
      * Score imagery using visual similarity against brand reference embeddings.
      * When no references configured, returns not_configured (caller should use scoreImagery instead).
      *
@@ -509,9 +536,33 @@ class BrandComplianceService
             return [0, 'No visual references configured.', 'not_configured'];
         }
 
-        // TODO: Generate asset embedding if not exists; compare to ref embeddings; return cosine similarity 0-100.
-        // Placeholder: embedding generation not yet implemented.
-        return [0, 'Imagery similarity requires embedding generation (not yet implemented).', 'not_evaluated'];
+        $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
+        if (! $assetEmbedding || empty($assetEmbedding->embedding_vector)) {
+            return [0, 'Asset embedding not yet generated.', 'not_evaluated'];
+        }
+
+        $assetVec = array_values($assetEmbedding->embedding_vector);
+        $maxSim = -1.0;
+        foreach ($refs as $ref) {
+            $refVec = array_values($ref->embedding_vector ?? []);
+            if (empty($refVec)) {
+                continue;
+            }
+            $sim = $this->cosineSimilarity($assetVec, $refVec);
+            if ($sim > $maxSim) {
+                $maxSim = $sim;
+            }
+        }
+
+        if ($maxSim < -1.0) {
+            return [0, 'No valid reference embeddings.', 'not_evaluated'];
+        }
+
+        // Normalize from [-1, 1] to [0, 100]
+        $score = (int) round((($maxSim + 1) / 2) * 100);
+        $score = min(100, max(0, $score));
+
+        return [$score, "Imagery similarity: {$score}% (highest match).", 'scored'];
     }
 
     protected function getAssetPhotographyStyle(Asset $asset): ?string

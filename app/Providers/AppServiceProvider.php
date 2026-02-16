@@ -9,8 +9,10 @@ use App\Listeners\ActivateAgencyReferral;
 use App\Listeners\GrantAgencyPartnerReward;
 use App\Listeners\ProcessAssetOnUpload;
 use App\Listeners\SendAssetPendingApprovalNotification;
+use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\OpenAIProvider;
+use App\Services\ImageEmbeddingService;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
@@ -38,6 +40,10 @@ class AppServiceProvider extends ServiceProvider
             
             // Fallback to OpenAI if provider not found
             return new OpenAIProvider();
+        });
+
+        $this->app->singleton(ImageEmbeddingServiceInterface::class, function () {
+            return new ImageEmbeddingService();
         });
     }
 

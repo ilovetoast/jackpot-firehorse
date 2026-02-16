@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AssetType;
+use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
 use App\Models\BrandModelVersion;
@@ -289,24 +290,24 @@ class BrandDNAController extends Controller
         BrandVisualReference::where('brand_id', $brand->id)->delete();
 
         if ($logoAssetId) {
-            BrandVisualReference::create([
+            $ref = BrandVisualReference::create([
                 'brand_id' => $brand->id,
                 'asset_id' => $logoAssetId,
                 'embedding_vector' => null,
                 'type' => BrandVisualReference::TYPE_LOGO,
             ]);
+            GenerateAssetEmbeddingJob::dispatch($logoAssetId, $ref->id);
         }
 
         foreach ($photoIds as $assetId) {
-            BrandVisualReference::create([
+            $ref = BrandVisualReference::create([
                 'brand_id' => $brand->id,
                 'asset_id' => $assetId,
                 'embedding_vector' => null,
                 'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
             ]);
+            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
         }
-
-        // TODO: Dispatch job to generate embedding vectors for new references
 
         return redirect()->route('brands.dna.index', ['brand' => $brand->id])
             ->with('success', 'Visual references saved.');

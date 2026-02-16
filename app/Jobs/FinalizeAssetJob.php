@@ -3,10 +3,12 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetCompletionService;
 use App\Services\AssetProcessingFailureService;
+use App\Services\ImageEmbeddingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -89,6 +91,10 @@ class FinalizeAssetJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'original_filename' => $asset->original_filename,
             ]);
+
+            if (ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+                GenerateAssetEmbeddingJob::dispatch($asset->id);
+            }
         } else {
             // Asset did not meet completion criteria
             Log::warning('[FinalizeAssetJob] Asset completion skipped - criteria not met', [

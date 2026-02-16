@@ -41,4 +41,9 @@ return [
         ],
     ],
 
+    'image_embedding' => [
+        'url' => env('IMAGE_EMBEDDING_API_URL'),
+        'model' => env('IMAGE_EMBEDDING_MODEL', 'clip-vit-base-patch32'),
+    ],
+
 ];

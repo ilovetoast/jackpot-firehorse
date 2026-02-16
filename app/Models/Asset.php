@@ -406,6 +406,14 @@ class Asset extends Model
     }
 
     /**
+     * Get the embedding for this asset (imagery similarity scoring).
+     */
+    public function embedding(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(AssetEmbedding::class);
+    }
+
+    /**
      * Get the events for this asset.
      */
     public function events(): HasMany
