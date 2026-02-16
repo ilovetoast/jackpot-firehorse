@@ -21,6 +21,12 @@ class BrandComplianceService
      * Score an asset against the brand's DNA rules.
      * Returns null if brand model is disabled or no active version.
      *
+     * Evaluation status rules:
+     * - CASE 1: Brand DNA disabled → return null, no row
+     * - CASE 2: No scoring dimensions configured → upsert not_applicable, return null
+     * - CASE 3: Rules configured but metadata missing → upsert incomplete, return null
+     * - CASE 4: At least one dimension scored → upsert evaluated, return result
+     *
      * @return array{overall_score: int, color_score: int, typography_score: int, tone_score: int, imagery_score: int, breakdown_payload: array}|null
      */
     public function scoreAsset(Asset $asset, Brand $brand): ?array
@@ -54,6 +60,8 @@ class BrandComplianceService
 
         $applicable = [];
         $breakdown = [];
+        $hasAnyRules = false;
+        $hasRulesButNotEvaluated = false;
 
         foreach ([
             'color' => [$colorResult, $colorWeight],
@@ -66,14 +74,45 @@ class BrandComplianceService
             if ($status === 'scored') {
                 $applicable[] = ['score' => $score, 'weight' => $weight];
             }
+            if ($status !== 'not_configured') {
+                $hasAnyRules = true;
+            }
+            if ($status === 'not_evaluated') {
+                $hasRulesButNotEvaluated = true;
+            }
         }
 
-        if (empty($applicable)) {
-            $this->deleteScoreIfExists($asset, $brand);
+        // CASE 2: No scoring dimensions configured
+        if (! $hasAnyRules) {
+            $this->upsertScore($asset, $brand, [
+                'overall_score' => null,
+                'color_score' => $breakdown['color']['score'],
+                'typography_score' => $breakdown['typography']['score'],
+                'tone_score' => $breakdown['tone']['score'],
+                'imagery_score' => $breakdown['imagery']['score'],
+                'breakdown_payload' => $breakdown,
+                'evaluation_status' => 'not_applicable',
+            ]);
 
             return null;
         }
 
+        // CASE 3: Rules configured but required metadata missing (no dimension scored)
+        if (empty($applicable) && $hasRulesButNotEvaluated) {
+            $this->upsertScore($asset, $brand, [
+                'overall_score' => null,
+                'color_score' => $breakdown['color']['score'],
+                'typography_score' => $breakdown['typography']['score'],
+                'tone_score' => $breakdown['tone']['score'],
+                'imagery_score' => $breakdown['imagery']['score'],
+                'breakdown_payload' => $breakdown,
+                'evaluation_status' => 'incomplete',
+            ]);
+
+            return null;
+        }
+
+        // CASE 4: At least one dimension successfully scored
         $totalWeight = array_sum(array_column($applicable, 'weight'));
         $weightedSum = 0;
         foreach ($applicable as $a) {
@@ -90,6 +129,7 @@ class BrandComplianceService
             'tone_score' => $breakdown['tone']['score'],
             'imagery_score' => $breakdown['imagery']['score'],
             'breakdown_payload' => $breakdown,
+            'evaluation_status' => 'evaluated',
         ];
 
         $this->upsertScore($asset, $brand, $result);
@@ -406,19 +446,24 @@ class BrandComplianceService
 
     protected function upsertScore(Asset $asset, Brand $brand, array $result): void
     {
+        $data = [
+            'overall_score' => $result['overall_score'],
+            'color_score' => $result['color_score'],
+            'typography_score' => $result['typography_score'],
+            'tone_score' => $result['tone_score'],
+            'imagery_score' => $result['imagery_score'],
+            'breakdown_payload' => $result['breakdown_payload'],
+        ];
+        if (isset($result['evaluation_status'])) {
+            $data['evaluation_status'] = $result['evaluation_status'];
+        }
+
         BrandComplianceScore::updateOrCreate(
             [
                 'brand_id' => $brand->id,
                 'asset_id' => $asset->id,
             ],
-            [
-                'overall_score' => $result['overall_score'],
-                'color_score' => $result['color_score'],
-                'typography_score' => $result['typography_score'],
-                'tone_score' => $result['tone_score'],
-                'imagery_score' => $result['imagery_score'],
-                'breakdown_payload' => $result['breakdown_payload'],
-            ]
+            $data
         );
     }
 }

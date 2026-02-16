@@ -28,6 +28,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [tagsLoading, setTagsLoading] = useState(false)
     const [complianceScore, setComplianceScore] = useState(null)
     const [complianceBreakdown, setComplianceBreakdown] = useState(null)
+    const [evaluationStatus, setEvaluationStatus] = useState('pending')
     const [complianceExpanded, setComplianceExpanded] = useState(false)
     const [brandDnaEnabled, setBrandDnaEnabled] = useState(false)
     const [rescoreLoading, setRescoreLoading] = useState(false)
@@ -74,6 +75,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setPendingMetadataCount(count)
                 setComplianceScore(data.compliance_score ?? null)
                 setComplianceBreakdown(data.compliance_breakdown ?? null)
+                setEvaluationStatus(data.evaluation_status ?? 'pending')
                 setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 if (onPendingCountChange) {
                     onPendingCountChange(count)
@@ -133,6 +135,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     setFields(data.fields || [])
                     setComplianceScore(data.compliance_score ?? null)
                     setComplianceBreakdown(data.compliance_breakdown ?? null)
+                    setEvaluationStatus(data.evaluation_status ?? 'pending')
                     setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 })
                 .catch((err) => {
@@ -224,9 +227,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     return (
         <>
             <div>
-                {complianceScore === null && (
+                {evaluationStatus === 'pending' && (
                     <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">Brand compliance not yet evaluated.</p>
+                        <p className="text-xs text-gray-500 italic">⏳ Evaluating...</p>
                         {brandDnaEnabled && (
                             <button
                                 type="button"
@@ -260,7 +263,80 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         )}
                     </div>
                 )}
-                {complianceScore !== null && (
+                {evaluationStatus === 'not_applicable' && (
+                    <div className="mb-3">
+                        <p className="text-xs text-gray-500 italic">Brand compliance not configured.</p>
+                        {brandDnaEnabled && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!assetId || rescoreLoading) return
+                                    setRescoreLoading(true)
+                                    try {
+                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                'Accept': 'application/json',
+                                            },
+                                            credentials: 'same-origin',
+                                        })
+                                        const data = await res.json()
+                                        if (data.status === 'queued') {
+                                            setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                        }
+                                    } finally {
+                                        setRescoreLoading(false)
+                                    }
+                                }}
+                                disabled={rescoreLoading}
+                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                            >
+                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
+                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
+                            </button>
+                        )}
+                    </div>
+                )}
+                {evaluationStatus === 'incomplete' && (
+                    <div className="mb-3">
+                        <p className="text-xs text-amber-600 font-medium">⚠ Incomplete brand data.</p>
+                        <p className="mt-0.5 text-[11px] text-gray-500">This asset is missing required metadata for evaluation.</p>
+                        {brandDnaEnabled && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!assetId || rescoreLoading) return
+                                    setRescoreLoading(true)
+                                    try {
+                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                'Accept': 'application/json',
+                                            },
+                                            credentials: 'same-origin',
+                                        })
+                                        const data = await res.json()
+                                        if (data.status === 'queued') {
+                                            setTimeout(() => window.dispatchEvent(new CustomEvent('metadata-updated')), 2000)
+                                        }
+                                    } finally {
+                                        setRescoreLoading(false)
+                                    }
+                                }}
+                                disabled={rescoreLoading}
+                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                            >
+                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
+                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
+                            </button>
+                        )}
+                    </div>
+                )}
+                {evaluationStatus === 'evaluated' && complianceScore != null && (
                     <div className="mb-3">
                         <button
                             type="button"

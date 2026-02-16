@@ -74,11 +74,15 @@ class BrandDNAController extends Controller
         $bottomExecutions = [];
         if (! empty($deliverableCategoryIds)) {
             $topScores = BrandComplianceScore::where('brand_id', $brand->id)
+                ->where('evaluation_status', 'evaluated')
+                ->whereNotNull('overall_score')
                 ->with('asset:id,title,metadata')
                 ->orderByDesc('overall_score')
                 ->limit(3)
                 ->get();
             $bottomScores = BrandComplianceScore::where('brand_id', $brand->id)
+                ->where('evaluation_status', 'evaluated')
+                ->whereNotNull('overall_score')
                 ->with('asset:id,title,metadata')
                 ->orderBy('overall_score')
                 ->limit(3)

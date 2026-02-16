@@ -953,6 +953,7 @@ class AssetMetadataController extends Controller
         // Brand Compliance score (if Brand DNA enabled)
         $complianceScore = null;
         $complianceBreakdown = null;
+        $evaluationStatus = 'pending';
         $brandDnaEnabled = false;
         if ($asset->brand_id) {
             $brandModel = $brand->brandModel;
@@ -963,6 +964,7 @@ class AssetMetadataController extends Controller
             if ($score) {
                 $complianceScore = $score->overall_score;
                 $complianceBreakdown = $score->breakdown_payload;
+                $evaluationStatus = $score->evaluation_status ?? 'pending';
             }
         }
 
@@ -973,6 +975,7 @@ class AssetMetadataController extends Controller
             'pending_metadata_count' => $pendingMetadataCount,
             'compliance_score' => $complianceScore,
             'compliance_breakdown' => $complianceBreakdown,
+            'evaluation_status' => $evaluationStatus,
             'brand_dna_enabled' => $brandDnaEnabled,
         ]);
     }

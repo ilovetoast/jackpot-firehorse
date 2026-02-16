@@ -20,6 +20,7 @@ class BrandComplianceScore extends Model
         'tone_score',
         'imagery_score',
         'breakdown_payload',
+        'evaluation_status',
     ];
 
     protected function casts(): array

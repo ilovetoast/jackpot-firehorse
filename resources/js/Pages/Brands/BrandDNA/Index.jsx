@@ -428,17 +428,17 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                 <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
                                     <p className="text-xs font-medium text-slate-500">% High Alignment (≥85)</p>
                                     <p className="mt-1 text-2xl font-bold text-emerald-600">
-                                        {complianceAggregate.execution_count > 0
-                                            ? ((complianceAggregate.high_score_count / complianceAggregate.execution_count) * 100).toFixed(0)
-                                            : 0}%
+                                        {complianceAggregate.execution_count > 0 && complianceAggregate.avg_score != null
+                                            ? ((complianceAggregate.high_score_count / complianceAggregate.execution_count) * 100).toFixed(0) + '%'
+                                            : '—'}
                                     </p>
                                 </div>
                                 <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
                                     <p className="text-xs font-medium text-slate-500">% Low Alignment (&lt;60)</p>
                                     <p className="mt-1 text-2xl font-bold text-amber-600">
-                                        {complianceAggregate.execution_count > 0
-                                            ? ((complianceAggregate.low_score_count / complianceAggregate.execution_count) * 100).toFixed(0)
-                                            : 0}%
+                                        {complianceAggregate.execution_count > 0 && complianceAggregate.avg_score != null
+                                            ? ((complianceAggregate.low_score_count / complianceAggregate.execution_count) * 100).toFixed(0) + '%'
+                                            : '—'}
                                     </p>
                                 </div>
                             </div>
@@ -452,7 +452,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                     <Link href={typeof route === 'function' ? route('deliverables.index', { asset: e.id }) : `/app/deliverables?asset=${e.id}`} className="truncate text-slate-700 hover:text-indigo-600">
                                                         {e.title || 'Untitled'}
                                                     </Link>
-                                                    <span className="flex-shrink-0 rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">{e.score}</span>
+                                                    <span className="flex-shrink-0 rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">{e.score != null ? `${e.score}%` : '—'}</span>
                                                 </li>
                                             ))}
                                         </ul>
@@ -465,7 +465,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                     <Link href={typeof route === 'function' ? route('deliverables.index', { asset: e.id }) : `/app/deliverables?asset=${e.id}`} className="truncate text-slate-700 hover:text-indigo-600">
                                                         {e.title || 'Untitled'}
                                                     </Link>
-                                                    <span className="flex-shrink-0 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">{e.score}</span>
+                                                    <span className="flex-shrink-0 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">{e.score != null ? `${e.score}%` : '—'}</span>
                                                 </li>
                                             ))}
                                         </ul>

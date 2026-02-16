@@ -195,6 +195,11 @@ class BrandComplianceTest extends TestCase
         $this->assertSame(100, $result['color_score']);
         $this->assertSame(100, $result['overall_score']);
         $this->assertSame('scored', $result['breakdown_payload']['color']['status']);
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'evaluated',
+        ]);
     }
 
     /**
@@ -240,7 +245,7 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
-     * No dominant color → dimension not_evaluated, overall score null when no dimensions scored.
+     * No dominant color → evaluation_status incomplete, overall_score null.
      */
     public function test_no_dominant_color_returns_null_overall_score(): void
     {
@@ -253,10 +258,13 @@ class BrandComplianceTest extends TestCase
         $result = $service->scoreAsset($asset, $this->brand);
 
         $this->assertNull($result);
-        $this->assertDatabaseMissing('brand_compliance_scores', [
+        $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
+            'evaluation_status' => 'incomplete',
         ]);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNull($row->overall_score);
     }
 
     /**
@@ -325,13 +333,15 @@ class BrandComplianceTest extends TestCase
 
         // Verify Asset query with compliance sort returns high-scoring asset before low-scoring
         $assetSortService = app(\App\Services\AssetSortService::class);
-        $query = Asset::where('tenant_id', $this->tenant->id)
-            ->where('brand_id', $this->brand->id)
-            ->where('type', AssetType::DELIVERABLE)
-            ->whereIn('id', [$assetLow->id, $assetHigh->id]);
+        $query = Asset::query()
+            ->select('assets.*')
+            ->where('assets.tenant_id', $this->tenant->id)
+            ->where('assets.brand_id', $this->brand->id)
+            ->where('assets.type', AssetType::DELIVERABLE)
+            ->whereIn('assets.id', [$assetLow->id, $assetHigh->id]);
         $assetSortService->applySort($query, 'compliance_high', 'desc');
         $ordered = $query->get();
-        $ids = $ordered->pluck('id')->filter()->values()->toArray();
+        $ids = $ordered->pluck('id')->values()->toArray();
         $this->assertCount(2, $ids, 'Should return both assets');
         $this->assertSame($assetHigh->id, $ids[0], 'High-scoring asset should be first when sort=compliance_high desc');
         $this->assertSame($assetLow->id, $ids[1], 'Low-scoring asset should be second');
@@ -359,5 +369,122 @@ class BrandComplianceTest extends TestCase
         $ids = array_column($assets, 'id');
         $this->assertContains($assetUnscored->id, $ids, 'Unscored asset should be in unscored filter results');
         $this->assertNotContains($assetScored->id, $ids, 'Scored asset should NOT be in unscored filter results');
+    }
+
+    /**
+     * evaluation_status = not_applicable when no scoring rules configured.
+     */
+    public function test_evaluation_status_not_applicable_when_no_rules(): void
+    {
+        $brandModel = $this->brand->brandModel;
+        if (!$brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'allowed_color_palette' => [],
+                    'allowed_fonts' => [],
+                    'tone_keywords' => [],
+                    'photography_attributes' => [],
+                ],
+                'scoring_config' => ['color_weight' => 0.25, 'typography_weight' => 0.25, 'tone_weight' => 0.25, 'imagery_weight' => 0.25],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset();
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNull($result);
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'not_applicable',
+        ]);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNull($row->overall_score);
+    }
+
+    /**
+     * evaluation_status = incomplete when rules exist but metadata missing.
+     */
+    public function test_evaluation_status_incomplete_when_metadata_missing(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        // No dominant colors
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNull($result);
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'incomplete',
+        ]);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNull($row->overall_score);
+    }
+
+    /**
+     * evaluation_status = evaluated when at least one dimension scored.
+     */
+    public function test_evaluation_status_evaluated_when_scored(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertNotNull($result['overall_score']);
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'evaluated',
+        ]);
+    }
+
+    /**
+     * No compliance row when Brand DNA disabled.
+     */
+    public function test_no_row_written_when_brand_dna_disabled(): void
+    {
+        $brandModel = $this->brand->brandModel;
+        if (!$brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => ['allowed_color_palette' => [['hex' => '#003388']]],
+                'scoring_config' => ['color_weight' => 1, 'typography_weight' => 0, 'tone_weight' => 0, 'imagery_weight' => 0],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => false, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNull($result);
+        $this->assertDatabaseMissing('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+        ]);
     }
 }
