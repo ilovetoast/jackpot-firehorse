@@ -206,6 +206,14 @@ class Brand extends Model
     }
 
     /**
+     * Get visual references (logo, photography examples) for imagery similarity scoring.
+     */
+    public function visualReferences(): HasMany
+    {
+        return $this->hasMany(BrandVisualReference::class);
+    }
+
+    /**
      * Get the categories for this brand.
      */
     public function categories(): HasMany

@@ -83,46 +83,24 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     }, [assetId])
 
     // Brand Compliance: Poll when evaluation_status === 'pending' so UI refreshes after job completes.
-    // Use silent fetch to avoid flashing loading state every 2s. Cap at 90s to prevent infinite polling.
+    // Do NOT poll for pending_processing (asset not ready); only poll when job is running.
     const pollIntervalRef = useRef(null)
-    const pollStartRef = useRef(null)
     useEffect(() => {
         if (evaluationStatus !== 'pending' || !assetId) {
             if (pollIntervalRef.current) {
                 clearInterval(pollIntervalRef.current)
                 pollIntervalRef.current = null
             }
-            pollStartRef.current = null
             return
         }
-        pollStartRef.current = pollStartRef.current ?? Date.now()
-        const POLL_INTERVAL_MS = 2000
-        const POLL_MAX_MS = 90000 // 90 seconds
-        pollIntervalRef.current = setInterval(() => {
-            if (Date.now() - pollStartRef.current > POLL_MAX_MS) {
-                if (pollIntervalRef.current) {
-                    clearInterval(pollIntervalRef.current)
-                    pollIntervalRef.current = null
-                }
-                pollStartRef.current = null
-                setEvaluationStatus('timeout')
-                return
-            }
-            fetchMetadata(true)
-        }, POLL_INTERVAL_MS)
+        pollIntervalRef.current = setInterval(() => fetchMetadata(true), 2000)
         return () => {
             if (pollIntervalRef.current) {
                 clearInterval(pollIntervalRef.current)
                 pollIntervalRef.current = null
             }
-            pollStartRef.current = null
         }
     }, [evaluationStatus, assetId])
-
-    // Reset poll timer when switching to a different asset
-    useEffect(() => {
-        pollStartRef.current = null
-    }, [assetId])
 
     // Refresh after edit
     const handleEditComplete = () => {
@@ -235,41 +213,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     return (
         <>
             <div>
-                {evaluationStatus === 'timeout' && (
-                    <div className="mb-3 flex items-center gap-2">
-                        <p className="text-xs text-amber-600">Evaluation taking longer than expected.</p>
-                        {brandDnaEnabled && (
-                            <button
-                                type="button"
-                                onClick={async () => {
-                                    if (!assetId || rescoreLoading) return
-                                    setRescoreLoading(true)
-                                    pollStartRef.current = null
-                                    try {
-                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                                                'Accept': 'application/json',
-                                            },
-                                            credentials: 'same-origin',
-                                        })
-                                        const data = await res.json()
-                                        if (data.status === 'queued') {
-                                            setEvaluationStatus('pending')
-                                        }
-                                    } finally {
-                                        setRescoreLoading(false)
-                                    }
-                                }}
-                                disabled={rescoreLoading}
-                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                            >
-                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
-                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
-                            </button>
-                        )}
+                {evaluationStatus === 'pending_processing' && (
+                    <div className="mb-3">
+                        <p className="text-xs text-gray-500 italic">Compliance will run once asset processing is complete.</p>
                     </div>
                 )}
                 {evaluationStatus === 'pending' && (

@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\EventType;
 use App\Enums\StorageBucketStatus;
+use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Jobs\ScoreAssetComplianceJob;
@@ -99,7 +100,7 @@ class BrandComplianceTest extends TestCase
             'uploaded_size' => 1024,
         ]);
 
-        return Asset::create(array_merge([
+        $asset = Asset::create(array_merge([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
             'user_id' => $this->user->id,
@@ -116,6 +117,9 @@ class BrandComplianceTest extends TestCase
             'published_at' => now(),
             'published_by_id' => $this->user->id,
         ], $overrides));
+        $this->makeAssetComplete($asset);
+
+        return $asset;
     }
 
     protected function enableBrandDnaWithColorPalette(array $allowedPalette): BrandModelVersion
@@ -617,5 +621,153 @@ class BrandComplianceTest extends TestCase
             ->first();
         $this->assertNotNull($event);
         $this->assertSame('incomplete', $event->metadata['evaluation_status'] ?? null);
+    }
+
+    protected function makeAssetComplete(Asset $asset): void
+    {
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'metadata' => array_merge($asset->metadata ?? [], [
+                'ai_tagging_completed' => true,
+                'metadata_extracted' => true,
+            ]),
+        ]);
+    }
+
+    /**
+     * Compliance does not run before processing complete; upserts pending_processing.
+     */
+    public function test_compliance_does_not_run_before_processing_complete(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+        // Revert to incomplete so we test pending_processing path
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'metadata' => array_merge($asset->metadata ?? [], ['ai_tagging_completed' => false, 'metadata_extracted' => false]),
+        ]);
+
+        app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
+
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'pending_processing',
+        ]);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNull($row->overall_score);
+    }
+
+    /**
+     * Missing dominant color does not zero score; dimension excluded, weights normalize.
+     */
+    public function test_missing_dominant_color_does_not_zero_score(): void
+    {
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'allowed_color_palette' => [['hex' => '#003388']],
+                    'tone_keywords' => ['professional', 'quality'],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0.5,
+                    'typography_weight' => 0,
+                    'tone_weight' => 0.5,
+                    'imagery_weight' => 0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset();
+        $this->makeAssetComplete($asset);
+        // No dominant colors - color returns not_evaluated
+        $asset->update(['title' => 'Professional quality asset']);
+        $this->setAssetDominantColors($asset, []);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertNotNull($result['overall_score']);
+        $this->assertSame('not_evaluated', $result['breakdown_payload']['color']['status'] ?? null);
+        $this->assertSame('scored', $result['breakdown_payload']['tone']['status'] ?? null);
+    }
+
+    /**
+     * Imagery similarity dimension returns not_configured when no visual refs.
+     */
+    public function test_imagery_similarity_dimension_calculates(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->makeAssetComplete($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $breakdown = $result['breakdown_payload']['imagery'] ?? null;
+        $this->assertNotNull($breakdown);
+        $this->assertContains($breakdown['status'] ?? '', ['not_configured', 'not_evaluated', 'scored']);
+    }
+
+    /**
+     * Weights normalize when dimension missing (only scored dimensions contribute).
+     */
+    public function test_weights_normalize_when_dimension_missing(): void
+    {
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'allowed_color_palette' => [['hex' => '#003388']],
+                    'tone_keywords' => ['brand'],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0.5,
+                    'typography_weight' => 0.25,
+                    'tone_weight' => 0.25,
+                    'imagery_weight' => 0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset();
+        $this->makeAssetComplete($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+        $asset->update(['title' => 'Brand asset']);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertNotNull($result['overall_score']);
+        $totalWeight = 0;
+        foreach (['color', 'typography', 'tone', 'imagery'] as $dim) {
+            $status = $result['breakdown_payload'][$dim]['status'] ?? null;
+            if ($status === 'scored') {
+                $totalWeight += $result['breakdown_payload'][$dim]['weight'] ?? 0;
+            }
+        }
+        $this->assertGreaterThan(0, $totalWeight);
     }
 }

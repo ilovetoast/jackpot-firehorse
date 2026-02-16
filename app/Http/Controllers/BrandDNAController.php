@@ -6,6 +6,7 @@ use App\Enums\AssetType;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
 use App\Models\BrandModelVersion;
+use App\Models\BrandVisualReference;
 use App\Models\Category;
 use App\Services\BrandDNA\BrandModelService;
 use Illuminate\Http\Request;
@@ -128,6 +129,19 @@ class BrandDNAController extends Controller
             ] : null,
             'topExecutions' => $topExecutions,
             'bottomExecutions' => $bottomExecutions,
+            'visualReferences' => $brand->visualReferences()
+                ->with('asset:id,title,metadata')
+                ->get()
+                ->map(fn ($r) => [
+                    'id' => $r->id,
+                    'asset_id' => $r->asset_id,
+                    'type' => $r->type,
+                    'asset' => $r->asset ? [
+                        'id' => $r->asset->id,
+                        'title' => $r->asset->title,
+                        'thumbnail_url' => route('assets.thumbnail.final', ['asset' => $r->asset->id, 'style' => 'medium']),
+                    ] : null,
+                ]),
         ]);
     }
 
@@ -241,5 +255,60 @@ class BrandDNAController extends Controller
 
         return redirect()->route('brands.dna.index', ['brand' => $brand->id])
             ->with('success', "Version {$version->version_number} activated.");
+    }
+
+    /**
+     * Store visual references (logo + up to 3 photography examples).
+     * Triggers embedding generation when assets are selected.
+     */
+    public function storeVisualReferences(Request $request, Brand $brand)
+    {
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        $this->authorize('update', $brand);
+
+        $validated = $request->validate([
+            'logo_asset_id' => 'nullable|exists:assets,id',
+            'photography_asset_ids' => 'nullable|array',
+            'photography_asset_ids.*' => 'exists:assets,id',
+        ]);
+
+        $logoAssetId = $validated['logo_asset_id'] ?? null;
+        $photoIds = array_slice($validated['photography_asset_ids'] ?? [], 0, 3);
+
+        $allAssetIds = array_filter(array_merge($logoAssetId ? [$logoAssetId] : [], $photoIds));
+        foreach ($allAssetIds as $aid) {
+            $asset = \App\Models\Asset::find($aid);
+            if ($asset && $asset->brand_id !== $brand->id) {
+                abort(422, 'Selected assets must belong to this brand.');
+            }
+        }
+
+        BrandVisualReference::where('brand_id', $brand->id)->delete();
+
+        if ($logoAssetId) {
+            BrandVisualReference::create([
+                'brand_id' => $brand->id,
+                'asset_id' => $logoAssetId,
+                'embedding_vector' => null,
+                'type' => BrandVisualReference::TYPE_LOGO,
+            ]);
+        }
+
+        foreach ($photoIds as $assetId) {
+            BrandVisualReference::create([
+                'brand_id' => $brand->id,
+                'asset_id' => $assetId,
+                'embedding_vector' => null,
+                'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
+            ]);
+        }
+
+        // TODO: Dispatch job to generate embedding vectors for new references
+
+        return redirect()->route('brands.dna.index', ['brand' => $brand->id])
+            ->with('success', 'Visual references saved.');
     }
 }

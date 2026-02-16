@@ -7,6 +7,7 @@ use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
+use App\Models\BrandVisualReference;
 use App\Services\ActivityRecorder;
 use App\Services\AssetCompletionService;
 use Illuminate\Support\Facades\DB;
@@ -84,7 +85,11 @@ class BrandComplianceService
         $colorResult = $this->safeScoreDimension(fn () => $this->scoreColor($asset, $scoringRules), 'color');
         $typographyResult = $this->safeScoreDimension(fn () => $this->scoreTypography($asset, $scoringRules), 'typography');
         $toneResult = $this->safeScoreDimension(fn () => $this->scoreTone($asset, $scoringRules), 'tone');
-        $imageryResult = $this->safeScoreDimension(fn () => $this->scoreImagery($asset, $scoringRules), 'imagery');
+        // Imagery: prefer similarity when brand has visual refs; else use photography_attributes
+        $hasVisualRefs = $this->brandHasVisualReferencesWithEmbeddings($brand);
+        $imageryResult = $hasVisualRefs
+            ? $this->safeScoreDimension(fn () => $this->scoreImagerySimilarity($asset, $brand), 'imagery')
+            : $this->safeScoreDimension(fn () => $this->scoreImagery($asset, $scoringRules), 'imagery');
 
         $applicable = [];
         $breakdown = [];
@@ -471,6 +476,42 @@ class BrandComplianceService
         }
 
         return [50, "Style \"{$assetStyle}\" not found in allowed photography attributes.", 'scored'];
+    }
+
+    /**
+     * Check if brand has visual references with embedding vectors for imagery similarity scoring.
+     */
+    protected function brandHasVisualReferencesWithEmbeddings(Brand $brand): bool
+    {
+        return BrandVisualReference::where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector')
+            ->where(function ($q) {
+                $q->where('type', BrandVisualReference::TYPE_LOGO)
+                    ->orWhere('type', BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE);
+            })
+            ->exists();
+    }
+
+    /**
+     * Score imagery using visual similarity against brand reference embeddings.
+     * When no references configured, returns not_configured (caller should use scoreImagery instead).
+     *
+     * @return array{0: int, 1: string, 2: string}
+     */
+    protected function scoreImagerySimilarity(Asset $asset, Brand $brand): array
+    {
+        $refs = BrandVisualReference::where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector')
+            ->whereIn('type', [BrandVisualReference::TYPE_LOGO, BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE])
+            ->get();
+
+        if ($refs->isEmpty()) {
+            return [0, 'No visual references configured.', 'not_configured'];
+        }
+
+        // TODO: Generate asset embedding if not exists; compare to ref embeddings; return cosine similarity 0-100.
+        // Placeholder: embedding generation not yet implemented.
+        return [0, 'Imagery similarity requires embedding generation (not yet implemented).', 'not_evaluated'];
     }
 
     protected function getAssetPhotographyStyle(Asset $asset): ?string

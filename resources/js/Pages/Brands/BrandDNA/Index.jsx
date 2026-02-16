@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
+import AssetImagePickerField from '../../../Components/media/AssetImagePickerField'
 import axios from 'axios'
 
 const DEFAULT_PAYLOAD = {
@@ -81,7 +82,7 @@ function mergePayload(base, incoming) {
     return result
 }
 
-export default function BrandDNAIndex({ brand, brandModel, activeVersion, editingVersion, allVersions, complianceAggregate, topExecutions, bottomExecutions }) {
+export default function BrandDNAIndex({ brand, brandModel, activeVersion, editingVersion, allVersions, complianceAggregate, topExecutions, bottomExecutions, visualReferences = [] }) {
     const { auth } = usePage().props
     const [activeSection, setActiveSection] = useState('identity')
     const [selectedVersionId, setSelectedVersionId] = useState(null)
@@ -372,7 +373,40 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
         { id: 'visual', label: 'Visual' },
         { id: 'typography', label: 'Typography' },
         { id: 'scoring', label: 'Scoring Rules' },
+        { id: 'visual_references', label: 'Visual References' },
     ]
+
+    const logoRef = visualReferences?.find((r) => r.type === 'logo')
+    const photoRefs = visualReferences?.filter((r) => r.type === 'photography_reference') ?? []
+    const [logoAssetId, setLogoAssetId] = useState(logoRef?.asset_id ?? null)
+    const [logoPreviewUrl, setLogoPreviewUrl] = useState(logoRef?.asset?.thumbnail_url ?? null)
+    const [photographyAssets, setPhotographyAssets] = useState(() =>
+        photoRefs.slice(0, 3).map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
+    )
+    const [visualRefsSaving, setVisualRefsSaving] = useState(false)
+
+    useEffect(() => {
+        const logo = visualReferences?.find((r) => r.type === 'logo')
+        const photos = visualReferences?.filter((r) => r.type === 'photography_reference') ?? []
+        setLogoAssetId(logo?.asset_id ?? null)
+        setLogoPreviewUrl(logo?.asset?.thumbnail_url ?? null)
+        setPhotographyAssets(photos.slice(0, 3).map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title })))
+    }, [visualReferences])
+
+    const handleSaveVisualReferences = (e) => {
+        e.preventDefault()
+        setVisualRefsSaving(true)
+        const url = typeof route === 'function'
+            ? route('brands.dna.visual_references.store', { brand: brand.id })
+            : `/app/brands/${brand.id}/dna/visual-references`
+        router.post(url, {
+            logo_asset_id: logoAssetId || null,
+            photography_asset_ids: photographyAssets.filter((a) => a?.asset_id).map((a) => a.asset_id),
+        }, {
+            preserveScroll: true,
+            onFinish: () => setVisualRefsSaving(false),
+        })
+    }
 
     return (
         <div className="min-h-full">
@@ -808,6 +842,102 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                             {renderTagArrayField('tone_keywords', 'Tone Keywords', 'Words that match brand tone')}
                                             {renderTagArrayField('banned_keywords', 'Banned Keywords', 'Words to penalize')}
                                             {renderTagArrayField('photography_attributes', 'Photography Attributes', 'e.g. minimal, lifestyle')}
+                                        </div>
+                                    )}
+
+                                    {activeSection === 'visual_references' && (
+                                        <div className="space-y-6">
+                                            <h2 className="text-lg font-semibold text-gray-900">Visual References</h2>
+                                            <p className="text-sm text-gray-600">
+                                                Select reference images for imagery similarity scoring. These are compared against assets during compliance evaluation.
+                                            </p>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">Brand Logo Reference</label>
+                                                <p className="text-xs text-gray-500 mb-2">Primary logo used for visual alignment scoring.</p>
+                                                <div className="max-w-xs">
+                                                    <AssetImagePickerField
+                                                        value={{
+                                                            asset_id: logoAssetId,
+                                                            preview_url: logoPreviewUrl,
+                                                        }}
+                                                        onChange={(v) => {
+                                                            if (v == null) {
+                                                                setLogoAssetId(null)
+                                                                setLogoPreviewUrl(null)
+                                                            } else if (v?.asset_id) {
+                                                                setLogoAssetId(v.asset_id)
+                                                                setLogoPreviewUrl(v.preview_url ?? v.thumbnail_url ?? null)
+                                                            }
+                                                        }}
+                                                        fetchAssets={(opts) => {
+                                                            const params = new URLSearchParams({ format: 'json' })
+                                                            if (opts?.category) params.set('category', opts.category)
+                                                            return fetch(`/app/assets?${params}`, {
+                                                                credentials: 'same-origin',
+                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                            }).then((r) => r.json())
+                                                        }}
+                                                        title="Select brand logo"
+                                                        defaultCategoryLabel="Logos"
+                                                        contextCategory="logos"
+                                                        placeholder="Select logo reference"
+                                                        helperText="Used for imagery similarity scoring"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-2">Photography Examples (up to 3)</label>
+                                                <p className="text-xs text-gray-500 mb-2">Approved photography that represents brand visual style.</p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                    {[0, 1, 2].map((i) => (
+                                                        <div key={i}>
+                                                            <AssetImagePickerField
+                                                                value={{
+                                                                    asset_id: photographyAssets[i]?.asset_id ?? null,
+                                                                    preview_url: photographyAssets[i]?.preview_url ?? null,
+                                                                }}
+                                                                onChange={(v) => {
+                                                                    setPhotographyAssets((prev) => {
+                                                                        const next = [...(prev || [])]
+                                                                        while (next.length <= i) next.push({})
+                                                                        if (v == null) {
+                                                                            next[i] = {}
+                                                                        } else if (v?.asset_id) {
+                                                                            next[i] = { asset_id: v.asset_id, preview_url: v.preview_url ?? v.thumbnail_url ?? null }
+                                                                        }
+                                                                        return next
+                                                                    })
+                                                                }}
+                                                                fetchAssets={(opts) => {
+                                                                    const params = new URLSearchParams({ format: 'json' })
+                                                                    if (opts?.category) params.set('category', opts.category)
+                                                                    return fetch(`/app/assets?${params}`, {
+                                                                        credentials: 'same-origin',
+                                                                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                                    }).then((r) => r.json())
+                                                                }}
+                                                                title={`Select photography example ${i + 1}`}
+                                                                defaultCategoryLabel="Photography"
+                                                                contextCategory="photography"
+                                                                placeholder={`Example ${i + 1}`}
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="pt-4 border-t border-gray-200">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSaveVisualReferences}
+                                                    disabled={visualRefsSaving}
+                                                    className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                                >
+                                                    {visualRefsSaving ? 'Saving…' : 'Save Visual References'}
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
                                 </div>

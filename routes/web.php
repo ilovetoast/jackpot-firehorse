@@ -556,6 +556,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             Route::get('/brands/{brand}/dna/versions/{version}', [\App\Http\Controllers\BrandDNAController::class, 'showVersion'])->name('brands.dna.versions.show');
             Route::post('/brands/{brand}/dna/versions', [\App\Http\Controllers\BrandDNAController::class, 'createVersion'])->name('brands.dna.versions.store');
             Route::post('/brands/{brand}/dna/versions/{version}/activate', [\App\Http\Controllers\BrandDNAController::class, 'activateVersion'])->name('brands.dna.versions.activate');
+            Route::post('/brands/{brand}/dna/visual-references', [\App\Http\Controllers\BrandDNAController::class, 'storeVisualReferences'])->name('brands.dna.visual_references.store');
 
             // Brand Bootstrap (foundation only)
             Route::get('/brands/{brand}/dna/bootstrap', [\App\Http\Controllers\BrandBootstrapController::class, 'index'])->name('brands.dna.bootstrap.index');
