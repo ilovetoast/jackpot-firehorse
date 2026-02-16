@@ -565,6 +565,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
         logo: null,
         logo_id: brand.logo_id ?? null,
         logo_preview: brand.logo_thumbnail_url || brand.logo_path || '',
+        clear_logo: false,
+        clear_icon: false,
         icon: null,
         icon_id: brand.icon_id ?? null,
         icon_preview: brand.icon_thumbnail_url || brand.icon_path || '',
@@ -843,14 +845,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                             setData('logo_id', null)
                                                             setData('logo_preview', null)
                                                             setData('logo', null)
+                                                            setData('clear_logo', true)
                                                         } else if (v?.asset_id) {
                                                             setData('logo_id', v.asset_id)
                                                             setData('logo_preview', v.preview_url ?? v.thumbnail_url ?? null)
                                                             setData('logo', null)
+                                                            setData('clear_logo', false)
                                                         } else if (v?.file) {
                                                             setData('logo', v.file)
                                                             setData('logo_preview', v.preview_url)
                                                             setData('logo_id', null)
+                                                            setData('clear_logo', false)
                                                         }
                                                     }}
                                                     fetchAssets={(opts) => {
@@ -896,14 +901,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                             setData('icon_id', null)
                                                             setData('icon_preview', null)
                                                             setData('icon', null)
+                                                            setData('clear_icon', true)
                                                         } else if (v?.asset_id) {
                                                             setData('icon_id', v.asset_id)
                                                             setData('icon_preview', v.preview_url ?? v.thumbnail_url ?? null)
                                                             setData('icon', null)
+                                                            setData('clear_icon', false)
                                                         } else if (v?.file) {
                                                             setData('icon', v.file)
                                                             setData('icon_preview', v.preview_url)
                                                             setData('icon_id', null)
+                                                            setData('clear_icon', false)
                                                         }
                                                     }}
                                                     fetchAssets={(opts) => {

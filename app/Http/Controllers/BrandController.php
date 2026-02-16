@@ -564,8 +564,10 @@ class BrandController extends Controller
             'slug' => 'nullable|string|max:255',
             'logo' => 'nullable|mimes:png,webp,svg,avif|max:2048',
             'logo_id' => 'nullable|uuid|exists:assets,id',
+            'clear_logo' => 'nullable|boolean',
             'icon' => 'nullable|mimes:png,webp,svg,avif|max:2048',
             'icon_id' => 'nullable|uuid|exists:assets,id',
+            'clear_icon' => 'nullable|boolean',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'show_in_selector' => 'nullable|boolean',
             'primary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
@@ -578,8 +580,16 @@ class BrandController extends Controller
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
         ]);
 
-        // Handle logo: asset_id (from pipeline) or file upload (legacy)
-        if ($request->hasFile('logo')) {
+        // Handle logo: explicit clear, asset_id (from pipeline), or file upload (legacy)
+        if ($request->boolean('clear_logo')) {
+            if ($brand->logo_path && str_starts_with($brand->logo_path, '/storage/')) {
+                $oldPath = str_replace('/storage/', '', $brand->logo_path);
+                Storage::disk('public')->delete($oldPath);
+            }
+            $validated['logo_path'] = null;
+            $validated['logo_id'] = null;
+            unset($validated['logo']);
+        } elseif ($request->hasFile('logo')) {
             if ($brand->logo_path && str_starts_with($brand->logo_path, '/storage/')) {
                 $oldPath = str_replace('/storage/', '', $brand->logo_path);
                 Storage::disk('public')->delete($oldPath);
@@ -603,8 +613,17 @@ class BrandController extends Controller
             $validated['logo_id'] = $brand->logo_id;
         }
 
-        // Handle icon: asset_id (from pipeline) or file upload (legacy)
-        if ($request->hasFile('icon')) {
+        // Handle icon: explicit clear, asset_id (from pipeline), or file upload (legacy)
+        if ($request->boolean('clear_icon')) {
+            if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
+                $oldPath = str_replace('/storage/', '', $brand->icon_path);
+                Storage::disk('public')->delete($oldPath);
+            }
+            $validated['icon_path'] = null;
+            $validated['icon_id'] = null;
+            $validated['icon'] = null;
+            unset($validated['icon']);
+        } elseif ($request->hasFile('icon')) {
             if ($brand->icon_path && str_starts_with($brand->icon_path, '/storage/')) {
                 $oldPath = str_replace('/storage/', '', $brand->icon_path);
                 Storage::disk('public')->delete($oldPath);
