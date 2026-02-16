@@ -8,12 +8,28 @@
  * @param {number} samplePixels - Number of pixels to sample (default 1000). Higher = more accurate but slower
  * @returns {Promise<boolean>} - True if image is predominantly white
  */
+/**
+ * Check if the image source is likely SVG (cannot be sampled for pixel data).
+ */
+function isLikelySvg(imageSrc) {
+    if (!imageSrc || typeof imageSrc !== 'string') return false
+    const s = imageSrc.toLowerCase()
+    return s.startsWith('data:image/svg+xml') || s.includes('.svg') || s.includes('image/svg')
+}
+
 export async function isImageWhite(imageSrc, threshold = 0.9, samplePixels = 1000) {
+    // SVG and other vector formats cannot be sampled for pixel data; skip detection
+    if (isLikelySvg(imageSrc)) {
+        return false
+    }
+
     return new Promise((resolve, reject) => {
         const img = new Image()
         
-        // Handle CORS for external images
-        img.crossOrigin = 'anonymous'
+        // Only set crossOrigin for http(s) URLs - blob/data URLs work without it
+        if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
+            img.crossOrigin = 'anonymous'
+        }
         
         img.onload = () => {
             try {
@@ -96,6 +112,13 @@ export async function isImageWhite(imageSrc, threshold = 0.9, samplePixels = 100
  * @returns {Promise<{background: string, isWhite: boolean}>} - Object with background style and white detection result
  */
 export async function getImageBackgroundStyle(imageSrc, backgroundColor = '#e5e7eb') {
+    if (!imageSrc) {
+        return { background: 'transparent', isWhite: false }
+    }
+    // Skip detection for SVG - cannot sample pixels
+    if (isLikelySvg(imageSrc)) {
+        return { background: 'transparent', isWhite: false }
+    }
     try {
         const isWhite = await isImageWhite(imageSrc)
         return {
@@ -103,8 +126,7 @@ export async function getImageBackgroundStyle(imageSrc, backgroundColor = '#e5e7
             isWhite,
         }
     } catch (error) {
-        console.error('Error detecting image color:', error)
-        // Default to no background on error
+        // Expected for CORS-blocked, SVG, or unloadable images - fail silently
         return {
             background: 'transparent',
             isWhite: false,
