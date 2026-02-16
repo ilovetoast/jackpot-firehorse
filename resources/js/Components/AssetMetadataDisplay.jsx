@@ -221,8 +221,8 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         }).flatMap((field) => {
                             const fieldHasValue = hasValue(field.current_value)
                             const widget = resolve(field, CONTEXT.DISPLAY)
-                            const isRating = widget === WIDGET.STAR_RATING
-                            const isDominantColors = widget === WIDGET.DOMINANT_COLORS_SWATCHES
+                            const isRating = widget === WIDGET.RATING
+                            const isDominantColors = widget === WIDGET.DOMINANT_COLORS
                             // For dominant_colors, check if we have a valid array
                             let dominantColorsArray = null
                             if (isDominantColors && field.current_value) {

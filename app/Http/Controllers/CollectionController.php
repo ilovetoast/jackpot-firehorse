@@ -73,9 +73,65 @@ class CollectionController extends Controller
             ->with(['brand', 'members'])
             ->orderBy('name');
 
-        $collections = $collectionsQuery->get()
+        $collectionsModels = $collectionsQuery->get()
             ->filter(fn (Collection $c) => Gate::forUser($user)->allows('view', $c))
-            ->values()
+            ->values();
+
+        // Build featured_image_url: prefer photography from collection, landscape aspect, high rating
+        $collectionIds = $collectionsModels->pluck('id')->all();
+        $bestAssetIds = [];
+        if (! empty($collectionIds)) {
+            $pairs = DB::table('asset_collections')
+                ->join('assets', 'assets.id', '=', 'asset_collections.asset_id')
+                ->where('assets.status', AssetStatus::VISIBLE)
+                ->whereNull('assets.deleted_at')
+                ->whereIn('collection_id', $collectionIds)
+                ->select('collection_id', 'asset_id', 'asset_collections.created_at')
+                ->orderBy('collection_id')
+                ->orderBy('asset_collections.created_at')
+                ->get();
+
+            $collectionAssetIds = [];
+            foreach ($pairs as $row) {
+                $collectionAssetIds[$row->collection_id][] = $row->asset_id;
+            }
+
+            $allAssetIds = collect($collectionAssetIds)->flatten()->unique()->values()->all();
+            if (! empty($allAssetIds)) {
+                $assetsWithMeta = Asset::query()
+                    ->whereIn('id', $allAssetIds)
+                    ->get(['id', 'metadata', 'thumbnail_status', 'mime_type']);
+                $categorySlugs = Category::query()
+                    ->where('brand_id', $brand->id)
+                    ->pluck('slug', 'id')
+                    ->all();
+
+                foreach ($collectionAssetIds as $collId => $assetIds) {
+                    $best = $this->pickBestFeaturedAsset($assetsWithMeta->keyBy('id'), $assetIds, $categorySlugs);
+                    if ($best) {
+                        $bestAssetIds[$collId] = $best;
+                    }
+                }
+            }
+        }
+        $featuredUrls = [];
+        if (! empty($bestAssetIds)) {
+            $bestAssets = Asset::query()
+                ->whereIn('id', array_values($bestAssetIds))
+                ->get(['id', 'metadata', 'thumbnail_status']);
+            foreach ($bestAssets as $asset) {
+                $status = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $asset->thumbnail_status->value
+                    : ($asset->thumbnail_status ?? 'pending');
+                if ($status === 'completed') {
+                    $featuredUrls[$asset->id] = route('assets.thumbnail.final', ['asset' => $asset->id, 'style' => 'large']);
+                } elseif (! empty($asset->metadata['preview_thumbnails']['preview'] ?? null)) {
+                    $featuredUrls[$asset->id] = route('assets.thumbnail.preview', ['asset' => $asset->id, 'style' => 'preview']);
+                }
+            }
+        }
+
+        $collections = $collectionsModels
             ->map(fn (Collection $c) => [
                 'id' => $c->id,
                 'name' => $c->name,
@@ -83,6 +139,9 @@ class CollectionController extends Controller
                 'visibility' => $c->visibility,
                 'is_public' => $c->is_public,
                 'assets_count' => (int) ($c->assets_count ?? 0),
+                'featured_image_url' => isset($bestAssetIds[$c->id])
+                    ? ($featuredUrls[$bestAssetIds[$c->id]] ?? null)
+                    : null,
             ])
             ->all();
 
@@ -549,6 +608,60 @@ class CollectionController extends Controller
             'attached' => $attached,
             'detached' => $detached,
         ]);
+    }
+
+    /**
+     * Pick the best asset for a collection's featured image.
+     * Prefers: photography category, landscape aspect ratio, high quality_rating.
+     * All images come from the collection's own assets.
+     *
+     * @param  \Illuminate\Support\Collection<int, Asset>  $assetsById
+     * @param  array<string>  $assetIds  Ordered by asset_collections.created_at
+     * @param  array<int, string>  $categorySlugs  category_id => slug
+     * @return string|null  Asset UUID or null if none suitable
+     */
+    private function pickBestFeaturedAsset($assetsById, array $assetIds, array $categorySlugs): ?string
+    {
+        $bestId = null;
+        $bestScore = -1;
+
+        foreach ($assetIds as $assetId) {
+            $asset = $assetsById->get($assetId);
+            if (! $asset) {
+                continue;
+            }
+
+            $mime = $asset->mime_type ?? '';
+            $isImage = str_starts_with(strtolower($mime), 'image/');
+            if (! $isImage) {
+                continue;
+            }
+
+            $metadata = $asset->metadata ?? [];
+            $width = (int) ($metadata['image_width'] ?? $metadata['source_image_width'] ?? 0);
+            $height = (int) ($metadata['image_height'] ?? $metadata['source_image_height'] ?? 0);
+            $rating = (int) ($metadata['quality_rating'] ?? 0);
+            $categoryId = $metadata['category_id'] ?? null;
+            $categorySlug = $categoryId ? ($categorySlugs[$categoryId] ?? null) : null;
+            $isPhotography = $categorySlug === 'photography';
+            $isLandscape = $width > 0 && $height > 0 && $width > $height;
+
+            $score = 0;
+            if ($isPhotography) {
+                $score += 20;
+            }
+            if ($isLandscape) {
+                $score += 10;
+            }
+            $score += min(4, max(0, $rating));
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestId = $asset->id;
+            }
+        }
+
+        return $bestId ?? ($assetIds[0] ?? null);
     }
 
     /**

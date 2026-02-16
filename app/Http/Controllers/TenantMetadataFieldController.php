@@ -459,6 +459,58 @@ class TenantMetadataFieldController extends Controller
     }
 
     /**
+     * Restore an archived tenant metadata field.
+     * System fields cannot be restored.
+     *
+     * POST /tenant/metadata/fields/{field}/restore
+     *
+     * @param Request $request
+     * @param int $field
+     * @return JsonResponse
+     */
+    public function restore(Request $request, int $field): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        if (!$this->canManageFields($user, $tenant)) {
+            abort(403, 'You do not have permission to manage tenant metadata fields.');
+        }
+
+        try {
+            $this->fieldService->restoreField($tenant, $field);
+
+            if ($request->header('X-Inertia')) {
+                return back()->with('success', 'Metadata field restored successfully.');
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Metadata field restored successfully',
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Failed to restore tenant metadata field', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'field_id' => $field,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Failed to restore field',
+            ], 500);
+        }
+    }
+
+    /**
      * Add an allowed value (option) to a metadata field.
      *
      * POST /tenant/metadata/fields/{field}/values

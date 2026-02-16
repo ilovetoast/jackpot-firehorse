@@ -1,19 +1,17 @@
 /**
  * Widget Resolver
  *
- * Centralized metadata widget rendering logic. Determines which component to use
- * based on display_widget (highest priority), type (fallback), and context.
+ * Centralized metadata widget resolution. Single source of truth for display architecture.
+ * Eliminates scattered key checks (quality_rating, collection, tags, etc.).
  *
- * Rules:
- * - rating → StarRating
- * - toggle → ToggleSwitch
- * - color → SwatchFilter (filters only)
- * - select → Dropdown
- * - multiselect → MultiSelect
- * - boolean → Checkbox (unless display_widget === 'toggle')
- * - dominant_color_bucket: filter context only, ColorSwatchFilter
- * - dominant_colors: display context only, DominantColorsSwatches
- * - collection & tags: rendered in dedicated rows, excluded from generic metadata loop
+ * Resolution order:
+ * 1. field.type === 'rating' → RATING
+ * 2. field.display_widget === 'toggle' → TOGGLE
+ * 3. field.key === 'collection' → COLLECTION_BADGES
+ * 4. field.key === 'tags' → TAG_MANAGER
+ * 5. field.key === 'dominant_color_bucket' → COLOR_SWATCH
+ * 6. field.key === 'dominant_colors' → DOMINANT_COLORS (display swatches)
+ * 7. Type-based fallback → STANDARD (or specific type)
  *
  * @module widgetResolver
  */
@@ -25,39 +23,39 @@ export const CONTEXT = {
     DISPLAY: 'display',
 }
 
-/** Widget types returned by resolve() */
+/** Canonical widget types — use these in switch(widget) */
 export const WIDGET = {
-    STAR_RATING: 'star_rating',
+    RATING: 'rating',
     TOGGLE: 'toggle',
-    SWATCH_FILTER: 'swatch_filter',
+    COLOR_SWATCH: 'color_swatch',
+    TAG_MANAGER: 'tag_manager',
+    COLLECTION_BADGES: 'collection_badges',
+    DOMINANT_COLORS: 'dominant_colors',
+    STANDARD: 'standard',
+    EXCLUDED: 'excluded',
+    // Filter/display-specific (resolved from above + context)
+    EXPIRATION_DATE: 'expiration_date',
     DROPDOWN: 'dropdown',
     MULTISELECT: 'multiselect',
     CHECKBOX: 'checkbox',
-    DOMINANT_COLORS_SWATCHES: 'dominant_colors_swatches',
-    DOMINANT_COLORS_FILTER: 'dominant_colors_filter',
-    TAG_FILTER: 'tag_filter',
-    COLLECTION_DROPDOWN: 'collection_dropdown',
-    EXPIRATION_DATE: 'expiration_date',
     TEXT: 'text',
     NUMBER: 'number',
     DATE: 'date',
     TEXTAREA: 'textarea',
-    EXCLUDED: 'excluded',
 }
 
-/** Fields excluded from generic metadata loop (rendered in dedicated rows) */
-export const EXCLUDED_FROM_GENERIC_LOOP = ['tags', 'collection', 'dimensions']
-
-/** Special field keys that have context-specific rendering */
-const SPECIAL_KEYS = {
-    dominant_color_bucket: 'dominant_color_bucket',
-    dominant_colors: 'dominant_colors',
-    quality_rating: 'quality_rating',
-    starred: 'starred',
-    collection: 'collection',
-    tags: 'tags',
-    expiration_date: 'expiration_date',
+/** Legacy aliases for backward compatibility */
+export const WIDGET_ALIASES = {
+    STAR_RATING: WIDGET.RATING,
+    SWATCH_FILTER: WIDGET.COLOR_SWATCH,
+    TAG_FILTER: WIDGET.TAG_MANAGER,
+    COLLECTION_DROPDOWN: WIDGET.COLLECTION_BADGES,
+    DOMINANT_COLORS_SWATCHES: WIDGET.DOMINANT_COLORS,
+    DOMINANT_COLORS_FILTER: WIDGET.DOMINANT_COLORS,
 }
+
+/** Field keys excluded from generic metadata loop (dimensions only; tags/collection use dedicated rows) */
+const EXCLUDED_KEYS = ['dimensions']
 
 /**
  * Get the field key from a field object (handles both key and field_key)
@@ -70,9 +68,10 @@ function getFieldKey(field) {
 }
 
 /**
- * Resolve widget type for display context (AssetMetadataDisplay, AssetDetailPanel)
+ * Resolve widget type for a field in a given context.
+ * Centralized — no direct key checks in components.
  *
- * @param {Object} field - { key, field_key, type, display_widget, ... }
+ * @param {Object} field - { key, field_key, type, display_widget, filter_type, ... }
  * @param {string} context - CONTEXT.DISPLAY | CONTEXT.EDIT | CONTEXT.FILTER
  * @returns {string} WIDGET.*
  */
@@ -82,69 +81,61 @@ export function resolve(field, context) {
     const displayWidget = field?.display_widget
     const filterType = field?.filter_type
 
-    // Excluded: collection & tags rendered in dedicated rows
-    if (EXCLUDED_FROM_GENERIC_LOOP.includes(key)) {
+    // dimensions: always excluded
+    if (EXCLUDED_KEYS.includes(key)) {
         return WIDGET.EXCLUDED
     }
 
-    // dominant_color_bucket: filter context only, use ColorSwatchFilter
-    if (key === SPECIAL_KEYS.dominant_color_bucket) {
-        if (context === CONTEXT.FILTER && filterType === 'color') {
-            return WIDGET.SWATCH_FILTER
-        }
-        return WIDGET.EXCLUDED
+    // 1. type === 'rating' → RATING
+    if (type === 'rating') {
+        return WIDGET.RATING
     }
 
-    // dominant_colors: display context only, use DominantColorsSwatches
-    if (key === SPECIAL_KEYS.dominant_colors) {
-        if (context === CONTEXT.DISPLAY) {
-            return WIDGET.DOMINANT_COLORS_SWATCHES
-        }
-        if (context === CONTEXT.FILTER) {
-            return WIDGET.DOMINANT_COLORS_FILTER
-        }
-        return WIDGET.EXCLUDED
+    // quality_rating (legacy type) or display_widget=stars
+    if (key === 'quality_rating' || displayWidget === 'stars') {
+        return WIDGET.RATING
     }
 
-    // quality_rating: StarRating (display + edit)
-    if (key === SPECIAL_KEYS.quality_rating || type === 'rating' || displayWidget === 'stars') {
-        return WIDGET.STAR_RATING
-    }
-
-    // starred / boolean with display_widget=toggle: ToggleSwitch
-    if (key === SPECIAL_KEYS.starred || (type === 'boolean' && displayWidget === 'toggle')) {
+    // 2. display_widget === 'toggle' → TOGGLE
+    if (displayWidget === 'toggle' || (type === 'boolean' && key === 'starred')) {
         return WIDGET.TOGGLE
     }
 
-    // collection: dedicated dropdown (filter context)
-    if (key === SPECIAL_KEYS.collection && context === CONTEXT.FILTER) {
-        return WIDGET.COLLECTION_DROPDOWN
+    // 3. key === 'collection' → COLLECTION_BADGES
+    if (key === 'collection') {
+        return WIDGET.COLLECTION_BADGES
     }
 
-    // tags: dedicated tag filter (filter context)
-    if (key === SPECIAL_KEYS.tags && context === CONTEXT.FILTER) {
-        return WIDGET.TAG_FILTER
+    // 4. key === 'tags' → TAG_MANAGER
+    if (key === 'tags') {
+        return WIDGET.TAG_MANAGER
+    }
+
+    // 5. key === 'dominant_color_bucket' → COLOR_SWATCH (filter context)
+    if (key === 'dominant_color_bucket') {
+        if (context === CONTEXT.FILTER && (filterType === 'color' || true)) {
+            return WIDGET.COLOR_SWATCH
+        }
+        return WIDGET.EXCLUDED
+    }
+
+    // 6. key === 'dominant_colors' → DOMINANT_COLORS
+    if (key === 'dominant_colors') {
+        return WIDGET.DOMINANT_COLORS
     }
 
     // expiration_date: preset dropdown (filter context)
-    if (key === SPECIAL_KEYS.expiration_date && context === CONTEXT.FILTER) {
+    if (key === 'expiration_date' && context === CONTEXT.FILTER) {
         return WIDGET.EXPIRATION_DATE
     }
 
-    // Color swatch filter: filter_type === 'color' (e.g. dominant_color_bucket from backend)
+    // filter_type === 'color' (e.g. dominant_color_bucket from backend)
     if (context === CONTEXT.FILTER && filterType === 'color') {
-        return WIDGET.SWATCH_FILTER
+        return WIDGET.COLOR_SWATCH
     }
 
-    // display_widget overrides type
-    if (displayWidget === 'toggle' && type === 'boolean') {
-        return WIDGET.TOGGLE
-    }
-
-    // Type-based fallback
+    // Type-based fallback (STANDARD variants)
     switch (type) {
-        case 'rating':
-            return WIDGET.STAR_RATING
         case 'select':
             return WIDGET.DROPDOWN
         case 'multiselect':
@@ -164,51 +155,70 @@ export function resolve(field, context) {
 }
 
 /**
- * Check if field should be excluded from generic metadata loop
+ * Check if field should be excluded from generic metadata loop.
+ * Tags and collection are rendered in dedicated rows; dimensions excluded.
  * @param {Object} field
  * @returns {boolean}
  */
 export function isExcludedFromGenericLoop(field) {
-    const key = getFieldKey(field)
-    return EXCLUDED_FROM_GENERIC_LOOP.includes(key)
+    const w = resolve(field, CONTEXT.DISPLAY)
+    return w === WIDGET.EXCLUDED || w === WIDGET.TAG_MANAGER || w === WIDGET.COLLECTION_BADGES
 }
 
 /**
- * Check if field uses StarRating widget
- * @param {Object} field
- * @param {string} context
- * @returns {boolean}
+ * Check if field uses Rating widget
  */
 export function isStarRating(field, context = CONTEXT.DISPLAY) {
-    return resolve(field, context) === WIDGET.STAR_RATING
+    return resolve(field, context) === WIDGET.RATING
 }
 
 /**
- * Check if field uses ToggleSwitch widget
- * @param {Object} field
- * @param {string} context
- * @returns {boolean}
+ * Check if field uses Toggle widget
  */
 export function isToggle(field, context = CONTEXT.DISPLAY) {
     return resolve(field, context) === WIDGET.TOGGLE
 }
 
 /**
- * Check if field uses DominantColorsSwatches (display context only)
- * @param {Object} field
- * @param {string} context
- * @returns {boolean}
+ * Check if field uses DominantColors swatches (display context)
  */
 export function isDominantColorsSwatches(field, context = CONTEXT.DISPLAY) {
-    return resolve(field, context) === WIDGET.DOMINANT_COLORS_SWATCHES
+    return resolve(field, context) === WIDGET.DOMINANT_COLORS
 }
 
 /**
- * Check if field uses ColorSwatchFilter (filter context)
- * @param {Object} field
- * @param {string} context
- * @returns {boolean}
+ * Check if field uses ColorSwatch filter (filter context)
  */
 export function isSwatchFilter(field, context = CONTEXT.FILTER) {
-    return resolve(field, context) === WIDGET.SWATCH_FILTER
+    return resolve(field, context) === WIDGET.COLOR_SWATCH
+}
+
+/**
+ * Check if schema has collection field (for dedicated collection row)
+ */
+export function hasCollectionField(fields) {
+    return Array.isArray(fields) && fields.some((f) => resolve(f, CONTEXT.DISPLAY) === WIDGET.COLLECTION_BADGES)
+}
+
+/**
+ * Get human-readable label for fields that use a custom display widget.
+ * Returns null if the field uses standard type-based rendering.
+ * Used in Edit Metadata Field modal to show "Custom display: Rating" etc.
+ *
+ * @param {Object} field - { key, field_key, type, display_widget, ... }
+ * @returns {string|null} e.g. "Rating", "Collection", "Tags", "Toggle", "Color Swatch", "Dominant Colors"
+ */
+export function getCustomDisplayLabel(field) {
+    const key = getFieldKey(field)
+    const displayWidget = field?.display_widget
+    const type = field?.type || 'text'
+
+    if (key === 'quality_rating' || displayWidget === 'stars' || type === 'rating') return 'Rating'
+    if (key === 'collection') return 'Collection'
+    if (key === 'tags') return 'Tags'
+    if (key === 'dominant_color_bucket') return 'Color Swatch'
+    if (key === 'dominant_colors') return 'Dominant Colors'
+    if (displayWidget === 'toggle' || (type === 'boolean' && key === 'starred')) return 'Toggle'
+
+    return null
 }

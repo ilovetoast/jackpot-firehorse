@@ -14,7 +14,7 @@ import AssetGridToolbar from '../../Components/AssetGridToolbar'
 import AssetGridSecondaryFilters from '../../Components/AssetGridSecondaryFilters'
 import AssetDrawer from '../../Components/AssetDrawer'
 import { useBucket } from '../../contexts/BucketContext'
-import { RectangleStackIcon, PlusIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
+import { RectangleStackIcon, PlusIcon, GlobeAltIcon, FolderIcon } from '@heroicons/react/24/outline'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
 import axios from 'axios'
@@ -156,7 +156,7 @@ export default function CollectionsIndex({
     }, [showInfo])
 
     const handleLifecycleUpdate = (updatedAsset) => {
-        setLocalAssets((prev) =>
+        setAssetsList((prev) =>
             prev.map((a) => (a.id === updatedAsset?.id ? { ...a, ...updatedAsset } : a))
         )
     }
@@ -270,16 +270,64 @@ export default function CollectionsIndex({
                                         </p>
                                     </div>
                                 ) : (
-                                    <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                    /* Hulu-style collection cards grid: dark background, photography from collection assets */
+                                    <div className="min-h-[60vh]">
                                         <div className="mb-8">
-                                            <RectangleStackIcon className="mx-auto h-16 w-16 text-gray-300" />
+                                            <h2 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
+                                                Your collections
+                                            </h2>
+                                            <p className="mt-2 text-base text-gray-600">
+                                                Choose a collection to view its assets.
+                                            </p>
                                         </div>
-                                        <h2 className="text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                            Select a collection
-                                        </h2>
-                                        <p className="mt-4 text-base leading-7 text-gray-600">
-                                            Choose a collection from the sidebar to view its assets.
-                                        </p>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                            {collections.map((c) => {
+                                                const brandGradient = `linear-gradient(to top, ${hexToRgba(workspaceAccentColor, 0.95)}, ${hexToRgba(workspaceAccentColor, 0.5)}, transparent)`
+                                                const placeholderGradient = `linear-gradient(145deg, ${workspaceAccentColor} 0%, #0f172a 100%)`
+                                                const overlayTextColor = getContrastTextColor(workspaceAccentColor)
+                                                return (
+                                                <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    onClick={() => router.get('/app/collections', { collection: c.id }, { preserveState: true })}
+                                                    className="group relative overflow-hidden rounded-xl shadow-lg ring-1 transition-all duration-300 hover:ring-2 hover:ring-offset-2 hover:ring-offset-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-50"
+                                                    style={{
+                                                        '--tw-ring-color': workspaceAccentColor,
+                                                        backgroundColor: workspaceAccentColor,
+                                                    }}
+                                                >
+                                                    <div className="aspect-[4/3] w-full overflow-hidden">
+                                                        {c.featured_image_url ? (
+                                                            <img
+                                                                src={c.featured_image_url}
+                                                                alt=""
+                                                                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                                            />
+                                                        ) : (
+                                                            <div
+                                                                className="flex h-full w-full items-center justify-center"
+                                                                style={{ background: placeholderGradient }}
+                                                            >
+                                                                <RectangleStackIcon className="h-16 w-16" style={{ color: overlayTextColor, opacity: 0.9 }} />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div
+                                                        className="absolute inset-x-0 bottom-0 pt-16 pb-4 px-4"
+                                                        style={{ background: brandGradient }}
+                                                    >
+                                                        <h3 className="text-lg font-semibold truncate" style={{ color: overlayTextColor }}>
+                                                            {c.name}
+                                                        </h3>
+                                                        <p className="mt-0.5 text-sm" style={{ color: overlayTextColor, opacity: 0.85 }}>
+                                                            {typeof c.assets_count === 'number'
+                                                                ? `${c.assets_count} asset${c.assets_count !== 1 ? 's' : ''}`
+                                                                : ''}
+                                                        </p>
+                                                    </div>
+                                                </button>
+                                            )})}
+                                        </div>
                                     </div>
                                 )
                             ) : (
@@ -422,7 +470,7 @@ export default function CollectionsIndex({
                                     onOpenCreateCollection: () => setShowCreateModal(true),
                                     onAssetRemovedFromCollection: (assetId, collectionId) => {
                                         if (collectionId === selectedCollectionId) {
-                                            setLocalAssets((prev) => prev.filter((a) => a.id !== assetId))
+                                            setAssetsList((prev) => prev.filter((a) => a.id !== assetId))
                                             setActiveAssetId(null)
                                         }
                                     },
@@ -453,13 +501,13 @@ export default function CollectionsIndex({
                             canRemoveFromCollection: can_remove_from_collection,
                             canCreateCollection: can_create_collection,
                             onOpenCreateCollection: () => setShowCreateModal(true),
-                            onAssetRemovedFromCollection: (assetId, collectionId) => {
-                                if (collectionId === selectedCollectionId) {
-                                    setLocalAssets((prev) => prev.filter((a) => a.id !== assetId))
-                                    setActiveAssetId(null)
-                                }
-                            },
-                        }}
+                                    onAssetRemovedFromCollection: (assetId, collectionId) => {
+                                        if (collectionId === selectedCollectionId) {
+                                            setAssetsList((prev) => prev.filter((a) => a.id !== assetId))
+                                            setActiveAssetId(null)
+                                        }
+                                    },
+                                }}
                     />
                 </div>
             )}

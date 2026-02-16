@@ -137,6 +137,10 @@ export default function ByCategoryView({
     const [categoryToRevert, setCategoryToRevert] = useState(null)
     const [highlightedFieldId, setHighlightedFieldId] = useState(null)
     const [fieldReorderLoading, setFieldReorderLoading] = useState(false)
+    const [showArchived, setShowArchived] = useState(false)
+    const [archivedFields, setArchivedFields] = useState([])
+    const [archivedLoading, setArchivedLoading] = useState(false)
+    const [restoreLoading, setRestoreLoading] = useState(false)
 
     useEffect(() => {
         setLocalCategories(categories)
@@ -1019,6 +1023,54 @@ export default function ByCategoryView({
         }
     }, [pendingArchiveField, archiveRemoveFromAssets, refreshMetadataRegistry])
 
+    // Fetch archived fields when View Archived is toggled on
+    useEffect(() => {
+        if (!showArchived) {
+            setArchivedFields([])
+            return
+        }
+        setArchivedLoading(true)
+        fetch('/app/api/tenant/metadata/fields/archived', {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then((res) => res.json())
+            .then((data) => setArchivedFields(data.archived_fields || []))
+            .catch(() => setArchivedFields([]))
+            .finally(() => setArchivedLoading(false))
+    }, [showArchived])
+
+    const handleRestoreField = useCallback(async (field) => {
+        setRestoreLoading(true)
+        try {
+            const res = await fetch(`/app/tenant/metadata/fields/${field.id}/restore`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+            })
+            const data = await res.json().catch(() => ({}))
+            if (res.ok && (data.success !== false)) {
+                setArchivedFields((prev) => prev.filter((f) => f.id !== field.id))
+                refreshMetadataRegistry()
+                setSuccessMessage('Metadata field restored successfully.')
+                setTimeout(() => setSuccessMessage(null), 3000)
+            } else {
+                setSuccessMessage(data?.error || 'Failed to restore field')
+                setTimeout(() => setSuccessMessage(null), 5000)
+            }
+        } catch (e) {
+            setSuccessMessage(e?.message || 'Network error')
+            setTimeout(() => setSuccessMessage(null), 5000)
+        } finally {
+            setRestoreLoading(false)
+        }
+    }, [refreshMetadataRegistry])
+
     const handleEditField = async (field) => {
         setLoadingFieldData(true)
         
@@ -1083,7 +1135,13 @@ export default function ByCategoryView({
 
     const handleModalSuccess = (newFieldId) => {
         if (newFieldId) setHighlightedFieldId(newFieldId)
-        refreshMetadataRegistry({
+        // Force full reload (preserveState: false) so registry gets fresh ai_eligible and other field data
+        router.get(METADATA_REGISTRY_URL, {
+            ...(selectedBrandId && { brand: selectedBrandId }),
+            ...(selectedCategory?.slug && { category: selectedCategory.slug }),
+        }, {
+            preserveState: false,
+            preserveScroll: true,
             onSuccess: () => {
                 setFieldCategoryData({})
                 if (newFieldId) setTimeout(() => setHighlightedFieldId(null), 2000)
@@ -1827,6 +1885,63 @@ export default function ByCategoryView({
                                 </div>
                             </div>
                         )}
+
+                        {/* View Archived Fields toggle — at bottom of page */}
+                        <div className="mt-8 pt-6 border-t border-gray-200">
+                            <button
+                                type="button"
+                                onClick={() => setShowArchived((v) => !v)}
+                                className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                            >
+                                {showArchived ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
+                                View Archived Fields
+                            </button>
+                            {showArchived && (
+                                <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+                                    {archivedLoading ? (
+                                        <p className="text-sm text-gray-500">Loading archived fields…</p>
+                                    ) : archivedFields.length === 0 ? (
+                                        <p className="text-sm text-gray-500">No archived fields.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Archived ({archivedFields.length})</p>
+                                            <ul className="space-y-2">
+                                                {archivedFields.map((field) => (
+                                                    <li
+                                                        key={field.id}
+                                                        className="flex items-center justify-between gap-4 py-2 px-3 rounded-md bg-white/80 border border-gray-100 text-sm"
+                                                    >
+                                                        <span className="text-gray-600 truncate">
+                                                            {field.system_label || field.key || 'Unnamed Field'}
+                                                        </span>
+                                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRestoreField(field)}
+                                                                disabled={restoreLoading}
+                                                                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            >
+                                                                <ArrowUpCircleIcon className="w-3.5 h-3.5" />
+                                                                Restore
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled
+                                                                title="Permanently delete (coming soon)"
+                                                                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-400 cursor-not-allowed"
+                                                            >
+                                                                <TrashIcon className="w-3.5 h-3.5" />
+                                                                Permanently delete
+                                                            </button>
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                             </div>
                         </div>
                     </div>
@@ -2303,6 +2418,8 @@ function FieldRow({
         : field.is_required ?? false
 
     const aiEligible = field.ai_eligible ?? false
+    // dominant_color_bucket: filter-only — user may only control is_filter_hidden
+    const isFilterOnlyField = (field.key ?? '') === 'dominant_color_bucket'
 
     const iconButtonClass = (active) =>
         `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -2345,24 +2462,28 @@ function FieldRow({
                     {/* Middle: Visibility icons — always visible; active = accent + soft bg, inactive = muted 60% */}
                     {isEnabled && (
                         <div className="flex items-center gap-0.5 flex-shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'upload', effectiveUpload) }}
-                                disabled={!canManage}
-                                title="Upload: Show in upload form when adding assets"
-                                className={iconButtonClass(effectiveUpload)}
-                            >
-                                <CloudArrowUpIcon className="w-4 h-4" />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
-                                disabled={!canManage}
-                                title="Quick View: Show in asset details drawer and modal"
-                                className={iconButtonClass(effectiveEdit)}
-                            >
-                                <EyeIcon className="w-4 h-4" />
-                            </button>
+                            {!isFilterOnlyField && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'upload', effectiveUpload) }}
+                                    disabled={!canManage}
+                                    title="Upload: Show in upload form when adding assets"
+                                    className={iconButtonClass(effectiveUpload)}
+                                >
+                                    <CloudArrowUpIcon className="w-4 h-4" />
+                                </button>
+                            )}
+                            {!isFilterOnlyField && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
+                                    disabled={!canManage}
+                                    title="Quick View: Show in asset details drawer and modal"
+                                    className={iconButtonClass(effectiveEdit)}
+                                >
+                                    <EyeIcon className="w-4 h-4" />
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter) }}
@@ -2372,20 +2493,22 @@ function FieldRow({
                             >
                                 <FunnelIcon className="w-4 h-4" />
                             </button>
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); effectiveFilter && canManage && categoryId && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary) }}
-                                disabled={!canManage || !effectiveFilter || !categoryId}
-                                title={!effectiveFilter ? 'Enable Filter first to add to primary filter bar' : !categoryId ? 'Select a category first' : 'Primary: Show inline in grid. Off: Under More filters'}
-                                className={iconButtonClass(effectiveFilter && effectiveIsPrimary)}
-                            >
-                                {effectiveIsPrimary ? (
-                                    <StarIconSolid className="w-4 h-4" />
-                                ) : (
-                                    <StarIcon className="w-4 h-4" />
-                                )}
-                            </button>
-                            {onRequiredToggle && (
+                            {!isFilterOnlyField && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); effectiveFilter && canManage && categoryId && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary) }}
+                                    disabled={!canManage || !effectiveFilter || !categoryId}
+                                    title={!effectiveFilter ? 'Enable Filter first to add to primary filter bar' : !categoryId ? 'Select a category first' : 'Primary: Show inline in grid. Off: Under More filters'}
+                                    className={iconButtonClass(effectiveFilter && effectiveIsPrimary)}
+                                >
+                                    {effectiveIsPrimary ? (
+                                        <StarIconSolid className="w-4 h-4" />
+                                    ) : (
+                                        <StarIcon className="w-4 h-4" />
+                                    )}
+                                </button>
+                            )}
+                            {!isFilterOnlyField && onRequiredToggle && (
                                 <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); effectiveUpload && canManage && categoryId && onRequiredToggle(field.id, categoryId, effectiveIsRequired) }}
@@ -2399,7 +2522,7 @@ function FieldRow({
                             <span
                                 title="AI Suggestions: AI can suggest values for this field"
                                 className={`inline-flex items-center justify-center gap-1 min-w-8 h-8 px-1.5 rounded-full transition-colors pointer-events-none ${
-                                    aiEligible ? 'text-purple-600 bg-purple-100' : 'text-gray-400 opacity-60'
+                                    aiEligible ? 'text-purple-600 bg-purple-100 ring-1 ring-purple-200' : 'text-gray-400 opacity-60'
                                 }`}
                                 aria-hidden
                             >
@@ -2416,7 +2539,7 @@ function FieldRow({
                         {isEnabled ? 'Enabled' : 'Off'}
                     </span>
                     <div className="flex items-center gap-1.5">
-                        {onEdit && (canManageFields || !isSystem) && (
+                        {onEdit && (canManageFields || !isSystem) && (field.key ?? '') !== 'dominant_color_bucket' && (
                             <button
                                 onClick={() => onEdit(field)}
                                 className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-gray-600 rounded p-1 transition-opacity"
@@ -2476,6 +2599,8 @@ function AutomatedFieldRow({
     const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
     const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
     const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? false
+    // dominant_color_bucket: filter-only — user may only control is_filter_hidden
+    const isFilterOnlyField = (field.key ?? '') === 'dominant_color_bucket'
 
     const iconButtonClass = (active) =>
         `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -2497,18 +2622,22 @@ function AutomatedFieldRow({
                 </div>
                 {isEnabled && (
                     <div className="flex items-center gap-0.5 flex-shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
-                        <span title="Upload: Disabled for automated fields (system-filled)" className="w-8 h-8 flex items-center justify-center rounded-full text-gray-300 opacity-60 cursor-not-allowed pointer-events-none">
-                            <CloudArrowUpIcon className="w-4 h-4" />
-                        </span>
-                        <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
-                            disabled={!canManage}
-                            title="Quick View: Show in asset details drawer and modal"
-                            className={iconButtonClass(effectiveEdit)}
-                        >
-                            <EyeIcon className="w-4 h-4" />
-                        </button>
+                        {!isFilterOnlyField && (
+                            <span title="Upload: Disabled for automated fields (system-filled)" className="w-8 h-8 flex items-center justify-center rounded-full text-gray-300 opacity-60 cursor-not-allowed pointer-events-none">
+                                <CloudArrowUpIcon className="w-4 h-4" />
+                            </span>
+                        )}
+                        {!isFilterOnlyField && (
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
+                                disabled={!canManage}
+                                title="Quick View: Show in asset details drawer and modal"
+                                className={iconButtonClass(effectiveEdit)}
+                            >
+                                <EyeIcon className="w-4 h-4" />
+                            </button>
+                        )}
                         <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter) }}

@@ -1,15 +1,39 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { router } from '@inertiajs/react'
-import { ArrowPathIcon, XMarkIcon, ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline'
-import OptionIconSelector, { OptionIcon } from './OptionIconSelector'
+import { arrayMove } from '@dnd-kit/sortable'
+import { ArrowPathIcon, Bars3Icon, CheckIcon, ChevronDownIcon, CloudArrowUpIcon, FunnelIcon, Squares2X2Icon, SparklesIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
+
+/** Custom checkbox: hidden native input + styled box with checkmark. variant="ai" uses purple for AI branding. */
+function StyledCheckbox({ id, name, checked, onChange, disabled, variant = 'default' }) {
+    const isAi = variant === 'ai'
+    const checkedClasses = isAi ? 'peer-checked:border-purple-600 peer-checked:bg-purple-600' : 'peer-checked:border-indigo-600 peer-checked:bg-indigo-600'
+    const focusClasses = isAi ? 'peer-focus:ring-purple-500/40' : 'peer-focus:ring-indigo-500/40'
+    return (
+        <span className="relative flex h-4 w-4 shrink-0">
+            <input
+                type="checkbox"
+                id={id}
+                name={name}
+                checked={checked}
+                onChange={onChange}
+                disabled={disabled}
+                className="peer sr-only"
+            />
+            <span className={`absolute inset-0 flex items-center justify-center rounded border-2 border-gray-300 bg-white transition-colors ${checkedClasses} peer-focus:ring-2 ${focusClasses} peer-focus:ring-offset-0 peer-disabled:border-gray-200 peer-disabled:bg-gray-50 peer-disabled:opacity-60`} />
+            <CheckIcon className="pointer-events-none absolute inset-0 m-auto h-2.5 w-2.5 text-white opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={2.5} />
+        </span>
+    )
+}
 import {
     toSnakeCase,
     validateSnakeCase,
     isDuplicateValue,
     normalizeOptions,
     prepareOptionsForSubmit,
+    snakeToTitleCase,
 } from '../utils/optionEditorUtils'
+import { getCustomDisplayLabel } from '../utils/widgetResolver'
 
 /**
  * Metadata Field Modal Component
@@ -40,9 +64,11 @@ export default function MetadataFieldModal({
         show_in_filters: true,
         is_primary: false,
         is_required: false,
+        option_editing_restricted: false,
         group_key: '',
     })
-    const [newOption, setNewOption] = useState({ value: '', system_label: '', color: '', icon: '' })
+    const [newOption, setNewOption] = useState({ value: '', system_label: '' })
+    const [bulkAddText, setBulkAddText] = useState('')
     const [optionError, setOptionError] = useState(null)
     const [errors, setErrors] = useState({})
     const [submitting, setSubmitting] = useState(false)
@@ -50,6 +76,7 @@ export default function MetadataFieldModal({
     const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false)
     const categoryDropdownRef = useRef(null)
     const [originalEnabledCategories, setOriginalEnabledCategories] = useState([]) // Track original enabled categories when editing
+    const [keyManuallyEdited, setKeyManuallyEdited] = useState(false) // When false, key syncs from display name
 
     const isEditing = !!field
     const isSystemField = field?.scope === 'system' || field?.is_system
@@ -143,8 +170,11 @@ export default function MetadataFieldModal({
                                 show_in_filters: fieldData.field.show_in_filters !== false,
                                 is_primary: isPrimary,
                                 is_required: isRequired,
+                                option_editing_restricted: fieldData.field.option_editing_restricted ?? false,
                                 group_key: fieldData.field.group_key || '',
                             })
+                            setBulkAddText('')
+                            setNewOption({ value: '', system_label: '' })
                         }
                         setLoadingField(false)
                     })
@@ -194,8 +224,11 @@ export default function MetadataFieldModal({
                                 show_in_filters: field.show_in_filters !== false,
                                 is_primary: isPrimary,
                                 is_required: isRequired,
+                                option_editing_restricted: fullFieldData.option_editing_restricted ?? field.option_editing_restricted ?? false,
                                 group_key: field.group_key || '',
                             })
+                            setBulkAddText('')
+                            setNewOption({ value: '', system_label: '' })
                             setLoadingField(false)
                         })
                         .catch(err => {
@@ -214,8 +247,11 @@ export default function MetadataFieldModal({
                                 show_in_filters: field.show_in_filters !== false,
                                 is_primary: false,
                                 is_required: false,
+                                option_editing_restricted: field.option_editing_restricted ?? false,
                                 group_key: field.group_key || '',
                             })
+                            setBulkAddText('')
+                            setNewOption({ value: '', system_label: '' })
                             setLoadingField(false)
                         })
                 } else {
@@ -233,16 +269,19 @@ export default function MetadataFieldModal({
                         show_in_filters: field.show_in_filters !== false,
                         is_primary: false,
                         is_required: false,
+                        option_editing_restricted: field.option_editing_restricted ?? false,
                         group_key: field.group_key || '',
                     })
+                    setBulkAddText('')
+                    setNewOption({ value: '', system_label: '' })
                     setLoadingField(false)
                 }
             }
         } else if (isOpen && !field) {
             // Reset form for new field
-            // Auto-select preselected category if provided
             const initialCategories = preselectedCategoryId ? [preselectedCategoryId] : []
-            setOriginalEnabledCategories([]) // Reset for new field
+            setOriginalEnabledCategories([])
+            setKeyManuallyEdited(false)
             setFormData({
                 key: '',
                 system_label: '',
@@ -256,8 +295,11 @@ export default function MetadataFieldModal({
                 show_in_filters: true,
                 is_primary: false,
                 is_required: false,
+                option_editing_restricted: false,
                 group_key: '',
             })
+            setBulkAddText('')
+            setNewOption({ value: '', system_label: '' })
             setErrors({})
             setLoadingField(false)
         }
@@ -506,17 +548,53 @@ export default function MetadataFieldModal({
             return
         }
 
-        const opt = {
-            value,
-            system_label,
-            color: newOption.color && /^#[0-9A-Fa-f]{6}$/.test(newOption.color) ? newOption.color : null,
-            icon: newOption.icon || null,
-        }
+        const opt = { value, system_label }
         setFormData({
             ...formData,
             options: [...formData.options, opt],
         })
-        setNewOption({ value: '', system_label: '', color: '', icon: '' })
+        setNewOption({ value: '', system_label: '' })
+    }
+
+    const processBulkAdd = () => {
+        setOptionError(null)
+        const lines = bulkAddText
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean)
+        if (lines.length === 0) {
+            setOptionError('Enter at least one value (one per line)')
+            return
+        }
+        const existingValues = new Set(formData.options.map((o) => o.value.toLowerCase()))
+        const toAdd = []
+        for (const line of lines) {
+            const value = toSnakeCase(line) || line.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+            if (!value) continue
+            const snakeCheck = validateSnakeCase(value)
+            if (!snakeCheck.valid) {
+                setOptionError(snakeCheck.message)
+                return
+            }
+            if (existingValues.has(value)) continue
+            existingValues.add(value)
+            toAdd.push({ value, system_label: snakeToTitleCase(value) })
+        }
+        if (toAdd.length === 0) {
+            setOptionError('All values already exist or are invalid')
+            return
+        }
+        setFormData({
+            ...formData,
+            options: [...formData.options, ...toAdd],
+        })
+        setBulkAddText('')
+    }
+
+    const moveOption = (fromIndex, toIndex) => {
+        if (fromIndex === toIndex || toIndex < 0 || toIndex >= formData.options.length) return
+        const next = arrayMove(formData.options, fromIndex, toIndex)
+        setFormData({ ...formData, options: next })
     }
 
     const removeOption = (index) => {
@@ -528,6 +606,8 @@ export default function MetadataFieldModal({
 
     const isTagsField = formData.key === 'tags' || field?.key === 'tags'
     const requiresOptions = (formData.type === 'select' || formData.type === 'multiselect') && !isTagsField
+    // dominant_color_bucket: filter-only system field — user may only control is_filter_hidden
+    const isFilterOnlyField = (field?.key ?? formData?.key) === 'dominant_color_bucket'
 
     // Early return if not open
     if (!isOpen) {
@@ -549,177 +629,146 @@ export default function MetadataFieldModal({
                 />
 
                 {/* Modal */}
-                <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl">
-                    {/* Header */}
-                    <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-semibold leading-6 text-gray-900">
+                <div className="relative transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl">
+                    {/* Compact Header */}
+                    <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-5">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <h3 className="text-base font-semibold text-gray-900 truncate">
                                 {isEditing ? 'Edit Metadata Field' : 'Create Custom Metadata Field'}
                             </h3>
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                            >
-                                <span className="sr-only">Close</span>
-                                <XMarkIcon className="h-6 w-6" />
-                            </button>
+                            {!isEditing && customFieldsLimit && customFieldsLimit.max > 0 && (
+                                <span className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full ${
+                                    customFieldsLimit.can_create ? 'bg-indigo-50 text-indigo-700' : 'bg-red-50 text-red-700'
+                                }`}>
+                                    {customFieldsLimit.current}/{customFieldsLimit.max}
+                                </span>
+                            )}
                         </div>
-                        {isSystemField && isEditing && (
-                            <p className="mt-2 text-sm text-amber-600">
-                                System fields: Only AI eligibility and category visibility can be modified.
-                            </p>
-                        )}
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex-shrink-0 rounded-md p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                        >
+                            <span className="sr-only">Close</span>
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
                     </div>
+                    {isSystemField && isEditing && (
+                        <p className="px-4 py-2 text-xs text-amber-600 bg-amber-50 border-b border-amber-100">
+                            System fields: Only AI eligibility and category visibility can be modified.
+                        </p>
+                    )}
 
                     {/* Form */}
-                    <form onSubmit={handleSubmit} className="px-4 pb-4 sm:px-6 sm:pb-6">
-                        {/* Plan Limit Warning */}
-                        {!isEditing && customFieldsLimit && customFieldsLimit.max > 0 && (
-                            <div className={`mb-4 rounded-md p-4 ${
-                                customFieldsLimit.can_create 
-                                    ? 'bg-blue-50 border border-blue-200' 
-                                    : 'bg-red-50 border border-red-200'
-                            }`}>
-                                <p className={`text-sm ${
-                                    customFieldsLimit.can_create ? 'text-blue-800' : 'text-red-800'
-                                }`}>
-                                    {customFieldsLimit.can_create ? (
-                                        <>You have {customFieldsLimit.current} of {customFieldsLimit.max} custom metadata fields available.</>
-                                    ) : (
-                                        <>Plan limit reached ({customFieldsLimit.current}/{customFieldsLimit.max}). Upgrade your plan to create more fields.</>
-                                    )}
-                                </p>
-                            </div>
-                        )}
-
+                    <form onSubmit={handleSubmit} className="px-4 py-4 sm:px-5 sm:py-5 max-h-[calc(100vh-12rem)] overflow-y-auto">
                         {errors.error && (
-                            <div className="mb-4 rounded-md bg-red-50 p-4">
-                                <p className="text-sm text-red-800">{errors.error}</p>
+                            <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                                {errors.error}
                             </div>
                         )}
 
-                        <div className="space-y-6">
-                            {/* Category Selection Info */}
-                            {!isEditing && (
-                                <>
-                                    {preselectedCategoryId ? (
-                                        <div className="rounded-md bg-blue-50 p-4">
-                                            <div className="flex">
-                                                <div className="ml-3">
-                                                    <h3 className="text-sm font-medium text-blue-800">Category Pre-selected</h3>
-                                                    <div className="mt-2 text-sm text-blue-700">
-                                                        <p>
-                                                            The category you were viewing has been pre-selected below. You can add more categories or remove it if needed.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="rounded-md bg-amber-50 p-4 border border-amber-200">
-                                            <div className="flex">
-                                                <div className="flex-shrink-0">
-                                                    <svg className="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                                <div className="ml-3">
-                                                    <h3 className="text-sm font-medium text-amber-800">Select Categories</h3>
-                                                    <div className="mt-2 text-sm text-amber-700">
-                                                        <p>
-                                                            Please select at least one category where this field should be enabled. The field will be available for assets in the selected categories.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-
-                            {/* Field Key */}
-                            <div>
-                                <label htmlFor="key" className="block text-sm font-medium leading-6 text-gray-900">
-                                    Field Key {!isEditing && <span className="text-red-500">*</span>}
-                                </label>
-                                <div className="mt-2">
+                        <div className="space-y-4">
+                            {/* Display Name first (primary input); Field Key auto-syncs from it until manually edited */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label htmlFor="system_label" className="block text-xs font-medium text-gray-700 mb-1">
+                                        Display Name <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        id="system_label"
+                                        required
+                                        value={formData.system_label}
+                                        onChange={(e) => {
+                                            const label = e.target.value
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                system_label: label,
+                                                ...(!isEditing && !keyManuallyEdited && { key: toSnakeCase(label) }),
+                                            }))
+                                        }}
+                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        placeholder="My Custom Field"
+                                    />
+                                    {errors.system_label && <p className="mt-1 text-xs text-red-600">{errors.system_label}</p>}
+                                </div>
+                                <div>
+                                    <label htmlFor="key" className="block text-xs font-medium text-gray-700 mb-1">
+                                        Field Key {!isEditing && <span className="text-red-500">*</span>}
+                                    </label>
                                     <input
                                         type="text"
                                         id="key"
                                         required={!isEditing}
                                         disabled={isEditing}
                                         value={formData.key}
-                                        onChange={(e) => setFormData({ ...formData, key: e.target.value })}
-                                        className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 disabled:bg-gray-50 disabled:text-gray-500"
-                                        placeholder={isEditing ? "Field key cannot be changed" : "my_field"}
+                                        onChange={(e) => {
+                                            setKeyManuallyEdited(true)
+                                            setFormData({ ...formData, key: e.target.value })
+                                        }}
+                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+                                        placeholder={isEditing ? "—" : "my_field"}
                                     />
+                                    {!isEditing && <p className="mt-1 text-xs text-gray-500">Prefixed with custom__</p>}
+                                    {errors.key && <p className="mt-1 text-xs text-red-600">{errors.key}</p>}
                                 </div>
-                                {!isEditing && (
-                                    <p className="mt-2 text-sm text-gray-500">
-                                        Will be prefixed with "custom__" automatically. Use lowercase with underscores.
-                                    </p>
-                                )}
-                                {errors.key && <p className="mt-2 text-sm text-red-600">{errors.key}</p>}
                             </div>
 
-                            {/* System Label */}
+                            {/* Field Type as horizontal chips */}
                             <div>
-                                <label htmlFor="system_label" className="block text-sm font-medium leading-6 text-gray-900">
-                                    Display Name <span className="text-red-500">*</span>
-                                </label>
-                                <div className="mt-2">
-                                    <input
-                                        type="text"
-                                        id="system_label"
-                                        required
-                                        value={formData.system_label}
-                                        onChange={(e) => setFormData({ ...formData, system_label: e.target.value })}
-                                        className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                        placeholder="My Custom Field"
-                                    />
-                                </div>
-                                {errors.system_label && <p className="mt-2 text-sm text-red-600">{errors.system_label}</p>}
-                            </div>
-
-                            {/* Field Type */}
-                            <div>
-                                <label htmlFor="type" className="block text-sm font-medium leading-6 text-gray-900">
+                                <label className="block text-xs font-medium text-gray-700 mb-2">
                                     Field Type <span className="text-red-500">*</span>
                                 </label>
-                                <div className="mt-2">
-                                    <select
-                                        id="type"
-                                        required
-                                        disabled={isEditing}
-                                        value={formData.type}
-                                        onChange={(e) => setFormData({ ...formData, type: e.target.value, options: requiresOptions ? formData.options : [] })}
-                                        className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 disabled:bg-gray-50 disabled:text-gray-500"
-                                    >
-                                        <option value="text">Text</option>
-                                        <option value="textarea">Textarea</option>
-                                        <option value="select">Select (Single)</option>
-                                        <option value="multiselect">Select (Multiple)</option>
-                                        <option value="number">Number</option>
-                                        <option value="boolean">Boolean (Yes/No)</option>
-                                        <option value="date">Date</option>
-                                    </select>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {[
+                                        { value: 'text', label: 'Text' },
+                                        { value: 'textarea', label: 'Textarea' },
+                                        { value: 'select', label: 'Select' },
+                                        { value: 'multiselect', label: 'Multi-Select' },
+                                        { value: 'number', label: 'Number' },
+                                        { value: 'boolean', label: 'Boolean' },
+                                        { value: 'date', label: 'Date' },
+                                    ].map(({ value, label }) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            disabled={isEditing}
+                                            onClick={() => setFormData({ ...formData, type: value, options: ['select', 'multiselect'].includes(value) ? [] : formData.options })}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                formData.type === value
+                                                    ? 'bg-indigo-600 text-white'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                    {isEditing && (() => {
+                                        const fieldForDisplay = { ...field, type: formData.type, display_widget: field?.display_widget }
+                                        const customLabel = getCustomDisplayLabel(fieldForDisplay)
+                                        return customLabel ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                                                Custom display: {customLabel}
+                                            </span>
+                                        ) : null
+                                    })()}
                                 </div>
-                                {errors.type && <p className="mt-2 text-sm text-red-600">{errors.type}</p>}
+                                {errors.type && <p className="mt-1 text-xs text-red-600">{errors.type}</p>}
                             </div>
 
-                            {/* Categories Multi-Select */}
-                            {(
-                                <div>
-                                    <label className="block text-sm font-medium leading-6 text-gray-900">
-                                        Categories <span className="text-red-500">*</span>
-                                    </label>
-                                    <div className="mt-2 relative" ref={categoryDropdownRef}>
-                                        {/* Multi-Select Button */}
+                            {/* Categories — compact */}
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Categories <span className="text-red-500">*</span>
+                                </label>
+                                {!isEditing && preselectedCategoryId && (
+                                    <p className="text-xs text-indigo-600 mb-1">Pre-selected from current view</p>
+                                )}
+                                <div className="relative" ref={categoryDropdownRef}>
                                         <button
                                             type="button"
                                             onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-                                            className="relative w-full cursor-default rounded-md bg-white py-2 pl-3 pr-10 text-left text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:text-sm sm:leading-6"
+                                            className="relative w-full cursor-default rounded-md border border-gray-300 bg-white py-1.5 pl-2.5 pr-8 text-left text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                         >
                                             <span className="block truncate">
                                                 {formData.selectedCategories.length > 0 
@@ -853,321 +902,239 @@ export default function MetadataFieldModal({
                                         </div>
                                     )}
 
-                                    <p className="mt-2 text-sm text-gray-500">
-                                        Select one or more categories where this field should be enabled.
+                                {formData.selectedCategories.length === 0 && (
+                                    <p className="mt-1 text-xs text-amber-600">Select at least one category</p>
+                                )}
+                                {errors.selectedCategories && <p className="mt-1 text-xs text-red-600">{errors.selectedCategories}</p>}
+                            </div>
+
+                            {/* Options (for select/multiselect) — hidden for system fields with custom rendering */}
+                            {requiresOptions && formData.option_editing_restricted && (
+                                <div className="rounded-md bg-amber-50 border border-amber-200 p-4">
+                                    <p className="text-sm text-amber-800">
+                                        This field uses a system-managed display and does not support manual options.
                                     </p>
-                                    {formData.selectedCategories.length === 0 && (
-                                        <p className="mt-2 text-sm text-amber-600">
-                                            At least one category must be selected.
-                                        </p>
-                                    )}
-                                    {errors.selectedCategories && <p className="mt-2 text-sm text-red-600">{errors.selectedCategories}</p>}
                                 </div>
                             )}
-
-                            {/* Options (for select/multiselect) */}
-                            {requiresOptions && (
-                                <div>
-                                    <label className="block text-sm font-medium leading-6 text-gray-900">
-                                        Options <span className="text-red-500">*</span>
-                                    </label>
-                                    <p className="mt-1 text-sm text-gray-500">
-                                        Add values that users can select. Value must be lowercase snake_case (e.g. high_quality).
+                            {requiresOptions && !formData.option_editing_restricted && (
+                                <div className="rounded-md border border-gray-200 bg-gray-50/50 p-3">
+                                    <p className="text-xs font-medium text-gray-700 mb-1">
+                                        {formData.type === 'multiselect' ? 'Multi-Select' : 'Single Select'} — add options (one per line)
                                     </p>
-                                    <div className="mt-3 space-y-3">
-                                        {formData.options.length > 0 && (
-                                            <div className="space-y-2">
-                                                {formData.options.map((option, index) => (
-                                                    <div key={index} className="flex items-center gap-2 rounded-md border border-gray-200 p-2">
-                                                        {/* Preview chip */}
-                                                        <div className="flex-shrink-0">
-                                                            <span
-                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border border-gray-200"
-                                                                style={
-                                                                    option.color
-                                                                        ? { backgroundColor: `${option.color}20`, color: option.color, borderColor: option.color }
-                                                                        : { backgroundColor: '#f3f4f6', color: '#374151' }
-                                                                }
-                                                            >
-                                                                {option.color && (
-                                                                    <span
-                                                                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                                                        style={{ backgroundColor: option.color }}
-                                                                    />
-                                                                )}
-                                                                {option.icon && <OptionIcon icon={option.icon} className="h-3.5 w-3.5" />}
-                                                                {option.system_label || option.value}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
-                                                            <div>
-                                                                <span className="text-xs text-gray-500">Value</span>
-                                                                <input
-                                                                    type="text"
-                                                                    value={option.value}
-                                                                    readOnly
-                                                                    className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 sm:text-sm sm:leading-6 bg-gray-50"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <span className="text-xs text-gray-500">Label</span>
-                                                                <input
-                                                                    type="text"
-                                                                    value={option.system_label || option.label}
-                                                                    readOnly
-                                                                    className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 sm:text-sm sm:leading-6 bg-gray-50"
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => removeOption(index)}
-                                                            className="mt-5 text-red-600 hover:text-red-800 text-sm font-medium"
-                                                        >
-                                                            Remove
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {/* Add new option */}
-                                        <div className="rounded-md border border-gray-200 p-3 bg-gray-50 space-y-3">
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-xs text-gray-500">Value (snake_case)</label>
-                                                    <input
-                                                        type="text"
-                                                        value={newOption.value}
-                                                        onChange={(e) => {
-                                                            const v = e.target.value
-                                                            setNewOption((prev) => ({ ...prev, value: v }))
-                                                            setOptionError(null)
-                                                        }}
-                                                        onBlur={(e) => {
-                                                            const v = e.target.value
-                                                            if (v) setNewOption((prev) => ({ ...prev, value: toSnakeCase(v) }))
-                                                        }}
-                                                        placeholder="e.g., high_quality"
-                                                        className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                                    />
+                                    <div className="flex gap-2 flex-wrap items-end">
+                                        <textarea
+                                            value={bulkAddText}
+                                            onChange={(e) => {
+                                                setBulkAddText(e.target.value)
+                                                setOptionError(null)
+                                            }}
+                                            placeholder={'high_quality\nmedium_quality\nlow_quality'}
+                                            rows={2}
+                                            className="flex-1 min-w-[120px] block rounded-md border border-gray-300 py-1.5 px-2 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={processBulkAdd}
+                                            disabled={!bulkAddText.trim()}
+                                            className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Add options
+                                        </button>
+                                        {optionError && <span className="text-xs text-red-600 w-full">{optionError}</span>}
+                                    </div>
+                                    <div className="mt-3">
+                                        <div className="rounded border border-gray-200 overflow-hidden bg-white">
+                                            {formData.options.length === 0 ? (
+                                                <div className="px-3 py-4 text-center text-xs text-gray-500">
+                                                    No options yet
                                                 </div>
-                                                <div>
-                                                    <label className="text-xs text-gray-500">Label <span className="text-red-500">*</span></label>
-                                                    <input
-                                                        type="text"
-                                                        value={newOption.system_label}
-                                                        onChange={(e) => {
-                                                            setNewOption((prev) => ({ ...prev, system_label: e.target.value }))
-                                                            setOptionError(null)
-                                                        }}
-                                                        placeholder="e.g., High Quality"
-                                                        className="mt-1 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-wrap items-end gap-3">
-                                                <div>
-                                                    <label className="text-xs text-gray-500 block mb-1">Color (optional)</label>
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="color"
-                                                            value={newOption.color || '#6366f1'}
-                                                            onChange={(e) => setNewOption((prev) => ({ ...prev, color: e.target.value }))}
-                                                            className="h-8 w-8 rounded border border-gray-300 cursor-pointer p-0"
-                                                        />
-                                                        <input
-                                                            type="text"
-                                                            value={newOption.color || ''}
-                                                            onChange={(e) => setNewOption((prev) => ({ ...prev, color: e.target.value }))}
-                                                            placeholder="#6366f1"
-                                                            className="w-24 rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 text-sm"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-xs text-gray-500 block mb-1">Icon (optional)</label>
-                                                    <OptionIconSelector
-                                                        value={newOption.icon}
-                                                        onChange={(icon) => setNewOption((prev) => ({ ...prev, icon }))}
-                                                        className="py-1.5"
-                                                    />
-                                                </div>
-                                                <div className="flex-1" />
-                                                <div className="flex items-center gap-2">
-                                                    {optionError && <span className="text-sm text-red-600">{optionError}</span>}
-                                                    <button
-                                                        type="button"
-                                                        onClick={addOption}
-                                                        disabled={!newOption.system_label.trim()}
-                                                        className="px-3 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        Add
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            {/* Preview chip for new option */}
-                                            {(newOption.system_label || newOption.value) && (
-                                                <div className="pt-1 border-t border-gray-200">
-                                                    <span className="text-xs text-gray-500">Preview: </span>
-                                                    <span
-                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border border-gray-200"
-                                                        style={
-                                                            newOption.color && /^#[0-9A-Fa-f]{6}$/.test(newOption.color)
-                                                                ? { backgroundColor: `${newOption.color}20`, color: newOption.color, borderColor: newOption.color }
-                                                                : { backgroundColor: '#f3f4f6', color: '#374151' }
-                                                        }
-                                                    >
-                                                        {newOption.color && /^#[0-9A-Fa-f]{6}$/.test(newOption.color) && (
-                                                            <span
-                                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                                                style={{ backgroundColor: newOption.color }}
-                                                            />
-                                                        )}
-                                                        {newOption.icon && <OptionIcon icon={newOption.icon} className="h-3.5 w-3.5" />}
-                                                        {newOption.system_label || toSnakeCase(newOption.value) || newOption.value || '…'}
-                                                    </span>
+                                            ) : (
+                                                <div className={formData.options.length > 8 ? 'max-h-64 overflow-y-auto' : ''}>
+                                                    <table className="min-w-full divide-y divide-gray-200">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th scope="col" className="w-9 px-2 py-2" />
+                                                                <th scope="col" className="w-40 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                                    Value
+                                                                </th>
+                                                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                                    Label
+                                                                </th>
+                                                                <th scope="col" className="w-10 px-2 py-2" />
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-gray-200 bg-white">
+                                                            {formData.options.map((option, index) => (
+                                                                <tr
+                                                                    key={`${option.value}-${index}`}
+                                                                    className="hover:bg-gray-50 transition-colors"
+                                                                >
+                                                                    <td className="px-2 py-1.5">
+                                                                        <div className="flex items-center text-gray-400 cursor-grab active:cursor-grabbing">
+                                                                            <Bars3Icon className="w-4 h-4" aria-hidden />
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-3 py-1.5">
+                                                                        <span className="text-sm font-mono text-gray-700">
+                                                                            {option.value}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-3 py-1.5">
+                                                                        <span className="text-sm text-gray-900">
+                                                                            {option.system_label || option.label || option.value}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-2 py-1.5">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => removeOption(index)}
+                                                                            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                                                                            title="Remove"
+                                                                        >
+                                                                            <TrashIcon className="w-4 h-4" aria-hidden />
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+                                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                        <input
+                                            type="text"
+                                            value={newOption.value}
+                                            onChange={(e) => {
+                                                setNewOption((prev) => ({ ...prev, value: e.target.value }))
+                                                setOptionError(null)
+                                            }}
+                                            onBlur={(e) => {
+                                                const v = e.target.value
+                                                if (v) setNewOption((prev) => ({ ...prev, value: toSnakeCase(v) }))
+                                            }}
+                                            placeholder="Value (snake_case)"
+                                            className="block w-32 rounded-md border border-gray-300 py-1 px-2 text-xs placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={newOption.system_label}
+                                            onChange={(e) => {
+                                                setNewOption((prev) => ({ ...prev, system_label: e.target.value }))
+                                                setOptionError(null)
+                                            }}
+                                            placeholder="Label"
+                                            className="block flex-1 min-w-[80px] rounded-md border border-gray-300 py-1 px-2 text-xs placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={addOption}
+                                            disabled={!newOption.value.trim() || !newOption.system_label.trim()}
+                                            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Add one
+                                        </button>
                                     </div>
                                     {errors.options && <p className="mt-2 text-sm text-red-600">{errors.options}</p>}
                                 </div>
                             )}
 
-                            {/* Visibility Options - Using Tailwind checkbox pattern */}
+                            {/* Visibility — compact 2-column grid */}
                             <div>
-                                <label className="text-base font-semibold leading-6 text-gray-900">
-                                    Visibility
-                                </label>
-                                <p className="text-sm leading-6 text-gray-600">
-                                    Control where this field appears in your workflow
-                                </p>
-                                <fieldset className="mt-4">
-                                    <div className="space-y-4">
-                                        <div className="relative flex items-start">
-                                            <div className="flex h-6 items-center">
-                                                <input
+                                <label className="text-xs font-medium text-gray-700 mb-2 block">Visibility</label>
+                                <fieldset>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                                        {!isFilterOnlyField && (
+                                            <label className="flex items-center gap-2 cursor-pointer py-1">
+                                                <StyledCheckbox
                                                     id="show_on_upload"
                                                     name="show_on_upload"
-                                                    type="checkbox"
                                                     checked={formData.show_on_upload}
                                                     onChange={(e) => setFormData({ ...formData, show_on_upload: e.target.checked })}
-                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
                                                 />
-                                            </div>
-                                            <div className="ml-3 text-sm leading-6">
-                                                <label htmlFor="show_on_upload" className="font-medium text-gray-900">
-                                                    Show on Upload
-                                                </label>
-                                                <p className="text-gray-500">Display this field in the upload interface</p>
-                                            </div>
-                                        </div>
-                                        <div className="relative flex items-start">
-                                            <div className="flex h-6 items-center">
-                                                <input
+                                                <CloudArrowUpIcon className="h-4 w-4 text-gray-400" />
+                                                <span className="text-sm text-gray-900">Show on Upload</span>
+                                            </label>
+                                        )}
+                                        {!isFilterOnlyField && (
+                                            <label className="flex items-center gap-2 cursor-pointer py-1">
+                                                <StyledCheckbox
                                                     id="show_on_edit"
                                                     name="show_on_edit"
-                                                    type="checkbox"
                                                     checked={formData.show_on_edit}
                                                     onChange={(e) => setFormData({ ...formData, show_on_edit: e.target.checked })}
-                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
                                                 />
-                                            </div>
-                                            <div className="ml-3 text-sm leading-6">
-                                                <label htmlFor="show_on_edit" className="font-medium text-gray-900">
-                                                    Quick View
-                                                </label>
-                                                <p className="text-gray-500">Display this field in the asset drawer and details modal</p>
-                                            </div>
-                                        </div>
-                                        <div className="relative flex items-start">
-                                            <div className="flex h-6 items-center">
-                                                <input
-                                                    id="show_in_filters"
-                                                    name="show_in_filters"
-                                                    type="checkbox"
-                                                    checked={formData.show_in_filters}
-                                                    onChange={(e) => setFormData({ ...formData, show_in_filters: e.target.checked })}
-                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                />
-                                            </div>
-                                            <div className="ml-3 text-sm leading-6">
-                                                <label htmlFor="show_in_filters" className="font-medium text-gray-900">
-                                                    Show in Filters
-                                                </label>
-                                                <p className="text-gray-500">Allow filtering assets by this field</p>
-                                            </div>
-                                        </div>
-                                        {formData.show_in_filters && (
-                                            <div className="relative flex items-start pl-7">
-                                                <div className="flex h-6 items-center">
-                                                    <input
-                                                        id="is_primary"
-                                                        name="is_primary"
-                                                        type="checkbox"
-                                                        checked={formData.is_primary}
-                                                        onChange={(e) => setFormData({ ...formData, is_primary: e.target.checked })}
-                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                    />
-                                                </div>
-                                                <div className="ml-3 text-sm leading-6">
-                                                    <label htmlFor="is_primary" className="font-medium text-gray-900">
-                                                        Primary Filter
-                                                    </label>
-                                                    <p className="text-gray-500">Show this field inline in the asset grid filter bar (otherwise under &quot;More filters&quot;)</p>
-                                                </div>
-                                            </div>
+                                                <Squares2X2Icon className="h-4 w-4 text-gray-400" />
+                                                <span className="text-sm text-gray-900">Quick View</span>
+                                            </label>
                                         )}
-                                        {formData.show_on_upload && (
-                                            <div className="relative flex items-start pl-7">
-                                                <div className="flex h-6 items-center">
-                                                    <input
-                                                        id="is_required"
-                                                        name="is_required"
-                                                        type="checkbox"
-                                                        checked={formData.is_required}
-                                                        onChange={(e) => setFormData({ ...formData, is_required: e.target.checked })}
-                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                    />
-                                                </div>
-                                                <div className="ml-3 text-sm leading-6">
-                                                    <label htmlFor="is_required" className="font-medium text-gray-900">
-                                                        Required
-                                                    </label>
-                                                    <p className="text-gray-500">Must be filled when adding assets to selected categories</p>
-                                                </div>
-                                            </div>
+                                        <label className="flex items-center gap-2 cursor-pointer py-1">
+                                            <StyledCheckbox
+                                                id="show_in_filters"
+                                                name="show_in_filters"
+                                                checked={formData.show_in_filters}
+                                                onChange={(e) => setFormData({ ...formData, show_in_filters: e.target.checked })}
+                                            />
+                                            <FunnelIcon className="h-4 w-4 text-gray-400" />
+                                            <span className="text-sm text-gray-900">Show in Filters</span>
+                                        </label>
+                                        {!isFilterOnlyField && formData.show_in_filters && (
+                                            <label className="flex items-center gap-2 cursor-pointer py-1 sm:col-start-2">
+                                                <StyledCheckbox
+                                                    id="is_primary"
+                                                    name="is_primary"
+                                                    checked={formData.is_primary}
+                                                    onChange={(e) => setFormData({ ...formData, is_primary: e.target.checked })}
+                                                />
+                                                <span className="text-sm text-gray-900">Primary Filter</span>
+                                            </label>
+                                        )}
+                                        {!isFilterOnlyField && formData.show_on_upload && (
+                                            <label className="flex items-center gap-2 cursor-pointer py-1">
+                                                <StyledCheckbox
+                                                    id="is_required"
+                                                    name="is_required"
+                                                    checked={formData.is_required}
+                                                    onChange={(e) => setFormData({ ...formData, is_required: e.target.checked })}
+                                                />
+                                                <span className="text-sm text-gray-900">Required</span>
+                                            </label>
                                         )}
                                     </div>
                                 </fieldset>
                             </div>
 
-                            {/* AI Eligible (for select/multiselect fields, or tags field) */}
-                            {(requiresOptions || isTagsField) && (
-                                <div className="relative flex items-start">
-                                    <div className="flex h-6 items-center">
-                                        <input
-                                            id="ai_eligible"
-                                            name="ai_eligible"
-                                            type="checkbox"
-                                            checked={formData.ai_eligible}
-                                            onChange={(e) => setFormData({ ...formData, ai_eligible: e.target.checked })}
-                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                        />
-                                    </div>
-                                    <div className="ml-3 text-sm leading-6">
-                                        <label htmlFor="ai_eligible" className="font-medium text-gray-900">
-                                            Enable AI Suggestions
+                            {/* AI Suggestions — always show; explain when unavailable. Uses purple for AI branding. */}
+                            {(() => {
+                                const aiAvailable = requiresOptions && formData.options.length > 0 || isTagsField
+                                const aiChecked = formData.ai_eligible
+                                return (
+                                    <div className="rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2">
+                                        <label className={`flex items-center gap-2 py-1 ${aiAvailable ? 'cursor-pointer' : 'cursor-default'}`}>
+                                            <StyledCheckbox
+                                                id="ai_eligible"
+                                                name="ai_eligible"
+                                                checked={aiChecked}
+                                                onChange={(e) => setFormData({ ...formData, ai_eligible: e.target.checked })}
+                                                disabled={!aiAvailable}
+                                                variant="ai"
+                                            />
+                                            <SparklesIcon className={`h-4 w-4 flex-shrink-0 ${aiChecked ? 'text-purple-600' : aiAvailable ? 'text-purple-400' : 'text-gray-300'}`} />
+                                            <span className={`text-sm ${aiAvailable ? 'text-gray-900' : 'text-gray-500'}`}>
+                                                Enable AI Suggestions
+                                            </span>
                                         </label>
-                                        <p className="text-gray-500">
-                                            Allow AI to suggest values for this field based on asset content.
-                                            {!isTagsField && formData.options.length === 0 && (
-                                                <span className="text-amber-600 font-medium"> Note: Options must be defined for AI suggestions to work.</span>
-                                            )}
-                                        </p>
+                                        {!aiAvailable && (
+                                            <p className="mt-0.5 text-xs text-gray-500 pl-6">
+                                                {requiresOptions && formData.options.length === 0
+                                                    ? 'Add options above to enable AI suggestions.'
+                                                    : 'AI suggestions only work with Select or Multi-Select fields that have predefined options.'}
+                                            </p>
+                                        )}
                                     </div>
-                                </div>
-                            )}
+                                )
+                            })()}
                         </div>
 
                         {/* Actions */}

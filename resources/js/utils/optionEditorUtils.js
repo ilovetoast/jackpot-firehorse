@@ -7,6 +7,20 @@
 const SNAKE_CASE_REGEX = /^[a-z0-9_]+$/
 
 /**
+ * Convert snake_case to Title Case (e.g. high_quality → High Quality)
+ * @param {string} input
+ * @returns {string}
+ */
+export function snakeToTitleCase(input) {
+    if (!input || typeof input !== 'string') return ''
+    return input
+        .trim()
+        .split('_')
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ')
+}
+
+/**
  * Convert input to lowercase snake_case (spaces/special chars → underscores)
  * @param {string} input
  * @returns {string}

@@ -23,6 +23,7 @@ import AssetTagManager from './AssetTagManager'
 import { usePermission } from '../hooks/usePermission'
 import { router, usePage } from '@inertiajs/react'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
+import { resolve, isExcludedFromGenericLoop, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
 export default function AssetDetailsModal({ asset, isOpen, onClose }) {
     const [metadata, setMetadata] = useState(null)
@@ -1329,15 +1330,15 @@ export default function AssetDetailsModal({ asset, isOpen, onClose }) {
                                         {metadata && metadata.fields && metadata.fields.length > 0 ? (
                                             <>
                                             {metadata.fields
-                                                .filter((field) => field.key !== 'tags' && field.key !== 'collection') // Tags and Collection shown separately
+                                                .filter((field) => !isExcludedFromGenericLoop(field))
                                                 .map((field) => {
                                                 const typeLabel = field.type + 
                                                     (field.population_mode !== 'manual' ? ` (${field.population_mode})` : '') +
                                                     (field.readonly ? ' (read-only)' : '') +
                                                     (field.is_ai_related ? ' (AI-related)' : '');
                                                 
-                                                // Special handling for dominant_colors - show color swatches
-                                                const isDominantColors = (field.key === 'dominant_colors' || field.field_key === 'dominant_colors')
+                                                const widget = resolve(field, CONTEXT.DISPLAY)
+                                                const isDominantColors = widget === WIDGET.DOMINANT_COLORS
                                                 
                                                 // For dominant_colors, check if we have valid color objects
                                                 let dominantColorsArray = null

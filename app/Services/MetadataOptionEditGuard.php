@@ -26,11 +26,12 @@ class MetadataOptionEditGuard
      */
     public static function isRestricted(object|array $field): bool
     {
-        $key = $field['key'] ?? $field->key ?? null;
-        $scope = $field['scope'] ?? $field->scope ?? null;
-        $tenantId = $field['tenant_id'] ?? $field->tenant_id ?? null;
-        $type = $field['type'] ?? $field->type ?? null;
-        $displayWidget = $field['display_widget'] ?? $field->display_widget ?? null;
+        $get = fn ($k) => is_array($field) ? ($field[$k] ?? null) : ($field->{$k} ?? null);
+        $key = $get('key');
+        $scope = $get('scope');
+        $tenantId = $get('tenant_id');
+        $type = $get('type');
+        $displayWidget = $get('display_widget');
 
         // Must be system field
         $isSystem = ($scope === 'system') || ($tenantId === null && $scope !== 'tenant');

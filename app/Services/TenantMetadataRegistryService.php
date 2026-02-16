@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Tenant;
+use App\Services\MetadataOptionEditGuard;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -59,30 +60,21 @@ class TenantMetadataRegistryService
         // Query system metadata fields
         // Exclude dimensions - it's file info, not metadata, and shouldn't appear in metadata management UI
         // Exclude archived (system fields are never archived, but defensive)
+        $selectColumns = [
+            'id', 'key', 'system_label', 'type', 'applies_to', 'population_mode',
+            'show_on_upload', 'show_on_edit', 'show_in_filters', 'readonly', 'group_key',
+            'is_filterable', 'is_user_editable', 'is_ai_trainable', 'is_internal_only', 'is_primary',
+            'ai_eligible',
+        ];
+        if (\Schema::hasColumn('metadata_fields', 'display_widget')) {
+            $selectColumns[] = 'display_widget';
+        }
         $fields = DB::table('metadata_fields')
             ->where('scope', 'system')
             ->whereNull('deprecated_at')
             ->whereNull('archived_at')
             ->where('key', '!=', 'dimensions') // Dimensions is file info, not metadata
-            ->select([
-                'id',
-                'key',
-                'system_label',
-                'type',
-                'applies_to',
-                'population_mode',
-                'show_on_upload',
-                'show_on_edit',
-                'show_in_filters',
-                'readonly',
-                'group_key',
-                'is_filterable',
-                'is_user_editable',
-                'is_ai_trainable',
-                'is_internal_only',
-                'is_primary',
-                'ai_eligible', // Include AI eligibility flag
-            ])
+            ->select($selectColumns)
             ->orderBy('key')
             ->get();
 
@@ -123,6 +115,7 @@ class TenantMetadataRegistryService
             $isAiRelated = in_array($fieldId, $aiRelatedFields);
             $isSystemGenerated = ($field->population_mode ?? 'manual') === 'automatic';
             $supportsOverride = ($field->population_mode ?? 'manual') === 'hybrid';
+            $optionEditingRestricted = MetadataOptionEditGuard::isRestricted($field);
 
             $result[] = [
                 'id' => $field->id,
@@ -150,6 +143,8 @@ class TenantMetadataRegistryService
                 'effective_show_in_filters' => $effectiveFilter,
                 // Has tenant override
                 'has_tenant_override' => $overrides !== null,
+                // Product integrity: system fields with custom rendering do not support option editing
+                'option_editing_restricted' => $optionEditingRestricted,
                 // Derived flags
                 'is_filter_only' => $isFilterOnly,
                 'is_ai_related' => $isAiRelated,

@@ -487,6 +487,10 @@ class TenantMetadataFieldService
             throw new \InvalidArgumentException('System fields cannot be archived.');
         }
 
+        if (($field->key ?? null) === 'dominant_color_bucket') {
+            throw new \InvalidArgumentException('dominant_color_bucket is a filter-only system field and cannot be archived.');
+        }
+
         if (($field->tenant_id ?? null) != $tenant->id || ($field->scope ?? null) !== 'tenant') {
             throw new \InvalidArgumentException("Field {$fieldId} does not belong to tenant {$tenant->id}.");
         }
@@ -517,6 +521,141 @@ class TenantMetadataFieldService
         ]);
 
         return true;
+    }
+
+    /**
+     * Restore an archived tenant metadata field.
+     * System fields cannot be restored (because they cannot be archived).
+     *
+     * @param Tenant $tenant
+     * @param int $fieldId
+     * @return bool
+     * @throws \InvalidArgumentException
+     */
+    public function restoreField(Tenant $tenant, int $fieldId): bool
+    {
+        $field = DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->first();
+
+        if (!$field) {
+            throw new \InvalidArgumentException("Field {$fieldId} does not exist.");
+        }
+
+        if (($field->scope ?? null) === 'system') {
+            throw new \InvalidArgumentException('System fields cannot be restored.');
+        }
+
+        if (($field->tenant_id ?? null) != $tenant->id || ($field->scope ?? null) !== 'tenant') {
+            throw new \InvalidArgumentException("Field {$fieldId} does not belong to tenant {$tenant->id}.");
+        }
+
+        if (($field->archived_at ?? null) === null) {
+            throw new \InvalidArgumentException("Field {$fieldId} is not archived.");
+        }
+
+        DB::table('metadata_fields')
+            ->where('id', $fieldId)
+            ->update([
+                'archived_at' => null,
+                'is_active' => true,
+                'updated_at' => now(),
+            ]);
+
+        Log::info('Tenant metadata field restored', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'field_key' => $field->key,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * List archived tenant metadata fields only.
+     *
+     * @param Tenant $tenant
+     * @return array
+     */
+    public function listArchivedFieldsByTenant(Tenant $tenant): array
+    {
+        return $this->listFieldsByTenantInternal($tenant, true, true);
+    }
+
+    /**
+     * Internal list implementation for archived fields only.
+     * When $archivedOnly is true, returns only archived fields.
+     *
+     * @param Tenant $tenant
+     * @param bool $includeInactive
+     * @param bool $archivedOnly
+     * @return array
+     */
+    protected function listFieldsByTenantInternal(Tenant $tenant, bool $includeInactive, bool $archivedOnly): array
+    {
+        $query = DB::table('metadata_fields')
+            ->where('tenant_id', $tenant->id)
+            ->where('scope', 'tenant')
+            ->whereNull('deprecated_at')
+            ->orderBy('archived_at', 'desc')
+            ->orderBy('created_at', 'desc');
+
+        if (!$includeInactive) {
+            $query->where('is_active', true);
+        }
+
+        if ($archivedOnly) {
+            $query->whereNotNull('archived_at');
+        } else {
+            $query->whereNull('archived_at');
+        }
+
+        $fields = $query->get();
+
+        $fieldIds = $fields->pluck('id')->toArray();
+        $options = [];
+        if (!empty($fieldIds)) {
+            $optionsData = DB::table('metadata_options')
+                ->whereIn('metadata_field_id', $fieldIds)
+                ->orderBy('metadata_field_id')
+                ->orderBy('id')
+                ->get();
+
+            foreach ($optionsData as $option) {
+                if (!isset($options[$option->metadata_field_id])) {
+                    $options[$option->metadata_field_id] = [];
+                }
+                $options[$option->metadata_field_id][] = [
+                    'value' => $option->value,
+                    'label' => $option->system_label,
+                ];
+            }
+        }
+
+        $result = [];
+        foreach ($fields as $field) {
+            $result[] = [
+                'id' => $field->id,
+                'key' => $field->key,
+                'system_label' => $field->system_label,
+                'type' => $field->type,
+                'applies_to' => $field->applies_to,
+                'is_filterable' => (bool) $field->is_filterable,
+                'show_on_upload' => (bool) ($field->show_on_upload ?? true),
+                'show_on_edit' => (bool) ($field->show_on_edit ?? true),
+                'show_in_filters' => (bool) ($field->show_in_filters ?? true),
+                'is_primary' => (bool) ($field->is_primary ?? false),
+                'ai_eligible' => (bool) ($field->ai_eligible ?? false),
+                'group_key' => $field->group_key,
+                'is_active' => (bool) ($field->is_active ?? true),
+                'options' => $options[$field->id] ?? [],
+                'created_at' => $field->created_at,
+                'updated_at' => $field->updated_at,
+                'archived_at' => $field->archived_at ?? null,
+            ];
+        }
+
+        return $result;
     }
 
     /**

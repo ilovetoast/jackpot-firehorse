@@ -45,6 +45,7 @@ import CollectionSelector from './Collections/CollectionSelector'
 import { usePermission } from '../hooks/usePermission'
 import { router, usePage } from '@inertiajs/react'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
+import { resolve, isExcludedFromGenericLoop, hasCollectionField, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
 const GROUP_LABELS = {
     classification: 'Classification',
@@ -433,10 +434,7 @@ export default function AssetDetailPanel({
 
     const metadataByGroup = useMemo(() => {
         if (!metadata?.fields) return []
-        const filtered = metadata.fields.filter((f) => {
-            const key = f.key || f.field_key
-            return key !== 'tags' && key !== 'collection'
-        })
+        const filtered = metadata.fields.filter((f) => !isExcludedFromGenericLoop(f))
         const byGroup = {}
         filtered.forEach((f) => {
             const key = f.group_key || 'general'
@@ -996,22 +994,17 @@ export default function AssetDetailPanel({
                                             </div>
                                             <dl className="px-3 pb-3">
                                                 {fields.map((field) => {
-                                                    const fieldKey = field.key || field.field_key
                                                     const metadataFieldId = field.metadata_field_id ?? field.field_id
                                                     const isEditableField =
                                                         canEditMetadata && !field.readonly && field.population_mode !== 'automatic'
                                                     const isSystemField = field.readonly || field.population_mode === 'automatic'
+                                                    const widget = resolve(field, CONTEXT.DISPLAY)
                                                     const isDominantColors =
-                                                        fieldKey === 'dominant_colors' &&
+                                                        widget === WIDGET.DOMINANT_COLORS &&
                                                         Array.isArray(field.current_value) &&
                                                         field.current_value.some((c) => c?.hex)
-                                                    const isRating =
-                                                        field.type === 'rating' ||
-                                                        fieldKey === 'quality_rating' ||
-                                                        field.display_widget === 'stars'
-                                                    const isToggleBoolean =
-                                                        field.type === 'boolean' &&
-                                                        (fieldKey === 'starred' || field.display_widget === 'toggle')
+                                                    const isRating = widget === WIDGET.RATING
+                                                    const isToggleBoolean = widget === WIDGET.TOGGLE
                                                     const editValue =
                                                         isEditing && isEditableField && metadataDirty[groupKey]?.[metadataFieldId] !== undefined
                                                             ? metadataDirty[groupKey][metadataFieldId]
@@ -1163,7 +1156,7 @@ export default function AssetDetailPanel({
                                                     )
                                                 })}
                                             </dl>
-                                            {metadata.fields.some((f) => (f.key || f.field_key) === 'collection') && groupKey === 'general' && (
+                                            {hasCollectionField(metadata.fields) && groupKey === 'general' && (
                                                 <div className="flex items-start justify-between gap-2 py-3 border-b border-gray-100 last:border-b-0 px-3">
                                                     <span className="text-sm font-semibold text-gray-700">Collection</span>
                                                     <div className="min-w-0 flex-1 flex justify-end">

@@ -348,19 +348,28 @@ class MetadataSchemaResolver
             $isFilterHidden = $visibilityOverrides['is_filter_hidden'];
         }
 
+        // dominant_color_bucket: filter-only system field — hard-enforce
+        if (($field->key ?? null) === 'dominant_color_bucket') {
+            $isEditHidden = true;
+            $isUploadHidden = true;
+        }
+
         // Resolve effective_is_primary from category override
         // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
         // A field may be primary in Photography but secondary in Logos.
         //
         // Resolution order:
-        // 1. Category override (metadata_field_visibility.is_primary where category_id is set) - highest priority
-        // 2. Fallback to global metadata_fields.is_primary (backward compatibility, deprecated)
-        // 3. Default to false if neither exists
+        // 1. dominant_color_bucket: always false (filter-only, secondary only)
+        // 2. Category override (metadata_field_visibility.is_primary where category_id is set) - highest priority
+        // 3. Fallback to global metadata_fields.is_primary (backward compatibility, deprecated)
+        // 4. Default to false if neither exists
         //
         // This ensures that filter placement is category-specific, not global.
         // Never use global is_primary directly - always resolve through category context.
         $effectiveIsPrimary = false;
-        if (isset($visibilityOverrides['is_primary']) && $visibilityOverrides['is_primary'] !== null) {
+        if (($field->key ?? null) === 'dominant_color_bucket') {
+            $effectiveIsPrimary = false;
+        } elseif (isset($visibilityOverrides['is_primary']) && $visibilityOverrides['is_primary'] !== null) {
             // Category override exists (highest priority)
             $effectiveIsPrimary = (bool) $visibilityOverrides['is_primary'];
         } elseif (isset($field->is_primary)) {

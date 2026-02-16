@@ -122,6 +122,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         Route::post('/tenant/metadata/fields/{field}/disable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'disable'])->name('tenant.metadata.fields.disable');
         Route::post('/tenant/metadata/fields/{field}/enable', [\App\Http\Controllers\TenantMetadataFieldController::class, 'enable'])->name('tenant.metadata.fields.enable');
         Route::post('/tenant/metadata/fields/{field}/archive', [\App\Http\Controllers\TenantMetadataFieldController::class, 'archive'])->name('tenant.metadata.fields.archive');
+        Route::post('/tenant/metadata/fields/{field}/restore', [\App\Http\Controllers\TenantMetadataFieldController::class, 'restore'])->name('tenant.metadata.fields.restore');
         Route::post('/tenant/metadata/fields/{field}/ai-eligible', [\App\Http\Controllers\TenantMetadataFieldController::class, 'updateAiEligible'])->name('tenant.metadata.fields.ai-eligible');
         
         // Allowed values (options) management
@@ -167,6 +168,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
         // Phase C4: Tenant metadata registry and visibility management
         Route::get('/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'index'])->name('tenant.metadata.registry.index');
         Route::get('/api/tenant/metadata/registry', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getRegistry'])->name('tenant.metadata.registry.api');
+        Route::get('/api/tenant/metadata/fields/archived', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getArchivedFields'])->name('tenant.metadata.fields.archived');
         Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
         Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
         Route::patch('/api/tenant/metadata/fields/{field}/categories/{category}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'patchCategoryFieldVisibility'])->name('tenant.metadata.category.field.visibility');

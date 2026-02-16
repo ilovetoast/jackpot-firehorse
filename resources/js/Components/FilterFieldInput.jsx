@@ -50,10 +50,10 @@ export function FilterFieldInput({
     const fieldKey = field?.field_key || field?.key
     const widget = resolve(field, CONTEXT.FILTER)
 
-    const isColorFilter = widget === WIDGET.SWATCH_FILTER
-    const isCollectionFilter = widget === WIDGET.COLLECTION_DROPDOWN
+    const isColorFilter = widget === WIDGET.COLOR_SWATCH
+    const isCollectionFilter = widget === WIDGET.COLLECTION_BADGES
     const isToggleBoolean = widget === WIDGET.TOGGLE
-    const isTagsFilter = widget === WIDGET.TAG_FILTER
+    const isTagsFilter = widget === WIDGET.TAG_MANAGER
     const isExpirationDateFilter = widget === WIDGET.EXPIRATION_DATE
 
     const filteredOptions = useFilteredOptions(field, availableValues, fieldKey)
@@ -207,7 +207,7 @@ export function FilterValueInput({
         : 'flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500'
 
     // Tag filter
-    if (widget === WIDGET.TAG_FILTER) {
+    if (widget === WIDGET.TAG_MANAGER) {
         return (
             <TagPrimaryFilter
                 value={Array.isArray(value) ? value : value ? [value] : []}
@@ -244,8 +244,8 @@ export function FilterValueInput({
         )
     }
 
-    // Collection dropdown
-    if (widget === WIDGET.COLLECTION_DROPDOWN) {
+    // Collection dropdown (COLLECTION_BADGES in filter context)
+    if (widget === WIDGET.COLLECTION_BADGES) {
         const opts = Array.isArray(filteredOptions) ? filteredOptions : field?.options || []
         const label = (opt) => opt.display_label ?? opt.label ?? opt.value
         const placeholder = labelInDropdown && placeholderLabel ? placeholderLabel : 'Any'
@@ -320,8 +320,8 @@ export function FilterValueInput({
         )
     }
 
-    // Dominant colors filter
-    if (widget === WIDGET.DOMINANT_COLORS_FILTER) {
+    // Dominant colors filter (DOMINANT_COLORS in filter context)
+    if (widget === WIDGET.DOMINANT_COLORS) {
         const colorArrays = variant === 'primary' && availableValues?.length
             ? availableValues.filter(Array.isArray)
             : availableValues
@@ -336,7 +336,7 @@ export function FilterValueInput({
     }
 
     // Color swatch filter (dominant_color_bucket)
-    if (widget === WIDGET.SWATCH_FILTER) {
+    if (widget === WIDGET.COLOR_SWATCH) {
         return (
             <ColorSwatchFilter
                 field={field}

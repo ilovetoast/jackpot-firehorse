@@ -208,6 +208,32 @@ class TenantMetadataRegistryController extends Controller
     }
 
     /**
+     * Get archived tenant metadata fields.
+     *
+     * GET /api/tenant/metadata/fields/archived
+     */
+    public function getArchivedFields(): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (!$tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (!$canView) {
+            abort(403, 'You do not have permission to view the metadata registry.');
+        }
+
+        $archived = $this->fieldService->listArchivedFieldsByTenant($tenant);
+
+        return response()->json(['archived_fields' => $archived]);
+    }
+
+    /**
      * Set visibility override for a field.
      *
      * POST /api/tenant/metadata/fields/{field}/visibility
