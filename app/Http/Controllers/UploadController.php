@@ -556,6 +556,7 @@ class UploadController extends Controller
                 'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
             ]);
         } catch (\Exception $e) {
+            Log::error('Failed to initiate batch upload', [
                 'tenant_id' => $tenant->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
