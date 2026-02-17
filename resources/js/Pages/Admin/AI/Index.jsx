@@ -26,6 +26,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 export default function AIDashboardIndex({ stats, environment, canManage, budgetStatus, budgetRemaining, currentMonthCost, costTrends, costSpikes, canViewBudgets, activeTab: initialTab = 'activity', tabContent = {} }) {
+    const { auth } = usePage().props
     const { can } = usePermission()
     const [activeTab, setActiveTab] = useState(initialTab || 'activity')
 

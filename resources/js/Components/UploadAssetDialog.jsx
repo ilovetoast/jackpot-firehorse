@@ -21,7 +21,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
-import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
@@ -262,6 +262,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // Track when finalize succeeds (all files finalized, no failures) - used to disable form during auto-close delay
     const [isFinalizeSuccess, setIsFinalizeSuccess] = useState(false)
+    
+    // Minimize to tray: compact bar at bottom so user can browse while uploads run in background
+    const [isMinimized, setIsMinimized] = useState(false)
+    const autoFinalizeTriggeredRef = useRef(false)
     
     // TASK 1: Track approval info from finalize response (UI-only, read-only)
     const [approvalInfo, setApprovalInfo] = useState({ approvalRequired: false, pendingMetadataCount: 0 })
@@ -4004,6 +4008,27 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const hasFiles = v2UploadManager.hasItems
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
 
+    // Warn before closing tab/browser when uploads are in progress
+    useEffect(() => {
+        const shouldWarn = hasFiles && (hasUploadingItems || batchStatus === 'finalizing')
+        const handler = (e) => {
+            if (shouldWarn) {
+                e.preventDefault()
+                e.returnValue = ''
+            }
+        }
+        window.addEventListener('beforeunload', handler)
+        return () => window.removeEventListener('beforeunload', handler)
+    }, [hasFiles, hasUploadingItems, batchStatus])
+
+    // Auto-finalize when minimized and all uploads complete (no errors, metadata valid)
+    useEffect(() => {
+        if (!isMinimized || !canFinalizeV2 || batchStatus !== 'ready' || autoFinalizeTriggeredRef.current) return
+        autoFinalizeTriggeredRef.current = true
+        const t = setTimeout(() => handleFinalizeV2(), 2000)
+        return () => clearTimeout(t)
+    }, [isMinimized, canFinalizeV2, batchStatus, handleFinalizeV2])
+
     // Files that don't support thumbnails yet (video, SVG, HEIC, etc.) — show info message
     const filesWithoutThumbnailSupport = useMemo(() => {
         return v2Files.filter((v2File) => {
@@ -4016,7 +4041,69 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         })
     }, [v2Files])
 
+    // Tray summary counts for minimized view
+    const trayCompleted = v2UploadManager.items.filter((i) => i.uploadStatus === 'complete').length
+    const trayTotal = v2UploadManager.items.length
+    const trayFailed = v2UploadManager.items.filter((i) => i.uploadStatus === 'failed').length
+
     return (
+        <>
+        {isMinimized ? (
+            /* Minimized tray — compact bar at bottom, user can browse while uploads run */
+            <div
+                data-upload-dialog-root
+                className="fixed bottom-4 right-4 z-50"
+                role="dialog"
+                aria-label="Upload progress"
+            >
+                <div
+                    className="flex items-center gap-4 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-lg"
+                    style={{ minWidth: '320px' }}
+                >
+                    <button
+                        type="button"
+                        onClick={() => setIsMinimized(false)}
+                        className="flex items-center gap-2 text-left flex-1 min-w-0"
+                        title="Expand to view and edit files"
+                    >
+                        <ChevronUpIcon className="h-5 w-5 text-gray-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                            {batchStatus === 'finalizing' ? (
+                                <span className="text-sm font-medium text-gray-900">Finalizing uploads…</span>
+                            ) : batchStatus === 'ready' ? (
+                                <span className="text-sm font-medium text-green-600">Ready to finalize ({trayCompleted} / {trayTotal})</span>
+                            ) : batchStatus === 'partial_success' ? (
+                                <span className="text-sm font-medium text-amber-600">{trayCompleted} succeeded, {trayFailed} failed</span>
+                            ) : (
+                                <span className="text-sm font-medium text-gray-900">
+                                    {hasUploadingItems ? 'Uploading…' : ''} {trayCompleted} / {trayTotal} uploads
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                    {canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess && (
+                        <button
+                            type="button"
+                            onClick={handleFinalizeV2}
+                            className="rounded-md px-3 py-1.5 text-sm font-medium text-white flex-shrink-0"
+                            style={{ backgroundColor: brandPrimary }}
+                        >
+                            Finalize now
+                        </button>
+                    )}
+                    {!hasUploadingItems && batchStatus !== 'finalizing' && (
+                        <button
+                            type="button"
+                            onClick={() => { resetV2State(); onClose() }}
+                            className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                            title="Close"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    )}
+                </div>
+            </div>
+        ) : (
         <div
             data-upload-dialog-root
             className="fixed inset-0 z-50 overflow-y-auto"
@@ -4039,26 +4126,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
                                 Add {defaultAssetType === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR}
                             </h3>
-                            {!hasUploadingItems && batchStatus !== 'finalizing' && (
-                                <button
-                                    type="button"
-                                    className="text-gray-400 hover:text-gray-500"
-                                    onClick={onClose}
-                                    title="Close dialog"
-                                >
-                                    <XMarkIcon className="h-6 w-6" />
-                                </button>
-                            )}
-                            {batchStatus === 'finalizing' && (
-                                <button
-                                    type="button"
-                                    className="text-gray-300 cursor-not-allowed"
-                                    disabled
-                                    title="Finalizing uploads…"
-                                >
-                                    <XMarkIcon className="h-6 w-6" />
-                                </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {hasFiles && (hasUploadingItems || batchStatus === 'ready' || batchStatus === 'partial_success' || batchStatus === 'uploading') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsMinimized(true)}
+                                        className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                        title="Minimize to tray — continue browsing while uploads run"
+                                    >
+                                        <ChevronDownIcon className="h-5 w-5" />
+                                    </button>
+                                )}
+                                {!hasUploadingItems && batchStatus !== 'finalizing' && (
+                                    <button
+                                        type="button"
+                                        className="text-gray-400 hover:text-gray-500"
+                                        onClick={onClose}
+                                        title="Close dialog"
+                                    >
+                                        <XMarkIcon className="h-6 w-6" />
+                                    </button>
+                                )}
+                                {batchStatus === 'finalizing' && (
+                                    <button
+                                        type="button"
+                                        className="text-gray-300 cursor-not-allowed"
+                                        disabled
+                                        title="Finalizing uploads…"
+                                    >
+                                        <XMarkIcon className="h-6 w-6" />
+                                    </button>
+                                )}
+                            </div>
                         </div>
 
                             {/* Asset Type - Hidden (used internally for filtering and finalization) */}
@@ -4483,5 +4582,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 </div>
             </div>
         </div>
+        )}
+        </>
     )
 }
