@@ -11,6 +11,7 @@ use Laravel\Cashier\Exceptions\IncompletePayment;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
+use Stripe\SubscriptionItem;
 
 class BillingService
 {
@@ -403,5 +404,112 @@ class BillingService
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to process refund: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Add a storage add-on to the tenant's subscription.
+     * Only one storage add-on at a time; adding a new one replaces the previous.
+     *
+     * @param Tenant $tenant
+     * @param string $packageId Package ID from config (e.g. storage_50gb)
+     * @return array Updated storage info from PlanService
+     * @throws \RuntimeException
+     */
+    public function addStorageAddon(Tenant $tenant, string $packageId): array
+    {
+        $packages = config('storage_addons.packages', []);
+        $package = collect($packages)->firstWhere('id', $packageId);
+
+        if (! $package) {
+            throw new \InvalidArgumentException("Invalid storage add-on package: {$packageId}");
+        }
+
+        $stripePriceId = $package['stripe_price_id'] ?? null;
+        if (empty($stripePriceId)) {
+            throw new \RuntimeException("Stripe price not configured for storage add-on package: {$packageId}");
+        }
+
+        $subscription = $tenant->subscription('default');
+        if (! $subscription || ! $subscription->stripe_id || $subscription->stripe_status !== 'active') {
+            throw new \RuntimeException('Tenant must have an active subscription to add storage.');
+        }
+
+        $stripeSecret = env('STRIPE_SECRET');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        $idempotencyKey = "tenant-{$tenant->id}-storage-addon";
+
+        try {
+            // If tenant already has an add-on, remove it first
+            if (! empty($tenant->storage_addon_stripe_subscription_item_id)) {
+                $this->removeStorageAddonStripeItem($tenant->storage_addon_stripe_subscription_item_id);
+            }
+
+            $item = SubscriptionItem::create([
+                'subscription' => $subscription->stripe_id,
+                'price' => $stripePriceId,
+                'quantity' => 1,
+            ], [
+                'idempotency_key' => $idempotencyKey,
+            ]);
+
+            $tenant->update([
+                'storage_addon_mb' => $package['storage_mb'],
+                'storage_addon_stripe_price_id' => $stripePriceId,
+                'storage_addon_stripe_subscription_item_id' => $item->id,
+            ]);
+
+            return (new PlanService())->getStorageInfo($tenant);
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to add storage add-on: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Remove the storage add-on from the tenant's subscription.
+     *
+     * @param Tenant $tenant
+     * @return array Updated storage info from PlanService
+     * @throws \RuntimeException
+     */
+    public function removeStorageAddon(Tenant $tenant): array
+    {
+        $itemId = $tenant->storage_addon_stripe_subscription_item_id;
+
+        if (empty($itemId)) {
+            // No add-on to remove; return current storage info
+            return (new PlanService())->getStorageInfo($tenant);
+        }
+
+        $stripeSecret = env('STRIPE_SECRET');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        try {
+            $this->removeStorageAddonStripeItem($itemId);
+
+            $tenant->update([
+                'storage_addon_mb' => 0,
+                'storage_addon_stripe_price_id' => null,
+                'storage_addon_stripe_subscription_item_id' => null,
+            ]);
+
+            return (new PlanService())->getStorageInfo($tenant);
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to remove storage add-on: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete a Stripe subscription item (storage add-on).
+     */
+    private function removeStorageAddonStripeItem(string $stripeSubscriptionItemId): void
+    {
+        SubscriptionItem::retrieve($stripeSubscriptionItemId)->delete();
     }
 }

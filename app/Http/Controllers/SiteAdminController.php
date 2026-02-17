@@ -1747,6 +1747,17 @@ class SiteAdminController extends Controller
         $stripeKey = env('STRIPE_KEY');
         $stripeSecret = env('STRIPE_SECRET');
         $hasKeys = !empty($stripeKey) && !empty($stripeSecret);
+
+        // Diagnostics to help debug why keys might not be found on staging
+        $diagnostics = [
+            'env_stripe_key_set' => !empty($stripeKey),
+            'env_stripe_secret_set' => !empty($stripeSecret),
+            'config_cached' => app()->configurationIsCached(),
+            'env_file_exists' => file_exists(base_path('.env')),
+            'env_file_path' => base_path('.env'),
+            'app_env' => config('app.env'),
+        ];
+        $diagnostics['suggestions'] = $this->getStripeKeyDiagnosticSuggestions($diagnostics);
         
         // Test Stripe connection by making an API call
         $connectionTest = [
@@ -1932,6 +1943,7 @@ class SiteAdminController extends Controller
                 'account_id' => $connectionTest['account_id'] ?? null,
                 'account_name' => $connectionTest['account_name'] ?? null,
                 'last_check' => now()->toDateTimeString(),
+                'diagnostics' => $diagnostics,
             ],
             'price_sync_status' => $priceSyncStatus,
             'tenants_with_stripe' => $tenantsWithStripe,
@@ -1939,6 +1951,27 @@ class SiteAdminController extends Controller
             'subscription_stats' => $subscriptionStats,
             'webhook_events' => $webhookEvents,
         ]);
+    }
+
+    /**
+     * Get diagnostic suggestions when Stripe keys are not found.
+     */
+    private function getStripeKeyDiagnosticSuggestions(array $diagnostics): array
+    {
+        $suggestions = [];
+
+        if (!$diagnostics['env_stripe_key_set'] || !$diagnostics['env_stripe_secret_set']) {
+            if (!$diagnostics['env_file_exists']) {
+                $suggestions[] = '.env file not found at ' . $diagnostics['env_file_path'] . ' — ensure .env exists (e.g. in shared dir on deploy)';
+            } elseif ($diagnostics['config_cached']) {
+                $suggestions[] = 'Config is cached. When config was cached, STRIPE_KEY/STRIPE_SECRET may not have been in .env. Run: php artisan config:clear && php artisan config:cache';
+            } else {
+                $suggestions[] = 'STRIPE_KEY and STRIPE_SECRET must be set in .env. On staging, add them to the shared .env file.';
+            }
+            $suggestions[] = 'If using a platform (Forge, Railway, etc.), add STRIPE_KEY and STRIPE_SECRET in the platform’s environment settings — they are not read from .env there.';
+        }
+
+        return $suggestions;
     }
 
     /**

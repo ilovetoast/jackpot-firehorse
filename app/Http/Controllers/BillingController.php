@@ -732,6 +732,74 @@ class BillingController extends Controller
     }
 
     /**
+     * Add storage add-on to tenant subscription.
+     * Requires tenant admin (owner or admin) role.
+     */
+    public function addStorageAddon(Request $request)
+    {
+        $request->validate([
+            'package_id' => 'required|string',
+        ]);
+
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage storage add-ons.'], 403);
+        }
+
+        try {
+            $storageInfo = $this->billingService->addStorageAddon($tenant, $request->package_id);
+
+            return response()->json([
+                'message' => 'Storage add-on added successfully.',
+                'storage' => $storageInfo,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Remove storage add-on from tenant subscription.
+     * Requires tenant admin (owner or admin) role.
+     */
+    public function removeStorageAddon(Request $request)
+    {
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage storage add-ons.'], 403);
+        }
+
+        try {
+            $storageInfo = $this->billingService->removeStorageAddon($tenant);
+
+            return response()->json([
+                'message' => 'Storage add-on removed successfully.',
+                'storage' => $storageInfo,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Handle successful checkout redirect.
      */
     public function success()

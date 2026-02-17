@@ -190,12 +190,16 @@ class PlanService
 
     /**
      * Get maximum storage in bytes.
+     * Includes base plan limit plus any storage add-on.
      */
     public function getMaxStorage(Tenant $tenant): int
     {
         $limits = $this->getPlanLimits($tenant);
+        $basePlanLimitMb = $limits['max_storage_mb'] ?? 0;
+        $addonMb = (int) ($tenant->storage_addon_mb ?? 0);
+        $effectiveLimitMb = $basePlanLimitMb + $addonMb;
 
-        return $limits['max_storage_mb'] * 1024 * 1024; // Convert MB to bytes
+        return $effectiveLimitMb * 1024 * 1024; // Convert MB to bytes
     }
 
     /**
@@ -222,11 +226,6 @@ class PlanService
         $maxStorage = $this->getMaxStorage($tenant);
         $currentUsage = $this->getCurrentStorageUsage($tenant);
 
-        // Handle unlimited plans (very large numbers)
-        if ($maxStorage >= 999999 * 1024 * 1024) {
-            return 0.0; // Unlimited
-        }
-
         if ($maxStorage === 0) {
             return 100.0; // No storage allowed
         }
@@ -242,16 +241,12 @@ class PlanService
         $maxStorage = $this->getMaxStorage($tenant);
         $currentUsage = $this->getCurrentStorageUsage($tenant);
 
-        // Handle unlimited plans (very large numbers)
-        if ($maxStorage >= 999999 * 1024 * 1024) {
-            return true; // Unlimited
-        }
-
         return ($currentUsage + $fileSizeBytes) <= $maxStorage;
     }
 
     /**
      * Get storage usage information for display.
+     * All plans have defined storage limits; is_unlimited is always false.
      */
     public function getStorageInfo(Tenant $tenant): array
     {
@@ -259,7 +254,8 @@ class PlanService
         $currentUsage = $this->getCurrentStorageUsage($tenant);
         $usagePercentage = $this->getStorageUsagePercentage($tenant);
 
-        $isUnlimited = $maxStorage >= 999999 * 1024 * 1024;
+        $addonStorageMb = (int) ($tenant->storage_addon_mb ?? 0);
+        $hasStorageAddon = $addonStorageMb > 0;
 
         return [
             'current_usage_bytes' => $currentUsage,
@@ -267,11 +263,13 @@ class PlanService
             'current_usage_mb' => round($currentUsage / 1024 / 1024, 2),
             'max_storage_mb' => round($maxStorage / 1024 / 1024, 2),
             'usage_percentage' => round($usagePercentage, 2),
-            'remaining_bytes' => $isUnlimited ? PHP_INT_MAX : max(0, $maxStorage - $currentUsage),
-            'remaining_mb' => $isUnlimited ? PHP_INT_MAX : round(max(0, $maxStorage - $currentUsage) / 1024 / 1024, 2),
-            'is_unlimited' => $isUnlimited,
-            'is_near_limit' => !$isUnlimited && $usagePercentage >= 80,
-            'is_at_limit' => !$isUnlimited && $usagePercentage >= 95,
+            'remaining_bytes' => max(0, $maxStorage - $currentUsage),
+            'remaining_mb' => round(max(0, $maxStorage - $currentUsage) / 1024 / 1024, 2),
+            'is_unlimited' => false,
+            'is_near_limit' => $usagePercentage >= 80,
+            'is_at_limit' => $usagePercentage >= 95,
+            'addon_storage_mb' => $addonStorageMb,
+            'has_storage_addon' => $hasStorageAddon,
         ];
     }
 

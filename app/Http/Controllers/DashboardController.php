@@ -755,7 +755,7 @@ class DashboardController extends Controller
                     'value' => $storageMB,
                     'change' => $storageChange,
                     'is_positive' => $storageChange >= 0,
-                    'limit' => $maxStorageMB, // null or number (999999 = unlimited)
+                    'limit' => $maxStorageMB, // Defined limit in MB (all plans have finite storage)
                 ],
                 'download_links' => [
                     'value' => $downloadLinksThisMonth, // Current month download links (Download model)

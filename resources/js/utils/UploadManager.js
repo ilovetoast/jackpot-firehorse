@@ -547,6 +547,28 @@ class UploadManager {
                 await this.performMultipartUpload(clientReference, [])
             }
         } catch (error) {
+            // Storage limit exceeded: store full payload for inline upgrade modal
+            const responseData = error.response?.data
+            if (responseData?.type === 'storage_limit_exceeded') {
+                upload.status = 'failed'
+                upload.error = 'Storage limit exceeded. Add more storage to continue.'
+                upload.errorInfo = {
+                    type: 'storage_limit_exceeded',
+                    ...responseData,
+                }
+                upload.storageLimitExceeded = {
+                    current_usage_mb: responseData.current_usage_mb,
+                    max_storage_mb: responseData.max_storage_mb,
+                    addon_packages: responseData.addon_packages || [],
+                }
+                upload.lastUpdatedAt = Date.now()
+                this.activeUploads.delete(clientReference)
+                this.stopActivityUpdates(clientReference)
+                this.persistToStorage()
+                this.notifyListeners()
+                return
+            }
+
             // Phase 2.5: Classify error and send diagnostics
             const httpStatus = error.response?.status || null
             const classifiedError = classifyUploadError(error, {

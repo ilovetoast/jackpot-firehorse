@@ -59,7 +59,7 @@ return [
         'limits' => [
             'max_brands' => 3,
             'max_categories' => 2,
-            'max_storage_mb' => 1024, // 1GB
+            'max_storage_mb' => 5120, // 5 GB
             'max_upload_size_mb' => 50,
             'max_users' => 5,
             'max_downloads_per_month' => 200,
@@ -102,7 +102,7 @@ return [
             'max_brands' => 5, // Unlimited
             'max_categories' => 5, // Unlimited
             'max_private_categories' => 5,
-            'max_storage_mb' => 999999, // 10GB
+            'max_storage_mb' => 256000, // 250 GB
             'max_upload_size_mb' => 999999,
             'max_users' => 20,
             'max_downloads_per_month' => 1000,
@@ -149,8 +149,8 @@ return [
             'max_brands' => 25, // Unlimited
             'max_categories' => 10, // Unlimited
             'max_private_categories' => 10,
-            'max_storage_mb' => 999999, // Unlimited
-            'max_upload_size_mb' => 999999, // Unlimited
+            'max_storage_mb' => 2097152, // 2 TB included
+            'max_upload_size_mb' => 999999, // Unlimited per-file
             'max_users' => 200, // Unlimited
             'max_downloads_per_month' => 999999, // Unlimited
             'max_download_assets' => 2000,
@@ -205,7 +205,7 @@ return [
             'max_brands' => 25,
             'max_categories' => 10,
             'max_private_categories' => 10,
-            'max_storage_mb' => 999999,
+            'max_storage_mb' => 2097152, // 2 TB (same as enterprise)
             'max_upload_size_mb' => 999999,
             'max_users' => 200,
             'max_downloads_per_month' => 999999,

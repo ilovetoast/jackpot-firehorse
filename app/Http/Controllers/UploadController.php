@@ -126,7 +126,9 @@ class UploadController extends Controller
                 'expires_at' => $result['expires_at'],
             ], 201);
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
-            // Phase 2.5 Step 2: Use normalized error response
+            if ($e->limitType === 'storage') {
+                return UploadErrorResponse::storageLimitExceeded($tenant);
+            }
             return UploadErrorResponse::fromException($e, 403, [
                 'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
                 'file_type' => UploadErrorResponse::extractFileType($validated['file_name'] ?? null),
@@ -546,8 +548,14 @@ class UploadController extends Controller
                 'batch_reference' => $batchReference, // Return batch reference for correlation
                 'uploads' => $results,
             ], 201);
+        } catch (\App\Exceptions\PlanLimitExceededException $e) {
+            if ($e->limitType === 'storage') {
+                return UploadErrorResponse::storageLimitExceeded($tenant);
+            }
+            return UploadErrorResponse::fromException($e, 403, [
+                'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
+            ]);
         } catch (\Exception $e) {
-            Log::error('Failed to initiate batch upload', [
                 'tenant_id' => $tenant->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),

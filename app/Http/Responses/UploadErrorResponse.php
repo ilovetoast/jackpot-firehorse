@@ -293,6 +293,26 @@ class UploadErrorResponse
     }
 
     /**
+     * Return storage limit exceeded response for inline upgrade flow.
+     * Used when PlanLimitExceededException is thrown with limitType 'storage'.
+     *
+     * @param \App\Models\Tenant $tenant
+     * @return JsonResponse
+     */
+    public static function storageLimitExceeded($tenant): JsonResponse
+    {
+        $planService = app(\App\Services\PlanService::class);
+        $storageInfo = $planService->getStorageInfo($tenant);
+
+        return response()->json([
+            'type' => 'storage_limit_exceeded',
+            'current_usage_mb' => $storageInfo['current_usage_mb'],
+            'max_storage_mb' => $storageInfo['max_storage_mb'],
+            'addon_packages' => config('storage_addons.packages', []),
+        ], 403);
+    }
+
+    /**
      * Map error code to category
      * 
      * @param string $errorCode

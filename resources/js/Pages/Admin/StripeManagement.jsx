@@ -125,6 +125,43 @@ export default function StripeManagement({
                                             <p className="text-sm text-red-800"><strong>Error:</strong> {stripe_status.error}</p>
                                         </div>
                                     )}
+                                    {!stripe_status?.connected && stripe_status?.diagnostics && (
+                                        <div className="rounded-md bg-amber-50 border border-amber-200 p-4">
+                                            <h3 className="text-sm font-semibold text-amber-800 mb-2">Diagnostics</h3>
+                                            <dl className="space-y-1 text-xs text-amber-900">
+                                                <div className="flex gap-2">
+                                                    <dt className="font-medium">STRIPE_KEY:</dt>
+                                                    <dd>{stripe_status.diagnostics.env_stripe_key_set ? '✓ Set' : '✗ Not set'}</dd>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <dt className="font-medium">STRIPE_SECRET:</dt>
+                                                    <dd>{stripe_status.diagnostics.env_stripe_secret_set ? '✓ Set' : '✗ Not set'}</dd>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <dt className="font-medium">Config cached:</dt>
+                                                    <dd>{stripe_status.diagnostics.config_cached ? 'Yes' : 'No'}</dd>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <dt className="font-medium">.env exists:</dt>
+                                                    <dd>{stripe_status.diagnostics.env_file_exists ? 'Yes' : 'No'}</dd>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <dt className="font-medium">APP_ENV:</dt>
+                                                    <dd>{stripe_status.diagnostics.app_env || '—'}</dd>
+                                                </div>
+                                            </dl>
+                                            {stripe_status.diagnostics.suggestions?.length > 0 && (
+                                                <div className="mt-3 pt-3 border-t border-amber-200">
+                                                    <p className="text-xs font-medium text-amber-800 mb-1">Suggestions:</p>
+                                                    <ul className="list-disc list-inside space-y-1 text-xs text-amber-900">
+                                                        {stripe_status.diagnostics.suggestions.map((s, i) => (
+                                                            <li key={i}>{s}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

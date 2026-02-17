@@ -121,8 +121,8 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
     }
 
     const formatStorage = (mb) => {
-        if (mb === Number.MAX_SAFE_INTEGER || mb === 2147483647 || mb === 999999) {
-            return 'Unlimited'
+        if (mb >= 1024 * 1024) {
+            return `${(mb / 1024 / 1024).toFixed(0)} TB`
         }
         if (mb >= 1024) {
             return `${(mb / 1024).toFixed(1)} GB`
@@ -511,7 +511,16 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             </div>
                                             <div className="flex justify-between">
                                                 <span>Storage:</span>
-                                                <span className="font-medium text-gray-900">{formatStorage(plan.limits.max_storage_mb)}</span>
+                                                <span className="font-medium text-gray-900">
+                                                    {plan.id === 'enterprise' ? (
+                                                        <span>
+                                                            <span>2 TB included</span>
+                                                            <span className="block text-xs text-gray-500 font-normal">Additional storage available</span>
+                                                        </span>
+                                                    ) : (
+                                                        formatStorage(plan.limits.max_storage_mb)
+                                                    )}
+                                                </span>
                                             </div>
                                             <div className="flex justify-between">
                                                 <span>Download Links:</span>

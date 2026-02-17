@@ -33,6 +33,7 @@ import { areAllRequiredFieldsSatisfied } from '../utils/metadataValidation' // P
 import ApprovalNotice from './Upload/ApprovalNotice' // TASK 1: Approval notice for contributors
 import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh' // CSRF token refresh for 419 errors
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
+import StorageUpgradeModal from './StorageUpgradeModal'
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
@@ -269,6 +270,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // TASK 1: Track approval info from finalize response (UI-only, read-only)
     const [approvalInfo, setApprovalInfo] = useState({ approvalRequired: false, pendingMetadataCount: 0 })
+
+    // Storage upgrade modal: when upload fails due to storage limit, show inline upgrade modal
+    const [storageUpgradeModalFile, setStorageUpgradeModalFile] = useState(null)
 
     // ═══════════════════════════════════════════════════════════════
     // CLEAN UPLOADER V2 — TEMPORARILY DISABLED LEGACY
@@ -638,18 +642,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 // Phase 2.5 Step 1: Extract error message, then normalize in catch block
                 const contentType = response.headers.get('content-type') || ''
                 let errorMessage = `Upload initiation failed: ${response.status} ${response.statusText}`
-                
-                if (contentType.includes('text/html')) {
-                    // Server returned HTML error page (e.g., 419 Page Expired)
-                    if (response.status === 419) {
-                        errorMessage = 'Session expired. Please refresh the page and try again.'
-                    } else {
-                        errorMessage = `Server error (${response.status}). Please refresh the page and try again.`
-                    }
-                } else {
-                    // Try to parse JSON error response
+                let errorData = null
+
+                if (!contentType.includes('text/html')) {
                     try {
-                        const errorData = await response.json()
+                        errorData = await response.json()
                         errorMessage = errorData.message || errorData.error || errorMessage
                     } catch {
                         // Not JSON, try text but limit length to prevent HTML dump
@@ -658,6 +655,33 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             errorMessage = errorText
                         }
                     }
+                } else {
+                    if (response.status === 419) {
+                        errorMessage = 'Session expired. Please refresh the page and try again.'
+                    } else {
+                        errorMessage = `Server error (${response.status}). Please refresh the page and try again.`
+                    }
+                }
+
+                // Storage limit exceeded: surface for inline upgrade modal (do not throw generic error)
+                if (errorData?.type === 'storage_limit_exceeded') {
+                    const storageData = {
+                        current_usage_mb: errorData.current_usage_mb,
+                        max_storage_mb: errorData.max_storage_mb,
+                        addon_packages: errorData.addon_packages || [],
+                    }
+                    setV2Files((prev) => prev.map((f) => (
+                        f.clientId === clientId
+                            ? {
+                                ...f,
+                                status: 'failed',
+                                error: { message: 'Storage limit exceeded. Add more storage to continue.' },
+                                storageLimitExceeded: storageData,
+                            }
+                            : f
+                    )))
+                    setStorageUpgradeModalFile({ clientId, file, storageLimitExceeded: storageData })
+                    return
                 }
                 
                 // Create error with Response attached for normalization
@@ -4583,6 +4607,34 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             </div>
         </div>
         )}
+
+        {/* Storage upgrade modal — inline add-on purchase when upload fails due to limit */}
+        {storageUpgradeModalFile && (() => {
+            const storageData = storageUpgradeModalFile.storageLimitExceeded
+            return (
+                <StorageUpgradeModal
+                    open={!!storageUpgradeModalFile}
+                    onClose={() => setStorageUpgradeModalFile(null)}
+                    currentUsageMb={storageData?.current_usage_mb ?? 0}
+                    maxStorageMb={storageData?.max_storage_mb ?? 0}
+                    addonPackages={storageData?.addon_packages ?? []}
+                    onSuccess={() => {
+                        // Storage info refreshed server-side; no local state to update
+                    }}
+                    onRetry={() => {
+                        if (storageUpgradeModalFile?.clientId && storageUpgradeModalFile?.file) {
+                            setV2Files((prev) => prev.map((f) => (
+                                f.clientId === storageUpgradeModalFile.clientId
+                                    ? { ...f, status: 'uploading', error: null, storageLimitExceeded: null }
+                                    : f
+                            )))
+                            const entry = { clientId: storageUpgradeModalFile.clientId, file: storageUpgradeModalFile.file }
+                            uploadSingleFile(entry)
+                        }
+                    }}
+                />
+            )
+        })()}
         </>
     )
 }

@@ -39,6 +39,9 @@ class Tenant extends Model
         'activated_client_count', // Phase AG-4: Tier progress tracking
         'referred_by_agency_id', // Phase AG-10: Referral attribution
         'referral_source', // Phase AG-10: Referral source tracking
+        'storage_addon_mb', // Storage add-on: additional MB from purchased add-on
+        'storage_addon_stripe_price_id', // Stripe price ID for add-on subscription item
+        'storage_addon_stripe_subscription_item_id', // Stripe subscription item ID
     ];
 
     /**

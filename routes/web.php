@@ -358,6 +358,8 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/billing/invoices/{id}/download', [\App\Http\Controllers\BillingController::class, 'downloadInvoice'])->name('billing.invoices.download');
     Route::post('/billing/cancel', [\App\Http\Controllers\BillingController::class, 'cancel'])->name('billing.cancel');
     Route::post('/billing/resume', [\App\Http\Controllers\BillingController::class, 'resume'])->name('billing.resume');
+    Route::post('/billing/storage-addon', [\App\Http\Controllers\BillingController::class, 'addStorageAddon'])->name('billing.storage-addon');
+    Route::delete('/billing/storage-addon', [\App\Http\Controllers\BillingController::class, 'removeStorageAddon'])->name('billing.storage-addon.remove');
     Route::get('/billing/success', [\App\Http\Controllers\BillingController::class, 'success'])->name('billing.success');
     Route::get('/billing/portal', [\App\Http\Controllers\BillingController::class, 'customerPortal'])->name('billing.portal');
     
