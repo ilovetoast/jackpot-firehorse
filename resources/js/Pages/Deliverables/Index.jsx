@@ -32,7 +32,11 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
-    const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState(false)
+    const [mobileContentTranslateX, setMobileContentTranslateX] = useState(0)
+    const [mobileContentAnimating, setMobileContentAnimating] = useState(false)
+    const mobileContentAnimationTimeoutRef = useRef(null)
+    const mobileTouchStartRef = useRef(null)
+    const mobileTouchDeltaRef = useRef({ x: 0, y: 0 })
     
     // FINAL FIX: Remount key to force page remount after finalize
     const [remountKey, setRemountKey] = useState(0)
@@ -49,6 +53,14 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
+
+    useEffect(() => {
+        return () => {
+            if (mobileContentAnimationTimeoutRef.current) {
+                clearTimeout(mobileContentAnimationTimeoutRef.current)
+            }
+        }
+    }, [])
 
     useEffect(() => {
         setAssetsList(Array.isArray(assets) ? assets : [])
@@ -322,6 +334,162 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const activeBgColor = workspaceAccentColor
     const activeTextColor = getContrastTextColor(workspaceAccentColor)
     const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
+
+    const visibleMobileCategories = useMemo(() => (
+        categories.filter((category) => !(
+            category.is_hidden === true ||
+            category.is_hidden === 1 ||
+            category.is_hidden === '1' ||
+            category.is_hidden === 'true'
+        ))
+    ), [categories])
+
+    const mobileCategoryTabs = useMemo(() => {
+        const tabs = []
+
+        if (show_all_button) {
+            tabs.push({
+                key: 'all',
+                label: 'All',
+                count: total_asset_count > 0 ? total_asset_count : null,
+                category: null,
+                categoryId: null,
+            })
+        }
+
+        visibleMobileCategories.forEach((category) => {
+            tabs.push({
+                key: String(category.id ?? `template-${category.slug}-${category.asset_type}`),
+                label: category.name,
+                count: category.asset_count > 0 ? category.asset_count : null,
+                category,
+                categoryId: category.id ?? null,
+            })
+        })
+
+        return tabs
+    }, [show_all_button, total_asset_count, visibleMobileCategories])
+
+    const activeMobileCategoryTabIndex = useMemo(() => (
+        mobileCategoryTabs.findIndex((tab) => {
+            if (tab.categoryId == null && selectedCategoryId == null) {
+                return true
+            }
+
+            if (tab.categoryId == null || selectedCategoryId == null) {
+                return false
+            }
+
+            return String(tab.categoryId) === String(selectedCategoryId)
+        })
+    ), [mobileCategoryTabs, selectedCategoryId])
+
+    const safeActiveMobileCategoryTabIndex = activeMobileCategoryTabIndex >= 0
+        ? activeMobileCategoryTabIndex
+        : (mobileCategoryTabs.length > 0 ? 0 : -1)
+
+    const animateMobileContentSwipe = useCallback((direction) => {
+        if (!direction) {
+            return
+        }
+
+        if (mobileContentAnimationTimeoutRef.current) {
+            clearTimeout(mobileContentAnimationTimeoutRef.current)
+        }
+
+        setMobileContentAnimating(false)
+        setMobileContentTranslateX(direction > 0 ? 32 : -32)
+
+        if (typeof window !== 'undefined') {
+            window.requestAnimationFrame(() => {
+                setMobileContentAnimating(true)
+                setMobileContentTranslateX(0)
+            })
+        }
+
+        mobileContentAnimationTimeoutRef.current = setTimeout(() => {
+            setMobileContentAnimating(false)
+        }, 220)
+    }, [])
+
+    const handleMobileCategoryTabChange = useCallback((targetIndex) => {
+        if (targetIndex < 0 || targetIndex >= mobileCategoryTabs.length) {
+            return
+        }
+
+        const currentIndex = activeMobileCategoryTabIndex
+        if (currentIndex >= 0 && currentIndex === targetIndex) {
+            return
+        }
+
+        const fallbackIndex = safeActiveMobileCategoryTabIndex
+        const baseIndex = currentIndex >= 0 ? currentIndex : fallbackIndex
+        const direction = targetIndex > baseIndex ? 1 : -1
+        animateMobileContentSwipe(direction)
+
+        const targetTab = mobileCategoryTabs[targetIndex]
+        if (!targetTab) {
+            return
+        }
+
+        handleCategorySelect(targetTab.category)
+    }, [mobileCategoryTabs, activeMobileCategoryTabIndex, safeActiveMobileCategoryTabIndex, animateMobileContentSwipe, handleCategorySelect])
+
+    const handleMobileContentTouchStart = useCallback((event) => {
+        if (mobileCategoryTabs.length <= 1) {
+            return
+        }
+
+        const touch = event.changedTouches?.[0]
+        if (!touch) {
+            return
+        }
+
+        mobileTouchStartRef.current = {
+            x: touch.clientX,
+            y: touch.clientY,
+        }
+        mobileTouchDeltaRef.current = { x: 0, y: 0 }
+    }, [mobileCategoryTabs.length])
+
+    const handleMobileContentTouchMove = useCallback((event) => {
+        if (!mobileTouchStartRef.current) {
+            return
+        }
+
+        const touch = event.changedTouches?.[0]
+        if (!touch) {
+            return
+        }
+
+        mobileTouchDeltaRef.current = {
+            x: touch.clientX - mobileTouchStartRef.current.x,
+            y: touch.clientY - mobileTouchStartRef.current.y,
+        }
+    }, [])
+
+    const handleMobileContentTouchEnd = useCallback(() => {
+        if (!mobileTouchStartRef.current || mobileCategoryTabs.length <= 1 || safeActiveMobileCategoryTabIndex < 0) {
+            mobileTouchStartRef.current = null
+            mobileTouchDeltaRef.current = { x: 0, y: 0 }
+            return
+        }
+
+        const { x, y } = mobileTouchDeltaRef.current
+        mobileTouchStartRef.current = null
+        mobileTouchDeltaRef.current = { x: 0, y: 0 }
+
+        const isHorizontalSwipe = Math.abs(x) >= 60 && Math.abs(x) > Math.abs(y) * 1.2
+        if (!isHorizontalSwipe) {
+            return
+        }
+
+        const nextIndex = x < 0
+            ? safeActiveMobileCategoryTabIndex + 1
+            : safeActiveMobileCategoryTabIndex - 1
+
+        handleMobileCategoryTabChange(nextIndex)
+    }, [mobileCategoryTabs.length, safeActiveMobileCategoryTabIndex, handleMobileCategoryTabChange])
     
     // Key only by remountKey so category changes do NOT remount (avoids double flash).
     // Assets does not use a category-dependent key; matching that here fixes Executions flashing twice.
@@ -605,50 +773,39 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                     </div>
                 </div>
 
-                {/* Mobile: Categories slide-out (visible when lg:hidden) */}
-                {mobileCategoriesOpen && (
-                    <>
-                        <div className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm lg:hidden" aria-hidden="true" onClick={() => setMobileCategoriesOpen(false)} />
-                        <div className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] flex flex-col shadow-xl lg:hidden" style={{ backgroundColor: sidebarColor, top: '5rem' }} role="dialog" aria-modal="true" aria-label="Categories">
-                            <div className="flex items-center justify-between h-14 px-4 border-b shrink-0" style={{ borderColor: textColor === '#ffffff' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)' }}>
-                                <span className="text-sm font-semibold" style={{ color: textColor }}>Categories</span>
-                                <button type="button" onClick={() => setMobileCategoriesOpen(false)} className="rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/50" style={{ color: textColor }} aria-label="Close categories">
-                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                </button>
-                            </div>
-                            <div className="flex-1 overflow-y-auto py-4 px-2">
-                                {auth?.user && (
-                                    <div className="px-2 py-2 mb-3">
-                                        <AddAssetButton defaultAssetType="deliverable" className="w-full" onClick={() => { handleOpenUploadDialog(); setMobileCategoriesOpen(false) }} />
-                                    </div>
-                                )}
-                                <div className="space-y-0.5">
-                                    {show_all_button && (
-                                        <button onClick={() => { handleCategorySelect(null); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === null ? activeBgColor : 'transparent', color: selectedCategoryId === null ? activeTextColor : textColor }}>
-                                            <TagIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId === null ? activeTextColor : textColor }} /><span className="flex-1">All</span>
-                                            {total_asset_count > 0 && <span className="text-xs opacity-50">{total_asset_count}</span>}
-                                        </button>
-                                    )}
-                                    {categories.length > 0 && categories.filter(c => !(c.is_hidden === true || c.is_hidden === 1 || c.is_hidden === '1' || c.is_hidden === 'true')).map((category) => (
-                                        <button key={category.id || `template-${category.slug}-${category.asset_type}`} onClick={() => { handleCategorySelect(category); setMobileCategoriesOpen(false) }} className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left" style={{ backgroundColor: selectedCategoryId === category.id ? activeBgColor : 'transparent', color: selectedCategoryId === category.id ? activeTextColor : textColor }}>
-                                            <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId === category.id ? activeTextColor : textColor }} /><span className="flex-1">{category.name}</span>
-                                            {category.asset_count > 0 && <span className="text-xs opacity-50">{category.asset_count}</span>}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </>
-                )}
-
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative flex flex-col">
-                    <div className="lg:hidden flex items-center justify-start gap-2 py-2 px-4 sm:px-6 border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0 sticky top-0 z-20">
-                        <button type="button" onClick={() => setMobileCategoriesOpen(true)} className="inline-flex max-w-full items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg bg-white border border-gray-300 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
-                            <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-                            <span>Categories</span>
-                            {selectedCategoryId != null && categories.find(c => c.id === selectedCategoryId) && <span className="text-gray-500 truncate max-w-[140px]">— {categories.find(c => c.id === selectedCategoryId).name}</span>}
-                        </button>
+                    <div className="lg:hidden border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0 sticky top-0 z-20">
+                        <div className="px-4 sm:px-6 py-2">
+                            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                                {mobileCategoryTabs.length > 0 ? mobileCategoryTabs.map((tab, index) => {
+                                    const isActive = index === safeActiveMobileCategoryTabIndex
+                                    return (
+                                        <button
+                                            key={tab.key}
+                                            type="button"
+                                            onClick={() => handleMobileCategoryTabChange(index)}
+                                            className="inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+                                            style={isActive ? {
+                                                backgroundColor: activeBgColor,
+                                                borderColor: activeBgColor,
+                                                color: activeTextColor,
+                                            } : {
+                                                backgroundColor: '#ffffff',
+                                                borderColor: '#d1d5db',
+                                                color: '#374151',
+                                            }}
+                                            aria-pressed={isActive}
+                                        >
+                                            <span>{tab.label}</span>
+                                            {tab.count ? <span className="text-xs opacity-80">{tab.count}</span> : null}
+                                        </button>
+                                    )
+                                }) : (
+                                    <span className="px-1 text-sm text-gray-500">No execution categories yet</span>
+                                )}
+                            </div>
+                        </div>
                     </div>
                     <div 
                         className={`flex-1 min-h-0 overflow-y-auto transition-[padding-right] duration-300 ease-in-out relative ${bucketAssetIds.length > 0 ? 'pb-24' : ''}`}
@@ -657,12 +814,17 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             // CSS Grid recalculates columns immediately on width change
                             // By delaying padding change until after animation, we get one controlled snap instead of dropping items mid-animation
                             // Use isDrawerOpen (not activeAsset) to prevent layout changes on asset swaps
-                            paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0' 
+                            paddingRight: (isDrawerOpen && !isDrawerAnimating) ? '480px' : '0',
+                            touchAction: 'pan-y',
                         }}
                         onDragOver={canUpload ? handleDragOver : undefined}
                         onDragEnter={canUpload ? handleDragEnter : undefined}
                         onDragLeave={canUpload ? handleDragLeave : undefined}
                         onDrop={canUpload ? handleDrop : undefined}
+                        onTouchStart={handleMobileContentTouchStart}
+                        onTouchMove={handleMobileContentTouchMove}
+                        onTouchEnd={handleMobileContentTouchEnd}
+                        onTouchCancel={handleMobileContentTouchEnd}
                     >
                         {/* Drag and drop overlay */}
                         {isDraggingOver && (() => {
@@ -689,7 +851,14 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 </div>
                             )
                         })()}
-                        <div className="py-6 px-4 sm:px-6 lg:px-8">
+                        <div
+                            className="py-6 px-4 sm:px-6 lg:px-8"
+                            style={{
+                                transform: `translateX(${mobileContentTranslateX}px)`,
+                                transition: mobileContentAnimating ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
+                                willChange: mobileContentAnimating ? 'transform' : 'auto',
+                            }}
+                        >
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Matches Assets/Index behavior - toolbar always visible, even when no assets */}
                         <div className="mb-8">
