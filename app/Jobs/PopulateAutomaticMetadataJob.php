@@ -42,10 +42,13 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
 
     /**
      * The number of times the job may be attempted.
+     * Higher than default because we use release() when thumbnails aren't ready —
+     * each release counts as an attempt. Slow assets (large TIFFs, etc.) may need
+     * several minutes for thumbnail generation.
      *
      * @var int
      */
-    public $tries = 3;
+    public $tries = 10;
 
     /**
      * The number of seconds to wait before retrying the job.
@@ -114,32 +117,49 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
         //
         // ARCHITECTURAL DECISION: Option A - "Retry until ready"
         // This job uses release() to reschedule itself when thumbnails are not ready.
-        // This model is appropriate when:
-        // - Thumbnails are guaranteed to complete eventually
-        // - We want work to resume automatically without manual intervention
-        // - The job chain is self-healing (retries until dependencies are met)
-        //
-        // NOTE: AITaggingJob uses a different model (skip + mark as skipped).
-        // Both models are valid, but consider standardizing on Option A long-term
-        // for consistency across all image-derived jobs.
-        // See /docs/PIPELINE_SEQUENCING.md for architectural details.
+        // NOTE: Each release() increments attempts — we cap retries to avoid MaxAttemptsExceededException.
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            // Thumbnails failed or skipped — never retry, allow chain to continue
+            if ($asset->thumbnail_status === ThumbnailStatus::FAILED || $asset->thumbnail_status === ThumbnailStatus::SKIPPED) {
+                PipelineLogger::warning('[PopulateAutomaticMetadataJob] EARLY_RETURN', [
+                    'asset_id' => $asset->id,
+                    'reason' => 'thumbnails_failed_or_skipped',
+                    'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                ]);
+                Log::info('[PopulateAutomaticMetadataJob] Skipping - thumbnails failed or skipped (no retry)', [
+                    'asset_id' => $asset->id,
+                    'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                ]);
+                return;
+            }
+
+            // Approaching max attempts — skip instead of release to avoid MaxAttemptsExceededException
+            // Allows chain to continue; dominant colors will be missing for this asset
+            if ($this->attempts() >= $this->tries - 1) {
+                PipelineLogger::warning('[PopulateAutomaticMetadataJob] EARLY_RETURN', [
+                    'asset_id' => $asset->id,
+                    'reason' => 'thumbnails_not_ready_after_retries',
+                    'attempts' => $this->attempts(),
+                    'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                ]);
+                Log::warning('[PopulateAutomaticMetadataJob] Thumbnails still not ready after retries - skipping to unblock chain', [
+                    'asset_id' => $asset->id,
+                    'attempts' => $this->attempts(),
+                    'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+                ]);
+                return;
+            }
+
             PipelineLogger::warning('[PopulateAutomaticMetadataJob] EARLY_RETURN', [
                 'asset_id' => $asset->id,
                 'reason' => 'thumbnails_not_ready',
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
-            PipelineLogger::warning('DOMINANT COLOR: SKIPPED', [
-                'asset_id' => $asset->id,
-                'reason' => 'thumbnails_not_ready',
-            ]);
             Log::warning('[PopulateAutomaticMetadataJob] Thumbnails not ready - releasing job for retry', [
                 'asset_id' => $asset->id,
+                'attempts' => $this->attempts(),
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             ]);
-            // Reschedule job with delay to retry after thumbnails complete
-            // This is retry-safe: job will check again on next attempt
-            // Job will automatically resume when thumbnails are ready
             $this->release(60); // Wait 60 seconds before retry
             return;
         }

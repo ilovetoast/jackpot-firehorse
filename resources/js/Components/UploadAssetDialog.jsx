@@ -21,7 +21,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
-import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, CloudArrowUpIcon, ArrowPathIcon, CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
 import UploadTray from './UploadTray'
@@ -4134,7 +4134,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
                                         title="Minimize to tray — continue browsing while uploads run"
                                     >
-                                        <ChevronDownIcon className="h-5 w-5" />
+                                        <ChevronRightIcon className="h-5 w-5" />
                                     </button>
                                 )}
                                 {!hasUploadingItems && batchStatus !== 'finalizing' && (
