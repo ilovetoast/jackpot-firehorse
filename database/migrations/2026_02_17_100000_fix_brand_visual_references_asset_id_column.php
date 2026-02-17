@@ -33,10 +33,18 @@ return new class extends Migration
             return;
         }
 
-        Schema::table('brand_visual_references', function (Blueprint $table) {
-            $table->dropForeign(['asset_id']);
-        });
+        $fkExists = DB::selectOne(
+            "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'brand_visual_references' AND COLUMN_NAME = 'asset_id' AND REFERENCED_TABLE_NAME = 'assets'",
+            [$dbName]
+        );
+        if ($fkExists) {
+            Schema::table('brand_visual_references', function (Blueprint $table) {
+                $table->dropForeign(['asset_id']);
+            });
+        }
+
         DB::statement('ALTER TABLE brand_visual_references MODIFY asset_id CHAR(36) NULL');
+
         Schema::table('brand_visual_references', function (Blueprint $table) {
             $table->foreign('asset_id')->references('id')->on('assets')->onDelete('set null');
         });
