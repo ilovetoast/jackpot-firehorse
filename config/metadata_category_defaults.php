@@ -86,12 +86,24 @@ return [
         'radio_type' => [
             'radio' => ['enabled' => true, 'is_primary' => true],
         ],
+        // Type fields for categories that may not exist in all tenants (suppress for others)
+        'template_type' => [
+            'templates' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'audio_type' => [
+            'audio' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'model_3d_type' => [
+            'model-3d' => ['enabled' => true, 'is_primary' => true],
+        ],
     ],
 
     /*
      * Fields restricted to specific slugs. Empty = no type-based auto-enabling.
+     * Type fields listed here are HIDDEN for categories not in their category_config.
+     * Ensures e.g. packaging shows only packaging_type, not template_type/audio_type/model_3d_type.
      */
-    'restrict_fields' => [],
+    'restrict_fields' => ['template_type', 'audio_type', 'model_3d_type'],
 
     /*
      * Dominant color fields: special defaults for image (asset) categories.

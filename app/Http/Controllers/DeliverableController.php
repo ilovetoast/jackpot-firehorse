@@ -15,6 +15,7 @@ use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemCategoryService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -38,8 +39,9 @@ class DeliverableController extends Controller
 
     /**
      * Display a listing of deliverables.
+     * Returns JsonResponse for format=json (pickers/modals); otherwise Inertia Response.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -603,6 +605,16 @@ class DeliverableController extends Controller
 
         // Keep collection for availableValues block
         $assets = collect($mappedAssets);
+
+        // format=json: return plain JSON for pickers/modals (e.g. Brand DNA visual reference selector)
+        if ($request->get('format') === 'json') {
+            return response()->json([
+                'assets' => $mappedAssets,
+                'categories' => $allCategories->values()->all(),
+                'categories_by_type' => ['all' => $allCategories->values()->all()],
+                'next_page_url' => $nextPageUrl,
+            ]);
+        }
 
         // Phase L.5.1: Enable filters in "All Categories" view (reuse $schema resolved above for applyFilters)
         $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);

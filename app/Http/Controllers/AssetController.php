@@ -670,6 +670,7 @@ class AssetController extends Controller
                 'assets' => $mappedAssets,
                 'categories' => $allCategories->values()->all(),
                 'categories_by_type' => ['all' => $allCategories->values()->all()],
+                'next_page_url' => $nextPageUrl,
             ]);
         }
 

@@ -403,6 +403,15 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
         }).then((r) => r.json())
     }
 
+    const fetchDeliverablesForRefs = (opts) => {
+        const params = new URLSearchParams({ format: 'json' })
+        if (opts?.category) params.set('category', opts.category)
+        return fetch(`/app/deliverables?${params}`, {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        }).then((r) => r.json())
+    }
+
     useEffect(() => {
         const logo = visualReferences?.find((r) => r.type === 'logo')
         const lifestyle = visualReferences?.filter((r) => r.type === 'lifestyle_photography') ?? []
@@ -852,6 +861,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                                 value={lifestyleAssets}
                                                                 onChange={setLifestyleAssets}
                                                                 fetchAssets={fetchAssetsForRefs}
+                                                                fetchDeliverables={fetchDeliverablesForRefs}
                                                                 title="Select lifestyle photography"
                                                                 defaultCategoryLabel="Photography"
                                                                 contextCategory="photography"
@@ -865,6 +875,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                                 value={productAssets}
                                                                 onChange={setProductAssets}
                                                                 fetchAssets={fetchAssetsForRefs}
+                                                                fetchDeliverables={fetchDeliverablesForRefs}
                                                                 title="Select product photography"
                                                                 defaultCategoryLabel="Photography"
                                                                 contextCategory="photography"
@@ -878,6 +889,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                                 value={graphicsAssets}
                                                                 onChange={setGraphicsAssets}
                                                                 fetchAssets={fetchAssetsForRefs}
+                                                                fetchDeliverables={fetchDeliverablesForRefs}
                                                                 title="Select graphics / layout examples"
                                                                 defaultCategoryLabel="Graphics"
                                                                 contextCategory={null}

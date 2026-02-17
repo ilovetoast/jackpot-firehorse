@@ -10,6 +10,7 @@ export default function AssetImagePickerFieldMulti({
   value = [],
   onChange,
   fetchAssets,
+  fetchDeliverables = null,
   title = 'Select images',
   defaultCategoryLabel = 'Photography',
   contextCategory = 'photography',
@@ -101,6 +102,7 @@ export default function AssetImagePickerFieldMulti({
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         fetchAssets={fetchAssets}
+        fetchDeliverables={fetchDeliverables}
         onSelect={handleSelect}
         title={title}
         defaultCategoryLabel={defaultCategoryLabel}

@@ -991,6 +991,25 @@ class TenantMetadataVisibilityService
             return $result;
         }
 
+        // Restrict fields: only enabled for slugs listed in category_config for that field.
+        // Must run BEFORE tags_and_collection_only so e.g. template_type/audio_type/model_3d_type
+        // are hidden for packaging (only packaging_type should show).
+        if (in_array($fieldKey, $restrictFields, true)) {
+            $enabledSlugs = array_keys($categoryConfig[$fieldKey] ?? []);
+            $enabled = in_array($categorySlug, $enabledSlugs, true);
+            $settings = $categoryConfig[$fieldKey][$categorySlug] ?? [];
+            $result = [
+                'is_hidden' => !$enabled,
+                'is_upload_hidden' => !$enabled,
+                'is_filter_hidden' => !$enabled,
+                'is_primary' => $enabled ? ($settings['is_primary'] ?? null) : null,
+            ];
+            if (!$enabled) {
+                $result['is_edit_hidden'] = true;
+            }
+            return $result;
+        }
+
         // Video (and any tags_and_collection_only): system fields enabled; tenant fields limited to tags/collection
         if (in_array($categorySlug, $tagsAndCollectionOnlySlugs, true)) {
             $enabled = ($fieldScope === 'system') || in_array($fieldKey, ['tags', 'collection'], true);
@@ -999,19 +1018,6 @@ class TenantMetadataVisibilityService
                 'is_upload_hidden' => false,
                 'is_filter_hidden' => false,
                 'is_primary' => null,
-            ];
-        }
-
-        // Restrict fields: only enabled for slugs listed in category_config for that field
-        if (in_array($fieldKey, $restrictFields, true)) {
-            $enabledSlugs = array_keys($categoryConfig[$fieldKey] ?? []);
-            $enabled = in_array($categorySlug, $enabledSlugs, true);
-            $settings = $categoryConfig[$fieldKey][$categorySlug] ?? [];
-            return [
-                'is_hidden' => !$enabled,
-                'is_upload_hidden' => false,
-                'is_filter_hidden' => false,
-                'is_primary' => $settings['is_primary'] ?? null,
             ];
         }
 

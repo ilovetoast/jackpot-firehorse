@@ -33,6 +33,7 @@ export default function AssetImagePicker({
   open,
   onClose,
   fetchAssets,
+  fetchDeliverables = null, // optional: when provided with fetchAssets, shows Assets | Deliverables source toggle
   onSelect,
   title = 'Select image',
   defaultCategoryLabel = 'Logos',
@@ -48,9 +49,13 @@ export default function AssetImagePicker({
   getAssetDownloadUrl = null,
 }) {
   const isMulti = maxSelection > 1
+  const hasSourceToggle = !!(fetchAssets && fetchDeliverables)
+  const [source, setSource] = useState(() => (fetchAssets ? 'assets' : 'deliverables'))
   const [assets, setAssets] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [nextPageUrl, setNextPageUrl] = useState(null)
   const [selectedAssetId, setSelectedAssetId] = useState(null)
   const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [uploadedFile, setUploadedFile] = useState(null)
@@ -62,11 +67,12 @@ export default function AssetImagePicker({
   // When in browse mode: filter by category slug (null = all)
   const [browseCategoryFilter, setBrowseCategoryFilter] = useState(null)
 
-  const fetchAssetsRef = useRef(fetchAssets)
+  const effectiveFetch = source === 'deliverables' ? fetchDeliverables : fetchAssets
+  const fetchAssetsRef = useRef(effectiveFetch)
   const lastFetchedKeyRef = useRef(null)
   const openCountRef = useRef(0)
 
-  fetchAssetsRef.current = fetchAssets
+  fetchAssetsRef.current = effectiveFetch
 
   const contextLabel = contextCategory ? (CONTEXT_LABELS[contextCategory] ?? defaultCategoryLabel) : defaultCategoryLabel
 
@@ -79,11 +85,13 @@ export default function AssetImagePicker({
     return result.then((res) => {
       const list = res?.props?.assets ?? res?.data ?? res?.assets ?? (Array.isArray(res) ? res : [])
       const categories = res?.props?.categories ?? res?.categories ?? res?.props?.categories_by_type?.all ?? res?.categories_by_type?.all ?? []
+      const nextPageUrl = res?.next_page_url ?? null
       return {
         assets: Array.isArray(list) ? list : [],
         categories: Array.isArray(categories) ? categories : [],
+        next_page_url: nextPageUrl,
       }
-    }).catch(() => ({ assets: [], categories: [] }))
+    }).catch(() => ({ assets: [], categories: [], next_page_url: null }))
   }, [])
 
   // Reset state when modal opens. Do NOT include fetchAssets or initialSelectedIds in deps —
@@ -105,8 +113,10 @@ export default function AssetImagePicker({
       return null
     })
     setBrowseCategoryFilter(null)
+    setNextPageUrl(null)
+    if (hasSourceToggle) setSource('assets')
 
-    if (!fetchAssets) {
+    if (!fetchAssets && !fetchDeliverables) {
       setMode('upload')
       return
     }
@@ -119,7 +129,7 @@ export default function AssetImagePicker({
     if (!open || mode === 'upload') return
 
     const category = mode === 'context' && contextCategory ? contextCategory : browseCategoryFilter
-    const fetchKey = `${mode}-${category ?? 'all'}`
+    const fetchKey = `${source}-${mode}-${category ?? 'all'}`
     if (lastFetchedKeyRef.current === fetchKey) return
     lastFetchedKeyRef.current = fetchKey
 
@@ -132,9 +142,10 @@ export default function AssetImagePicker({
     }
 
     doFetch(category)
-      .then(({ assets: arr, categories: cats }) => {
+      .then(({ assets: arr, categories: cats, next_page_url: next }) => {
         if (thisOpenId !== openCountRef.current) return
         setAssets(arr)
+        setNextPageUrl(next || null)
         if (mode === 'browse' && Array.isArray(cats) && cats.length > 0) {
           setCategories(cats)
         }
@@ -147,7 +158,7 @@ export default function AssetImagePicker({
         if (thisOpenId !== openCountRef.current) return
         setLoading(false)
       })
-  }, [open, mode, contextCategory, browseCategoryFilter, doFetch])
+  }, [open, source, mode, contextCategory, browseCategoryFilter, doFetch])
 
   const handleSelectAsset = (asset) => {
     if (isMulti) {
@@ -310,6 +321,24 @@ export default function AssetImagePicker({
     lastFetchedKeyRef.current = null
   }
 
+  const handleLoadMore = () => {
+    if (!nextPageUrl || loadingMore) return
+    setLoadingMore(true)
+    fetch(nextPageUrl, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        const list = res?.data ?? res?.assets ?? []
+        const next = res?.next_page_url ?? null
+        setAssets((prev) => [...prev, ...(Array.isArray(list) ? list : [])])
+        setNextPageUrl(next)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false))
+  }
+
   const canConfirm = (isMulti && selectedAssetIds.length > 0) || (!isMulti && (selectedAssetId || uploadedFile))
 
   const emptyLabel = mode === 'context' ? contextLabel : 'library'
@@ -336,9 +365,36 @@ export default function AssetImagePicker({
               </button>
             </div>
 
+            {/* Source toggle: Assets | Deliverables (when both fetch functions provided) */}
+            {hasSourceToggle && (
+              <div className="flex gap-2 px-5 py-2 border-b border-gray-100">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide self-center">Source:</span>
+                <div className="flex rounded-lg bg-gray-100 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => { setSource('assets'); lastFetchedKeyRef.current = null }}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      source === 'assets' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Assets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSource('deliverables'); lastFetchedKeyRef.current = null }}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      source === 'deliverables' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Deliverables
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Tabs: Context | Browse All | Upload (when contextCategory) or Browse All | Upload */}
             <div className="flex border-b border-gray-200/80 px-5">
-              {fetchAssets && hasContextTab && (
+              {(fetchAssets || fetchDeliverables) && hasContextTab && (
                 <button
                   type="button"
                   onClick={() => handleTabSwitch('context')}
@@ -357,7 +413,7 @@ export default function AssetImagePicker({
                   )}
                 </button>
               )}
-              {fetchAssets && (
+              {(fetchAssets || fetchDeliverables) && (
                 <button
                   type="button"
                   onClick={() => handleTabSwitch('browse')}
@@ -381,7 +437,7 @@ export default function AssetImagePicker({
                   type="button"
                   onClick={() => setMode('upload')}
                   className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    mode === 'upload' || !fetchAssets
+                    mode === 'upload' || !(fetchAssets || fetchDeliverables)
                       ? 'border-indigo-600 text-indigo-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
@@ -471,6 +527,18 @@ export default function AssetImagePicker({
                     <p className="text-sm text-gray-500 py-8 text-center">
                       No assets in {emptyLabel} yet. Upload a new image above.
                     </p>
+                  )}
+                  {!loading && assets.length > 0 && nextPageUrl && (
+                    <div className="mt-4 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={handleLoadMore}
+                        disabled={loadingMore}
+                        className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        {loadingMore ? 'Loading…' : 'Load more'}
+                      </button>
+                    </div>
                   )}
                   </div>
                 </>
