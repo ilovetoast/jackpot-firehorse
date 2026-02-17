@@ -65,6 +65,24 @@ class BrandComplianceService
             $thumbnailsComplete = $asset->thumbnail_status === ThumbnailStatus::COMPLETED;
 
             if (! $hasEmbedding || ! $hasDominantColor || ! $thumbnailsComplete) {
+                // Timeline: Record analysis_incomplete_detected when thumbnails done but metadata missing
+                if ($thumbnailsComplete && (! $hasEmbedding || ! $hasDominantColor)) {
+                    \App\Models\ActivityEvent::firstOrCreate(
+                        [
+                            'tenant_id' => $asset->tenant_id,
+                            'brand_id' => $asset->brand_id,
+                            'event_type' => \App\Enums\EventType::ASSET_ANALYSIS_INCOMPLETE_DETECTED,
+                            'subject_type' => \App\Models\Asset::class,
+                            'subject_id' => $asset->id,
+                        ],
+                        [
+                            'actor_type' => 'system',
+                            'actor_id' => null,
+                            'metadata' => null,
+                            'created_at' => now(),
+                        ]
+                    );
+                }
                 $this->upsertScore($asset, $brand, [
                     'overall_score' => null,
                     'color_score' => 0,

@@ -31,7 +31,7 @@ import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
 import { isFilterCompatible } from '../utils/filterScopeRules'
-import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters } from '../utils/filterUrlUtils'
+import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterParam } from '../utils/filterUrlUtils'
 import { FilterFieldInput } from './FilterFieldInput'
 import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
@@ -191,7 +191,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -215,7 +215,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -239,7 +239,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -259,7 +259,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -279,7 +279,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -356,9 +356,28 @@ export default function AssetGridSecondaryFilters({
     }
     
     const page = usePage()
+    const serverFilters = page.props.filters
     const [isExpanded, setIsExpanded] = useState(false)
+
+    function normalizeIncomingFilters(raw) {
+        const out = {}
+        for (const [key, def] of Object.entries(raw || {})) {
+            if (!def || (def.value === undefined && def.value === null)) continue
+            const v = def.value
+            if (['tags', 'collection', 'dominant_color_bucket'].includes(key)) {
+                out[key] = { operator: def.operator || 'equals', value: normalizeFilterParam(v) }
+            } else {
+                out[key] = { operator: def.operator || 'equals', value: v }
+            }
+        }
+        return out
+    }
+
     const [filters, setFilters] = useState(() => {
         try {
+            if (serverFilters && typeof serverFilters === 'object' && Object.keys(serverFilters).length > 0) {
+                return normalizeIncomingFilters(serverFilters)
+            }
             const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : (page.url?.split('?')[1] || ''))
             return parseFiltersFromUrl(urlParams, filterKeys)
         } catch (e) { /* ignore */ }
@@ -366,10 +385,14 @@ export default function AssetGridSecondaryFilters({
     })
     
     useEffect(() => {
+        if (serverFilters && typeof serverFilters === 'object' && Object.keys(serverFilters).length > 0) {
+            setFilters(normalizeIncomingFilters(serverFilters))
+            return
+        }
         const search = typeof window !== 'undefined' ? window.location.search : (page.url?.includes('?') ? '?' + (page.url || '').split('?')[1] : '')
         const urlParams = new URLSearchParams(search)
         setFilters(parseFiltersFromUrl(urlParams, filterKeys))
-    }, [page.url, filterKeys])
+    }, [page.url, page.props.filters, filterKeys])
     
     const handleFilterChange = (fieldKey, operator, value) => {
         const newFilters = { ...filters, [fieldKey]: { operator, value } }
@@ -382,7 +405,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -395,7 +418,7 @@ export default function AssetGridSecondaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     

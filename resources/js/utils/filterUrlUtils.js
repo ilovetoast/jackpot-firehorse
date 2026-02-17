@@ -22,8 +22,25 @@ const RESERVED_PARAMS = new Set([
 /** Keys that must be included in URL for load_more / infinite scroll to respect filters (backend applies these even if not in schema). */
 const SPECIAL_FILTER_KEYS = ['tags', 'collection']
 
-/** Keys that support multiple values in the URL (repeated param: tags=hero&tags=campaign). Backend accepts array for these. */
-const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection'])
+/** Keys that support multiple values in the URL (repeated param or dominant_color_bucket[]=X). Backend accepts array for these. */
+const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_color_bucket'])
+
+/**
+ * Normalize a filter param value to a deduplicated array.
+ * Handles: array, string, PHP-style duplicated keys.
+ *
+ * @param {unknown} value - Raw value from URL/state
+ * @returns {string[]} Deduplicated array of string values
+ */
+export function normalizeFilterParam(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(String).filter(Boolean))]
+  }
+  if (typeof value === 'string') {
+    return [value]
+  }
+  return []
+}
 
 /**
  * @param {Record<string, { operator?: string, value?: unknown }>} filters
@@ -40,9 +57,9 @@ export function filtersToFlatParams(filters, filterKeys = null) {
     if (!def || (def.value === undefined && def.value === null)) continue
     const v = def.value
     if (Array.isArray(v)) {
-      const nonEmpty = v.filter(x => x !== '' && x !== null && x !== undefined).map(String)
+      const nonEmpty = [...new Set(v.filter(x => x !== '' && x !== null && x !== undefined).map(String))]
       if (nonEmpty.length > 0) {
-        // Multi-value: keep all so URL gets e.g. tags=hero&tags=campaign (or single value as array of one)
+        // Multi-value: dedupe and keep all for URL (tags=hero&tags=campaign or dominant_color_bucket=X&dominant_color_bucket=Y)
         out[key] = MULTI_VALUE_FILTER_KEYS.has(key) ? nonEmpty : [nonEmpty[0]]
       }
     } else if (v !== '' && v !== null && v !== undefined) {
@@ -53,27 +70,45 @@ export function filtersToFlatParams(filters, filterKeys = null) {
 }
 
 /**
+ * Extract base key from PHP-style array param (e.g. dominant_color_bucket[0] -> dominant_color_bucket)
+ * @param {string} key
+ * @param {Set<string>} keySet
+ * @returns {string|null} Base key if valid, else null
+ */
+function parsePhpArrayKey(key, keySet) {
+  const match = key.match(/^(.+)\[\d*\]$/)
+  if (match) {
+    const base = match[1]
+    return keySet.has(base) ? base : null
+  }
+  return keySet.has(key) ? key : null
+}
+
+/**
  * @param {URLSearchParams|Record<string, string>} params - URL params or object
  * @param {string[]} filterKeys - Allowed filter keys (e.g. from filterable_schema); only these are read
  * @returns {Record<string, { operator: string, value: string | string[] }>} filters object (multi-value keys get value as string[])
  */
 export function flatParamsToFilters(params, filterKeys = []) {
-  const keySet = new Set([...(filterKeys || []), ...SPECIAL_FILTER_KEYS])
+  const keySet = new Set([...(filterKeys || []), ...SPECIAL_FILTER_KEYS, 'dominant_color_bucket'])
   if (keySet.size === 0) return {}
   const entries = params instanceof URLSearchParams
     ? Array.from(params.entries())
     : Object.entries(params || {})
-  const out = {}
+  const rawByKey = {}
   for (const [key, value] of entries) {
-    if (RESERVED_PARAMS.has(key) || !keySet.has(key)) continue
+    if (RESERVED_PARAMS.has(key)) continue
     if (value === '' || value === null || value === undefined) continue
-    const isMulti = MULTI_VALUE_FILTER_KEYS.has(key)
-    if (isMulti && key in out) {
-      const existing = out[key].value
-      out[key] = { operator: 'equals', value: Array.isArray(existing) ? [...existing, value] : [existing, value] }
-    } else {
-      out[key] = { operator: 'equals', value: value }
-    }
+    const baseKey = parsePhpArrayKey(key, keySet) ?? (keySet.has(key) ? key : null)
+    if (!baseKey) continue
+    if (!rawByKey[baseKey]) rawByKey[baseKey] = []
+    rawByKey[baseKey].push(String(value))
+  }
+  const out = {}
+  for (const [baseKey, values] of Object.entries(rawByKey)) {
+    const isMulti = MULTI_VALUE_FILTER_KEYS.has(baseKey)
+    const normalized = isMulti ? [...new Set(values)] : values[values.length - 1]
+    out[baseKey] = { operator: 'equals', value: normalized }
   }
   return out
 }
@@ -109,7 +144,12 @@ export function parseFiltersFromUrl(urlParams, filterKeys = []) {
 export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = []) {
   const obj = Object.fromEntries(urlParams.entries())
   delete obj.filters
-  filterKeys.forEach(k => delete obj[k])
+  const keysToRemove = new Set([...filterKeys, ...SPECIAL_FILTER_KEYS, 'dominant_color_bucket'])
+  keysToRemove.forEach(k => delete obj[k])
+  Object.keys(obj).forEach(k => {
+    const m = k.match(/^(.+)\[\d*\]$/)
+    if (m && keysToRemove.has(m[1])) delete obj[k]
+  })
   const flat = filtersToFlatParams(filters, filterKeys)
   return { ...obj, ...flat }
 }

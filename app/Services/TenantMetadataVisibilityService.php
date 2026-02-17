@@ -650,11 +650,12 @@ class TenantMetadataVisibilityService
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            if ($hasPrimary && array_key_exists('is_primary', $visibility)) {
-                $row['is_primary'] = $visibility['is_primary'];
+            // Always add optional columns when they exist so all rows have identical keys (bulk insert)
+            if ($hasPrimary) {
+                $row['is_primary'] = $visibility['is_primary'] ?? null;
             }
-            if ($hasEditHidden && array_key_exists('is_edit_hidden', $visibility)) {
-                $row['is_edit_hidden'] = $visibility['is_edit_hidden'];
+            if ($hasEditHidden) {
+                $row['is_edit_hidden'] = $visibility['is_edit_hidden'] ?? false;
             }
             $rows[] = $row;
         }

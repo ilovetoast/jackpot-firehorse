@@ -44,6 +44,27 @@ class MetadataFieldsSeeder extends Seeder
         
         // Configure category-specific settings
         $this->configureCategorySettings();
+
+        // Guarantee default system fields exist and are enabled (staging consistency)
+        $this->ensureDefaultSystemFields();
+    }
+
+    /**
+     * Ensure default system fields always exist and are enabled.
+     * Guarantees staging consistency: fields created by seedBasicFields/seedFilterOnlyFields
+     * are explicitly set to population_mode=automatic and deprecated_at=null.
+     */
+    protected function ensureDefaultSystemFields(): void
+    {
+        $systemFieldKeys = ['dominant_colors', 'dominant_color_bucket', 'color_space', 'orientation', 'resolution_class'];
+
+        DB::table('metadata_fields')
+            ->whereIn('key', $systemFieldKeys)
+            ->update([
+                'population_mode' => 'automatic',
+                'deprecated_at' => null,
+                'updated_at' => now(),
+            ]);
     }
     
     /**

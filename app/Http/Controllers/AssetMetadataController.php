@@ -3,7 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EventType;
+use App\Enums\ThumbnailStatus;
+use App\Jobs\GenerateAssetEmbeddingJob;
+use App\Jobs\GenerateThumbnailsJob;
+use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ScoreAssetComplianceJob;
+use App\Models\ActivityEvent;
+use App\Models\AssetEmbedding;
+use Illuminate\Support\Facades\Bus;
 use App\Models\Asset;
 use App\Models\Category;
 use App\Services\ActivityRecorder;
@@ -973,6 +980,18 @@ class AssetMetadataController extends Controller
             }
         }
 
+        // Metadata health: surface missing system metadata for recovery UI
+        $hasDominantColors = ! empty(data_get($asset->metadata, 'dominant_colors'))
+            || ! empty(data_get($asset->metadata, 'fields.dominant_colors'));
+        $hasEmbedding = $asset->embedding()->exists();
+        $thumbnailComplete = $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED;
+        $metadataHealth = [
+            'dominant_colors' => $hasDominantColors,
+            'embedding' => $hasEmbedding,
+            'thumbnails' => $thumbnailComplete,
+        ];
+        $metadataHealth['is_complete'] = $hasDominantColors && $hasEmbedding && $thumbnailComplete;
+
         return response()->json([
             'fields' => $editableFields,
             'approval_required' => $approvalRequired,
@@ -983,6 +1002,7 @@ class AssetMetadataController extends Controller
             'evaluation_status' => $evaluationStatus,
             'alignment_confidence' => $alignmentConfidence,
             'brand_dna_enabled' => $brandDnaEnabled,
+            'metadata_health' => $metadataHealth,
         ]);
     }
 
@@ -1014,6 +1034,54 @@ class AssetMetadataController extends Controller
         }
 
         ScoreAssetComplianceJob::dispatch($asset->id);
+
+        return response()->json(['status' => 'queued']);
+    }
+
+    /**
+     * Re-run analysis for an asset (thumbnails, metadata, embedding).
+     * POST /assets/{asset}/reanalyze
+     *
+     * Dispatches: GenerateThumbnailsJob -> PopulateAutomaticMetadataJob -> GenerateAssetEmbeddingJob
+     * Respects existing asset policies (no permission escalation).
+     */
+    public function reanalyze(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        // Reset thumbnail_status so GenerateThumbnailsJob will run (it skips when COMPLETED)
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'thumbnail_error' => null,
+        ]);
+
+        // Delete existing embedding so GenerateAssetEmbeddingJob will regenerate
+        AssetEmbedding::where('asset_id', $asset->id)->delete();
+
+        Bus::chain([
+            new GenerateThumbnailsJob($asset->id),
+            new PopulateAutomaticMetadataJob($asset->id),
+            new GenerateAssetEmbeddingJob($asset->id),
+        ])->dispatch();
+
+        ActivityEvent::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'event_type' => EventType::ASSET_ANALYSIS_RERUN_REQUESTED,
+            'subject_type' => Asset::class,
+            'subject_id' => $asset->id,
+            'actor_type' => 'user',
+            'actor_id' => Auth::id(),
+            'metadata' => null,
+            'created_at' => now(),
+        ]);
 
         return response()->json(['status' => 'queued']);
     }

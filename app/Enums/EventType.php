@@ -90,6 +90,8 @@ class EventType
     // System metadata = orientation, color_space, resolution_class (automatically computed)
     public const ASSET_SYSTEM_METADATA_GENERATED = 'asset.system_metadata.generated';
     public const ASSET_SYSTEM_METADATA_REGENERATED = 'asset.system_metadata.regenerated';
+    public const ASSET_ANALYSIS_RERUN_REQUESTED = 'asset.analysis_rerun_requested';
+    public const ASSET_ANALYSIS_INCOMPLETE_DETECTED = 'asset.analysis_incomplete_detected';
     
     // AI Metadata Generation events (AiMetadataGenerationJob - metadata_generator agent)
     // AI metadata = candidates for ai_eligible fields like Photo Type (vision-based field inference)

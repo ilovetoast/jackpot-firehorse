@@ -22,10 +22,10 @@ export default function ColorSwatchFilter({
         return list.filter((opt) => opt && (opt.swatch || opt.value))
     }, [field.options, filteredOptions])
 
-    const selectedValues = Array.isArray(value) ? value : (value != null ? [value] : [])
+    const selectedValues = Array.isArray(value) ? [...new Set(value)] : (value != null ? [value] : [])
 
     const handleToggle = (bucketValue) => {
-        let nextValues = Array.isArray(value) ? [...value] : (value != null ? [value] : [])
+        let nextValues = Array.isArray(value) ? [...new Set(value)] : (value != null ? [value] : [])
 
         if (nextValues.includes(bucketValue)) {
             nextValues = nextValues.filter(v => v !== bucketValue)

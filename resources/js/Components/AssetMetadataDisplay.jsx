@@ -32,7 +32,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [complianceExpanded, setComplianceExpanded] = useState(false)
     const [brandDnaEnabled, setBrandDnaEnabled] = useState(false)
     const [rescoreLoading, setRescoreLoading] = useState(false)
-    
+    const [metadataHealth, setMetadataHealth] = useState(null)
+    const [reanalyzeLoading, setReanalyzeLoading] = useState(false)
+
     // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
 
     // Fetch editable metadata (silent = true skips loading state, used for polling)
@@ -58,6 +60,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setEvaluationStatus(data.evaluation_status ?? 'pending')
                 setAlignmentConfidence(data.alignment_confidence ?? 'low')
                 setBrandDnaEnabled(data.brand_dna_enabled ?? false)
+                setMetadataHealth(data.metadata_health ?? null)
                 if (onPendingCountChange) {
                     onPendingCountChange(count)
                 }
@@ -126,6 +129,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     setEvaluationStatus(data.evaluation_status ?? 'pending')
                     setAlignmentConfidence(data.alignment_confidence ?? 'low')
                     setBrandDnaEnabled(data.brand_dna_enabled ?? false)
+                    setMetadataHealth(data.metadata_health ?? null)
                 })
                 .catch((err) => {
                     console.error('[AssetMetadataDisplay] Failed to refresh metadata', err)
@@ -212,10 +216,51 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
         return 'bg-red-50 text-red-700 ring-red-600/20'
     }
 
+    const handleReanalyze = async () => {
+        if (!assetId || reanalyzeLoading) return
+        setReanalyzeLoading(true)
+        try {
+            const res = await fetch(`/app/assets/${assetId}/reanalyze`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+            })
+            const data = await res.json()
+            if (data.status === 'queued') {
+                fetchMetadata()
+            }
+        } finally {
+            setReanalyzeLoading(false)
+        }
+    }
+
     // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
             <div>
+                {!metadataHealth?.is_complete && metadataHealth && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
+                        <div className="font-medium text-amber-800">
+                            Some system metadata is missing.
+                        </div>
+                        <div className="text-sm text-amber-700 mt-1">
+                            Dominant colors, embeddings, or thumbnails may not have completed.
+                            You can re-run analysis to ensure brand scoring accuracy.
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleReanalyze}
+                            disabled={reanalyzeLoading}
+                            className="mt-3 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                        >
+                            {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
+                        </button>
+                    </div>
+                )}
                 {evaluationStatus === 'pending_processing' && (
                     <div className="mb-3">
                         <p className="text-xs text-gray-500 italic">Compliance will run once asset processing is complete.</p>

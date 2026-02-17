@@ -295,12 +295,16 @@ class AssetController extends Controller
             $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
             $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
             $filters = [];
+            $multiValueKeys = ['tags', 'collection', 'dominant_color_bucket'];
             foreach ($filterKeys as $key) {
                 if (in_array($key, $reserved, true)) {
                     continue;
                 }
                 $val = $request->input($key);
                 if ($val !== null && $val !== '') {
+                    if (in_array($key, $multiValueKeys, true) && is_array($val)) {
+                        $val = array_values(array_unique(array_map('strval', array_filter($val))));
+                    }
                     $filters[$key] = ['operator' => 'equals', 'value' => $val];
                 }
             }
@@ -1128,6 +1132,7 @@ class AssetController extends Controller
             'next_page_url' => $nextPageUrl,
             'filterable_schema' => $filterableSchema, // Phase 2 – Step 8: Filterable metadata fields
             'available_values' => $availableValues, // available_values is required by Phase H filter visibility rules
+            'filters' => $filters, // Server-parsed filters for active filter UI sync with URL
             'sort' => $sort,
             'sort_direction' => $sortDirection,
             'q' => $request->input('q', ''),

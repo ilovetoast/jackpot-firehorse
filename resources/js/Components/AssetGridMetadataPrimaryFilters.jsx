@@ -54,7 +54,7 @@ import { usePage, router } from '@inertiajs/react'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters } from '../utils/filterVisibilityRules'
-import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters } from '../utils/filterUrlUtils'
+import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterParam } from '../utils/filterUrlUtils'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 import { FilterFieldInput } from './FilterFieldInput'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
@@ -134,21 +134,43 @@ export default function AssetGridMetadataPrimaryFilters({
     }, [primaryFilterClassifications, visibilityContext, filterable_schema, selectedCategoryId, available_values])
     
     const page = usePage()
+    const serverFilters = page.props.filters
     const [filters, setFilters] = useState(() => {
         try {
+            if (serverFilters && typeof serverFilters === 'object' && Object.keys(serverFilters).length > 0) {
+                return normalizeIncomingFilters(serverFilters)
+            }
             const search = typeof window !== 'undefined' ? window.location.search : (page.url?.split('?')[1] || '')
             const urlParams = new URLSearchParams(search)
             return parseFiltersFromUrl(urlParams, filterKeys)
         } catch (e) { /* ignore */ }
         return {}
     })
+
+    function normalizeIncomingFilters(raw) {
+        const out = {}
+        for (const [key, def] of Object.entries(raw || {})) {
+            if (!def || (def.value === undefined && def.value === null)) continue
+            const v = def.value
+            if (['tags', 'collection', 'dominant_color_bucket'].includes(key)) {
+                out[key] = { operator: def.operator || 'equals', value: normalizeFilterParam(v) }
+            } else {
+                out[key] = { operator: def.operator || 'equals', value: v }
+            }
+        }
+        return out
+    }
     
-    // Sync filters from URL when page/URL changes (e.g. after router.get, back/forward, or initial load with query)
+    // Sync filters from URL or server props when page/URL changes (e.g. after router.get, back/forward, or initial load)
     useEffect(() => {
+        if (serverFilters && typeof serverFilters === 'object' && Object.keys(serverFilters).length > 0) {
+            setFilters(normalizeIncomingFilters(serverFilters))
+            return
+        }
         const search = typeof window !== 'undefined' ? window.location.search : (page.url?.includes('?') ? '?' + page.url.split('?')[1] : '')
         const urlParams = new URLSearchParams(search)
         setFilters(parseFiltersFromUrl(urlParams, filterKeys))
-    }, [page.url, filterKeys])
+    }, [page.url, page.props.filters, filterKeys])
     
     const handleFilterChange = (fieldKey, operator, value) => {
         const newFilters = { ...filters, [fieldKey]: { operator, value } }
@@ -161,7 +183,7 @@ export default function AssetGridMetadataPrimaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
@@ -174,7 +196,7 @@ export default function AssetGridMetadataPrimaryFilters({
         router.get(window.location.pathname, urlParamsObj, {
             preserveState: true,
             preserveScroll: true,
-            only: ['assets', 'next_page_url'],
+            only: ['assets', 'next_page_url', 'filters'],
         })
     }
     
