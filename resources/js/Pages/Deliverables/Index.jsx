@@ -256,7 +256,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const getStoredCardSize = () => {
         if (typeof window === 'undefined') return 220
         const stored = localStorage.getItem('assetGridCardSize')
-        return stored ? parseInt(stored, 10) : 220
+        const parsed = stored ? parseInt(stored, 10) : 220
+        return [160, 220].includes(parsed) ? parsed : 220
     }
     
     const getStoredShowInfo = () => {
@@ -642,11 +643,11 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
 
                 {/* Main Content - Full Height with Scroll */}
                 <div className="flex-1 overflow-hidden bg-gray-50 h-full relative flex flex-col">
-                    <div className="lg:hidden flex items-center gap-2 py-2 px-4 sm:px-6 border-b border-gray-200 bg-white/80 backdrop-blur-sm shrink-0">
-                        <button type="button" onClick={() => setMobileCategoriesOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-white border border-gray-300 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+                    <div className="lg:hidden flex items-center justify-start gap-2 py-2 px-4 sm:px-6 border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0 sticky top-0 z-20">
+                        <button type="button" onClick={() => setMobileCategoriesOpen(true)} className="inline-flex max-w-full items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg bg-white border border-gray-300 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
                             <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
                             <span>Categories</span>
-                            {selectedCategoryId != null && categories.find(c => c.id === selectedCategoryId) && <span className="text-gray-500 truncate max-w-[120px]">— {categories.find(c => c.id === selectedCategoryId).name}</span>}
+                            {selectedCategoryId != null && categories.find(c => c.id === selectedCategoryId) && <span className="text-gray-500 truncate max-w-[140px]">— {categories.find(c => c.id === selectedCategoryId).name}</span>}
                         </button>
                     </div>
                     <div 
@@ -762,11 +763,11 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                         hasMoreAvailable={!!nextPageUrl}
                                         barTrailingContent={
                                             assetsList?.length > 0 ? (
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex flex-wrap items-center gap-2">
                                                     <button
                                                         type="button"
                                                         onClick={handleSelectAllToggle}
-                                                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                                                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 whitespace-nowrap"
                                                     >
                                                         {allVisibleInBucket ? 'Deselect all' : 'Select all'}
                                                     </button>

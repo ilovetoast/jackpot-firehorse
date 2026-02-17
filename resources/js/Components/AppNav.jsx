@@ -9,6 +9,7 @@ import {
     ArrowDownCircleIcon,
     ArrowDownTrayIcon,
     BookOpenIcon,
+    FolderIcon,
     HomeIcon,
     PhotoIcon,
     SparklesIcon,
@@ -24,6 +25,7 @@ export default function AppNav({ brand, tenant }) {
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
     const [isInstallAvailable, setIsInstallAvailable] = useState(false)
+    const [showInstallAction, setShowInstallAction] = useState(false)
     const [isInstalling, setIsInstalling] = useState(false)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
@@ -204,13 +206,13 @@ export default function AppNav({ brand, tenant }) {
     }
 
     useEffect(() => {
-        if (typeof window === 'undefined' || !isAppPage) {
-            setIsInstallAvailable(false)
+        if (typeof window === 'undefined') {
             return
         }
 
         const updateInstallAvailability = () => {
             const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true
+            setShowInstallAction(!isStandalone)
             setIsInstallAvailable(Boolean(window.__jackpotDeferredInstallPrompt) && !isStandalone)
         }
 
@@ -225,7 +227,7 @@ export default function AppNav({ brand, tenant }) {
             window.removeEventListener('jackpot:pwa-installed', updateInstallAvailability)
             document.removeEventListener('visibilitychange', updateInstallAvailability)
         }
-    }, [isAppPage])
+    }, [])
 
     useEffect(() => {
         if (typeof document === 'undefined') {
@@ -250,7 +252,12 @@ export default function AppNav({ brand, tenant }) {
 
         const deferredPrompt = window.__jackpotDeferredInstallPrompt
         if (!deferredPrompt) {
-            setIsInstallAvailable(false)
+            const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '')
+            window.alert(
+                isIos
+                    ? 'To install this app, tap Share and choose "Add to Home Screen".'
+                    : 'To install this app, open your browser menu and choose "Install app".'
+            )
             return
         }
 
@@ -300,11 +307,11 @@ export default function AppNav({ brand, tenant }) {
             isActive: (url) => url.startsWith('/app/generative'),
         },
         {
-            href: '/app/downloads',
-            label: 'Downloads',
-            shortLabel: 'Downloads',
-            icon: ArrowDownTrayIcon,
-            isActive: (url) => url.startsWith('/app/downloads'),
+            href: '/app/collections',
+            label: 'Collections',
+            shortLabel: 'Collections',
+            icon: FolderIcon,
+            isActive: (url) => url.startsWith('/app/collections'),
         },
         {
             href: '/app/brand-guidelines',
@@ -700,31 +707,24 @@ export default function AppNav({ brand, tenant }) {
                             </Link>
                         )}
                         {/* Right-side nav: install + utility links (desktop/tablet), then notifications */}
+                        {showInstallAction && (
+                            <button
+                                type="button"
+                                onClick={handleInstallApp}
+                                disabled={isInstalling}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-md p-2 md:px-2 md:py-1.5 text-sm font-medium border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{
+                                    color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
+                                }}
+                                aria-label={isInstalling ? 'Installing app' : 'Install app'}
+                                title={isInstalling ? 'Installing app' : 'Install app'}
+                            >
+                                <ArrowDownCircleIcon className="h-5 w-5" />
+                                <span className="hidden lg:inline">{isInstalling ? 'Installing...' : 'Install App'}</span>
+                            </button>
+                        )}
                         {isAppPage && (
                             <>
-                                {isInstallAvailable && (
-                                    <button
-                                        type="button"
-                                        onClick={handleInstallApp}
-                                        disabled={isInstalling}
-                                        className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        style={{
-                                            color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
-                                        }}
-                                    >
-                                        <ArrowDownCircleIcon className="h-5 w-5" />
-                                        <span>{isInstalling ? 'Installing...' : 'Install App'}</span>
-                                    </button>
-                                )}
-                                <Link
-                                    href="/app/downloads"
-                                    className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                                    style={{
-                                        color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
-                                    }}
-                                >
-                                    <span>Downloads</span>
-                                </Link>
                                 <Link
                                     href="/app/brand-guidelines"
                                     className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
@@ -740,6 +740,21 @@ export default function AppNav({ brand, tenant }) {
                         <div className="hidden sm:block">
                             <NotificationBell textColor={textColor} />
                         </div>
+                        {isAppPage && !isCollectionOnlyNav && (
+                            <Link
+                                href="/app/downloads"
+                                className="inline-flex items-center justify-center rounded-md p-2 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                style={{
+                                    color: currentUrl.startsWith('/app/downloads')
+                                        ? (activeBrand?.primary_color || '#4f46e5')
+                                        : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
+                                }}
+                                aria-label="Downloads"
+                                title="Downloads"
+                            >
+                                <ArrowDownTrayIcon className="h-5 w-5" aria-hidden="true" />
+                            </Link>
+                        )}
                         
                         {/* User Menu */}
                         <div className="relative ml-3">
