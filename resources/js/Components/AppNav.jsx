@@ -25,6 +25,7 @@ export default function AppNav({ brand, tenant }) {
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
     const [isInstallAvailable, setIsInstallAvailable] = useState(false)
+    const [showInstallAction, setShowInstallAction] = useState(false)
     const [isInstalling, setIsInstalling] = useState(false)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
@@ -211,6 +212,7 @@ export default function AppNav({ brand, tenant }) {
 
         const updateInstallAvailability = () => {
             const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true
+            setShowInstallAction(!isStandalone)
             setIsInstallAvailable(Boolean(window.__jackpotDeferredInstallPrompt) && !isStandalone)
         }
 
@@ -250,7 +252,12 @@ export default function AppNav({ brand, tenant }) {
 
         const deferredPrompt = window.__jackpotDeferredInstallPrompt
         if (!deferredPrompt) {
-            setIsInstallAvailable(false)
+            const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '')
+            window.alert(
+                isIos
+                    ? 'To install this app, tap Share and choose "Add to Home Screen".'
+                    : 'To install this app, open your browser menu and choose "Install app".'
+            )
             return
         }
 
@@ -700,7 +707,7 @@ export default function AppNav({ brand, tenant }) {
                             </Link>
                         )}
                         {/* Right-side nav: install + utility links (desktop/tablet), then notifications */}
-                        {isInstallAvailable && (
+                        {showInstallAction && (
                             <button
                                 type="button"
                                 onClick={handleInstallApp}
