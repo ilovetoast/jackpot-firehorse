@@ -598,6 +598,7 @@ class DeliverableController extends Controller
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
+                    'analysis_status' => $asset->analysis_status ?? 'uploading',
                 ];
             })
             ->values()

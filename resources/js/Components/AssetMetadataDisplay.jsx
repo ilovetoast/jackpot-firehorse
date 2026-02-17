@@ -34,6 +34,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [rescoreLoading, setRescoreLoading] = useState(false)
     const [metadataHealth, setMetadataHealth] = useState(null)
     const [analysisStatus, setAnalysisStatus] = useState('uploading')
+    const [thumbnailStatus, setThumbnailStatus] = useState('pending')
     const [reanalyzeLoading, setReanalyzeLoading] = useState(false)
 
     // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
@@ -63,6 +64,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 setMetadataHealth(data.metadata_health ?? null)
                 setAnalysisStatus(data.analysis_status ?? 'uploading')
+                setThumbnailStatus(data.thumbnail_status ?? 'pending')
                 if (onPendingCountChange) {
                     onPendingCountChange(count)
                 }
@@ -133,6 +135,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                     setMetadataHealth(data.metadata_health ?? null)
                     setAnalysisStatus(data.analysis_status ?? 'uploading')
+                    setThumbnailStatus(data.thumbnail_status ?? 'pending')
                 })
                 .catch((err) => {
                     console.error('[AssetMetadataDisplay] Failed to refresh metadata', err)
@@ -244,6 +247,17 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
+            {/* Dev-only: surface pipeline state for debugging rerun/guard mismatches */}
+            {import.meta.env.DEV && (
+                <div className="mb-3 rounded border border-amber-300 bg-amber-50/80 p-3 font-mono text-xs text-amber-900">
+                    <div className="font-semibold mb-1">Pipeline state (dev)</div>
+                    <pre className="whitespace-pre-wrap break-all">
+                        analysis_status: {analysisStatus}
+                        evaluation_status: {evaluationStatus}
+                        thumbnail_status: {thumbnailStatus}
+                    </pre>
+                </div>
+            )}
             <div>
                 {!metadataHealth?.is_complete && metadataHealth && (
                     <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">

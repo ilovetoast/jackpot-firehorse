@@ -59,6 +59,7 @@ import CollapsibleSection from './CollapsibleSection'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
 import { getThumbnailState, getThumbnailVersion } from '../utils/thumbnailUtils'
+import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
 import { usePermission } from '../hooks/usePermission'
 import { useDrawerThumbnailPoll } from '../hooks/useDrawerThumbnailPoll'
@@ -2012,13 +2013,26 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         <div className="flex items-start gap-4">
                             <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Status</dt>
                             <dd className="text-sm font-medium flex-1 min-w-0 text-left">
-                                <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                    isVisible
-                                        ? 'bg-green-100 text-green-800'
-                                        : 'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                    {isVisible ? 'Completed' : 'Processing'}
-                                </span>
+                                {(() => {
+                                    const analysisStatus = displayAsset.analysis_status ?? 'uploading'
+                                    const isComplete = analysisStatus === 'complete'
+                                    const currentStep = getPipelineStageIndex(analysisStatus)
+                                    const totalSteps = PIPELINE_STAGES.length
+                                    return (
+                                        <div className="flex flex-col gap-1">
+                                            <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium w-fit ${
+                                                isComplete ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {getPipelineStageLabel(analysisStatus)}
+                                            </span>
+                                            {!isComplete && (
+                                                <span className="text-[11px] text-gray-500">
+                                                    Step {currentStep + 1} of {totalSteps}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )
+                                })()}
                             </dd>
                         </div>
                         {displayAsset.created_at && (

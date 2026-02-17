@@ -616,6 +616,8 @@ class AssetController extends Controller
                     'url' => null, // Reserved for future download endpoint
                     // Phase V-1: Video quick preview on hover (grid and drawer)
                     'video_preview_url' => $asset->video_preview_url,
+                    // Pipeline status for visible progression (uploading → complete)
+                    'analysis_status' => $asset->analysis_status ?? 'uploading',
                 ];
                 } catch (\Throwable $e) {
                     Log::error('[AssetController::index] map asset failed', [
@@ -646,6 +648,7 @@ class AssetController extends Controller
                         'archived_at' => null,
                         'archived_by' => null,
                         'video_preview_url' => null,
+                        'analysis_status' => 'uploading',
                     ];
                 }
             })

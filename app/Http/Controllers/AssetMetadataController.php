@@ -1039,6 +1039,10 @@ class AssetMetadataController extends Controller
         // If dominant_colors exist but dominant_hue_group missing → incomplete (needs re-analysis)
         $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding && $thumbnailComplete;
 
+        $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+            ? $asset->thumbnail_status->value
+            : ($asset->thumbnail_status ?? 'pending');
+
         return response()->json([
             'fields' => $editableFields,
             'approval_required' => $approvalRequired,
@@ -1051,6 +1055,7 @@ class AssetMetadataController extends Controller
             'brand_dna_enabled' => $brandDnaEnabled,
             'metadata_health' => $metadataHealth,
             'analysis_status' => $asset->analysis_status ?? 'uploading',
+            'thumbnail_status' => $thumbnailStatus,
         ]);
     }
 
