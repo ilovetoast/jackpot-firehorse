@@ -9,6 +9,7 @@ import {
     ArrowDownCircleIcon,
     ArrowDownTrayIcon,
     BookOpenIcon,
+    FolderIcon,
     HomeIcon,
     PhotoIcon,
     SparklesIcon,
@@ -300,11 +301,11 @@ export default function AppNav({ brand, tenant }) {
             isActive: (url) => url.startsWith('/app/generative'),
         },
         {
-            href: '/app/downloads',
-            label: 'Downloads',
-            shortLabel: 'Downloads',
-            icon: ArrowDownTrayIcon,
-            isActive: (url) => url.startsWith('/app/downloads'),
+            href: '/app/collections',
+            label: 'Collections',
+            shortLabel: 'Collections',
+            icon: FolderIcon,
+            isActive: (url) => url.startsWith('/app/collections'),
         },
         {
             href: '/app/brand-guidelines',
@@ -717,15 +718,6 @@ export default function AppNav({ brand, tenant }) {
                                     </button>
                                 )}
                                 <Link
-                                    href="/app/downloads"
-                                    className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                                    style={{
-                                        color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
-                                    }}
-                                >
-                                    <span>Downloads</span>
-                                </Link>
-                                <Link
                                     href="/app/brand-guidelines"
                                     className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                     style={{
@@ -740,6 +732,21 @@ export default function AppNav({ brand, tenant }) {
                         <div className="hidden sm:block">
                             <NotificationBell textColor={textColor} />
                         </div>
+                        {isAppPage && !isCollectionOnlyNav && (
+                            <Link
+                                href="/app/downloads"
+                                className="inline-flex items-center justify-center rounded-md p-2 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                style={{
+                                    color: currentUrl.startsWith('/app/downloads')
+                                        ? (activeBrand?.primary_color || '#4f46e5')
+                                        : (textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.75)'),
+                                }}
+                                aria-label="Downloads"
+                                title="Downloads"
+                            >
+                                <ArrowDownTrayIcon className="h-5 w-5" aria-hidden="true" />
+                            </Link>
+                        )}
                         
                         {/* User Menu */}
                         <div className="relative ml-3">

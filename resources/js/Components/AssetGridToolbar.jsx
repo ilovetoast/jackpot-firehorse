@@ -161,9 +161,8 @@ export default function AssetGridToolbar({
         })
     }
     
-    // Grid size button group - 4 discrete settings
-    const SIZE_PRESETS = [160, 220, 280, 360] // 4 discrete size options
-    const DEFAULT_PRESET_INDEX = 1 // 220px is the default (index 1)
+    // Grid size button group - 2 discrete settings (compact + comfortable)
+    const SIZE_PRESETS = [160, 220]
     
     // Snap cardSize to nearest preset
     const snapToPreset = (value) => {
@@ -259,23 +258,24 @@ export default function AssetGridToolbar({
             )}
             
             {/* Primary Toolbar Row */}
-            <div className="px-3 py-3 sm:px-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="px-3 py-2.5 sm:px-4">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                     {/* Search: decoupled component keeps focus across Inertia reloads; stable key */}
-                    <div className="flex-1 flex items-center gap-2">
-                        <div className="flex-1 min-w-[180px] max-w-md">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <div className="w-full sm:flex-1 sm:min-w-[180px] max-w-full sm:max-w-sm">
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}
                                 onSearchApply={applySearch}
                                 isSearchPending={searchLoading}
-                                placeholder="Search filename, title, tags…"
+                                placeholder="Search items…"
+                                inputClassName="py-1 text-xs sm:text-sm"
                                 inputRef={searchInputRef}
                             />
                         </div>
                         
                         {/* Primary Metadata Filters - Between search and controls */}
-                        <div className="flex items-center gap-2 min-w-[100px]">
+                        <div className="flex items-center gap-2 min-w-0">
                             <AssetGridMetadataPrimaryFilters
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
@@ -287,12 +287,12 @@ export default function AssetGridToolbar({
                             {/* When no More filters bar: show Sort in toolbar (e.g. Collections) */}
                         </div>
                         {onSortChange && !showMoreFilters && (
-                            <div className="flex items-center gap-1 flex-shrink-0">
+                            <div className="flex items-center gap-1 flex-shrink-0 ml-auto sm:ml-0">
                                 <span className="text-xs font-medium text-gray-500">Sort</span>
                                 <select
                                     value={sortBy}
                                     onChange={(e) => onSortChange(e.target.value, sortDirection)}
-                                    className="rounded border border-gray-300 bg-white py-1.5 pl-2 pr-6 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    className="min-w-[7.5rem] rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs sm:text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                     aria-label="Sort by"
                                 >
                                     <option value="featured">Featured</option>
@@ -304,7 +304,7 @@ export default function AssetGridToolbar({
                                 <button
                                     type="button"
                                     onClick={() => onSortChange(sortBy, sortDirection === 'asc' ? 'desc' : 'asc')}
-                                    className="p-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    className="p-1 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                     title={sortDirection === 'asc' ? 'Descending' : 'Ascending'}
                                     aria-label={sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'}
                                 >
@@ -319,14 +319,14 @@ export default function AssetGridToolbar({
                     </div>
 
                     {/* Controls - Right Side on Desktop */}
-                    <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:justify-end">
                         {/* Phase 2 – Step 7: Bulk Actions (only in main row when no More filters bar, e.g. Collections) */}
                         {onToggleBulkMode && !showMoreFilters && (
                             <>
                                 <button
                                     type="button"
                                     onClick={onToggleBulkMode}
-                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                    className={`px-2.5 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-colors ${
                                         isBulkMode
                                             ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
                                             : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
@@ -338,7 +338,7 @@ export default function AssetGridToolbar({
                                     <button
                                         type="button"
                                         onClick={onBulkEdit}
-                                        className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                        className="px-2.5 py-1.5 text-xs sm:text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                     >
                                         Edit Metadata ({bulkSelectedCount})
                                     </button>
@@ -350,7 +350,7 @@ export default function AssetGridToolbar({
                             <button
                                 type="button"
                                 onClick={onSelectAllForDownload}
-                                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                                className="px-2.5 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                             >
                                 Select all
                             </button>
@@ -382,14 +382,12 @@ export default function AssetGridToolbar({
                         </label>
 
                         {/* Grid Size Button Group */}
-                        <div className="flex items-center gap-2.5">                        
+                        <div className="flex items-center gap-1.5">                        
                             <div className="inline-flex rounded-md shadow-sm" role="group" aria-label="Grid size">
                                 {SIZE_PRESETS.map((size, index) => {
                                     const isSelected = currentPresetIndex === index
-                                    // Reverse icon order: leftmost shows densest (xlarge), rightmost shows sparsest (small)
-                                    const iconSizes = ['xlarge', 'large', 'medium', 'small']
-                                    // Reverse the index for icon selection (so index 0 gets xlarge, index 3 gets small)
-                                    const reversedIndex = SIZE_PRESETS.length - 1 - index
+                                    const iconSizes = ['small', 'medium']
+                                    const iconSize = iconSizes[index] || 'medium'
                                     
                                     return (
                                         <button
@@ -397,7 +395,7 @@ export default function AssetGridToolbar({
                                             type="button"
                                             onClick={() => onCardSizeChange(size)}
                                             className={`
-                                                px-3 py-1.5 text-sm font-medium transition-all
+                                                px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-all
                                                 flex items-center justify-center
                                                 ${index === 0 ? 'rounded-l-md' : ''}
                                                 ${index === SIZE_PRESETS.length - 1 ? 'rounded-r-md' : ''}
@@ -414,10 +412,10 @@ export default function AssetGridToolbar({
                                                 '--tw-ring-color': primaryColor,
                                             } : {}}
                                             aria-pressed={isSelected}
-                                            aria-label={`${iconSizes[reversedIndex]} size`}
-                                            title={`${iconSizes[reversedIndex].charAt(0).toUpperCase() + iconSizes[reversedIndex].slice(1)} size`}
+                                            aria-label={`${iconSize} tile size`}
+                                            title={`${iconSize.charAt(0).toUpperCase() + iconSize.slice(1)} tile size`}
                                         >
-                                            <SizeIcon size={iconSizes[reversedIndex]} />
+                                            <SizeIcon size={iconSize} className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                         </button>
                                     )
                                 })}
