@@ -581,6 +581,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             // Then explicitly set boolean values (convert string '0'/'1' to boolean)
             metadata_approval_enabled: brand.settings?.metadata_approval_enabled === true || brand.settings?.metadata_approval_enabled === '1' || brand.settings?.metadata_approval_enabled === 1, // Phase M-2
             contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval === true || brand.settings?.contributor_upload_requires_approval === '1' || brand.settings?.contributor_upload_requires_approval === 1, // Phase J.3.1
+            asset_grid_style: brand.settings?.asset_grid_style || 'clean', // clean | impact
         },
         // D10: Brand-level download landing branding (logo from assets, color from palette, no raw URL/hex)
         download_landing_settings: {
@@ -1367,6 +1368,31 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                                     </button>
                                                 )
                                             })}
+                                        </div>
+                                    </div>
+                                    {/* Asset grid styling */}
+                                    <div>
+                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Asset Grid Styling</h4>
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            How asset tiles appear in the Assets grid. Clean is minimal with floating labels; Impact uses shadows and attached titles.
+                                        </p>
+                                        <div className="flex gap-2">
+                                            {[
+                                                { value: 'clean', label: 'Clean', desc: 'Minimal, floating labels' },
+                                                { value: 'impact', label: 'Impact', desc: 'Shadows, attached titles' },
+                                            ].map((opt) => (
+                                                <button
+                                                    key={opt.value}
+                                                    type="button"
+                                                    onClick={() => setData('settings', { ...data.settings, asset_grid_style: opt.value })}
+                                                    className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                                                        (data.settings?.asset_grid_style ?? 'clean') === opt.value ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
+                                                    }`}
+                                                >
+                                                    <span className="text-sm font-medium text-gray-900">{opt.label}</span>
+                                                    <span className="text-xs text-gray-500 mt-0.5">{opt.desc}</span>
+                                                </button>
+                                            ))}
                                         </div>
                                     </div>
                                     {/* Sidebar color selection */}

@@ -29,7 +29,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import AssetGridSearchInput from './AssetGridSearchInput'
-import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon, SwatchIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 
@@ -38,8 +38,6 @@ export default function AssetGridToolbar({
     onToggleInfo = () => {},
     cardSize = 220,
     onCardSizeChange = () => {},
-    cardStyle = 'default',
-    onCardStyleChange = null,
     primaryColor = '#6366f1', // Default indigo-600
     bulkSelectedCount = 0, // Phase 2 – Step 7
     onBulkEdit = null, // Phase 2 – Step 7
@@ -382,24 +380,6 @@ export default function AssetGridToolbar({
                                 />
                             </button>                        
                         </label>
-
-                        {/* Tile style toggle (guidelines vs default) - testing only */}
-                        {onCardStyleChange && (
-                            <button
-                                type="button"
-                                onClick={() => onCardStyleChange(cardStyle === 'guidelines' ? 'default' : 'guidelines')}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
-                                    cardStyle === 'guidelines'
-                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                                }`}
-                                title={cardStyle === 'guidelines' ? 'Guidelines style (click for default)' : 'Default style (click for guidelines)'}
-                                aria-label="Toggle tile style"
-                            >
-                                <SwatchIcon className="h-4 w-4" />
-                                <span className="hidden sm:inline">{cardStyle === 'guidelines' ? 'Guidelines' : 'Default'}</span>
-                            </button>
-                        )}
 
                         {/* Grid Size Button Group - 4 on desktop, last 2 only on mobile */}
                         <div className="flex items-center gap-1.5">                        

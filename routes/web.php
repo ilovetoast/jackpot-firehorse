@@ -16,6 +16,18 @@ Route::options('/{any}', function () {
         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 })->where('any', '.*');
 
+// PWA manifest — must be publicly accessible (no auth) so browsers can fetch it
+Route::get('/manifest.webmanifest', function () {
+    $path = public_path('manifest.webmanifest');
+    if (! file_exists($path)) {
+        abort(404);
+    }
+
+    return response()->file($path, [
+        'Content-Type' => 'application/manifest+json',
+    ]);
+})->name('manifest');
+
 // Home route - simple home page (subdomains disabled)
 Route::get('/', fn () => Inertia::render('Home'));
 

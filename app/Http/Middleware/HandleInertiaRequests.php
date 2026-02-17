@@ -408,6 +408,7 @@ class HandleInertiaRequests extends Middleware
                     'workspace_button_style' => $activeBrand->workspace_button_style ?? $activeBrand->settings['button_style'] ?? 'primary',
                     'logo_filter' => $activeBrand->logo_filter ?? 'none',
                     'settings' => $activeBrand->settings ?? [], // Phase J.3.1: Include brand settings for approval checks
+                    'asset_grid_style' => $activeBrand->settings['asset_grid_style'] ?? 'clean', // clean | impact
                 ] : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
                 // User is in company but has no brand access (removed from all brands)

@@ -447,10 +447,9 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Card size with scaling enabled - loads from localStorage
     const [cardSize, setCardSize] = useState(getStoredCardSize)
     const [showInfo, setShowInfo] = useState(getStoredShowInfo)
-    const [cardStyle, setCardStyle] = useState(() => {
-        if (typeof window === 'undefined') return 'guidelines'
-        return localStorage.getItem('assetGridCardStyle') || 'guidelines'
-    })
+
+    // Card style from brand settings: clean (guidelines) | impact (default)
+    const cardStyle = (auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'
 
     // Save card size to localStorage when it changes
     useEffect(() => {
@@ -464,12 +463,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             localStorage.setItem('assetGridShowInfo', showInfo.toString())
         }
     }, [showInfo])
-
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            localStorage.setItem('assetGridCardStyle', cardStyle)
-        }
-    }, [cardStyle])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
     const handleCategorySelect = useCallback((category) => {
@@ -966,8 +959,6 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 onToggleInfo={() => setShowInfo(v => !v)}
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
-                                cardStyle={cardStyle}
-                                onCardStyleChange={setCardStyle}
                                 primaryColor={workspaceAccentColor}
                                 bulkSelectedCount={bulkSelectedAssetIds.length}
                                 onBulkEdit={() => {

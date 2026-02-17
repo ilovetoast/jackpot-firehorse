@@ -557,6 +557,7 @@ class BrandController extends Controller
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
+            'settings.asset_grid_style' => 'nullable|string|in:clean,impact',
         ]);
 
         // Handle logo: explicit clear or asset_id (all logos must be assets, no direct file upload)

@@ -72,6 +72,7 @@ export default function CollectionOnlyView({ collection, assets = [] }) {
                                 assets={assets}
                                 onAssetClick={handleAssetClick}
                                 cardSize={cardSize}
+                                cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                 showInfo={showInfo}
                                 selectedAssetId={null}
                                 primaryColor="#6366f1"

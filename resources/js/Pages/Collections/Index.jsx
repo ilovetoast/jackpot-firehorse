@@ -581,6 +581,7 @@ export default function CollectionsIndex({
                                             assets={assetsList}
                                             onAssetClick={(asset) => setActiveAssetId(asset?.id ?? null)}
                                             cardSize={cardSize}
+                                            cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
                                             showInfo={showInfo}
                                             selectedAssetId={activeAssetId}
                                             primaryColor={workspaceAccentColor}
