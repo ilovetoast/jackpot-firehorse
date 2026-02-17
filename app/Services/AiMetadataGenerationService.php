@@ -427,8 +427,11 @@ class AiMetadataGenerationService
             ];
         }
 
-        $prompt = "Analyze this image and provide both structured metadata field values and general descriptive tags.\n\n";
-        
+        $isVideo = str_starts_with($asset->mime_type ?? '', 'video/');
+        $prompt = $isVideo
+            ? "This is a frame from a video. Analyze it and describe what the video is likely about (subject, setting, action, mood). Provide both structured metadata field values and general descriptive tags.\n\n"
+            : "Analyze this image and provide both structured metadata field values and general descriptive tags.\n\n";
+
         $prompt .= "STRUCTURED FIELDS:\n";
         $prompt .= "For each field below, select ONLY from the provided allowed values.\n";
         $prompt .= "Fields to analyze:\n";

@@ -40,6 +40,10 @@ import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import FileTypeIcon from './FileTypeIcon'
 import AssetPlaceholder from './AssetPlaceholder'
 
+// Cache of thumbnail URLs that have failed (404, etc.) - prevents retrying across instances
+// Enables graceful fallback when thumbnails are processing or missing from S3
+const failedThumbnailUrls = new Set()
+
 
 export default function ThumbnailPreview({
     asset,
@@ -142,7 +146,9 @@ export default function ThumbnailPreview({
     
     // Final thumbnails only win AFTER they successfully load
     // If final exists but failed to load (imageError), fall back to preview
-    const canUseFinal = lockedIsFinal && !imageError
+    // Skip URLs we've already seen fail (404, etc.) - prevents retries and console noise
+    const urlKnownFailed = lockedUrl ? failedThumbnailUrls.has(lockedUrl) : false
+    const canUseFinal = lockedIsFinal && !imageError && !urlKnownFailed
     const activeThumbnailUrl = lockedUrl
     const isPreview = lockedIsPreview
     
@@ -186,54 +192,24 @@ export default function ThumbnailPreview({
     }
 
     const handleImageError = () => {
+        if (activeThumbnailUrl) {
+            failedThumbnailUrls.add(activeThumbnailUrl)
+        }
         if (isPreview) {
-            console.warn('[ThumbnailPreview] Preview load failed (non-terminal)', {
-                assetId: asset?.id,
-                url: activeThumbnailUrl,
-            })
             setImageLoaded(false)
-            // Check if preview was actually removed (no preview URL in asset data)
             if (!asset?.preview_thumbnail_url && !asset?.final_thumbnail_url) {
-                // Preview was removed - clear locked URL to show icon
                 setLockedUrl(null)
                 setLockedType(null)
                 setImageError(false)
             } else {
-                // Preview URL exists but image failed to load - likely broken/missing file
-                // Clear locked URL to show icon instead of white space
                 setLockedUrl(null)
                 setLockedType(null)
                 setImageError(false)
             }
         } else {
-            // Final thumbnail failed to load - this is expected if:
-            // 1. Thumbnail status is COMPLETED but file doesn't exist in S3 (data inconsistency)
-            // 2. S3 access/permissions issue
-            // 3. Thumbnail was deleted but status wasn't updated
-            // In all cases, we gracefully fall back to icon - this is not a critical error
-            if (!isFailed && !hasThumbnailError) {
-                // Only log as warning if status suggests it should exist
-                // This helps identify data inconsistencies without being too noisy
-                console.warn('[ThumbnailPreview] Final thumbnail not found (status suggests it should exist)', {
-                    assetId: asset?.id,
-                    url: activeThumbnailUrl,
-                    thumbnailStatus: thumbnailStatus,
-                    note: 'This may indicate the thumbnail file is missing from S3 despite COMPLETED status',
-                })
-            } else {
-                // Status is FAILED or has error - this is expected, don't log
-            }
-            
             setImageLoaded(false)
             setImageError(true)
-            
-            // If thumbnail status is FAILED, trigger re-render to show icon
-            // This handles the case where a broken URL exists but status is FAILED
-            if (isFailed || hasThumbnailError) {
-                // Force component to re-evaluate and show icon
-                // The isFailed check at the top will catch this on next render
-            } else {
-                // Final thumbnail URL exists but image failed to load - clear to show icon
+            if (!isFailed && !hasThumbnailError) {
                 setLockedUrl(null)
                 setLockedType(null)
             }
@@ -259,8 +235,9 @@ export default function ThumbnailPreview({
        PRIORITY 1 — FINAL THUMBNAIL (only if successfully loaded)
        HARD STABILIZATION: Render ONLY lockedUrl - never respond to updates
        If image fails to load AND status is FAILED, show icon instead
+       urlKnownFailed: skip img render for URLs we've seen 404 - show placeholder
     ------------------------------------------------------------ */
-    if (canUseFinal && lockedUrl) {
+    if (canUseFinal && lockedUrl && !urlKnownFailed) {
         // If image failed to load AND status is FAILED, show icon
         if (imageError && (isFailed || hasThumbnailError)) {
             return (
@@ -405,8 +382,9 @@ export default function ThumbnailPreview({
        HARD STABILIZATION: Render ONLY lockedUrl - never respond to updates
        Preview must render immediately when preview_thumbnail_url exists
        imageLoaded only affects opacity, not whether image exists in DOM
+       urlKnownFailed: skip img render for URLs we've seen 404 - show placeholder
     ------------------------------------------------------------ */
-    if (lockedIsPreview && lockedUrl) {
+    if (lockedIsPreview && lockedUrl && !urlKnownFailed) {
         // HARD TERMINAL STATE: Spinner may ONLY render when actively processing
         // Spinner must NEVER render for terminal states (COMPLETED, FAILED, SKIPPED)
         // Spinner must NEVER render when final thumbnail exists
@@ -514,12 +492,23 @@ export default function ThumbnailPreview({
        CRITICAL: Icons NEVER render when preview_thumbnail_url exists
        Icons may render if final_thumbnail_url exists but failed (no preview available)
     ------------------------------------------------------------ */
+    // URL known failed (404, etc.) - show placeholder without retrying
+    if (lockedUrl && urlKnownFailed) {
+        return (
+            <div className={`flex items-center justify-center bg-gray-50 ${className}`}>
+                <AssetPlaceholder
+                    asset={asset}
+                    primaryColor={brandPrimaryColor}
+                />
+            </div>
+        )
+    }
+
     // Icons are terminal-only - never render if preview exists
     // Guard: If preview exists, we should have already returned above
     // HARD STABILIZATION: Check locked URL, not live URL
     if (lockedUrl) {
         // Should not reach here - preview/final branch should have handled it
-        // Return null to prevent icon rendering
         return null
     }
     

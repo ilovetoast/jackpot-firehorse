@@ -94,33 +94,25 @@ class AITaggingJob implements ShouldQueue
             return;
         }
 
-        // AI tagging (stub implementation)
-        $tags = $this->generateAITags($asset);
+        // NOTE: Reviewable AI tags come from AiMetadataGenerationService (AiMetadataGenerationJob),
+        // which creates records in asset_tag_candidates. This job does NOT generate tags.
+        // It only sets ai_tagging_completed so AssetCompletionService::isComplete() can pass.
+        // The generateAITags() stub and metadata['ai_tags'] were never used by the UI.
 
-        // Update asset metadata
+        // Update asset metadata - set completion flag for pipeline sequencing
         // IMPORTANT: Asset.status must NOT be mutated here.
-        // Asset.status represents VISIBILITY (UPLOADED = visible in grid, COMPLETED = visible in dashboard),
-        // not processing progress. Mutating status would cause assets to disappear from the asset grid
-        // (AssetController queries status = UPLOADED). Processing progress is tracked via:
-        // - metadata flags (ai_tagging_completed, ai_tagging_completed_at)
-        // - activity events (asset.ai_tagging.completed)
-        // Only FinalizeAssetJob is authorized to change status from UPLOADED to COMPLETED.
         $currentMetadata = $asset->metadata ?? [];
         $currentMetadata['ai_tagging_completed'] = true;
         $currentMetadata['ai_tagging_completed_at'] = now()->toIso8601String();
-        if (!empty($tags)) {
-            $currentMetadata['ai_tags'] = $tags;
-        }
 
         $asset->update([
             'metadata' => $currentMetadata,
         ]);
 
-        // Record AI tagging completed activity event (AI Tagging - general/freeform tags)
+        // Record AI tagging completed activity event
         ActivityRecorder::logAsset($asset, EventType::ASSET_AI_TAGGING_COMPLETED, [
             'job' => 'AITaggingJob',
-            'tag_count' => count($tags),
-            'tags' => $tags,
+            'tag_count' => 0,
         ]);
 
         PipelineLogger::warning('AI TAGGING: COMPLETE', [
@@ -129,24 +121,10 @@ class AITaggingJob implements ShouldQueue
 
         Log::info('[AITaggingJob] AI tagging completed', [
             'asset_id' => $asset->id,
-            'tag_count' => count($tags),
         ]);
 
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
-    }
-
-    /**
-     * Generate AI tags for asset (stub implementation).
-     *
-     * @param Asset $asset
-     * @return array
-     */
-    protected function generateAITags(Asset $asset): array
-    {
-        // Stub implementation - future phase will add actual AI tagging
-        // Returns empty array for now
-        return [];
     }
 
     /**
