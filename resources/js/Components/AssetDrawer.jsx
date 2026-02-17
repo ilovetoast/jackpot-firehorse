@@ -1159,10 +1159,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 >
                                     {/* Hover video preview (auto-play loop, no controls, no audio) */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && (
-                                        <video
+<video
                                             ref={videoPreviewRef}
                                             src={displayAsset.video_preview_url}
-                                            className="absolute inset-0 w-full h-full object-cover z-10"
+                                            className="absolute inset-0 w-full h-full object-contain z-10 bg-gray-50"
                                             autoPlay
                                             muted
                                             loop

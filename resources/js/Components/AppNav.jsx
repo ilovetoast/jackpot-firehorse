@@ -713,10 +713,10 @@ export default function AppNav({ brand, tenant }) {
                                 {userMenuOpen && (
                                 <>
                                     <div
-                                        className="fixed inset-0 z-10"
+                                        className="fixed inset-0 z-[60]"
                                         onClick={() => setUserMenuOpen(false)}
                                     />
-                                    <div className="absolute right-0 z-20 mt-2 w-64 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                                    <div className="absolute right-0 z-[61] mt-2 w-64 origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
                                         {/* Account Section */}
                                         <div className="px-4 py-2 border-b border-gray-200">
                                             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account</p>

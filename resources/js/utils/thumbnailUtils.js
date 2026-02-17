@@ -223,8 +223,9 @@ export function getThumbnailState(asset, retryCount = 0) {
     // ============================================================================
     
     // Priority 1: Final thumbnail (permanent, full-quality, versioned)
-    // CRITICAL: Only use final thumbnail if status is completed (prevents loading stale URLs after file replacement)
-    if (asset?.final_thumbnail_url && thumbnailStatus === 'completed') {
+    // Backend sends final_thumbnail_url only when thumbnails exist (completed or metadata-resilient)
+    // Use it whenever provided - don't require status===completed (resilient to status sync - see THUMBNAIL_STATUS_SYNC_ISSUE.md)
+    if (asset?.final_thumbnail_url) {
         return {
             state: 'AVAILABLE',
             thumbnailUrl: asset.final_thumbnail_url,

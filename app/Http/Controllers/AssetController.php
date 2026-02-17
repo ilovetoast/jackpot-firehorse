@@ -525,17 +525,27 @@ class AssetController extends Controller
                 $finalThumbnailUrl = null;
                 $thumbnailVersion = null;
                 
-                // Final thumbnail URL only provided when thumbnail_status === COMPLETED
-                // Asset grids use medium size; fall back to thumb if medium not available
-                if ($thumbnailStatus === 'completed') {
+                // Final thumbnail URL: provide when status is completed OR thumbnails exist in metadata
+                // (Resilient to status sync issues - see THUMBNAIL_STATUS_SYNC_ISSUE.md)
+                $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+                if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                     $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
-                    $finalThumbnailUrl = route('assets.thumbnail.final', [
-                        'asset' => $asset->id,
-                        'style' => $thumbnailStyle,
-                    ]);
-                    if ($thumbnailVersion) {
-                        $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                    $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');
+                    if ($pathExists) {
+                        $finalThumbnailUrl = route('assets.thumbnail.final', [
+                            'asset' => $asset->id,
+                            'style' => $thumbnailStyle,
+                        ]);
+                        if ($thumbnailVersion) {
+                            $finalThumbnailUrl .= '?v=' . urlencode($thumbnailVersion);
+                        }
+                        if ($thumbnailStatus !== 'completed' && $thumbnailsExistInMetadata) {
+                            Log::info('[AssetController] Providing final_thumbnail_url despite status mismatch', [
+                                'asset_id' => $asset->id,
+                                'thumbnail_status' => $thumbnailStatus,
+                            ]);
+                        }
                     }
                 }
 

@@ -70,7 +70,10 @@ self.addEventListener('fetch', (event) => {
                         caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, responseClone))
                         return response
                     })
-                    .catch(() => cached)
+                    .catch((err) => {
+                        if (cached) return cached
+                        throw err
+                    })
                 return cached || fetchPromise
             })
         )

@@ -141,30 +141,59 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                 ? Object.values(auth.permissions)
                 : []
     
-    // Check if user has AI dashboard view permission
-    const canViewAIDashboard = permissionsArray.includes('ai.dashboard.view')
+    // Site roles that always have AI dashboard access (stable visibility when effective_permissions may lag)
+    const siteRoles = Array.isArray(auth.site_roles) ? auth.site_roles : []
+    const hasSiteAdminRole = siteRoles.some(r => r === 'site_admin' || r === 'site_owner' || r === 'site_compliance')
+    
+    // Check if user has AI dashboard view permission (permission or site role)
+    const canViewAIDashboard = permissionsArray.includes('ai.dashboard.view') || hasSiteAdminRole
     // Check if user has metadata registry view permission
     const canViewMetadataRegistry = permissionsArray.includes('metadata.registry.view')
 
-    const adminTools = [
-        { name: 'Download Failures', icon: ArrowDownTrayIcon, description: stats ? `Failed: ${stats.download_failures_last_24h ?? 0} (24h), Escalated: ${stats.download_failures_escalated ?? 0}, Awaiting: ${stats.download_failures_awaiting_review ?? 0}` : 'Failed ZIP builds, escalated cases, AI assessments', href: '/app/admin/download-failures' },
-        { name: 'Upload Failures', icon: CloudArrowUpIcon, description: stats ? `Failed: ${stats.upload_failures_last_24h ?? 0} (24h), Escalated: ${stats.upload_failures_escalated ?? 0}, Awaiting: ${stats.upload_failures_awaiting_review ?? 0}` : 'Failed uploads, escalated cases, AI assessments', href: '/app/admin/upload-failures' },
-        { name: 'Derivative Failures', icon: ExclamationTriangleIcon, description: stats ? `Total: ${stats.derivative_failures_total ?? 0}, Escalated: ${stats.derivative_failures_escalated ?? 0}` : 'Thumbnail/preview failures, by processor and type', href: '/app/admin/derivative-failures' },
-        { name: 'AI Agent Health', icon: BoltIcon, description: stats ? `Failures (24h): ${stats.ai_agent_failures_24h ?? 0}` : 'Agent runs, conclusions, escalation', href: '/app/admin/ai-agents' },
-        { name: 'Agencies', icon: BuildingOfficeIcon, description: 'Manage agency partners and approvals', href: '/app/admin/agencies' },
-        { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
-        { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },
-        { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
-        { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
-        { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
-        { name: 'Logs', icon: DocumentTextIcon, description: 'Error and warning logs from web and workers (Redis-backed)', href: '/app/admin/logs' },
-        ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
-        ...(canViewMetadataRegistry ? [{ name: 'Metadata Registry', icon: TagIcon, description: 'Inspect system metadata fields and their behavior', href: '/app/admin/metadata/registry' }] : []),
-        { name: 'Billing Overview', icon: ChartBarIcon, description: 'View income, expenses, and financial reports', href: '/app/admin/billing' },
-        { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
-        { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },
-        { name: 'Permissions', icon: LockClosedIcon, description: 'Manage role permissions', href: '/app/admin/permissions' },
-        { name: 'System Categories', icon: FolderIcon, description: 'Manage system category templates', href: '/app/admin/system-categories' },
+    const adminToolGroups = [
+        {
+            heading: 'Support & Billing',
+            tools: [
+                { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
+                { name: 'Billing Overview', icon: ChartBarIcon, description: 'View income, expenses, and financial reports', href: '/app/admin/billing' },
+            ],
+        },
+        {
+            heading: 'Technical & System Operations',
+            tools: [
+                { name: 'Download Failures', icon: ArrowDownTrayIcon, description: stats ? `Failed: ${stats.download_failures_last_24h ?? 0} (24h), Escalated: ${stats.download_failures_escalated ?? 0}, Awaiting: ${stats.download_failures_awaiting_review ?? 0}` : 'Failed ZIP builds, escalated cases, AI assessments', href: '/app/admin/download-failures' },
+                { name: 'Upload Failures', icon: CloudArrowUpIcon, description: stats ? `Failed: ${stats.upload_failures_last_24h ?? 0} (24h), Escalated: ${stats.upload_failures_escalated ?? 0}, Awaiting: ${stats.upload_failures_awaiting_review ?? 0}` : 'Failed uploads, escalated cases, AI assessments', href: '/app/admin/upload-failures' },
+                { name: 'Derivative Failures', icon: ExclamationTriangleIcon, description: stats ? `Total: ${stats.derivative_failures_total ?? 0}, Escalated: ${stats.derivative_failures_escalated ?? 0}` : 'Thumbnail/preview failures, by processor and type', href: '/app/admin/derivative-failures' },
+                { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
+                { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
+                { name: 'Logs', icon: DocumentTextIcon, description: 'Error and warning logs from web and workers (Redis-backed)', href: '/app/admin/logs' },
+                ...(canViewMetadataRegistry ? [{ name: 'Metadata Registry', icon: TagIcon, description: 'Inspect system metadata fields and their behavior', href: '/app/admin/metadata/registry' }] : []),
+                { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },
+                { name: 'Permissions', icon: LockClosedIcon, description: 'Manage role permissions', href: '/app/admin/permissions' },
+            ],
+        },
+        {
+            heading: 'AI & Automation',
+            tools: [
+                { name: 'AI Agent Health', icon: BoltIcon, description: stats ? `Failures (24h): ${stats.ai_agent_failures_24h ?? 0}` : 'Agent runs, conclusions, escalation', href: '/app/admin/ai-agents' },
+                ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
+            ],
+        },
+        {
+            heading: 'Day-to-Day Operations',
+            tools: [
+                { name: 'Agencies', icon: BuildingOfficeIcon, description: 'Manage agency partners and approvals', href: '/app/admin/agencies' },
+                { name: 'Notifications', icon: BellIcon, description: 'Manage email templates', href: '/app/admin/notifications' },
+                { name: 'Email Test', icon: EnvelopeIcon, description: 'Test email sending', href: '/app/admin/email-test' },
+                { name: 'System Categories', icon: FolderIcon, description: 'Manage system category templates', href: '/app/admin/system-categories' },
+            ],
+        },
+        {
+            heading: 'Documentation',
+            tools: [
+                { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
+            ],
+        },
     ]
 
     // Load stats on mount if not provided
@@ -368,29 +397,33 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                         <p className="mt-2 text-sm text-gray-700">Platform administration and management</p>
                     </div>
 
-                    {/* Admin Tools */}
-                    <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Admin Tools</h2>
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                            {adminTools.map((tool) => {
-                                const IconComponent = tool.icon
-                                return (
-                                    <Link
-                                        key={tool.name}
-                                        href={tool.href}
-                                        className="block rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200 hover:ring-indigo-500 transition-colors"
-                                    >
-                                        <div className="flex items-center">
-                                            <IconComponent className="h-6 w-6 text-gray-400 mr-3 flex-shrink-0" aria-hidden="true" />
-                                            <div>
-                                                <h3 className="text-sm font-semibold text-gray-900">{tool.name}</h3>
-                                                <p className="mt-1 text-xs text-gray-500">{tool.description}</p>
-                                            </div>
-                                        </div>
-                                    </Link>
-                                )
-                            })}
-                        </div>
+                    {/* Admin Tools - Grouped by role/function */}
+                    <div className="mb-8 space-y-8">
+                        {adminToolGroups.map((group) => (
+                            <div key={group.heading}>
+                                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">{group.heading}</h2>
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                    {group.tools.map((tool) => {
+                                        const IconComponent = tool.icon
+                                        return (
+                                            <Link
+                                                key={tool.name}
+                                                href={tool.href}
+                                                className="block rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200 hover:ring-indigo-500 transition-colors"
+                                            >
+                                                <div className="flex items-center">
+                                                    <IconComponent className="h-6 w-6 text-gray-400 mr-3 flex-shrink-0" aria-hidden="true" />
+                                                    <div>
+                                                        <h3 className="text-sm font-semibold text-gray-900">{tool.name}</h3>
+                                                        <p className="mt-1 text-xs text-gray-500">{tool.description}</p>
+                                                    </div>
+                                                </div>
+                                            </Link>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
                     {/* Summary Statistics */}

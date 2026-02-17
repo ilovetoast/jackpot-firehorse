@@ -240,7 +240,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     <video
                         ref={videoPreviewRef}
                         src={asset.video_preview_url}
-                        className="absolute inset-0 w-full h-full object-cover z-10"
+                        className="absolute inset-0 w-full h-full object-contain z-10 bg-gray-50"
                         autoPlay
                         muted
                         loop
