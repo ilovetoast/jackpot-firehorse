@@ -110,6 +110,14 @@ class CompanyController extends Controller
             'brand_id' => $defaultBrand->id,
         ]);
 
+        $redirect = $request->input('redirect');
+        if ($redirect && is_string($redirect)) {
+            $path = parse_url($redirect, PHP_URL_PATH) ?? '';
+            if ($path !== '' && str_starts_with($path, '/app') && ! str_starts_with($path, '/app/api')) {
+                return redirect()->to($redirect);
+            }
+        }
+
         return $this->redirectToIntendedApp('/app/dashboard');
     }
 

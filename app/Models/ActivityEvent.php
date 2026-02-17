@@ -118,19 +118,28 @@ class ActivityEvent extends Model
 
     /**
      * Normalize actor_type value.
+     * Store short strings ('user', 'system', 'api', 'guest') to avoid tight coupling to class names.
      */
     protected function normalizeActorType(?string $value): ?string
     {
-        if (!$value || str_contains($value, '\\') || in_array($value, static::$stringActorTypes, true)) {
-            return $value; // Already normalized or is a string type
+        if (! $value) {
+            return $value;
         }
 
-        // Map short names to full class names
-        $typeMap = [
-            'user' => \App\Models\User::class,
+        // Map class names to short strings for stable storage
+        $classToShort = [
+            \App\Models\User::class => 'user',
         ];
-        
-        return $typeMap[strtolower($value)] ?? $value;
+        if (isset($classToShort[$value])) {
+            return $classToShort[$value];
+        }
+
+        // Keep short string types as-is
+        if (in_array($value, static::$stringActorTypes, true)) {
+            return $value;
+        }
+
+        return $value;
     }
 
     /**
@@ -151,18 +160,6 @@ class ActivityEvent extends Model
      */
     public function actor(): MorphTo
     {
-        // Normalize actor_type if needed before relationship resolves
-        $rawType = $this->getRawOriginal('actor_type');
-        if ($rawType && !str_contains($rawType, '\\') && !in_array($rawType, static::$stringActorTypes, true)) {
-            $normalized = $this->normalizeActorType($rawType);
-            if ($normalized !== $rawType) {
-                $this->setAttribute('actor_type', $normalized);
-                $attributes = $this->getAttributes();
-                $attributes['actor_type'] = $normalized;
-                $this->setRawAttributes($attributes, false);
-            }
-        }
-        
         return $this->morphTo('actor', 'actor_type', 'actor_id');
     }
 

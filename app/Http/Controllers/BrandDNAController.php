@@ -259,7 +259,7 @@ class BrandDNAController extends Controller
     }
 
     /**
-     * Store visual references (logo + up to 3 photography examples).
+     * Store visual references (logo + lifestyle, product, graphics).
      * Triggers embedding generation when assets are selected.
      */
     public function storeVisualReferences(Request $request, Brand $brand)
@@ -272,23 +272,49 @@ class BrandDNAController extends Controller
 
         $logoInput = $request->input('logo_asset_id');
         $photoInput = $request->input('photography_asset_ids', []);
+        $lifestyleInput = $request->input('lifestyle_photography_ids', []);
+        $productInput = $request->input('product_photography_ids', []);
+        $graphicsInput = $request->input('graphics_layout_ids', []);
+
         $photoInput = is_array($photoInput) ? array_values(array_filter($photoInput)) : [];
+        $lifestyleInput = is_array($lifestyleInput) ? array_values(array_filter($lifestyleInput)) : [];
+        $productInput = is_array($productInput) ? array_values(array_filter($productInput)) : [];
+        $graphicsInput = is_array($graphicsInput) ? array_values(array_filter($graphicsInput)) : [];
+
         $request->merge([
             'logo_asset_id' => $logoInput && $logoInput !== '' ? $logoInput : null,
             'photography_asset_ids' => $photoInput,
+            'lifestyle_photography_ids' => $lifestyleInput,
+            'product_photography_ids' => $productInput,
+            'graphics_layout_ids' => $graphicsInput,
         ]);
 
         $validated = $request->validate([
             'logo_asset_id' => 'nullable|exists:assets,id',
             'photography_asset_ids' => 'nullable|array',
             'photography_asset_ids.*' => 'exists:assets,id',
+            'lifestyle_photography_ids' => 'nullable|array',
+            'lifestyle_photography_ids.*' => 'exists:assets,id',
+            'product_photography_ids' => 'nullable|array',
+            'product_photography_ids.*' => 'exists:assets,id',
+            'graphics_layout_ids' => 'nullable|array',
+            'graphics_layout_ids.*' => 'exists:assets,id',
         ]);
 
         $logoAssetId = $validated['logo_asset_id'] ?? null;
         $logoAssetId = $logoAssetId && $logoAssetId !== '' ? $logoAssetId : null;
         $photoIds = array_slice($validated['photography_asset_ids'] ?? [], 0, 3);
+        $lifestyleIds = array_slice($validated['lifestyle_photography_ids'] ?? [], 0, 6);
+        $productIds = array_slice($validated['product_photography_ids'] ?? [], 0, 6);
+        $graphicsIds = array_slice($validated['graphics_layout_ids'] ?? [], 0, 4);
 
-        $allAssetIds = array_filter(array_merge($logoAssetId ? [$logoAssetId] : [], $photoIds));
+        $allAssetIds = array_filter(array_merge(
+            $logoAssetId ? [$logoAssetId] : [],
+            $photoIds,
+            $lifestyleIds,
+            $productIds,
+            $graphicsIds
+        ));
         foreach ($allAssetIds as $aid) {
             $asset = \App\Models\Asset::find($aid);
             if ($asset && $asset->brand_id !== $brand->id) {
@@ -314,6 +340,36 @@ class BrandDNAController extends Controller
                 'asset_id' => $assetId,
                 'embedding_vector' => null,
                 'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
+            ]);
+            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
+        }
+
+        foreach ($lifestyleIds as $assetId) {
+            $ref = BrandVisualReference::create([
+                'brand_id' => $brand->id,
+                'asset_id' => $assetId,
+                'embedding_vector' => null,
+                'type' => BrandVisualReference::TYPE_LIFESTYLE_PHOTOGRAPHY,
+            ]);
+            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
+        }
+
+        foreach ($productIds as $assetId) {
+            $ref = BrandVisualReference::create([
+                'brand_id' => $brand->id,
+                'asset_id' => $assetId,
+                'embedding_vector' => null,
+                'type' => BrandVisualReference::TYPE_PRODUCT_PHOTOGRAPHY,
+            ]);
+            GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
+        }
+
+        foreach ($graphicsIds as $assetId) {
+            $ref = BrandVisualReference::create([
+                'brand_id' => $brand->id,
+                'asset_id' => $assetId,
+                'embedding_vector' => null,
+                'type' => BrandVisualReference::TYPE_GRAPHICS_LAYOUT,
             ]);
             GenerateAssetEmbeddingJob::dispatch($assetId, $ref->id);
         }

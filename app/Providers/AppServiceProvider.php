@@ -13,6 +13,7 @@ use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\OpenAIProvider;
 use App\Services\ImageEmbeddingService;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\ServiceProvider;
@@ -52,6 +53,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Map short actor_type strings for ActivityEvent morphTo resolution
+        Relation::morphMap([
+            'user' => \App\Models\User::class,
+        ]);
+
         // Validate Vite manifest requirement based on environment
         $this->validateViteManifest();
 

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AssetImagePickerField from '../../../Components/media/AssetImagePickerField'
+import AssetImagePickerFieldMulti from '../../../Components/media/AssetImagePickerFieldMulti'
+import CollapsibleSection from '../../../Components/CollapsibleSection'
 import axios from 'axios'
 
 const DEFAULT_PAYLOAD = {
@@ -376,20 +378,44 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
     ]
 
     const logoRef = visualReferences?.find((r) => r.type === 'logo')
-    const photoRefs = visualReferences?.filter((r) => r.type === 'photography_reference') ?? []
+    const lifestyleRefs = visualReferences?.filter((r) => r.type === 'lifestyle_photography') ?? []
+    const productRefs = visualReferences?.filter((r) => r.type === 'product_photography') ?? []
+    const graphicsRefs = visualReferences?.filter((r) => r.type === 'graphics_layout') ?? []
     const [logoAssetId, setLogoAssetId] = useState(logoRef?.asset_id ?? null)
     const [logoPreviewUrl, setLogoPreviewUrl] = useState(logoRef?.asset?.thumbnail_url ?? null)
-    const [photographyAssets, setPhotographyAssets] = useState(() =>
-        photoRefs.slice(0, 3).map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
+    const [lifestyleAssets, setLifestyleAssets] = useState(() =>
+        lifestyleRefs.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
+    )
+    const [productAssets, setProductAssets] = useState(() =>
+        productRefs.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
+    )
+    const [graphicsAssets, setGraphicsAssets] = useState(() =>
+        graphicsRefs.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
     )
     const [visualRefsSaving, setVisualRefsSaving] = useState(false)
 
+    const fetchAssetsForRefs = (opts) => {
+        const params = new URLSearchParams({ format: 'json' })
+        if (opts?.category) params.set('category', opts.category)
+        return fetch(`/app/assets?${params}`, {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        }).then((r) => r.json())
+    }
+
     useEffect(() => {
         const logo = visualReferences?.find((r) => r.type === 'logo')
-        const photos = visualReferences?.filter((r) => r.type === 'photography_reference') ?? []
+        const lifestyle = visualReferences?.filter((r) => r.type === 'lifestyle_photography') ?? []
+        const product = visualReferences?.filter((r) => r.type === 'product_photography') ?? []
+        const graphics = visualReferences?.filter((r) => r.type === 'graphics_layout') ?? []
+        const legacyPhotos = visualReferences?.filter((r) => r.type === 'photography_reference') ?? []
         setLogoAssetId(logo?.asset_id ?? null)
         setLogoPreviewUrl(logo?.asset?.thumbnail_url ?? null)
-        setPhotographyAssets(photos.slice(0, 3).map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title })))
+        const lifestyleMapped = lifestyle.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
+        const legacyMapped = legacyPhotos.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title }))
+        setLifestyleAssets(lifestyleMapped.length ? lifestyleMapped : legacyMapped)
+        setProductAssets(product.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title })))
+        setGraphicsAssets(graphics.map((r) => ({ asset_id: r.asset_id, preview_url: r.asset?.thumbnail_url ?? null, title: r.asset?.title })))
     }, [visualReferences])
 
     const handleSaveVisualReferences = (e) => {
@@ -400,12 +426,17 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
             : `/app/brands/${brand.id}/dna/visual-references`
         router.post(url, {
             logo_asset_id: logoAssetId || null,
-            photography_asset_ids: photographyAssets.filter((a) => a?.asset_id).map((a) => a.asset_id),
+            photography_asset_ids: [],
+            lifestyle_photography_ids: lifestyleAssets.filter((a) => a?.asset_id).map((a) => a.asset_id),
+            product_photography_ids: productAssets.filter((a) => a?.asset_id).map((a) => a.asset_id),
+            graphics_layout_ids: graphicsAssets.filter((a) => a?.asset_id).map((a) => a.asset_id),
         }, {
             preserveScroll: true,
             onFinish: () => setVisualRefsSaving(false),
         })
     }
+
+    const hasAnyVisualRef = logoAssetId || lifestyleAssets?.length || productAssets?.length || graphicsAssets?.length
 
     return (
         <div className="min-h-full">
@@ -741,14 +772,32 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                 />
                                             </div>
 
-                                            {/* Approved Visual References */}
-                                            <div className="mt-8 pt-6 border-t border-gray-200">
+                                            {/* Approved Visual References — contained in a color well */}
+                                            <div className="mt-8 rounded-xl border border-gray-200 bg-slate-50/80 p-6 shadow-sm">
                                                 <h3 className="text-base font-semibold text-gray-900">Approved Visual References</h3>
                                                 <p className="mt-1 text-sm text-gray-600">
                                                     Reference images used for imagery similarity scoring during compliance evaluation.
                                                 </p>
-                                                {(!logoAssetId && !photographyAssets?.some((a) => a?.asset_id)) ? (
-                                                    <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/50 p-6">
+
+                                                <CollapsibleSection title="How Brand Alignment Is Calculated" defaultExpanded={false} className="mt-4 rounded-lg border border-gray-200 bg-white/80">
+                                                    <div className="text-sm text-gray-700 space-y-3">
+                                                        <p>
+                                                            Brand alignment scoring considers several factors to assess how well an asset matches your brand:
+                                                        </p>
+                                                        <ul className="list-disc list-inside space-y-1.5 ml-1">
+                                                            <li><strong>Visual similarity</strong> — How closely the asset resembles your approved reference images in style, subject matter, and composition.</li>
+                                                            <li><strong>Color harmony</strong> — Whether colors align with your brand palette and overall color temperature.</li>
+                                                            <li><strong>Style and composition</strong> — Consistency with the look and feel of your approved examples.</li>
+                                                            <li><strong>Governance signals</strong> — Ratings, starred assets, and approval status can influence scoring when available.</li>
+                                                        </ul>
+                                                        <p>
+                                                            Adding more approved references improves scoring accuracy by giving the system a clearer picture of your brand’s visual identity.
+                                                        </p>
+                                                    </div>
+                                                </CollapsibleSection>
+
+                                                {!hasAnyVisualRef ? (
+                                                    <div className="mt-4 rounded-lg border border-gray-200 bg-white/60 p-6">
                                                         <p className="text-sm text-gray-500">No visual references configured.</p>
                                                         <p className="mt-2 text-sm text-gray-600">Click below to add your brand logo reference.</p>
                                                         <div className="mt-4 max-w-xs">
@@ -760,14 +809,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                                         setLogoPreviewUrl(v.preview_url ?? v.thumbnail_url ?? null)
                                                                     }
                                                                 }}
-                                                                fetchAssets={(opts) => {
-                                                                    const params = new URLSearchParams({ format: 'json' })
-                                                                    if (opts?.category) params.set('category', opts.category)
-                                                                    return fetch(`/app/assets?${params}`, {
-                                                                        credentials: 'same-origin',
-                                                                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                                    }).then((r) => r.json())
-                                                                }}
+                                                                fetchAssets={fetchAssetsForRefs}
                                                                 title="Select brand logo"
                                                                 defaultCategoryLabel="Logos"
                                                                 contextCategory="logos"
@@ -779,7 +821,8 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                 ) : (
                                                     <div className="mt-4 space-y-6">
                                                         <div>
-                                                            <label className="block text-sm font-medium text-gray-700 mb-2">Logo Reference</label>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-2">Logo</label>
+                                                            <p className="text-xs text-gray-500 mb-2">1 required</p>
                                                             <div className="max-w-xs">
                                                                 <AssetImagePickerField
                                                                     value={{
@@ -795,14 +838,7 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                                             setLogoPreviewUrl(v.preview_url ?? v.thumbnail_url ?? null)
                                                                         }
                                                                     }}
-                                                                    fetchAssets={(opts) => {
-                                                                        const params = new URLSearchParams({ format: 'json' })
-                                                                        if (opts?.category) params.set('category', opts.category)
-                                                                        return fetch(`/app/assets?${params}`, {
-                                                                            credentials: 'same-origin',
-                                                                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                                        }).then((r) => r.json())
-                                                                    }}
+                                                                    fetchAssets={fetchAssetsForRefs}
                                                                     title="Select brand logo"
                                                                     defaultCategoryLabel="Logos"
                                                                     contextCategory="logos"
@@ -812,50 +848,50 @@ export default function BrandDNAIndex({ brand, brandModel, activeVersion, editin
                                                             </div>
                                                         </div>
                                                         <div>
-                                                            <label className="block text-sm font-medium text-gray-700 mb-2">Photography References (up to 3)</label>
-                                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                                {[0, 1, 2].map((i) => (
-                                                                    <div key={i}>
-                                                                        <AssetImagePickerField
-                                                                            value={{
-                                                                                asset_id: photographyAssets[i]?.asset_id ?? null,
-                                                                                preview_url: photographyAssets[i]?.preview_url ?? null,
-                                                                            }}
-                                                                            onChange={(v) => {
-                                                                                setPhotographyAssets((prev) => {
-                                                                                    const next = [...(prev || [])]
-                                                                                    while (next.length <= i) next.push({})
-                                                                                    if (v == null) {
-                                                                                        next[i] = {}
-                                                                                    } else if (v?.asset_id) {
-                                                                                        next[i] = { asset_id: v.asset_id, preview_url: v.preview_url ?? v.thumbnail_url ?? null }
-                                                                                    }
-                                                                                    return next
-                                                                                })
-                                                                            }}
-                                                                            fetchAssets={(opts) => {
-                                                                                const params = new URLSearchParams({ format: 'json' })
-                                                                                if (opts?.category) params.set('category', opts.category)
-                                                                                return fetch(`/app/assets?${params}`, {
-                                                                                    credentials: 'same-origin',
-                                                                                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                                                }).then((r) => r.json())
-                                                                            }}
-                                                                            title={`Select photography example ${i + 1}`}
-                                                                            defaultCategoryLabel="Photography"
-                                                                            contextCategory="photography"
-                                                                            placeholder={`Example ${i + 1}`}
-                                                                        />
-                                                                    </div>
-                                                                ))}
-                                                            </div>
+                                                            <AssetImagePickerFieldMulti
+                                                                value={lifestyleAssets}
+                                                                onChange={setLifestyleAssets}
+                                                                fetchAssets={fetchAssetsForRefs}
+                                                                title="Select lifestyle photography"
+                                                                defaultCategoryLabel="Photography"
+                                                                contextCategory="photography"
+                                                                maxSelection={6}
+                                                                recommendedText="Recommended: 3–6 images"
+                                                                label="Lifestyle Photography"
+                                                            />
                                                         </div>
-                                                        <div className="pt-2">
+                                                        <div>
+                                                            <AssetImagePickerFieldMulti
+                                                                value={productAssets}
+                                                                onChange={setProductAssets}
+                                                                fetchAssets={fetchAssetsForRefs}
+                                                                title="Select product photography"
+                                                                defaultCategoryLabel="Photography"
+                                                                contextCategory="photography"
+                                                                maxSelection={6}
+                                                                recommendedText="Recommended: 3–6 images"
+                                                                label="Product Photography"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <AssetImagePickerFieldMulti
+                                                                value={graphicsAssets}
+                                                                onChange={setGraphicsAssets}
+                                                                fetchAssets={fetchAssetsForRefs}
+                                                                title="Select graphics / layout examples"
+                                                                defaultCategoryLabel="Graphics"
+                                                                contextCategory={null}
+                                                                maxSelection={4}
+                                                                recommendedText="Recommended: 2–4 examples"
+                                                                label="Graphics / Layout"
+                                                            />
+                                                        </div>
+                                                        <div className="pt-4 mt-4 border-t border-gray-200/80">
                                                             <button
                                                                 type="button"
                                                                 onClick={handleSaveVisualReferences}
                                                                 disabled={visualRefsSaving}
-                                                                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                                                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                                                             >
                                                                 {visualRefsSaving ? 'Saving…' : 'Save Visual References'}
                                                             </button>

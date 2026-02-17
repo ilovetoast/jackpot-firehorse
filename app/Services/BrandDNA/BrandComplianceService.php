@@ -159,11 +159,54 @@ class BrandComplianceService
             $w = $totalWeight > 0 ? $a['weight'] / $totalWeight : 0;
             $weightedSum += $a['score'] * $w;
         }
-        $overallScore = (int) round($weightedSum);
-        $overallScore = min(100, max(0, $overallScore));
+        $visualScore = (int) round($weightedSum);
+        $visualScore = min(100, max(0, $visualScore));
+
+        // Governance Boost: additive human signals (starred, quality rating, approved)
+        // Scale down when visual score is low to avoid inflating obviously off-brand content
+        $governanceBoost = 0;
+        $metadata = $asset->metadata ?? [];
+        if (filter_var($metadata['starred'] ?? null, FILTER_VALIDATE_BOOLEAN)) {
+            $governanceBoost += 5;
+        }
+        if ((int) ($metadata['quality_rating'] ?? 0) >= 4) {
+            $governanceBoost += 8;
+        }
+        if ($asset->approved_at !== null) {
+            $governanceBoost += 15;
+        }
+
+        $boostMultiplier = $visualScore >= 50 ? 1.0 : 0.5;
+        $governanceBoost = (int) round($governanceBoost * $boostMultiplier);
+
+        $boostedScore = min(100, $visualScore + $governanceBoost);
+
+        // Nonlinear score curve: exponent 1.25 spreads midrange values
+        $normalized = $boostedScore / 100;
+        $curved = pow($normalized, 1.25);
+        $finalScore = (int) round($curved * 100);
+        $overallScore = max(0, min(100, $finalScore));
+
+        // Alignment confidence: reference count, embedding availability, metadata completeness
+        $referenceCount = BrandVisualReference::where('brand_id', $brand->id)
+            ->whereNotNull('embedding_vector')
+            ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
+            ->count();
+        $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
+        $hasEmbedding = $assetEmbedding !== null && ! empty($assetEmbedding->embedding_vector ?? []);
+        $hasColorData = $this->hasDominantColors($asset);
+
+        if ($referenceCount >= 6 && $hasEmbedding && $hasColorData) {
+            $confidence = 'high';
+        } elseif ($referenceCount >= 3 && $hasEmbedding) {
+            $confidence = 'medium';
+        } else {
+            $confidence = 'low';
+        }
 
         $result = [
             'overall_score' => $overallScore,
+            'alignment_confidence' => $confidence,
             'color_score' => $breakdown['color']['score'],
             'typography_score' => $breakdown['typography']['score'],
             'tone_score' => $breakdown['tone']['score'],
@@ -486,10 +529,7 @@ class BrandComplianceService
     {
         return BrandVisualReference::where('brand_id', $brand->id)
             ->whereNotNull('embedding_vector')
-            ->where(function ($q) {
-                $q->where('type', BrandVisualReference::TYPE_LOGO)
-                    ->orWhere('type', BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE);
-            })
+            ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
             ->exists();
     }
 
@@ -533,7 +573,8 @@ class BrandComplianceService
     }
 
     /**
-     * Score imagery using visual similarity against brand reference embeddings.
+     * Score imagery using centroid-based similarity against brand reference embeddings.
+     * Compares asset to the centroid (average) of all brand visual references.
      * When no references configured, returns not_configured (caller should use scoreImagery instead).
      *
      * @return array{0: int, 1: string, 2: string}
@@ -542,7 +583,7 @@ class BrandComplianceService
     {
         $refs = BrandVisualReference::where('brand_id', $brand->id)
             ->whereNotNull('embedding_vector')
-            ->whereIn('type', [BrandVisualReference::TYPE_LOGO, BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE])
+            ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
             ->get();
 
         if ($refs->isEmpty()) {
@@ -555,43 +596,37 @@ class BrandComplianceService
         }
 
         $assetVec = array_values($assetEmbedding->embedding_vector);
-        $refVectors = [];
+        $embeddings = [];
         foreach ($refs as $ref) {
             $refVec = array_values($ref->embedding_vector ?? []);
             if (! empty($refVec) && count($refVec) === count($assetVec)) {
-                $refVectors[] = $refVec;
+                $embeddings[] = $refVec;
             }
         }
 
-        if (empty($refVectors)) {
-            return [0, 'No valid reference embeddings.', 'not_evaluated'];
+        if (empty($embeddings)) {
+            return [0, 'No valid reference embeddings.', 'not_configured'];
         }
 
-        // Brand visual centroid: average of reference vectors, then normalize
-        $dim = count($assetVec);
-        $centroid = array_fill(0, $dim, 0.0);
-        foreach ($refVectors as $v) {
-            for ($i = 0; $i < $dim; $i++) {
-                $centroid[$i] += $v[$i] ?? 0;
+        // Centroid-based similarity: compute average of reference vectors
+        $dimensionCount = count($embeddings[0]);
+        $centroid = array_fill(0, $dimensionCount, 0);
+
+        foreach ($embeddings as $vector) {
+            for ($i = 0; $i < $dimensionCount; $i++) {
+                $centroid[$i] += $vector[$i] ?? 0;
             }
         }
-        $n = count($refVectors);
-        for ($i = 0; $i < $dim; $i++) {
-            $centroid[$i] /= $n;
+
+        for ($i = 0; $i < $dimensionCount; $i++) {
+            $centroid[$i] /= count($embeddings);
         }
-        $centroid = $this->normalizeVector($centroid);
 
         $similarity = $this->cosineSimilarity($assetVec, $centroid);
-
-        // Map [0, 1] to [0, 100]; negative = unrelated, map to 0
         $score = (int) round(max(0.0, $similarity) * 100);
         $score = min(100, max(0, $score));
 
-        $reason = $score >= 70
-            ? 'High visual similarity to brand references.'
-            : ($score >= 40 ? 'Moderate similarity to approved brand imagery.' : 'Low similarity to approved brand imagery.');
-
-        return [$score, $reason, 'scored'];
+        return [$score, 'Visual similarity to brand centroid', 'scored'];
     }
 
     protected function getAssetPhotographyStyle(Asset $asset): ?string
@@ -669,6 +704,9 @@ class BrandComplianceService
         ];
         if (isset($result['evaluation_status'])) {
             $data['evaluation_status'] = $result['evaluation_status'];
+        }
+        if (array_key_exists('alignment_confidence', $result)) {
+            $data['alignment_confidence'] = $result['alignment_confidence'];
         }
 
         BrandComplianceScore::updateOrCreate(

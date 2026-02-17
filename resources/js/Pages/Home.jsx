@@ -683,6 +683,69 @@ export default function Home() {
                 </div>
             </div>
 
+            {/* Brand Governance & On-Brand Scoring AI Section */}
+            <div className="relative overflow-hidden bg-gradient-to-b from-indigo-50/30 via-white to-white">
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-100/40 via-transparent to-transparent" aria-hidden="true" />
+                <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8">
+                    <div className="mx-auto max-w-3xl text-center">
+                        <span className="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-sm font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+                            Brand Governance
+                        </span>
+                        <h2 className="mt-4 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
+                            On-brand scoring AI that works behind the scenes
+                        </h2>
+                        <p className="mt-6 text-lg leading-8 text-gray-600">
+                            Most DAM systems stop at storage. We use AI to keep your brand consistent across every execution — automatically. Agencies manage brand governance through AI-powered tools that reinforce guidelines without slowing creative teams down.
+                        </p>
+                    </div>
+
+                    {/* Them vs Us comparison */}
+                    <div className="mx-auto mt-16 max-w-5xl">
+                        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+                            <div className="rounded-2xl border border-gray-200/80 bg-white/90 p-8 shadow-sm ring-1 ring-gray-100">
+                                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Most systems</h3>
+                                <ul className="mt-6 space-y-4">
+                                    <li className="flex items-start gap-3">
+                                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500" aria-hidden="true">×</span>
+                                        <span className="text-base leading-7 text-gray-600"><strong className="text-gray-900">Hard rule-based</strong> — rigid checks that block or allow, no nuance</span>
+                                    </li>
+                                    <li className="flex items-start gap-3">
+                                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500" aria-hidden="true">×</span>
+                                        <span className="text-base leading-7 text-gray-600"><strong className="text-gray-900">Static compliance</strong> — same rules forever, no learning from your brand</span>
+                                    </li>
+                                </ul>
+                                <p className="mt-6 text-sm text-gray-500">Traditional DAM: storage + checkboxes.</p>
+                            </div>
+                            <div className="rounded-2xl border-2 border-indigo-200/80 bg-white p-8 shadow-md ring-1 ring-indigo-100 lg:scale-[1.02]">
+                                <h3 className="text-sm font-semibold uppercase tracking-wider text-indigo-700">Jackpot</h3>
+                                <ul className="mt-6 space-y-4">
+                                    <li className="flex items-start gap-3">
+                                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white" aria-hidden="true">✓</span>
+                                        <span className="text-base leading-7 text-gray-600"><strong className="text-gray-900">Hybrid AI + human</strong> — AI suggests, humans approve. Best of both.</span>
+                                    </li>
+                                    <li className="flex items-start gap-3">
+                                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white" aria-hidden="true">✓</span>
+                                        <span className="text-base leading-7 text-gray-600"><strong className="text-gray-900">Adaptive brand reinforcement</strong> — learns from your brand and gets smarter over time</span>
+                                    </li>
+                                    <li className="flex items-start gap-3">
+                                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white" aria-hidden="true">✓</span>
+                                        <span className="text-base leading-7 text-gray-600"><strong className="text-gray-900">Feedback-loop driven</strong> — approvals and corrections feed back into the system</span>
+                                    </li>
+                                </ul>
+                                <p className="mt-6 text-sm font-medium text-indigo-700">That&apos;s a real product.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Supporting copy */}
+                    <div className="mx-auto mt-16 max-w-2xl text-center">
+                        <p className="text-base leading-7 text-gray-600">
+                            On-brand scoring runs in the background — tagging, suggesting, and flagging so your team stays consistent across campaigns, regions, and channels. Agencies get governance tools that scale without becoming a bottleneck.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             {/* Agency Partner Program Section */}
             <div className="relative overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-50/80 via-transparent to-transparent" aria-hidden="true" />

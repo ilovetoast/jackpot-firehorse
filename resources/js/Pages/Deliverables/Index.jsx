@@ -269,7 +269,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         if (typeof window === 'undefined') return 220
         const stored = localStorage.getItem('assetGridCardSize')
         const parsed = stored ? parseInt(stored, 10) : 220
-        return [160, 220].includes(parsed) ? parsed : 220
+        return [160, 220, 280, 360].includes(parsed) ? parsed : 220
     }
     
     const getStoredShowInfo = () => {

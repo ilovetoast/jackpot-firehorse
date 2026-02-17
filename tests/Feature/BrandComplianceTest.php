@@ -12,8 +12,10 @@ use App\Enums\UploadType;
 use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
+use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandComplianceScore;
+use App\Models\BrandVisualReference;
 use App\Models\BrandModel;
 use App\Models\BrandModelVersion;
 use App\Models\Category;
@@ -769,5 +771,292 @@ class BrandComplianceTest extends TestCase
             }
         }
         $this->assertGreaterThan(0, $totalWeight);
+    }
+
+    /**
+     * Enable Brand DNA with tone-only scoring that yields baseline ~70 (no keyword match).
+     * Used for Governance Boost tests.
+     */
+    protected function enableBrandDnaWithBaseline70(): void
+    {
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'tone_keywords' => ['brand'],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0,
+                    'typography_weight' => 0,
+                    'tone_weight' => 1.0,
+                    'imagery_weight' => 0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+    }
+
+    /**
+     * Governance Boost: starred asset receives +5 boost.
+     */
+    public function test_starred_asset_receives_boost(): void
+    {
+        $this->enableBrandDnaWithBaseline70();
+        $asset = $this->createAsset();
+        $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['starred' => true])]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        // Curve: (75/100)^1.25 * 100 ≈ 70
+        $this->assertSame(70, $result['overall_score'], 'Baseline 70 + starred boost 5 = 75, curved ≈ 70');
+    }
+
+    /**
+     * Governance Boost: high quality_rating (>=4) receives +8 boost.
+     */
+    public function test_high_quality_rating_receives_boost(): void
+    {
+        $this->enableBrandDnaWithBaseline70();
+        $asset = $this->createAsset();
+        $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['quality_rating' => 4])]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        // Curve: (78/100)^1.25 * 100 ≈ 73
+        $this->assertSame(73, $result['overall_score'], 'Baseline 70 + quality_rating>=4 boost 8 = 78, curved ≈ 73');
+    }
+
+    /**
+     * Governance Boost: approved asset receives +15 boost.
+     */
+    public function test_approved_asset_receives_larger_boost(): void
+    {
+        $this->enableBrandDnaWithBaseline70();
+        $asset = $this->createAsset();
+        $asset->update(['approved_at' => now(), 'approved_by_user_id' => $this->user->id]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        // Curve: (85/100)^1.25 * 100 ≈ 82
+        $this->assertSame(82, $result['overall_score'], 'Baseline 70 + approved boost 15 = 85, curved ≈ 82');
+    }
+
+    /**
+     * Governance Boost: boost scaled down when visual score < 50.
+     */
+    public function test_governance_boost_scaled_when_visual_score_low(): void
+    {
+        $this->enableBrandDnaWithBaseline70();
+        // Tone returns 70 when no keywords match; use banned keyword to get ~40
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 2,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'tone_keywords' => ['brand'],
+                    'banned_keywords' => ['spam'],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0,
+                    'typography_weight' => 0,
+                    'tone_weight' => 1.0,
+                    'imagery_weight' => 0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset(['title' => 'Spam content']);
+        $asset->update([
+            'metadata' => array_merge($asset->metadata ?? [], ['starred' => true]),
+            'approved_at' => now(),
+            'approved_by_user_id' => $this->user->id,
+        ]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        // Visual ~40 (70 - 30 banned). Boost 5+15=20, scaled 0.5 = 10. 40+10=50. Curve: (50/100)^1.25*100 ≈ 42
+        $this->assertSame(42, $result['overall_score'], 'Low visual score should scale boost by 0.5, curved ≈ 42');
+    }
+
+    /**
+     * Governance Boost: total score capped at 100.
+     */
+    public function test_boost_does_not_exceed_100(): void
+    {
+        $this->enableBrandDnaWithBaseline70();
+        $asset = $this->createAsset(['title' => 'Brand asset']);
+        $asset->update([
+            'metadata' => array_merge($asset->metadata ?? [], ['starred' => true, 'quality_rating' => 5]),
+            'approved_at' => now(),
+            'approved_by_user_id' => $this->user->id,
+        ]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertSame(100, $result['overall_score'], 'Baseline ~80 (tone match) + 5 + 8 + 15 = 108, must be capped at 100');
+    }
+
+    /**
+     * Nonlinear score curve spreads midrange values (exponent 1.25).
+     */
+    public function test_score_curve_spreads_midrange_values(): void
+    {
+        $this->enableBrandDnaWithBaseline70();
+        $asset = $this->createAsset();
+        // No tone keyword match -> baseline 70
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $visualScore = 70;
+        $this->assertLessThan($visualScore, $result['overall_score'], 'Curve should reduce midrange score (70 -> ~64)');
+        $this->assertGreaterThanOrEqual(60, $result['overall_score']);
+    }
+
+    /**
+     * High scores (90+) not overly penalized by curve.
+     */
+    public function test_high_score_not_overly_penalized(): void
+    {
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'allowed_color_palette' => [['hex' => '#003388']],
+                    'tone_keywords' => ['brand'],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0.5,
+                    'typography_weight' => 0,
+                    'tone_weight' => 0.5,
+                    'imagery_weight' => 0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset(['title' => 'Brand asset']);
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertGreaterThanOrEqual(85, $result['overall_score'], 'Baseline ~90 should curve to >= 85');
+    }
+
+    /**
+     * Alignment confidence = high when refCount>=6, embedding present, color data present.
+     */
+    public function test_alignment_confidence_high(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $refAsset = $this->createAsset();
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $vec = array_fill(0, 384, 0.01);
+        for ($i = 0; $i < 6; $i++) {
+            BrandVisualReference::create([
+                'brand_id' => $this->brand->id,
+                'asset_id' => $refAsset->id,
+                'embedding_vector' => $vec,
+                'type' => BrandVisualReference::TYPE_LIFESTYLE_PHOTOGRAPHY,
+            ]);
+        }
+        AssetEmbedding::create([
+            'asset_id' => $asset->id,
+            'embedding_vector' => $vec,
+            'model' => 'test-model',
+        ]);
+
+        $service = app(BrandComplianceService::class);
+        $service->scoreAsset($asset, $this->brand);
+
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNotNull($row);
+        $this->assertSame('high', $row->alignment_confidence);
+    }
+
+    /**
+     * Alignment confidence = medium when refCount>=3 and embedding present.
+     */
+    public function test_alignment_confidence_medium(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $refAsset = $this->createAsset();
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $vec = array_fill(0, 384, 0.01);
+        for ($i = 0; $i < 3; $i++) {
+            BrandVisualReference::create([
+                'brand_id' => $this->brand->id,
+                'asset_id' => $refAsset->id,
+                'embedding_vector' => $vec,
+                'type' => BrandVisualReference::TYPE_LIFESTYLE_PHOTOGRAPHY,
+            ]);
+        }
+        AssetEmbedding::create([
+            'asset_id' => $asset->id,
+            'embedding_vector' => $vec,
+            'model' => 'test-model',
+        ]);
+
+        $service = app(BrandComplianceService::class);
+        $service->scoreAsset($asset, $this->brand);
+
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNotNull($row);
+        $this->assertSame('medium', $row->alignment_confidence);
+    }
+
+    /**
+     * Alignment confidence = low when refCount < 3.
+     */
+    public function test_alignment_confidence_low(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $service = app(BrandComplianceService::class);
+        $service->scoreAsset($asset, $this->brand);
+
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNotNull($row);
+        $this->assertSame('low', $row->alignment_confidence);
     }
 }

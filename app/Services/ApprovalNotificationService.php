@@ -291,12 +291,16 @@ class ApprovalNotificationService
         // Get asset title with proper fallback (title -> original_filename -> 'Untitled Asset')
         $assetName = $asset->title ?? $asset->original_filename ?? 'Untitled Asset';
         
+        $tenant = $brand?->tenant;
+
         return [
             'asset_id' => $asset->id,
             'asset_name' => $assetName,
             'asset_type' => $asset->asset_type->value ?? 'unknown',
             'brand_id' => $brand?->id,
             'brand_name' => $brand?->name ?? 'Unknown Brand',
+            'tenant_id' => $tenant?->id,
+            'tenant_name' => $tenant?->name ?? null,
             'action' => $action,
             'actor_id' => $actor->id,
             'actor_name' => $actor->name,

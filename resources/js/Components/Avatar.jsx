@@ -8,6 +8,7 @@
  * @param {string} email - User's email (fallback for initials)
  * @param {string} size - Size variant: 'sm', 'md', 'lg', 'xl' or custom className
  * @param {string} className - Additional CSS classes
+ * @param {string} primaryColor - Optional brand color for initials fallback (when no avatar image)
  */
 export default function Avatar({ 
     avatarUrl, 
@@ -15,7 +16,8 @@ export default function Avatar({
     lastName, 
     email, 
     size = 'md',
-    className = '' 
+    className = '',
+    primaryColor 
 }) {
     // Get initials from first/last name or email
     const getInitials = () => {
@@ -42,7 +44,7 @@ export default function Avatar({
     // If size is a custom className, use it; otherwise use size mapping
     const sizeClass = sizeClasses[size] || size
 
-    const baseClasses = 'flex items-center justify-center rounded-full bg-indigo-600 text-white font-medium flex-shrink-0'
+    const baseClasses = `flex items-center justify-center rounded-full text-white font-medium flex-shrink-0 ${primaryColor ? '' : 'bg-indigo-600'}`
 
     if (avatarUrl) {
         return (
@@ -55,7 +57,10 @@ export default function Avatar({
     }
 
     return (
-        <div className={`${baseClasses} ${sizeClass} ${className}`}>
+        <div
+            className={`${baseClasses} ${sizeClass} ${className}`}
+            style={primaryColor ? { backgroundColor: primaryColor } : undefined}
+        >
             {getInitials()}
         </div>
     )

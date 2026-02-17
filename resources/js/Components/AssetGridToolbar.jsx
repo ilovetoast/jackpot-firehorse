@@ -29,7 +29,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePage, router } from '@inertiajs/react'
 import AssetGridMetadataPrimaryFilters from './AssetGridMetadataPrimaryFilters'
 import AssetGridSearchInput from './AssetGridSearchInput'
-import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, ClockIcon, TagIcon, ChevronUpIcon, ChevronDownIcon, BarsArrowDownIcon, BarsArrowUpIcon, SwatchIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 
@@ -38,6 +38,8 @@ export default function AssetGridToolbar({
     onToggleInfo = () => {},
     cardSize = 220,
     onCardSizeChange = () => {},
+    cardStyle = 'default',
+    onCardStyleChange = null,
     primaryColor = '#6366f1', // Default indigo-600
     bulkSelectedCount = 0, // Phase 2 – Step 7
     onBulkEdit = null, // Phase 2 – Step 7
@@ -161,8 +163,8 @@ export default function AssetGridToolbar({
         })
     }
     
-    // Grid size button group - 2 discrete settings (compact + comfortable)
-    const SIZE_PRESETS = [160, 220]
+    // Grid size button group - 4 discrete settings (compact to spacious)
+    const SIZE_PRESETS = [160, 220, 280, 360]
     
     // Snap cardSize to nearest preset
     const snapToPreset = (value) => {
@@ -381,13 +383,33 @@ export default function AssetGridToolbar({
                             </button>                        
                         </label>
 
-                        {/* Grid Size Button Group */}
+                        {/* Tile style toggle (guidelines vs default) - testing only */}
+                        {onCardStyleChange && (
+                            <button
+                                type="button"
+                                onClick={() => onCardStyleChange(cardStyle === 'guidelines' ? 'default' : 'guidelines')}
+                                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                                    cardStyle === 'guidelines'
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                }`}
+                                title={cardStyle === 'guidelines' ? 'Guidelines style (click for default)' : 'Default style (click for guidelines)'}
+                                aria-label="Toggle tile style"
+                            >
+                                <SwatchIcon className="h-4 w-4" />
+                                <span className="hidden sm:inline">{cardStyle === 'guidelines' ? 'Guidelines' : 'Default'}</span>
+                            </button>
+                        )}
+
+                        {/* Grid Size Button Group - 4 on desktop, last 2 only on mobile */}
                         <div className="flex items-center gap-1.5">                        
                             <div className="inline-flex rounded-md shadow-sm" role="group" aria-label="Grid size">
                                 {SIZE_PRESETS.map((size, index) => {
                                     const isSelected = currentPresetIndex === index
-                                    const iconSizes = ['small', 'medium']
+                                    const iconSizes = ['small', 'medium', 'large', 'xlarge']
                                     const iconSize = iconSizes[index] || 'medium'
+                                    // On mobile (default): only show first 2 buttons (small, medium). On md+: show all 4.
+                                    const isMobileOnlyHidden = index >= 2
                                     
                                     return (
                                         <button
@@ -399,6 +421,7 @@ export default function AssetGridToolbar({
                                                 flex items-center justify-center
                                                 ${index === 0 ? 'rounded-l-md' : ''}
                                                 ${index === SIZE_PRESETS.length - 1 ? 'rounded-r-md' : ''}
+                                                ${index === 1 ? 'rounded-r-md md:rounded-r-none' : ''}
                                                 ${index > 0 ? '-ml-px' : ''}
                                                 ${isSelected 
                                                     ? 'bg-white text-gray-900 shadow-sm z-10' 
@@ -406,6 +429,7 @@ export default function AssetGridToolbar({
                                                 }
                                                 border border-gray-300
                                                 focus:z-10 focus:outline-none focus:ring-2 focus:ring-offset-0
+                                                ${isMobileOnlyHidden ? 'hidden md:flex' : ''}
                                             `}
                                             style={isSelected ? {
                                                 borderColor: primaryColor,

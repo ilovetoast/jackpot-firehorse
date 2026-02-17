@@ -7,6 +7,7 @@ import BrandThemeProvider from './Components/BrandThemeProvider'
 import FlashMessage from './Components/FlashMessage'
 import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
+import PWAInstallPopover from './Components/PWAInstallPopover'
 import { BucketProvider } from './contexts/BucketContext'
 
 if (typeof window !== 'undefined' && import.meta.env.PROD && !window.__jackpotPwaInitialized) {
@@ -68,6 +69,7 @@ createInertiaApp({
         return (props) => (
             <>
                 <PageComponent {...props} />
+                {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
                 <FlashMessage />
                 <AssetProcessingTray />
                 <DownloadBucketBarGlobal />

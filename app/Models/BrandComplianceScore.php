@@ -21,6 +21,7 @@ class BrandComplianceScore extends Model
         'imagery_score',
         'breakdown_payload',
         'evaluation_status',
+        'alignment_confidence',
     ];
 
     protected function casts(): array

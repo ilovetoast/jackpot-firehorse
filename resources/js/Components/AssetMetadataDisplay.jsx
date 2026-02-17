@@ -28,6 +28,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [complianceScore, setComplianceScore] = useState(null)
     const [complianceBreakdown, setComplianceBreakdown] = useState(null)
     const [evaluationStatus, setEvaluationStatus] = useState('pending')
+    const [alignmentConfidence, setAlignmentConfidence] = useState('low')
     const [complianceExpanded, setComplianceExpanded] = useState(false)
     const [brandDnaEnabled, setBrandDnaEnabled] = useState(false)
     const [rescoreLoading, setRescoreLoading] = useState(false)
@@ -55,6 +56,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setComplianceScore(data.compliance_score ?? null)
                 setComplianceBreakdown(data.compliance_breakdown ?? null)
                 setEvaluationStatus(data.evaluation_status ?? 'pending')
+                setAlignmentConfidence(data.alignment_confidence ?? 'low')
                 setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 if (onPendingCountChange) {
                     onPendingCountChange(count)
@@ -122,6 +124,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     setComplianceScore(data.compliance_score ?? null)
                     setComplianceBreakdown(data.compliance_breakdown ?? null)
                     setEvaluationStatus(data.evaluation_status ?? 'pending')
+                    setAlignmentConfidence(data.alignment_confidence ?? 'low')
                     setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 })
                 .catch((err) => {
@@ -338,6 +341,15 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             On-Brand Score: {complianceScore}%
                             <span className="text-[10px] opacity-75">{complianceExpanded ? '▼' : '▶'}</span>
                         </button>
+                        <div className="mt-1 flex items-center gap-2">
+                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                alignmentConfidence === 'high' ? 'bg-green-100 text-green-800' :
+                                alignmentConfidence === 'medium' ? 'bg-amber-100 text-amber-800' :
+                                'bg-gray-100 text-gray-600'
+                            }`}>
+                                Confidence: {alignmentConfidence.charAt(0).toUpperCase() + alignmentConfidence.slice(1)}
+                            </span>
+                        </div>
                         <p className="mt-1 text-[11px] text-gray-500">
                             This score reflects how well this execution aligns with your active Brand DNA scoring rules.
                             {complianceBreakdown && (() => {

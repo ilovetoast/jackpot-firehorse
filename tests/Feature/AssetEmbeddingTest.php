@@ -240,4 +240,130 @@ class AssetEmbeddingTest extends TestCase
         $this->assertGreaterThanOrEqual(0, $result['breakdown_payload']['imagery']['score'] ?? -1);
         $this->assertLessThanOrEqual(100, $result['breakdown_payload']['imagery']['score'] ?? 101);
     }
+
+    /**
+     * Centroid similarity: asset equal to centroid of two refs scores near 100.
+     */
+    public function test_centroid_similarity_is_average_of_references(): void
+    {
+        $asset = $this->createImageAsset();
+
+        // Two refs with identical vectors; centroid = same vector
+        $vec = array_fill(0, 64, 1.0 / 8);
+        $centroid = $vec;
+
+        BrandVisualReference::create([
+            'brand_id' => $this->brand->id,
+            'asset_id' => $asset->id,
+            'embedding_vector' => $vec,
+            'type' => BrandVisualReference::TYPE_LOGO,
+        ]);
+        BrandVisualReference::create([
+            'brand_id' => $this->brand->id,
+            'asset_id' => $asset->id,
+            'embedding_vector' => $vec,
+            'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
+        ]);
+
+        AssetEmbedding::create([
+            'asset_id' => $asset->id,
+            'embedding_vector' => $centroid,
+            'model' => 'test',
+        ]);
+
+        $brandModel = $this->brand->brandModel ?: BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [],
+                'scoring_config' => [
+                    'color_weight' => 0,
+                    'typography_weight' => 0,
+                    'tone_weight' => 0,
+                    'imagery_weight' => 1.0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $imagery = $result['breakdown_payload']['imagery'] ?? null;
+        $this->assertSame('scored', $imagery['status'] ?? null);
+        $this->assertSame(100, $imagery['score'] ?? 0, 'Asset equal to centroid should score 100');
+        $this->assertSame('Visual similarity to brand centroid', $imagery['reason'] ?? null);
+    }
+
+    /**
+     * Centroid similarity: score differs when centroid (average of refs) differs from single reference.
+     */
+    public function test_centroid_similarity_differs_from_single_reference(): void
+    {
+        $asset = $this->createImageAsset();
+
+        // Ref1: [1,0,0,...], Ref2: [0,1,0,...] -> centroid = [0.5, 0.5, 0, ...]
+        $dim = 64;
+        $ref1 = array_fill(0, $dim, 0);
+        $ref1[0] = 1;
+        $ref2 = array_fill(0, $dim, 0);
+        $ref2[1] = 1;
+
+        BrandVisualReference::create([
+            'brand_id' => $this->brand->id,
+            'asset_id' => $asset->id,
+            'embedding_vector' => $ref1,
+            'type' => BrandVisualReference::TYPE_LOGO,
+        ]);
+        BrandVisualReference::create([
+            'brand_id' => $this->brand->id,
+            'asset_id' => $asset->id,
+            'embedding_vector' => $ref2,
+            'type' => BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE,
+        ]);
+
+        // Asset matches ref1 only (not centroid)
+        AssetEmbedding::create([
+            'asset_id' => $asset->id,
+            'embedding_vector' => $ref1,
+            'model' => 'test',
+        ]);
+
+        $brandModel = $this->brand->brandModel ?: BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [],
+                'scoring_config' => [
+                    'color_weight' => 0,
+                    'typography_weight' => 0,
+                    'tone_weight' => 0,
+                    'imagery_weight' => 1.0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $service = app(BrandComplianceService::class);
+        $resultTwoRefs = $service->scoreAsset($asset, $this->brand);
+
+        // Single ref: centroid = ref1, asset = ref1 -> score 100
+        BrandVisualReference::where('brand_id', $this->brand->id)
+            ->where('type', BrandVisualReference::TYPE_PHOTOGRAPHY_REFERENCE)
+            ->delete();
+        $resultOneRef = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($resultTwoRefs);
+        $this->assertNotNull($resultOneRef);
+        $scoreTwoRefs = $resultTwoRefs['breakdown_payload']['imagery']['score'] ?? -1;
+        $scoreOneRef = $resultOneRef['breakdown_payload']['imagery']['score'] ?? -1;
+        $this->assertNotEquals($scoreOneRef, $scoreTwoRefs, 'Centroid of 2 refs should differ from single ref');
+    }
 }

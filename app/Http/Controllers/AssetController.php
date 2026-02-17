@@ -1735,7 +1735,7 @@ class AssetController extends Controller
                 'event_type' => \App\Enums\EventType::ASSET_SYSTEM_METADATA_REGENERATED,
                 'subject_type' => Asset::class,
                 'subject_id' => $asset->id,
-                'actor_type' => User::class,
+                'actor_type' => 'user',
                 'actor_id' => $user?->id,
                 'metadata' => [
                     'fields_regenerated' => ['orientation', 'color_space', 'resolution_class', 'dimensions', 'dominant_colors', 'dominant_color_bucket'],

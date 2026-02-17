@@ -10,6 +10,7 @@
  * @param {boolean} props.showInfo - Whether to show asset info (title, file type)
  * @param {boolean} props.isSelected - Whether this asset is currently selected
  * @param {string} props.primaryColor - Brand primary color for selected highlight
+ * @param {string} props.cardStyle - 'default' | 'guidelines' — guidelines = flat tiles, label below (color-tile style), hover shadow
  */
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
@@ -18,7 +19,7 @@ import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
 
-export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default' }) {
+export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default', cardStyle = 'default' }) {
     const { auth } = usePage().props
     // Extract file extension from original_filename, file_extension, or mime_type
     const getFileExtension = () => {
@@ -196,11 +197,17 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     } : {}
     
     const isCinematic = cardVariant === 'cinematic'
-    const cardBgClass = isCinematic ? 'bg-white/10 backdrop-blur-md' : 'bg-white'
-    const cardBorderClass = isCinematic
-        ? (isSelected ? 'border-2 border-white/60' : 'border-white/20 hover:border-white/40')
-        : (isSelected ? 'border-2' : 'border-gray-200 hover:border-gray-300')
-    const cardShadowClass = isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-md hover:shadow-lg'
+    const isGuidelines = cardStyle === 'guidelines'
+    const cardBgClass = isGuidelines ? 'bg-transparent' : isCinematic ? 'bg-white/10 backdrop-blur-md' : 'bg-white'
+    const cardBorderClass = isGuidelines
+        ? 'border-0'
+        : isCinematic
+            ? (isSelected ? 'border-2 border-white/60' : 'border-white/20 hover:border-white/40')
+            : (isSelected ? 'border-2' : 'border-gray-200 hover:border-gray-300')
+    const cardShadowClass = isGuidelines
+        ? 'shadow-none' // Guidelines: shadow lives on image only (see image container)
+        : isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-md hover:shadow-lg'
+    const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]' // More elongated for guidelines
 
     return (
         <div
@@ -209,15 +216,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
-            className={`group relative ${cardBgClass} rounded-lg border overflow-hidden transition-all duration-200 cursor-pointer ${cardBorderClass} ${cardShadowClass}`}
+            className={`group relative ${cardBgClass} rounded-2xl border transition-all duration-200 cursor-pointer ${cardBorderClass} ${cardShadowClass} ${isGuidelines ? 'overflow-visible flex flex-col' : 'overflow-hidden'}`}
             style={{
                 ...shadowStyle,
                 '--primary-color': primaryColor,
             }}
         >
-            {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) */}
+            {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) or elongated (5:3) for guidelines */}
             <div 
-                className={`aspect-[4/3] relative overflow-hidden ${isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
+                className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-shadow duration-200 ${isGuidelines ? 'bg-white shadow-none group-hover:shadow-lg' : isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
                 onMouseLeave={() => {
                     setIsHovering(false)
@@ -301,13 +308,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     </div>
                 )}
 
-                {/* File type badge overlay - top right - Conditionally hidden based on showInfo prop */}
+                {/* File type badge overlay - top right. In guidelines mode, file type moves to label below. */}
                 {showInfo && (
                     <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                         <div className="inline-flex items-center gap-1.5">
-                            <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
-                                {fileExtension}
-                            </span>
+                            {!isGuidelines && (
+                                <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
+                                    {fileExtension}
+                                </span>
+                            )}
                             {/* Starred: gold for visibility on varied image backgrounds (brand primary was too dark) */}
                             {asset.starred === true && (
                                 <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />
@@ -319,21 +328,30 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                                 <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
                             )}
                         </div>
-                        
-                        {/* Labels removed for clean grid view */}
                     </div>
                 )}
             </div>
             
             {/* Title section - Conditionally hidden based on showInfo prop */}
             {showInfo && (
-                <div className={`p-3 border-t ${isCinematic ? 'border-white/20' : 'border-gray-100'}`}>
-                    <h3 
-                        className={`text-sm font-medium truncate transition-colors duration-200 group-hover:text-[var(--primary-color)] ${isCinematic ? 'text-white drop-shadow-sm' : 'text-gray-900'}`}
-                    >
-                        {asset.title || asset.original_filename || 'Untitled Asset'}
-                    </h3>
-                </div>
+                isGuidelines ? (
+                    <div className="mt-3 px-4 flex items-center justify-between gap-2 min-w-0">
+                        <span className="text-xs font-medium truncate text-gray-900">
+                            {asset.title || asset.original_filename || 'Untitled Asset'}
+                        </span>
+                        <span className="font-mono text-[10px] font-medium text-gray-600 flex-shrink-0">
+                            {fileExtension}
+                        </span>
+                    </div>
+                ) : (
+                    <div className={`p-3 border-t ${isCinematic ? 'border-white/20' : 'border-gray-100'}`}>
+                        <h3 
+                            className={`text-sm font-medium truncate transition-colors duration-200 group-hover:text-[var(--primary-color)] ${isCinematic ? 'text-white drop-shadow-sm' : 'text-gray-900'}`}
+                        >
+                            {asset.title || asset.original_filename || 'Untitled Asset'}
+                        </h3>
+                    </div>
+                )
             )}
             
             {/* Phase L.6.2: Visual indicator for unpublished assets - user clicks asset to open drawer */}

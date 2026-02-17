@@ -10,7 +10,7 @@ import { usePermission } from '../hooks/usePermission'
  * Also shows simple pending items (AI suggestions, metadata approvals).
  */
 export default function NotificationBell({ textColor = '#000000' }) {
-    const { pending_items } = usePage().props
+    const { pending_items, auth } = usePage().props
     const [notifications, setNotifications] = useState([])
     const [unreadCount, setUnreadCount] = useState(0)
     const [isOpen, setIsOpen] = useState(false)
@@ -95,7 +95,8 @@ export default function NotificationBell({ textColor = '#000000' }) {
         const assetName = data?.asset_name || 'an asset'
         const actorName = data?.actor_name || 'Someone'
         const downloadTitle = data?.download_title || 'Your download'
-        
+        const assetCount = data?.asset_count ?? 0
+
         switch (type) {
             case 'asset.submitted':
                 return `${actorName} submitted "${assetName}" for approval`
@@ -106,24 +107,95 @@ export default function NotificationBell({ textColor = '#000000' }) {
             case 'asset.resubmitted':
                 return `${actorName} resubmitted "${assetName}" for approval`
             case 'download.ready':
+                if (isUuidFallbackTitle(downloadTitle, data?.download_id)) {
+                    return assetCount > 0 ? `${assetCount} asset${assetCount === 1 ? '' : 's'} ready to download` : 'Download ready'
+                }
                 return `"${downloadTitle}" is ready to download`
             default:
                 return 'New notification'
         }
     }
 
+    const isUuidFallbackTitle = (title, downloadId) => {
+        if (!title || typeof title !== 'string') return false
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        if (title === `Download ${downloadId}` && uuidPattern.test(String(downloadId))) return true
+        if (uuidPattern.test(title)) return true
+        if (/^Download [0-9a-f-]{36}$/i.test(title)) return true
+        return false
+    }
+
+    const getContextLabel = (notification) => {
+        const { data } = notification
+        const tenantName = data?.tenant_name
+        const brandName = data?.brand_name
+        if (tenantName && brandName && tenantName !== brandName) return `${tenantName} · ${brandName}`
+        if (tenantName) return tenantName
+        if (brandName) return brandName
+        return null
+    }
+
     const handleNotificationClick = async (notification) => {
+        const activeTenantId = auth?.activeCompany?.id
+        const activeBrandId = auth?.activeBrand?.id
+        const data = notification.data || {}
+        const notifTenantId = data.tenant_id
+        const notifBrandId = data.brand_id
+
         if (notification.is_unread) {
             await handleMarkAsRead(notification.id)
         }
-        
-        if (notification.type === 'download.ready' && notification.data?.download_id) {
-            router.visit('/app/downloads')
+
+        const needsCompanySwitch = notifTenantId && (!activeTenantId || activeTenantId !== notifTenantId)
+        const needsBrandSwitch = notifBrandId && activeBrandId && notifBrandId !== activeBrandId && activeTenantId === notifTenantId
+
+        if (notification.type === 'download.ready' && data.download_id) {
             setIsOpen(false)
+            if (needsCompanySwitch) {
+                const form = document.createElement('form')
+                form.method = 'POST'
+                form.action = `/app/companies/${notifTenantId}/switch`
+                form.innerHTML = `<input type="hidden" name="_token" value="${document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')}" /><input type="hidden" name="redirect" value="/app/downloads" />`
+                document.body.appendChild(form)
+                form.submit()
+                return
+            }
+            if (needsBrandSwitch) {
+                router.post(`/app/brands/${notifBrandId}/switch`, {}, {
+                    preserveState: true,
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        router.reload({ only: ['auth'] })
+                        router.visit('/app/downloads')
+                    },
+                })
+                return
+            }
+            router.visit('/app/downloads')
             return
         }
-        if (notification.data?.asset_id) {
-            window.location.href = `/app/assets?asset=${notification.data.asset_id}`
+        if (data.asset_id) {
+            if (needsCompanySwitch && notifTenantId) {
+                const form = document.createElement('form')
+                form.method = 'POST'
+                form.action = `/app/companies/${notifTenantId}/switch`
+                form.innerHTML = `<input type="hidden" name="_token" value="${document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')}" /><input type="hidden" name="redirect" value="/app/assets?asset=${data.asset_id}" />`
+                document.body.appendChild(form)
+                form.submit()
+                return
+            }
+            if (needsBrandSwitch && notifBrandId) {
+                router.post(`/app/brands/${notifBrandId}/switch`, {}, {
+                    preserveState: true,
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        router.reload({ only: ['auth'] })
+                        window.location.href = `/app/assets?asset=${data.asset_id}`
+                    },
+                })
+                return
+            }
+            window.location.href = `/app/assets?asset=${data.asset_id}`
         }
         setIsOpen(false)
     }
@@ -283,6 +355,11 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                                                 <p className="text-sm font-medium text-gray-900">
                                                                     {getNotificationMessage(notification)}
                                                                 </p>
+                                                                {getContextLabel(notification) && (
+                                                                    <p className="text-xs text-indigo-600 mt-0.5 font-medium">
+                                                                        {getContextLabel(notification)}
+                                                                    </p>
+                                                                )}
                                                                 <p className="text-xs text-gray-500 mt-0.5">
                                                                     Ready to download
                                                                 </p>
@@ -301,6 +378,11 @@ export default function NotificationBell({ textColor = '#000000' }) {
                                                             <p className="text-sm text-gray-900">
                                                                 {getNotificationMessage(notification)}
                                                             </p>
+                                                            {getContextLabel(notification) && (
+                                                                <p className="text-xs text-indigo-600 mt-0.5 font-medium">
+                                                                    {getContextLabel(notification)}
+                                                                </p>
+                                                            )}
                                                             <p className="text-xs text-gray-500 mt-1">
                                                                 {new Date(notification.created_at).toLocaleString()}
                                                             </p>

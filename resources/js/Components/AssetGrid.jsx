@@ -32,6 +32,7 @@ export default function AssetGrid({
     selectedAssetId = null,
     primaryColor = '#6366f1',
     cardVariant = 'default', // 'default' | 'cinematic' — cinematic = transparent cards over background
+    cardStyle = 'default', // 'default' | 'guidelines' — guidelines = brand guidelines color-tile style (flat, label below, hover shadow)
     selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
     onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
     bucketAssetIds = [], // Phase D1: Download bucket IDs
@@ -73,6 +74,7 @@ export default function AssetGrid({
                     isPendingApprovalMode={isPendingApprovalMode} // Phase L.6.2
                     isPendingPublicationFilter={isPendingPublicationFilter} // Phase J.3.1
                     onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null} // Phase L.6.2
+                    cardStyle={cardStyle}
                 />
             ))}
         </AssetGridContainer>

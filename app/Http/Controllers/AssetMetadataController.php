@@ -955,6 +955,7 @@ class AssetMetadataController extends Controller
         $complianceBreakdown = null;
         $evaluationStatus = 'pending';
         $brandDnaEnabled = false;
+        $alignmentConfidence = 'low';
         if ($asset->brand_id) {
             $brandModel = $brand->brandModel;
             $brandDnaEnabled = $brandModel && $brandModel->is_enabled && $brandModel->activeVersion !== null;
@@ -965,6 +966,7 @@ class AssetMetadataController extends Controller
                 $complianceScore = $score->overall_score;
                 $complianceBreakdown = $score->breakdown_payload;
                 $evaluationStatus = $score->evaluation_status ?? 'pending';
+                $alignmentConfidence = $score->alignment_confidence ?? 'low';
             } elseif (! $brandDnaEnabled) {
                 // No score row and Brand DNA disabled: nothing to evaluate
                 $evaluationStatus = 'not_applicable';
@@ -979,6 +981,7 @@ class AssetMetadataController extends Controller
             'compliance_score' => $complianceScore,
             'compliance_breakdown' => $complianceBreakdown,
             'evaluation_status' => $evaluationStatus,
+            'alignment_confidence' => $alignmentConfidence,
             'brand_dna_enabled' => $brandDnaEnabled,
         ]);
     }

@@ -29,6 +29,18 @@ class BrandVisualReference extends Model
 
     public const TYPE_LOGO = 'logo';
     public const TYPE_PHOTOGRAPHY_REFERENCE = 'photography_reference';
+    public const TYPE_LIFESTYLE_PHOTOGRAPHY = 'lifestyle_photography';
+    public const TYPE_PRODUCT_PHOTOGRAPHY = 'product_photography';
+    public const TYPE_GRAPHICS_LAYOUT = 'graphics_layout';
+
+    /** All types included in imagery centroid scoring (logo + all photography/graphics). */
+    public const IMAGERY_TYPES = [
+        self::TYPE_LOGO,
+        self::TYPE_PHOTOGRAPHY_REFERENCE,
+        self::TYPE_LIFESTYLE_PHOTOGRAPHY,
+        self::TYPE_PRODUCT_PHOTOGRAPHY,
+        self::TYPE_GRAPHICS_LAYOUT,
+    ];
 
     public function brand(): BelongsTo
     {

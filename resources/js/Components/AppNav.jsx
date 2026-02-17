@@ -6,7 +6,6 @@ import PermissionGate from './PermissionGate'
 import Avatar from './Avatar'
 import NotificationBell from './NotificationBell'
 import {
-    ArrowDownCircleIcon,
     ArrowDownTrayIcon,
     BookOpenIcon,
     FolderIcon,
@@ -24,9 +23,6 @@ export default function AppNav({ brand, tenant }) {
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
-    const [isInstallAvailable, setIsInstallAvailable] = useState(false)
-    const [showInstallAction, setShowInstallAction] = useState(false)
-    const [isInstalling, setIsInstalling] = useState(false)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
@@ -206,30 +202,6 @@ export default function AppNav({ brand, tenant }) {
     }
 
     useEffect(() => {
-        if (typeof window === 'undefined') {
-            return
-        }
-
-        const updateInstallAvailability = () => {
-            const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true
-            setShowInstallAction(!isStandalone)
-            setIsInstallAvailable(Boolean(window.__jackpotDeferredInstallPrompt) && !isStandalone)
-        }
-
-        updateInstallAvailability()
-
-        window.addEventListener('jackpot:pwa-installable', updateInstallAvailability)
-        window.addEventListener('jackpot:pwa-installed', updateInstallAvailability)
-        document.addEventListener('visibilitychange', updateInstallAvailability)
-
-        return () => {
-            window.removeEventListener('jackpot:pwa-installable', updateInstallAvailability)
-            window.removeEventListener('jackpot:pwa-installed', updateInstallAvailability)
-            document.removeEventListener('visibilitychange', updateInstallAvailability)
-        }
-    }, [])
-
-    useEffect(() => {
         if (typeof document === 'undefined') {
             return
         }
@@ -244,38 +216,6 @@ export default function AppNav({ brand, tenant }) {
             document.body.classList.remove('has-mobile-tabbar')
         }
     }, [isAppPage, isCollectionOnlyNav, isAdminPage])
-
-    const handleInstallApp = async () => {
-        if (typeof window === 'undefined') {
-            return
-        }
-
-        const deferredPrompt = window.__jackpotDeferredInstallPrompt
-        if (!deferredPrompt) {
-            const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent || '')
-            window.alert(
-                isIos
-                    ? 'To install this app, tap Share and choose "Add to Home Screen".'
-                    : 'To install this app, open your browser menu and choose "Install app".'
-            )
-            return
-        }
-
-        setIsInstalling(true)
-
-        try {
-            await deferredPrompt.prompt()
-            await deferredPrompt.userChoice
-        } catch (error) {
-            console.error('App install prompt failed', error)
-        } finally {
-            if (window.__jackpotDeferredInstallPrompt === deferredPrompt) {
-                window.__jackpotDeferredInstallPrompt = null
-            }
-            setIsInstallAvailable(false)
-            setIsInstalling(false)
-        }
-    }
 
     const mobileAppNavItems = [
         {
@@ -706,44 +646,22 @@ export default function AppNav({ brand, tenant }) {
                                 Collection access
                             </Link>
                         )}
-                        {/* Right-side nav: install + utility links (desktop/tablet), then notifications */}
-                        {showInstallAction && (
-                            <button
-                                type="button"
-                                onClick={handleInstallApp}
-                                disabled={isInstalling}
-                                className="inline-flex items-center justify-center gap-1.5 rounded-md p-2 md:px-2 md:py-1.5 text-sm font-medium border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        {/* Right-side nav: Brand Guidelines, Downloads */}
+                        {isAppPage && (
+                            <Link
+                                href="/app/brand-guidelines"
+                                className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                 style={{
                                     color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
                                 }}
-                                aria-label={isInstalling ? 'Installing app' : 'Install app'}
-                                title={isInstalling ? 'Installing app' : 'Install app'}
                             >
-                                <ArrowDownCircleIcon className="h-5 w-5" />
-                                <span className="hidden lg:inline">{isInstalling ? 'Installing...' : 'Install App'}</span>
-                            </button>
+                                <span>Brand Guidelines</span>
+                            </Link>
                         )}
-                        {isAppPage && (
-                            <>
-                                <Link
-                                    href="/app/brand-guidelines"
-                                    className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                                    style={{
-                                        color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
-                                    }}
-                                >
-                                    <span>Brand Guidelines</span>
-                                </Link>
-                            </>
-                        )}
-                        {/* Phase AF-3: Notification Bell */}
-                        <div className="hidden sm:block">
-                            <NotificationBell textColor={textColor} />
-                        </div>
                         {isAppPage && !isCollectionOnlyNav && (
                             <Link
                                 href="/app/downloads"
-                                className="inline-flex items-center justify-center rounded-md p-2 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                 style={{
                                     color: currentUrl.startsWith('/app/downloads')
                                         ? (activeBrand?.primary_color || '#4f46e5')
@@ -752,13 +670,18 @@ export default function AppNav({ brand, tenant }) {
                                 aria-label="Downloads"
                                 title="Downloads"
                             >
-                                <ArrowDownTrayIcon className="h-5 w-5" aria-hidden="true" />
+                                <ArrowDownTrayIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                                <span className="hidden md:inline">Downloads</span>
                             </Link>
                         )}
                         
-                        {/* User Menu */}
-                        <div className="relative ml-3">
-                            <div>
+                        {/* User Menu (Notifications next to user name) */}
+                        <div className="flex items-center gap-2">
+                            {/* Phase AF-3: Notification Bell - next to user name */}
+                            <div className="hidden sm:block">
+                                <NotificationBell textColor={textColor} />
+                            </div>
+                            <div className="relative">
                                 <button
                                     type="button"
                                     className="flex max-w-xs items-center rounded-full bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
@@ -782,12 +705,12 @@ export default function AppNav({ brand, tenant }) {
                                             lastName={auth.user?.last_name}
                                             email={auth.user?.email}
                                             size="h-8 w-8 text-xs"
+                                            primaryColor={!auth.user?.avatar_url ? (activeBrand?.primary_color || effectiveCollection?.brand?.primary_color || '#6366f1') : undefined}
                                         />
                                     </div>
                                 </button>
-                            </div>
 
-                            {userMenuOpen && (
+                                {userMenuOpen && (
                                 <>
                                     <div
                                         className="fixed inset-0 z-10"
@@ -1052,7 +975,8 @@ export default function AppNav({ brand, tenant }) {
                                         </div>
                                     </div>
                                 </>
-                            )}
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

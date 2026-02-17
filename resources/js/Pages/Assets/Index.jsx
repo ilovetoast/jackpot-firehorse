@@ -435,7 +435,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         if (typeof window === 'undefined') return 220
         const stored = localStorage.getItem('assetGridCardSize')
         const parsed = stored ? parseInt(stored, 10) : 220
-        return [160, 220].includes(parsed) ? parsed : 220
+        return [160, 220, 280, 360].includes(parsed) ? parsed : 220
     }
     
     const getStoredShowInfo = () => {
@@ -447,7 +447,11 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Card size with scaling enabled - loads from localStorage
     const [cardSize, setCardSize] = useState(getStoredCardSize)
     const [showInfo, setShowInfo] = useState(getStoredShowInfo)
-    
+    const [cardStyle, setCardStyle] = useState(() => {
+        if (typeof window === 'undefined') return 'guidelines'
+        return localStorage.getItem('assetGridCardStyle') || 'guidelines'
+    })
+
     // Save card size to localStorage when it changes
     useEffect(() => {
         if (typeof window !== 'undefined') {
@@ -460,6 +464,12 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             localStorage.setItem('assetGridShowInfo', showInfo.toString())
         }
     }, [showInfo])
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridCardStyle', cardStyle)
+        }
+    }, [cardStyle])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
     const handleCategorySelect = useCallback((category) => {
@@ -956,6 +966,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 onToggleInfo={() => setShowInfo(v => !v)}
                                 cardSize={cardSize}
                                 onCardSizeChange={setCardSize}
+                                cardStyle={cardStyle}
+                                onCardStyleChange={setCardStyle}
                                 primaryColor={workspaceAccentColor}
                                 bulkSelectedCount={bulkSelectedAssetIds.length}
                                 onBulkEdit={() => {
@@ -1070,6 +1082,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                     assets={assetsList} 
                                     onAssetClick={handleAssetClick}
                                     cardSize={cardSize}
+                                    cardStyle={cardStyle}
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}
                                     primaryColor={workspaceAccentColor}
