@@ -60,6 +60,40 @@ class AssetDeletionService
     }
 
     /**
+     * Restore a soft-deleted asset (undo delete before grace period expires).
+     * When DeleteAssetJob runs, it checks if asset is still trashed; if restored, job skips.
+     *
+     * @param Asset $asset Must be loaded with withTrashed()
+     * @param int|null $userId Optional user ID for event tracking
+     * @return void
+     */
+    public function restoreFromTrash(Asset $asset, ?int $userId = null): void
+    {
+        if (!$asset->trashed()) {
+            return; // Idempotent: already restored
+        }
+
+        $asset->restore();
+
+        AssetEvent::create([
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'asset_id' => $asset->id,
+            'user_id' => $userId,
+            'event_type' => 'asset.restored_from_trash',
+            'metadata' => [
+                'original_filename' => $asset->original_filename,
+            ],
+            'created_at' => now(),
+        ]);
+
+        Log::info('Asset restored from trash', [
+            'asset_id' => $asset->id,
+            'original_filename' => $asset->original_filename,
+        ]);
+    }
+
+    /**
      * Get soft-deleted assets that are past grace period and ready for hard deletion.
      *
      * @param int $batchSize

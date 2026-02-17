@@ -11,7 +11,7 @@ The **display_widget** column on `metadata_fields` controls how a field is rende
   - **Filters (grid):** Primary/secondary filters render it as a toggle.
   - **Upload:** Rendered as a toggle in the upload metadata section.
 - **`select`** – Explicit dropdown (schema can still define options).
-- **`color`** – Used for fields like `dominant_color_bucket` (swatch UI).
+- **`color`** – Used for fields like `dominant_hue_group` (swatch UI).
 
 Other values may be added (e.g. `rating`, `date`) as needed.
 

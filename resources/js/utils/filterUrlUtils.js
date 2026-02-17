@@ -23,7 +23,7 @@ const RESERVED_PARAMS = new Set([
 const SPECIAL_FILTER_KEYS = ['tags', 'collection']
 
 /** Keys that support multiple values in the URL (repeated param or dominant_color_bucket[]=X). Backend accepts array for these. */
-const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_color_bucket'])
+const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_hue_group'])
 
 /**
  * Normalize a filter param value to a deduplicated array.
@@ -59,7 +59,7 @@ export function filtersToFlatParams(filters, filterKeys = null) {
     if (Array.isArray(v)) {
       const nonEmpty = [...new Set(v.filter(x => x !== '' && x !== null && x !== undefined).map(String))]
       if (nonEmpty.length > 0) {
-        // Multi-value: dedupe and keep all for URL (tags=hero&tags=campaign or dominant_color_bucket=X&dominant_color_bucket=Y)
+        // Multi-value: dedupe and keep all for URL (tags=hero&tags=campaign or dominant_hue_group=X&dominant_hue_group=Y)
         out[key] = MULTI_VALUE_FILTER_KEYS.has(key) ? nonEmpty : [nonEmpty[0]]
       }
     } else if (v !== '' && v !== null && v !== undefined) {
@@ -70,7 +70,7 @@ export function filtersToFlatParams(filters, filterKeys = null) {
 }
 
 /**
- * Extract base key from PHP-style array param (e.g. dominant_color_bucket[0] -> dominant_color_bucket)
+ * Extract base key from PHP-style array param (e.g. dominant_hue_group[0] -> dominant_hue_group)
  * @param {string} key
  * @param {Set<string>} keySet
  * @returns {string|null} Base key if valid, else null
@@ -90,7 +90,7 @@ function parsePhpArrayKey(key, keySet) {
  * @returns {Record<string, { operator: string, value: string | string[] }>} filters object (multi-value keys get value as string[])
  */
 export function flatParamsToFilters(params, filterKeys = []) {
-  const keySet = new Set([...(filterKeys || []), ...SPECIAL_FILTER_KEYS, 'dominant_color_bucket'])
+  const keySet = new Set([...(filterKeys || []), ...SPECIAL_FILTER_KEYS, 'dominant_hue_group'])
   if (keySet.size === 0) return {}
   const entries = params instanceof URLSearchParams
     ? Array.from(params.entries())
@@ -144,7 +144,7 @@ export function parseFiltersFromUrl(urlParams, filterKeys = []) {
 export function buildUrlParamsWithFlatFilters(urlParams, filters, filterKeys = []) {
   const obj = Object.fromEntries(urlParams.entries())
   delete obj.filters
-  const keysToRemove = new Set([...filterKeys, ...SPECIAL_FILTER_KEYS, 'dominant_color_bucket'])
+  const keysToRemove = new Set([...filterKeys, ...SPECIAL_FILTER_KEYS, 'dominant_hue_group'])
   keysToRemove.forEach(k => delete obj[k])
   Object.keys(obj).forEach(k => {
     const m = k.match(/^(.+)\[\d*\]$/)

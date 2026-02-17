@@ -983,14 +983,17 @@ class AssetMetadataController extends Controller
         // Metadata health: surface missing system metadata for recovery UI
         $hasDominantColors = ! empty(data_get($asset->metadata, 'dominant_colors'))
             || ! empty(data_get($asset->metadata, 'fields.dominant_colors'));
+        $hasDominantHueGroup = ! empty($asset->dominant_hue_group);
         $hasEmbedding = $asset->embedding()->exists();
         $thumbnailComplete = $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED;
         $metadataHealth = [
             'dominant_colors' => $hasDominantColors,
+            'dominant_hue_group' => $hasDominantHueGroup,
             'embedding' => $hasEmbedding,
             'thumbnails' => $thumbnailComplete,
         ];
-        $metadataHealth['is_complete'] = $hasDominantColors && $hasEmbedding && $thumbnailComplete;
+        // If dominant_colors exist but dominant_hue_group missing → incomplete (needs re-analysis)
+        $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding && $thumbnailComplete;
 
         return response()->json([
             'fields' => $editableFields,
@@ -1257,7 +1260,7 @@ class AssetMetadataController extends Controller
                 }
             }
 
-            // Respect show_on_edit (Quick View): exclude filter-only fields (e.g. dominant_color_bucket)
+            // Respect show_on_edit (Quick View): exclude filter-only fields (e.g. dominant_hue_group)
             $effectiveShowOnEdit = (bool) ($field->show_on_edit ?? true);
             if (isset($editVisibilityOverrides[$fieldId]) && $editVisibilityOverrides[$fieldId]) {
                 $effectiveShowOnEdit = false; // Category override: is_edit_hidden=true

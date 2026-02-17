@@ -335,7 +335,7 @@ export function FilterValueInput({
         )
     }
 
-    // Color swatch filter (dominant_color_bucket)
+    // Color swatch filter (dominant_hue_group)
     if (widget === WIDGET.COLOR_SWATCH) {
         return (
             <ColorSwatchFilter

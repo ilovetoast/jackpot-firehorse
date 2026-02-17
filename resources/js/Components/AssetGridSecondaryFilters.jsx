@@ -364,7 +364,7 @@ export default function AssetGridSecondaryFilters({
         for (const [key, def] of Object.entries(raw || {})) {
             if (!def || (def.value === undefined && def.value === null)) continue
             const v = def.value
-            if (['tags', 'collection', 'dominant_color_bucket'].includes(key)) {
+            if (['tags', 'collection', 'dominant_hue_group'].includes(key)) {
                 out[key] = { operator: def.operator || 'equals', value: normalizeFilterParam(v) }
             } else {
                 out[key] = { operator: def.operator || 'equals', value: v }

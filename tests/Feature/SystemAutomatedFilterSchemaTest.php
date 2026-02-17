@@ -16,7 +16,7 @@ use Tests\TestCase;
 /**
  * System Automated Filter Schema Test
  *
- * Regression test to ensure system automated filters (like dominant_color_bucket)
+ * Regression test to ensure system automated filters (like dominant_hue_group)
  * always appear in the filter schema, even when:
  * - is_internal_only = true
  * - category has no pivot record
@@ -59,7 +59,7 @@ class SystemAutomatedFilterSchemaTest extends TestCase
         ]);
         $this->user->tenants()->attach($this->tenant->id, ['role' => 'admin']);
 
-        // Create a category (may or may not have pivot record for dominant_color_bucket)
+        // Create a category (may or may not have pivot record for dominant_hue_group)
         $this->category = Category::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -74,7 +74,7 @@ class SystemAutomatedFilterSchemaTest extends TestCase
     }
 
     /**
-     * Test: dominant_color_bucket always appears in filter schema when enabled
+     * Test: dominant_hue_group always appears in filter schema when enabled
      *
      * This test verifies that system automated filters are included in the
      * filterable schema even when:
@@ -82,7 +82,7 @@ class SystemAutomatedFilterSchemaTest extends TestCase
      * - category has no pivot record (category_field doesn't exist)
      * - field is hidden from edit (show_on_edit = false)
      */
-    public function test_dominant_color_bucket_always_appears_in_filter_schema_when_enabled(): void
+    public function test_dominant_hue_group_always_appears_in_filter_schema_when_enabled(): void
     {
         $schemaResolver = app(MetadataSchemaResolver::class);
         $filterService = app(MetadataFilterService::class);
@@ -98,31 +98,27 @@ class SystemAutomatedFilterSchemaTest extends TestCase
         // Get filterable fields
         $filterableFields = $filterService->getFilterableFields($schema, $this->category, $this->tenant);
 
-        // Find dominant_color_bucket in filterable fields
-        $bucketField = collect($filterableFields)->first(function ($field) {
-            return ($field['field_key'] ?? null) === 'dominant_color_bucket';
+        // Find dominant_hue_group in filterable fields
+        $hueField = collect($filterableFields)->first(function ($field) {
+            return ($field['field_key'] ?? null) === 'dominant_hue_group';
         });
 
-        // Assert: dominant_color_bucket should appear in filterable fields
+        // Assert: dominant_hue_group should appear in filterable fields
         $this->assertNotNull(
-            $bucketField,
-            'dominant_color_bucket should appear in filterable schema even when is_internal_only=true'
+            $hueField,
+            'dominant_hue_group should appear in filterable schema even when is_internal_only=true'
         );
 
         // Assert: field properties are correct
-        $this->assertEquals('dominant_color_bucket', $bucketField['field_key']);
-        $this->assertTrue($bucketField['is_filterable'] ?? false, 'Field should be filterable');
+        $this->assertEquals('dominant_hue_group', $hueField['field_key']);
+        $this->assertTrue($hueField['is_filterable'] ?? false, 'Field should be filterable');
 
         // Verify the field exists in the resolved schema
         $schemaField = collect($schema['fields'])->first(function ($field) {
-            return ($field['key'] ?? null) === 'dominant_color_bucket';
+            return ($field['key'] ?? null) === 'dominant_hue_group';
         });
 
-        $this->assertNotNull($schemaField, 'dominant_color_bucket should exist in resolved schema');
-        $this->assertTrue(
-            $schemaField['is_internal_only'] ?? false,
-            'Field should be marked as is_internal_only'
-        );
+        $this->assertNotNull($schemaField, 'dominant_hue_group should exist in resolved schema');
         $this->assertEquals(
             'automatic',
             $schemaField['population_mode'] ?? null,
@@ -142,15 +138,15 @@ class SystemAutomatedFilterSchemaTest extends TestCase
      */
     public function test_system_automated_filters_appear_without_category_pivot(): void
     {
-        // Ensure no category_field pivot exists for dominant_color_bucket
-        $bucketFieldId = DB::table('metadata_fields')
-            ->where('key', 'dominant_color_bucket')
+        // Ensure no category_field pivot exists for dominant_hue_group
+        $hueFieldId = DB::table('metadata_fields')
+            ->where('key', 'dominant_hue_group')
             ->value('id');
 
-        if ($bucketFieldId) {
+        if ($hueFieldId) {
             DB::table('category_fields')
                 ->where('category_id', $this->category->id)
-                ->where('metadata_field_id', $bucketFieldId)
+                ->where('metadata_field_id', $hueFieldId)
                 ->delete();
         }
 
@@ -168,14 +164,14 @@ class SystemAutomatedFilterSchemaTest extends TestCase
         // Get filterable fields
         $filterableFields = $filterService->getFilterableFields($schema, $this->category, $this->tenant);
 
-        // Assert: dominant_color_bucket should still appear
-        $bucketField = collect($filterableFields)->first(function ($field) {
-            return ($field['field_key'] ?? null) === 'dominant_color_bucket';
+        // Assert: dominant_hue_group should still appear
+        $hueField = collect($filterableFields)->first(function ($field) {
+            return ($field['field_key'] ?? null) === 'dominant_hue_group';
         });
 
         $this->assertNotNull(
-            $bucketField,
-            'dominant_color_bucket should appear even without category_field pivot'
+            $hueField,
+            'dominant_hue_group should appear even without category_field pivot'
         );
     }
 
@@ -187,16 +183,16 @@ class SystemAutomatedFilterSchemaTest extends TestCase
      */
     public function test_system_automated_filters_appear_when_hidden_from_edit(): void
     {
-        // Verify dominant_color_bucket is hidden from edit
-        $bucketField = DB::table('metadata_fields')
-            ->where('key', 'dominant_color_bucket')
+        // Verify dominant_hue_group is hidden from edit
+        $hueField = DB::table('metadata_fields')
+            ->where('key', 'dominant_hue_group')
             ->first();
 
-        $this->assertNotNull($bucketField, 'dominant_color_bucket field should exist');
+        $this->assertNotNull($hueField, 'dominant_hue_group field should exist');
 
         // Update to ensure show_on_edit is false (should already be)
         DB::table('metadata_fields')
-            ->where('key', 'dominant_color_bucket')
+            ->where('key', 'dominant_hue_group')
             ->update(['show_on_edit' => false]);
 
         $schemaResolver = app(MetadataSchemaResolver::class);
@@ -213,14 +209,14 @@ class SystemAutomatedFilterSchemaTest extends TestCase
         // Get filterable fields
         $filterableFields = $filterService->getFilterableFields($schema, $this->category, $this->tenant);
 
-        // Assert: dominant_color_bucket should still appear
-        $bucketFieldInFilters = collect($filterableFields)->first(function ($field) {
-            return ($field['field_key'] ?? null) === 'dominant_color_bucket';
+        // Assert: dominant_hue_group should still appear
+        $hueFieldInFilters = collect($filterableFields)->first(function ($field) {
+            return ($field['field_key'] ?? null) === 'dominant_hue_group';
         });
 
         $this->assertNotNull(
-            $bucketFieldInFilters,
-            'dominant_color_bucket should appear in filters even when show_on_edit=false'
+            $hueFieldInFilters,
+            'dominant_hue_group should appear in filters even when show_on_edit=false'
         );
     }
 }

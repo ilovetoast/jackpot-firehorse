@@ -9,7 +9,7 @@
  * 2. field.display_widget === 'toggle' → TOGGLE
  * 3. field.key === 'collection' → COLLECTION_BADGES
  * 4. field.key === 'tags' → TAG_MANAGER
- * 5. field.key === 'dominant_color_bucket' → COLOR_SWATCH
+ * 5. field.key === 'dominant_hue_group' → COLOR_SWATCH
  * 6. field.key === 'dominant_colors' → DOMINANT_COLORS (display swatches)
  * 7. Type-based fallback → STANDARD (or specific type)
  *
@@ -111,8 +111,8 @@ export function resolve(field, context) {
         return WIDGET.TAG_MANAGER
     }
 
-    // 5. key === 'dominant_color_bucket' → COLOR_SWATCH (filter context)
-    if (key === 'dominant_color_bucket') {
+    // 5. key === 'dominant_hue_group' → COLOR_SWATCH (filter context)
+    if (key === 'dominant_hue_group') {
         if (context === CONTEXT.FILTER && (filterType === 'color' || true)) {
             return WIDGET.COLOR_SWATCH
         }
@@ -129,7 +129,7 @@ export function resolve(field, context) {
         return WIDGET.EXPIRATION_DATE
     }
 
-    // filter_type === 'color' (e.g. dominant_color_bucket from backend)
+    // filter_type === 'color' (e.g. dominant_hue_group from backend)
     if (context === CONTEXT.FILTER && filterType === 'color') {
         return WIDGET.COLOR_SWATCH
     }
@@ -216,7 +216,7 @@ export function getCustomDisplayLabel(field) {
     if (key === 'quality_rating' || displayWidget === 'stars' || type === 'rating') return 'Rating'
     if (key === 'collection') return 'Collection'
     if (key === 'tags') return 'Tags'
-    if (key === 'dominant_color_bucket') return 'Color Swatch'
+    if (key === 'dominant_hue_group') return 'Dominant Hue'
     if (key === 'dominant_colors') return 'Dominant Colors'
     if (displayWidget === 'toggle' || (type === 'boolean' && key === 'starred')) return 'Toggle'
 

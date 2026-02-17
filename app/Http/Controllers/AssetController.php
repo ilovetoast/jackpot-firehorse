@@ -295,7 +295,7 @@ class AssetController extends Controller
             $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
             $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
             $filters = [];
-            $multiValueKeys = ['tags', 'collection', 'dominant_color_bucket'];
+            $multiValueKeys = ['tags', 'collection', 'dominant_hue_group'];
             foreach ($filterKeys as $key) {
                 if (in_array($key, $reserved, true)) {
                     continue;
@@ -569,6 +569,7 @@ class AssetController extends Controller
                         'name' => $categoryName,
                         'slug' => $categorySlug,
                     ] : null,
+                    'user_id' => $asset->user_id, // For delete-own permission check
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
                     // Thumbnail URLs - distinct paths prevent cache confusion
                     'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (temporary, low-quality)
@@ -694,7 +695,7 @@ class AssetController extends Controller
             $filterableSchema = $this->metadataFilterService->getFilterableFields($schema, $category, $tenant);
         } elseif (!$categoryId) {
             // "All Categories" view: Resolve schema without category context
-            // This enables system-level metadata fields (orientation, color_space, resolution_class, dominant_color_bucket)
+            // This enables system-level metadata fields (orientation, color_space, resolution_class, dominant_hue_group)
             // that are computed from assets themselves, not category-specific
             $fileType = 'image'; // Default file type for metadata schema resolution
             
@@ -728,21 +729,14 @@ class AssetController extends Controller
         // - Same visibility rules
         // If these differ, filter options won't match visible assets
         $availableValues = [];
-        $bucketToDominantColors = []; // bucket -> dominant_colors for swatch display (first occurrence wins)
+        $hueGroupToDisplayHex = []; // cluster key -> display_hex from HueClusterService
         
         // 🔍 Step 1: Prove assets used for option harvesting
         // CRITICAL: Use the SAME asset collection that appears in the grid
         // This ensures filter options match what users see
         foreach ($filterableSchema as $field) {
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
-            if ($fieldKey === 'dominant_color_bucket') {
-                \App\Support\Logging\PipelineLogger::warning('FILTER HARVEST: ASSET SET', [
-                    'field_key' => $fieldKey,
-                    'asset_count' => $assets->count(),
-                    'asset_ids' => $assets->pluck('id')->take(5)->all(),
-                    'category_id' => $categoryId,
-                    'lifecycle_filter' => $request->get('lifecycle'),
-                ]);
+            if ($fieldKey === 'dominant_hue_group') {
                 break;
             }
         }
@@ -776,10 +770,10 @@ class AssetController extends Controller
                     ->pluck('id')
                     ->toArray();
                 
-                // Safeguard: Always include dominant_color_bucket so it's never excluded (e.g. if population_mode wasn't set)
-                $bucketField = \DB::table('metadata_fields')->where('key', 'dominant_color_bucket')->first();
-                if ($bucketField && !in_array($bucketField->id, $automaticFieldIds, true)) {
-                    $automaticFieldIds[] = (int) $bucketField->id;
+                // Safeguard: Always include dominant_hue_group so it's never excluded
+                $hueGroupField = \DB::table('metadata_fields')->where('key', 'dominant_hue_group')->first();
+                if ($hueGroupField && !in_array($hueGroupField->id, $automaticFieldIds, true)) {
+                    $automaticFieldIds[] = (int) $hueGroupField->id;
                 }
                 
                 // Build query: Include automatic fields regardless of approved_at, require approved_at for others
@@ -806,29 +800,6 @@ class AssetController extends Controller
                     ->distinct()
                     ->get();
                 
-                // 🔍 Step 2: Log raw metadata rows used for harvesting
-                $dominantColorBucketRows = $assetMetadataValues->filter(function($row) {
-                    return $row->key === 'dominant_color_bucket';
-                });
-                if ($dominantColorBucketRows->isNotEmpty()) {
-                    \App\Support\Logging\PipelineLogger::warning('FILTER HARVEST: RAW VALUES', [
-                        'field_key' => 'dominant_color_bucket',
-                        'raw_values' => $dominantColorBucketRows->take(5)->map(function($row) {
-                            return [
-                                'raw_value_json' => $row->value_json,
-                                'decoded' => json_decode($row->value_json, true),
-                            ];
-                        })->toArray(),
-                    ]);
-                } else {
-                    \App\Support\Logging\PipelineLogger::warning('FILTER HARVEST: RAW VALUES (EMPTY)', [
-                        'field_key' => 'dominant_color_bucket',
-                        'total_rows' => $assetMetadataValues->count(),
-                        'field_keys_found' => $assetMetadataValues->pluck('key')->unique()->toArray(),
-                        'automatic_field_ids' => $automaticFieldIds,
-                        'asset_ids_count' => count($assetIds),
-                    ]);
-                }
                 
                 // Group values by field key (with confidence filtering for AI metadata)
                 foreach ($assetMetadataValues as $row) {
@@ -845,16 +816,6 @@ class AssetController extends Controller
                     
                     $value = json_decode($row->value_json, true);
                     
-                    // TASK: Debug logging for dominant_color_bucket value extraction
-                    if ($fieldKey === 'dominant_color_bucket') {
-                        \App\Support\Logging\PipelineLogger::warning('FILTER DEBUG: dominant_color_bucket value extraction', [
-                            'raw_value_json' => $row->value_json,
-                            'decoded_value' => $value,
-                            'decoded_type' => gettype($value),
-                            'is_array' => is_array($value),
-                            'population_mode' => $populationMode,
-                        ]);
-                    }
                     
                     // Skip null values
                     if ($value !== null) {
@@ -864,7 +825,7 @@ class AssetController extends Controller
                         
                         // TASK 3: Use MetadataValueNormalizer for consistent normalization
                         // This handles edge cases where values may have been incorrectly stored
-                        // For scalar fields (like dominant_color_bucket), normalize to scalar
+                        // For scalar fields (like dominant_hue_group), normalize to scalar
                         // For multiselect fields, keep as array
                         $isMultiselectField = in_array($fieldKey, ['dominant_colors', 'tags']); // Known multiselect fields
                         
@@ -885,7 +846,7 @@ class AssetController extends Controller
                                 }
                             }
                         } else {
-                            // Scalar fields (like dominant_color_bucket): normalize to scalar
+                            // Scalar fields (like dominant_hue_group): normalize to scalar
                             $normalized = MetadataValueNormalizer::normalizeScalar($value);
                             if ($normalized !== null) {
                                 if (!in_array($normalized, $availableValues[$fieldKey], true)) {
@@ -903,6 +864,23 @@ class AssetController extends Controller
                     }
                 }
                 
+                // Source 2a: dominant_hue_group from assets.dominant_hue_group column
+                if (isset($filterableFieldKeys['dominant_hue_group'])) {
+                    $hueGroupValues = \DB::table('assets')
+                        ->whereIn('id', $assetIds)
+                        ->whereNotNull('dominant_hue_group')
+                        ->where('dominant_hue_group', '!=', '')
+                        ->distinct()
+                        ->pluck('dominant_hue_group')
+                        ->all();
+                    if (!empty($hueGroupValues)) {
+                        $availableValues['dominant_hue_group'] = array_values(array_unique(array_merge(
+                            $availableValues['dominant_hue_group'] ?? [],
+                            $hueGroupValues
+                        )));
+                    }
+                }
+
                 // Source 2: Query metadata JSON column (legacy/fallback)
                 // Extract values from metadata->fields structure for assets not in asset_metadata
                 // Note: $assets here is the mapped collection (arrays), not Asset models
@@ -933,10 +911,7 @@ class AssetController extends Controller
                                 if (!in_array($value, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $value;
                                 }
-                                // For dominant_color_bucket, keep first asset's dominant_colors for swatch display
-                                if ($fieldKey === 'dominant_color_bucket' && !isset($bucketToDominantColors[$value])) {
-                                    $bucketToDominantColors[$value] = ($item['metadata'] ?? [])['dominant_colors'] ?? null;
-                                }
+                                // dominant_hue_group: swatch from HueClusterService (handled below)
                             }
                         }
                     }
@@ -1058,41 +1033,20 @@ class AssetController extends Controller
             }
         }
 
-        // 🔍 Step 4: Hard assert the invariant (temporary)
-        $bucketFieldInSchema = collect($filterableSchema)->first(function($field) {
-            return ($field['field_key'] ?? $field['key'] ?? null) === 'dominant_color_bucket';
-        });
-        if ($bucketFieldInSchema && empty($availableValues['dominant_color_bucket'] ?? [])) {
-            \App\Support\Logging\PipelineLogger::error('FILTER ERROR: dominant_color_bucket has no options but assets exist', [
-                'asset_count' => $assets->count(),
-                'filterable_schema_has_field' => true,
-                'available_values_keys' => array_keys($availableValues),
-            ]);
-        }
-
-        // 🔍 Step 5: UI payload confirmation (final proof)
-        \App\Support\Logging\PipelineLogger::warning('FILTER PAYLOAD FINAL', [
-            'dominant_color_bucket_in_schema' => $bucketFieldInSchema ? true : false,
-            'dominant_color_bucket_options' => $availableValues['dominant_color_bucket'] ?? [],
-            'options_count' => count($availableValues['dominant_color_bucket'] ?? []),
-        ]);
-
-        // Attach color swatch data to dominant_color_bucket filter options (filter_type = 'color')
-        $colorBucketService = app(\App\Services\ColorBucketService::class);
+        // Attach color swatch data to dominant_hue_group filter options (filter_type = 'color')
+        $hueClusterService = app(\App\Services\Color\HueClusterService::class);
         foreach ($filterableSchema as &$field) {
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
-            if ($fieldKey === 'dominant_color_bucket') {
-                $bucketValues = $availableValues['dominant_color_bucket'] ?? [];
-                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService, $bucketToDominantColors) {
+            if ($fieldKey === 'dominant_hue_group') {
+                $hueValues = $availableValues['dominant_hue_group'] ?? [];
+                $field['options'] = array_values(array_map(function ($clusterKey) use ($hueClusterService) {
+                    $meta = $hueClusterService->getClusterMeta((string) $clusterKey);
                     return [
-                        'value' => $bucketValue,
-                        'label' => $bucketValue,
-                        'swatch' => $colorBucketService->swatchHexForAsset(
-                            (string) $bucketValue,
-                            $bucketToDominantColors[$bucketValue] ?? null
-                        ),
+                        'value' => (string) $clusterKey,
+                        'label' => $meta['label'] ?? (string) $clusterKey,
+                        'swatch' => $meta['display_hex'] ?? '#999999',
                     ];
-                }, $bucketValues));
+                }, $hueValues));
             }
             // C9.2: Attach collection options (id => name) so primary filter is a dropdown with labels
             if ($fieldKey === 'collection') {
@@ -1703,7 +1657,7 @@ class AssetController extends Controller
      * - resolution_class (low/medium/high/ultra)
      * - dimensions (widthxheight)
      * - dominant_colors (top 3 dominant colors from image analysis)
-     * - dominant_color_bucket (quantized LAB bucket for filtering)
+     * - dominant_hue_group (perceptual hue cluster for filtering)
      *
      * @param Asset $asset
      * @return JsonResponse
@@ -1741,7 +1695,7 @@ class AssetController extends Controller
             $computedMetadataService->computeMetadata($asset);
 
             // Also regenerate dominant colors via PopulateAutomaticMetadataJob
-            // This ensures dominant_colors and dominant_color_bucket are regenerated
+            // This ensures dominant_colors and dominant_hue_group are regenerated
             \App\Jobs\PopulateAutomaticMetadataJob::dispatchSync($asset->id);
 
             // Log activity event
@@ -1753,7 +1707,7 @@ class AssetController extends Controller
                 'actor_type' => 'user',
                 'actor_id' => $user?->id,
                 'metadata' => [
-                    'fields_regenerated' => ['orientation', 'color_space', 'resolution_class', 'dimensions', 'dominant_colors', 'dominant_color_bucket'],
+                    'fields_regenerated' => ['orientation', 'color_space', 'resolution_class', 'dimensions', 'dominant_colors', 'dominant_hue_group'],
                 ],
             ]);
 
@@ -1973,6 +1927,8 @@ class AssetController extends Controller
      */
     public function destroy(Asset $asset): JsonResponse
     {
+        $this->authorize('delete', $asset);
+
         $tenant = app('tenant');
         $user = auth()->user();
 
@@ -2002,6 +1958,45 @@ class AssetController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to delete asset: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a soft-deleted asset (undo delete before grace period expires).
+     *
+     * POST /assets/{asset}/restore-from-trash
+     */
+    public function restoreFromTrash(string $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = auth()->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        $assetModel = Asset::withTrashed()->findOrFail($asset);
+
+        if ($assetModel->tenant_id !== $tenant->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        if (!$assetModel->trashed()) {
+            return response()->json(['message' => 'Asset is not deleted'], 409);
+        }
+
+        $this->authorize('delete', $assetModel); // Same permission as delete
+
+        try {
+            $this->deletionService->restoreFromTrash($assetModel, $user->id);
+            return response()->json([
+                'message' => 'Asset restored successfully',
+                'asset_id' => $assetModel->id,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to restore asset: ' . $e->getMessage(),
             ], 500);
         }
     }

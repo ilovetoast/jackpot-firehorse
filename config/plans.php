@@ -195,48 +195,4 @@ return [
             '10,000 AI tagging operations and 10,000 AI suggestions per month',
         ],
     ],
-
-    // Staging/canonical: agency Silver tier (same limits as enterprise)
-    'agency_silver' => [
-        'name' => 'Agency Silver',
-        'stripe_price_id' => env('STRIPE_PRICE_ENTERPRISE', 'price_1SlzxCBF7ZSvskYAigcdiKKj'),
-        'fallback_monthly_price' => 299.00,
-        'limits' => [
-            'max_brands' => 25,
-            'max_categories' => 10,
-            'max_private_categories' => 10,
-            'max_storage_mb' => 2097152, // 2 TB (same as enterprise)
-            'max_upload_size_mb' => 999999,
-            'max_users' => 200,
-            'max_downloads_per_month' => 999999,
-            'max_download_assets' => 2000,
-            'max_download_zip_mb' => 5120,
-            'max_custom_metadata_fields' => 100,
-            'max_tags_per_asset' => 15,
-            'max_ai_tagging_per_month' => 10000,
-            'max_ai_suggestions_per_month' => 10000,
-        ],
-        'features' => [
-            'all_asset_types',
-            'advanced_features',
-            'custom_integrations',
-            'access_to_more_roles',
-            'edit_system_categories',
-        ],
-        'approval_features' => [
-            'approvals.enabled' => true,
-            'notifications.enabled' => true,
-            'approval_summaries.enabled' => true,
-        ],
-        'public_collections_enabled' => true,
-        'download_features' => [
-            'download_links_limited' => false,
-            'download_links_limit' => 999999,
-            'custom_download_permissions' => true,
-            'share_downloads_with_permissions' => true,
-        ],
-        'notes' => [
-            'Agency Silver: enterprise-level limits for agency (Company ID 1 canonical).',
-        ],
-    ],
 ];

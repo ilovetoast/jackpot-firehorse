@@ -56,7 +56,7 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function ensureDefaultSystemFields(): void
     {
-        $systemFieldKeys = ['dominant_colors', 'dominant_color_bucket', 'color_space', 'orientation', 'resolution_class'];
+        $systemFieldKeys = ['dominant_colors', 'dominant_color_bucket', 'dominant_hue_group', 'color_space', 'orientation', 'resolution_class'];
 
         DB::table('metadata_fields')
             ->whereIn('key', $systemFieldKeys)
@@ -563,20 +563,33 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => false,
         ]);
 
-        // Dominant Color Bucket (system automated) — filter-only field.
-        // Stores quantized LAB bucket: "L{L}_A{A}_B{B}" format.
-        // Config filter_only_enforced_fields + dominant_colors_visibility enforce:
-        // - Never in Quick View, Upload, Primary filters
-        // - Secondary filters only when is_filter_hidden=false (user enables)
-        // - Uses ColorSwatchFilter (filter_type=color)
+        // Dominant Color Bucket (DEPRECATED) — kept for safety, not used.
         $this->getOrCreateField([
             'key' => 'dominant_color_bucket',
-            'system_label' => 'Dominant Color Bucket',
-            'type' => 'text', // String field for bucket value
+            'system_label' => 'Dominant Color Bucket (Deprecated)',
+            'type' => 'text',
             'applies_to' => 'image',
             'scope' => 'system',
             'group_key' => 'technical',
-            'is_filterable' => true, // Filter-only; visibility via metadata_field_visibility
+            'is_filterable' => false,
+            'is_user_editable' => false,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => false,
+            'is_internal_only' => true,
+            'ai_eligible' => false,
+        ]);
+
+        // Dominant Hue (system automated) — filter-only field.
+        // Perceptual hue clusters from HueClusterService. Options from getClusters().
+        // type: select, system_automated: true, filterable: true, visible: true, not user-editable.
+        $this->getOrCreateField([
+            'key' => 'dominant_hue_group',
+            'system_label' => 'Dominant Hue',
+            'type' => 'select',
+            'applies_to' => 'image',
+            'scope' => 'system',
+            'group_key' => 'technical',
+            'is_filterable' => true,
             'is_user_editable' => false,
             'is_ai_trainable' => false,
             'is_upload_visible' => false,
@@ -811,16 +824,16 @@ class MetadataFieldsSeeder extends Seeder
             'color_space',
             'resolution_class',
             'dominant_colors', // System automated - extracted from color analysis
-            'dominant_color_bucket', // System automated - quantized LAB bucket for filtering
+            'dominant_hue_group', // System automated - perceptual hue cluster for filtering
         ];
 
         foreach ($automaticFields as $fieldKey) {
-            // dominant_colors: display-only, never in filters (always_hidden_fields)
-            // dominant_color_bucket: filter-only, secondary filters when enabled (filter_only_enforced_fields)
+            // dominant_colors: display-only, never in filters
+            // dominant_hue_group: filter-only, secondary filters when enabled
             $isDominantColors = ($fieldKey === 'dominant_colors');
-            $isDominantColorBucket = ($fieldKey === 'dominant_color_bucket');
-            $showOnEdit = $isDominantColorBucket ? false : true; // dominant_color_bucket never in Quick View
-            $showInFilters = $isDominantColors ? false : true;  // dominant_colors never in filters; bucket filter-only
+            $isDominantHueGroup = ($fieldKey === 'dominant_hue_group');
+            $showOnEdit = $isDominantHueGroup ? false : true; // dominant_hue_group never in Quick View
+            $showInFilters = $isDominantColors ? false : true;  // dominant_colors never in filters; hue group filter-only
 
             DB::table('metadata_fields')
                 ->where('key', $fieldKey)

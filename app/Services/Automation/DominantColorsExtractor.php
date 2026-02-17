@@ -3,6 +3,7 @@
 namespace App\Services\Automation;
 
 use App\Models\Asset;
+use App\Services\Color\HueClusterService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -58,9 +59,9 @@ class DominantColorsExtractor
 
         // Persist to asset.metadata
         $this->persistDominantColors($asset, $dominantColors);
-        
-        // Also compute and persist dominant_color_bucket from top cluster's LAB values
-        $this->persistDominantColorBucket($asset, $dominantColors);
+
+        // Assign dominant_hue_group from highest-weight dominant color via HueClusterService
+        $this->persistDominantHueGroup($asset, $dominantColors);
     }
 
     /**
@@ -294,45 +295,43 @@ class DominantColorsExtractor
     }
 
     /**
-     * Compute and persist dominant_color_bucket from top cluster's LAB values.
-     * Bucket format: "L{L}_A{A}_B{B}" where L, A, B are rounded LAB values from top cluster.
+     * Assign and persist dominant_hue_group from highest-weight dominant color.
+     * Uses HueClusterService for perceptual cluster assignment.
      *
      * @param Asset $asset
-     * @param array $dominantColors Array of color objects (from extractDominantColors)
+     * @param array $dominantColors Array of color objects (from extractDominantColors), sorted by coverage desc
      * @return void
      */
-    protected function persistDominantColorBucket(Asset $asset, array $dominantColors): void
+    protected function persistDominantHueGroup(Asset $asset, array $dominantColors): void
     {
         if (empty($dominantColors)) {
             return;
         }
 
-        // Get the top cluster's LAB values from metadata
-        $metadata = $asset->metadata ?? [];
-        $clusters = $metadata['_color_analysis']['clusters'] ?? [];
-        
-        if (empty($clusters)) {
+        $topColor = $dominantColors[0];
+        $hex = $topColor['hex'] ?? null;
+        if (!$hex || !is_string($hex)) {
             return;
         }
 
-        // Get top cluster (highest coverage, already sorted)
-        $topCluster = $clusters[0] ?? null;
-        if (!$topCluster || !isset($topCluster['lab']) || !is_array($topCluster['lab']) || count($topCluster['lab']) < 3) {
+        $hueClusterService = app(HueClusterService::class);
+        $clusterKey = $hueClusterService->assignClusterFromHex($hex);
+
+        if ($clusterKey === null) {
+            Log::debug('[DominantColorsExtractor] No hue cluster found for dominant color', [
+                'asset_id' => $asset->id,
+                'hex' => $hex,
+            ]);
             return;
         }
 
-        // Quantize LAB values: round to integers
-        $L = (int) round($topCluster['lab'][0]);
-        $a = (int) round($topCluster['lab'][1]);
-        $b = (int) round($topCluster['lab'][2]);
+        // Persist to assets.dominant_hue_group column
+        $asset->update(['dominant_hue_group' => $clusterKey]);
 
-        // Format as "L{L}_A{A}_B{B}"
-        $bucket = sprintf('L%d_A%d_B%d', $L, $a, $b);
-
-        // Persist to asset_metadata (canonical for filters)
-        $field = DB::table('metadata_fields')->where('key', 'dominant_color_bucket')->first();
+        // Persist to asset_metadata (canonical for filters/schema)
+        $field = DB::table('metadata_fields')->where('key', 'dominant_hue_group')->first();
         if ($field) {
-            $valueJson = json_encode($bucket);
+            $valueJson = json_encode($clusterKey);
             $existing = DB::table('asset_metadata')
                 ->where('asset_id', $asset->id)
                 ->where('metadata_field_id', $field->id)
@@ -381,12 +380,12 @@ class DominantColorsExtractor
                     'created_at' => now(),
                 ]);
             }
-
-            Log::info('[DominantColorsExtractor] Dominant color bucket persisted', [
-                'asset_id' => $asset->id,
-                'bucket' => $bucket,
-            ]);
         }
+
+        Log::info('[DominantColorsExtractor] Dominant hue group persisted', [
+            'asset_id' => $asset->id,
+            'dominant_hue_group' => $clusterKey,
+        ]);
     }
 
     /**

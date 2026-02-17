@@ -3,9 +3,11 @@ import { useState } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 
-export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color }) {
+export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages }) {
     const { auth, errors, flash } = usePage().props
     const [processingPlanId, setProcessingPlanId] = useState(null)
+    const [storageAddonSubmitting, setStorageAddonSubmitting] = useState(false)
+    const [storageAddonError, setStorageAddonError] = useState(null)
 
     const handleSubscribe = (priceId, planId) => {
         if (!priceId || priceId === 'price_free' || priceId === 'price_FREE') {
@@ -108,6 +110,41 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                 setProcessingPlanId(null)
             }
         })
+    }
+
+    const handleAddStorageAddon = async (packageId) => {
+        if (!packageId || storageAddonSubmitting) return
+        setStorageAddonError(null)
+        setStorageAddonSubmitting(true)
+        try {
+            const response = await window.axios.post('/app/billing/storage-addon', { package_id: packageId }, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            if (response?.data?.storage) {
+                router.reload()
+            }
+        } catch (err) {
+            setStorageAddonError(err.response?.data?.message ?? 'Failed to add storage. Please try again.')
+        } finally {
+            setStorageAddonSubmitting(false)
+        }
+    }
+
+    const handleRemoveStorageAddon = async () => {
+        if (storageAddonSubmitting) return
+        if (!confirm('Remove the storage add-on? Your storage limit will decrease at the end of the billing period.')) return
+        setStorageAddonError(null)
+        setStorageAddonSubmitting(true)
+        try {
+            await window.axios.delete('/app/billing/storage-addon', {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            router.reload()
+        } catch (err) {
+            setStorageAddonError(err.response?.data?.message ?? 'Failed to remove storage add-on. Please try again.')
+        } finally {
+            setStorageAddonSubmitting(false)
+        }
     }
 
     const formatLimit = (limit) => {
@@ -348,14 +385,18 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-gray-600">Storage</span>
                                         <span className="text-gray-900 font-medium">
-                                            {formatStorage(current_usage?.storage_mb || 0)} / {formatStorage(current_plan_limits?.max_storage_mb || 0)}
+                                            {storage_info
+                                                ? `${formatStorage(storage_info.current_usage_mb)} / ${formatStorage(storage_info.max_storage_mb)}`
+                                                : `${formatStorage(current_usage?.storage_mb || 0)} / ${formatStorage(current_plan_limits?.max_storage_mb || 0)}`}
                                         </span>
                                     </div>
                                     <div className="w-full bg-gray-200 rounded-full h-2">
                                         <div
                                             className="h-2 rounded-full transition-all"
                                             style={{
-                                                width: `${getUsagePercentage(current_usage?.storage_mb || 0, current_plan_limits?.max_storage_mb || 0)}%`,
+                                                width: `${storage_info
+                                                    ? Math.min(storage_info.usage_percentage || 0, 100)
+                                                    : getUsagePercentage(current_usage?.storage_mb || 0, current_plan_limits?.max_storage_mb || 0)}%`,
                                                 backgroundColor: sitePrimaryColor,
                                             }}
                                         />
@@ -632,6 +673,95 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             )
                         })}
                     </div>
+
+                    {/* Add Storage Section - for paid plans */}
+                    {['starter', 'pro', 'enterprise'].includes(current_plan) && (
+                        <div className="mt-10 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-2">Additional Storage</h3>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Add extra storage to your plan. Storage is prorated and billed monthly.
+                            </p>
+
+                            {storage_info && (
+                                <div className="mb-4 rounded-md bg-gray-50 p-3 text-sm">
+                                    <div className="flex items-center justify-between text-gray-700">
+                                        <span>
+                                            Using <strong>{formatStorage(storage_info.current_usage_mb)}</strong> of{' '}
+                                            <strong>{formatStorage(storage_info.max_storage_mb)}</strong>
+                                            {storage_info.has_storage_addon && (
+                                                <span className="ml-2 text-gray-500">
+                                                    (+{formatStorage(storage_info.addon_storage_mb)} add-on)
+                                                </span>
+                                            )}
+                                        </span>
+                                    </div>
+                                    <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className="h-2 rounded-full transition-all"
+                                            style={{
+                                                width: `${Math.min(storage_info.usage_percentage || 0, 100)}%`,
+                                                backgroundColor: sitePrimaryColor,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {storageAddonError && (
+                                <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+                                    {storageAddonError}
+                                </div>
+                            )}
+
+                            {subscription?.status !== 'active' ? (
+                                <p className="text-sm text-gray-600">
+                                    Add storage requires an active subscription. Subscribe to a plan above to add storage.
+                                </p>
+                            ) : storage_addon_packages?.length > 0 ? (
+                                <div className="space-y-2">
+                                    {storage_info?.has_storage_addon ? (
+                                        <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
+                                            <span className="text-sm text-gray-700">
+                                                You have a storage add-on. To change it, remove the current add-on first.
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={handleRemoveStorageAddon}
+                                                disabled={storageAddonSubmitting}
+                                                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {storageAddonSubmitting ? 'Removing...' : 'Remove add-on'}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                            {storage_addon_packages.map((pkg) => (
+                                                <button
+                                                    key={pkg.id}
+                                                    type="button"
+                                                    onClick={() => handleAddStorageAddon(pkg.id)}
+                                                    disabled={storageAddonSubmitting}
+                                                    className="flex flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-center shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <span className="text-sm font-medium text-gray-900">{pkg.label}</span>
+                                                    <span className="mt-1 text-sm font-semibold" style={{ color: sitePrimaryColor }}>
+                                                        ${Number(pkg.monthly_price).toFixed(2)}/mo
+                                                    </span>
+                                                    <span className="mt-1 text-xs text-gray-500">
+                                                        Add storage
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-gray-500">
+                                    Storage add-ons are not configured. Add <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">STRIPE_PRICE_STORAGE_50GB</code>, etc. to your .env and create matching products in Stripe.
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     {/* Billing Overview & Invoices Links */}
                     <div className="mt-8 flex items-center justify-center gap-6">

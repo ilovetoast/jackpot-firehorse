@@ -63,14 +63,15 @@ class BillingController extends Controller
         
         // Get AI usage for current month
         $aiUsageStatus = $this->aiUsageService->getUsageStatus($tenant);
-        
+        $storageInfo = $planService->getStorageInfo($tenant);
+
         $currentUsage = [
             'brands' => $tenant->brands()->count(),
             'users' => $tenant->users()->count(),
             'categories' => $tenant->brands()->withCount(['categories' => function ($query) {
                 $query->where('is_system', false);
             }])->get()->sum('categories_count'),
-            'storage_mb' => 0, // TODO: Calculate actual storage usage
+            'storage_mb' => (int) round($storageInfo['current_usage_mb'] ?? 0),
             'download_links' => Download::where('tenant_id', $tenant->id)
                 ->where('status', DownloadStatus::READY)
                 ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
@@ -84,9 +85,8 @@ class BillingController extends Controller
             'ai_suggestions' => $aiUsageStatus['suggestions']['usage'] ?? 0,
         ];
 
-        // Fetch Stripe price data for each plan (exclude agency_silver — internal/staging only, not purchasable)
+        // Fetch Stripe price data for each plan
         $plans = collect(config('plans'))
-            ->except('agency_silver')
             ->map(function ($plan, $key) use ($currentPlan, $currentUsage) {
             $priceData = null;
             $monthlyPrice = null;
@@ -132,7 +132,13 @@ class BillingController extends Controller
         });
 
         $currentPlanLimits = $planService->getPlanLimits($tenant);
-        
+
+        // Storage add-on packages (only those with Stripe price IDs configured)
+        $storageAddonPackages = collect(config('storage_addons.packages', []))
+            ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
+            ->values()
+            ->all();
+
         // Use site-wide branding color (not tenant-specific)
         $sitePrimaryColor = '#6366f1'; // Default Jackpot brand color
 
@@ -208,6 +214,8 @@ class BillingController extends Controller
                 'last_four' => $paymentMethod->last_four,
                 'brand' => $paymentMethod->card->brand ?? null,
             ] : null,
+            'storage_info' => $storageInfo,
+            'storage_addon_packages' => $storageAddonPackages,
         ]);
     }
 
@@ -608,6 +616,12 @@ class BillingController extends Controller
             }
         }
 
+        $storageInfo = $planService->getStorageInfo($tenant);
+        $storageAddonPackages = collect(config('storage_addons.packages', []))
+            ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
+            ->values()
+            ->all();
+
         return Inertia::render('Billing/Overview', [
             'tenant' => [
                 'id' => $tenant->id,
@@ -620,12 +634,15 @@ class BillingController extends Controller
             ],
             'subscription' => [
                 'status' => $subscriptionStatus,
+                'status_lower' => strtolower($stripeStatus ?? $subscription?->stripe_status ?? ''),
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
                 'has_subscription' => $subscription !== null,
                 'has_incomplete_payment' => $hasIncompletePayment,
                 'payment_url' => $paymentUrl,
             ],
+            'storage_info' => $storageInfo,
+            'storage_addon_packages' => $storageAddonPackages,
             'payment_method' => $paymentMethod ? [
                 'type' => $paymentMethod->type,
                 'last_four' => $paymentMethod->last_four,

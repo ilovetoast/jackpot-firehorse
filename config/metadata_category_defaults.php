@@ -6,8 +6,8 @@
  * Single source of truth for seeded defaults. Used by:
  * - TenantMetadataVisibilityService::applySeededDefaultsForCategory (new categories, Reset to default)
  *
- * Content Model: Default enabled fields limited to collection + tags.
- * No auto-enabling of type-based fields. No UI-only flags in seed data.
+ * System fields (scope=system) are enabled for all categories by default.
+ * Tenant-scoped fields: only tags and collection enabled unless in category_config.
  */
 return [
     /*
@@ -33,9 +33,60 @@ return [
 
     /*
      * Per-field, per-category overrides (optional).
-     * Empty = all categories use tags_and_collection_only.
+     * Enables type fields for their corresponding system categories (e.g. photo_type for photography).
+     * Checked before tags_and_collection_only so these override the minimal default.
      */
-    'category_config' => [],
+    'category_config' => [
+        // Asset categories: type fields
+        'photo_type' => [
+            'photography' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'logo_type' => [
+            'logos' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'graphic_type' => [
+            'graphics' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'video_type' => [
+            'video' => ['enabled' => true, 'is_primary' => true],
+        ],
+        // Scene classification for image categories
+        'scene_classification' => [
+            'photography' => ['enabled' => true, 'is_primary' => false],
+            'graphics' => ['enabled' => true, 'is_primary' => false],
+        ],
+        // Deliverable categories: type fields
+        'print_type' => [
+            'print' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'digital_type' => [
+            'digital-ads' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'ooh_type' => [
+            'ooh' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'event_type' => [
+            'events' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'execution_video_type' => [
+            'videos' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'sales_collateral_type' => [
+            'sales-collateral' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'pr_type' => [
+            'pr' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'packaging_type' => [
+            'packaging' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'product_render_type' => [
+            'product-renders' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'radio_type' => [
+            'radio' => ['enabled' => true, 'is_primary' => true],
+        ],
+    ],
 
     /*
      * Fields restricted to specific slugs. Empty = no type-based auto-enabling.
@@ -44,12 +95,7 @@ return [
 
     /*
      * Dominant color fields: special defaults for image (asset) categories.
-     * Disabled by default; can be enabled per category by user.
-     *
-     * dominant_color_bucket: filter-only field.
-     * - Never in Quick View, Upload, or Primary filters.
-     * - Appears in Secondary filters only when is_filter_hidden=false (user enables).
-     * - Uses ColorSwatchFilter. Enforced via filter_only_enforced_fields.
+     * dominant_hue_group: filter-only field (perceptual hue clusters).
      */
     'dominant_colors_visibility' => [
         'dominant_colors' => [
@@ -58,40 +104,25 @@ return [
             'is_filter_hidden' => true,
             'is_primary' => null,
         ],
-        'dominant_color_bucket' => [
+        'dominant_hue_group' => [
             'is_hidden' => true,
             'is_upload_hidden' => true,
-            'is_edit_hidden' => true, // Never in Quick View
+            'is_edit_hidden' => true,
             'is_filter_hidden' => true,
-            'is_primary' => false, // Never primary; secondary only when enabled
+            'is_primary' => false,
         ],
     ],
 
-    /*
-     * System fields never shown in upload, quick view, or filters.
-     * Excludes dominant_color_bucket: it is filter-only (see filter_only_enforced_fields).
-     */
     'always_hidden_fields' => ['dimensions', 'dominant_colors'],
 
-    /*
-     * Filter-only fields: never in Quick View, Upload, or Primary.
-     * Appear in Secondary filters only when is_filter_hidden=false (user enables).
-     * When saving visibility: force is_primary=false, is_upload_hidden=true, is_edit_hidden=true.
-     */
-    'filter_only_enforced_fields' => ['dominant_color_bucket'],
+    'filter_only_enforced_fields' => ['dominant_hue_group'],
 
-    /*
-     * System fields that use custom rendering and do NOT support manual option editing.
-     * Product integrity rule: these fields are not customizable option fields.
-     * Used by: MetadataFieldModal (hide Options), addValue endpoint, TenantMetadataFieldService.
-     * Also restricted: fields with custom display_widget or type=rating (checked at runtime).
-     */
     'restricted_option_edit_keys' => [
         'collection',
         'tags',
         'quality_rating',
         'starred',
-        'dominant_color_bucket',
+        'dominant_hue_group',
         'dominant_colors',
     ],
 ];

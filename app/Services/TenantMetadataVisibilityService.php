@@ -618,7 +618,7 @@ class TenantMetadataVisibilityService
             ->where('is_active', true)
             ->whereNull('deprecated_at')
             ->whereNull('archived_at')
-            ->get(['id', 'key']);
+            ->get(['id', 'key', 'scope']);
 
         $rows = [];
         $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
@@ -626,8 +626,10 @@ class TenantMetadataVisibilityService
 
         foreach ($fields as $field) {
             $key = $field->key;
+            $scope = $field->scope ?? 'system';
             $visibility = $this->computeSeededDefaultForField(
                 $key,
+                $scope,
                 $slug,
                 $isImageCategory,
                 $categoryConfig,
@@ -686,7 +688,10 @@ class TenantMetadataVisibilityService
      * Compute default visibility for one field in one category from config.
      * Returns array with is_hidden, is_upload_hidden, is_filter_hidden, is_primary (optional), or null to skip row.
      *
+     * System fields (scope=system) are enabled for all categories by default.
+     *
      * @param string $fieldKey
+     * @param string $fieldScope
      * @param string $categorySlug
      * @param bool $isImageCategory
      * @param array $categoryConfig
@@ -697,6 +702,7 @@ class TenantMetadataVisibilityService
      */
     private function computeSeededDefaultForField(
         string $fieldKey,
+        string $fieldScope,
         string $categorySlug,
         bool $isImageCategory,
         array $categoryConfig,
@@ -704,9 +710,25 @@ class TenantMetadataVisibilityService
         array $tagsAndCollectionOnlySlugs,
         array $dominantColorsVisibility
     ): ?array {
-        // Video (and any tags_and_collection_only): only tags and collection enabled
+        // Explicit per-slug config for this field (checked first so type fields can override tags_and_collection_only)
+        if (isset($categoryConfig[$fieldKey][$categorySlug])) {
+            $settings = $categoryConfig[$fieldKey][$categorySlug];
+            $enabled = $settings['enabled'] ?? true;
+            $result = [
+                'is_hidden' => !$enabled,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'is_primary' => $settings['is_primary'] ?? null,
+            ];
+            if (array_key_exists('is_edit_hidden', $settings)) {
+                $result['is_edit_hidden'] = $settings['is_edit_hidden'];
+            }
+            return $result;
+        }
+
+        // Video (and any tags_and_collection_only): system fields enabled; tenant fields limited to tags/collection
         if (in_array($categorySlug, $tagsAndCollectionOnlySlugs, true)) {
-            $enabled = in_array($fieldKey, ['tags', 'collection'], true);
+            $enabled = ($fieldScope === 'system') || in_array($fieldKey, ['tags', 'collection'], true);
             return [
                 'is_hidden' => !$enabled,
                 'is_upload_hidden' => false,
@@ -743,20 +765,8 @@ class TenantMetadataVisibilityService
             return $result;
         }
 
-        // Explicit per-slug config for this field
-        if (isset($categoryConfig[$fieldKey][$categorySlug])) {
-            $settings = $categoryConfig[$fieldKey][$categorySlug];
-            $enabled = $settings['enabled'] ?? true;
-            return [
-                'is_hidden' => !$enabled,
-                'is_upload_hidden' => false,
-                'is_filter_hidden' => false,
-                'is_primary' => $settings['is_primary'] ?? null,
-            ];
-        }
-
-        // Default: only collection and tags enabled (no auto-enable of type-based fields)
-        $enabled = in_array($fieldKey, ['tags', 'collection'], true);
+        // Default: all system fields enabled for all categories; tenant fields limited to tags/collection
+        $enabled = ($fieldScope === 'system') || in_array($fieldKey, ['tags', 'collection'], true);
         return [
             'is_hidden' => !$enabled,
             'is_upload_hidden' => false,

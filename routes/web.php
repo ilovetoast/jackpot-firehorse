@@ -498,6 +498,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
             // Phase L.3: Asset archive & restore actions
             Route::post('/assets/{asset}/archive', [\App\Http\Controllers\AssetController::class, 'archive'])->name('assets.archive');
             Route::post('/assets/{asset}/restore', [\App\Http\Controllers\AssetController::class, 'restore'])->name('assets.restore');
+            Route::post('/assets/{asset}/restore-from-trash', [\App\Http\Controllers\AssetController::class, 'restoreFromTrash'])->name('assets.restore-from-trash');
             Route::delete('/assets/{asset}', [\App\Http\Controllers\AssetController::class, 'destroy'])->name('assets.destroy');
             Route::get('/deliverables', [\App\Http\Controllers\DeliverableController::class, 'index'])->name('deliverables.index');
             Route::get('/collections', [\App\Http\Controllers\CollectionController::class, 'index'])->name('collections.index');

@@ -124,6 +124,10 @@ class AssetPolicy
 
     /**
      * Determine if the user can delete the asset.
+     *
+     * - Admins and brand managers: can delete any asset (assets.delete)
+     * - Managers: can delete only their own files (assets.delete_own + asset.user_id match)
+     * - Contributors and viewers: cannot delete
      */
     public function delete(User $user, Asset $asset): bool
     {
@@ -132,13 +136,22 @@ class AssetPolicy
             return false;
         }
 
-        // Check permission for deleting assets
         $tenant = $asset->tenant;
-        if (! $user->hasPermissionForTenant($tenant, 'assets.delete')) {
-            return false;
+
+        // Admins and brand managers: full delete permission
+        if ($user->hasPermissionForTenant($tenant, 'assets.delete')) {
+            return true;
+        }
+        if ($asset->brand_id && $user->hasPermissionForBrand($asset->brand, 'assets.delete')) {
+            return true;
         }
 
-        return true;
+        // Managers: can delete only their own files
+        if ($user->hasPermissionForTenant($tenant, 'assets.delete_own')) {
+            return $asset->user_id !== null && (int) $asset->user_id === (int) $user->id;
+        }
+
+        return false;
     }
 
     /**

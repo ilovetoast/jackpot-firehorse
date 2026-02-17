@@ -2418,8 +2418,8 @@ function FieldRow({
         : field.is_required ?? false
 
     const aiEligible = field.ai_eligible ?? false
-    // dominant_color_bucket: filter-only — user may only control is_filter_hidden
-    const isFilterOnlyField = (field.key ?? '') === 'dominant_color_bucket'
+    // dominant_hue_group: filter-only — user may only control is_filter_hidden
+    const isFilterOnlyField = (field.key ?? '') === 'dominant_hue_group'
 
     const iconButtonClass = (active) =>
         `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -2539,7 +2539,7 @@ function FieldRow({
                         {isEnabled ? 'Enabled' : 'Off'}
                     </span>
                     <div className="flex items-center gap-1.5">
-                        {onEdit && (canManageFields || !isSystem) && (field.key ?? '') !== 'dominant_color_bucket' && (
+                        {onEdit && (canManageFields || !isSystem) && (field.key ?? '') !== 'dominant_hue_group' && (
                             <button
                                 onClick={() => onEdit(field)}
                                 className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-gray-600 rounded p-1 transition-opacity"
@@ -2599,8 +2599,8 @@ function AutomatedFieldRow({
     const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
     const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
     const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? false
-    // dominant_color_bucket: filter-only — user may only control is_filter_hidden
-    const isFilterOnlyField = (field.key ?? '') === 'dominant_color_bucket'
+    // dominant_hue_group: filter-only — user may only control is_filter_hidden
+    const isFilterOnlyField = (field.key ?? '') === 'dominant_hue_group'
 
     const iconButtonClass = (active) =>
         `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${

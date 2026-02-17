@@ -18,6 +18,10 @@ class PlanService
         // If manual plan override is set, use it
         if ($tenant->manual_plan_override) {
             $overridePlan = $tenant->manual_plan_override;
+            // Legacy: agency_silver was removed; treat as enterprise
+            if ($overridePlan === 'agency_silver') {
+                return 'enterprise';
+            }
             // Validate that the plan exists in config
             if (config("plans.{$overridePlan}")) {
                 return $overridePlan;

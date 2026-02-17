@@ -123,6 +123,9 @@ class BrandComplianceService
         }
 
         $payload = $activeVersion->model_payload ?? [];
+        if (! is_array($payload)) {
+            $payload = [];
+        }
         $scoringRules = $payload['scoring_rules'] ?? [];
         $scoringConfig = $payload['scoring_config'] ?? [];
         $colorWeight = (float) ($scoringConfig['color_weight'] ?? 0.1);
@@ -275,7 +278,7 @@ class BrandComplianceService
 
     /**
      * Score color using top 5 dominant colors from asset metadata (not bucket).
-     * Compares hex values directly. Case insensitive, accepts #hex or hex.
+     * Uses LAB ΔE perceptual matching: close colors score high even without exact hex match.
      *
      * @return array{0: int, 1: string, 2: string} [score, reason, status]
      */
@@ -284,7 +287,23 @@ class BrandComplianceService
         $allowed = $rules['allowed_color_palette'] ?? [];
         $banned = $rules['banned_colors'] ?? [];
 
-        if (empty($allowed) && empty($banned)) {
+        $allowedHexes = collect($allowed)
+            ->map(fn ($c) => is_array($c) ? ($c['hex'] ?? null) : $c)
+            ->filter()
+            ->map(fn ($h) => $this->normalizeHex((string) $h))
+            ->filter()
+            ->values()
+            ->all();
+
+        $bannedHexes = collect($banned)
+            ->map(fn ($c) => is_array($c) ? ($c['hex'] ?? null) : $c)
+            ->filter()
+            ->map(fn ($h) => $this->normalizeHex((string) $h))
+            ->filter()
+            ->values()
+            ->all();
+
+        if (empty($allowedHexes) && empty($bannedHexes)) {
             return [0, 'No color rules configured.', 'not_configured'];
         }
 
@@ -293,29 +312,107 @@ class BrandComplianceService
             return [0, 'No dominant color data available.', 'not_evaluated'];
         }
 
+        // Banned: strict hex match (explicit exclusion)
         foreach ($dominantColors as $color) {
             $hex = is_array($color) ? ($color['hex'] ?? null) : $color;
             if (! is_string($hex) || $hex === '') {
                 continue;
             }
-            if (! empty($banned) && $this->hexMatches($hex, $banned)) {
+            if (! empty($bannedHexes) && $this->hexInList($hex, $bannedHexes)) {
                 return [0, "Dominant color {$hex} is in banned colors list.", 'scored'];
             }
         }
 
+        // Allowed: LAB ΔE perceptual matching with weighted score
+        if (empty($allowedHexes)) {
+            return [0, 'No allowed color palette configured.', 'not_configured'];
+        }
+
+        $allowedLabs = [];
+        foreach ($allowedHexes as $h) {
+            $allowedLabs[] = $this->hexToLab($h);
+        }
+
+        $weightedSum = 0.0;
+        $totalWeight = 0.0;
+        $bestDeltaE = null;
+        $bestHex = null;
+
         foreach ($dominantColors as $color) {
             $hex = is_array($color) ? ($color['hex'] ?? null) : $color;
+            $weight = is_array($color) ? (float) ($color['weight'] ?? 1) : 1;
             if (! is_string($hex) || $hex === '') {
                 continue;
             }
-            if (! empty($allowed) && $this->hexMatches($hex, $allowed)) {
-                return [100, "Dominant color {$hex} matches allowed palette.", 'scored'];
+
+            $dominantLab = $this->hexToLab($hex);
+            $minDeltaE = null;
+            foreach ($allowedLabs as $paletteLab) {
+                $d = $this->deltaE($dominantLab, $paletteLab);
+                if ($minDeltaE === null || $d < $minDeltaE) {
+                    $minDeltaE = $d;
+                }
+            }
+
+            if ($minDeltaE !== null) {
+                if ($bestDeltaE === null || $minDeltaE < $bestDeltaE) {
+                    $bestDeltaE = $minDeltaE;
+                    $bestHex = $hex;
+                }
+                $score = $this->deltaEToScore($minDeltaE);
+                $weightedSum += $score * $weight;
+                $totalWeight += $weight;
             }
         }
 
-        $firstHex = is_array($dominantColors[0]) ? ($dominantColors[0]['hex'] ?? '') : $dominantColors[0];
+        if ($totalWeight <= 0) {
+            return [0, 'Dominant colors not found in allowed palette.', 'scored'];
+        }
 
-        return [0, "Dominant colors not found in allowed palette.", 'scored'];
+        $finalScore = (int) round($weightedSum / $totalWeight);
+        $finalScore = min(100, max(0, $finalScore));
+
+        $reason = $bestDeltaE !== null && $bestDeltaE < 10
+            ? "Dominant color {$bestHex} matches allowed palette (ΔE={$bestDeltaE})."
+            : "Dominant colors scored by perceptual distance (best ΔE=" . round($bestDeltaE ?? 999, 1) . ').';
+
+        return [$finalScore, $reason, 'scored'];
+    }
+
+    /**
+     * Normalize hex string for comparison (#RRGGBB, uppercase).
+     */
+    protected function normalizeHex(string $hex): ?string
+    {
+        $hex = strtoupper(trim(str_replace(' ', '', $hex)));
+        if ($hex === '') {
+            return null;
+        }
+        if ($hex[0] !== '#') {
+            $hex = '#' . $hex;
+        }
+        $hex = ltrim($hex, '#');
+        if (strlen($hex) === 3 && ctype_xdigit($hex)) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+        if (strlen($hex) !== 6 || ! ctype_xdigit($hex)) {
+            return null;
+        }
+
+        return '#' . $hex;
+    }
+
+    /**
+     * Check if hex matches any in a list of normalized hex strings (for banned colors).
+     */
+    protected function hexInList(string $hex, array $normalizedHexList): bool
+    {
+        $normalized = $this->normalizeHex($hex);
+        if ($normalized === null) {
+            return false;
+        }
+
+        return in_array($normalized, $normalizedHexList, true);
     }
 
     /**
@@ -389,33 +486,119 @@ class BrandComplianceService
         }
         usort($withWeight, fn ($a, $b) => $b['weight'] <=> $a['weight']);
 
-        return array_slice(array_map(fn ($x) => $x['hex'], $withWeight), 0, 5);
+        return array_slice($withWeight, 0, 5);
     }
 
-    protected function hexMatches(string $hex, array $list): bool
+    /**
+     * Convert hex to RGB. Accepts #RRGGBB or RRGGBB.
+     *
+     * @return array{0: int, 1: int, 2: int} [r, g, b] 0-255
+     */
+    protected function hexToRgb(string $hex): array
     {
-        $normalized = strtolower(trim(str_replace(' ', '', $hex)));
-        if ($normalized !== '' && $normalized[0] !== '#') {
-            $normalized = '#' . $normalized;
+        $hex = ltrim(trim($hex), '#');
+        if (strlen($hex) === 3) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
         }
-        foreach ($list as $c) {
-            $itemHex = $c;
-            if (is_array($c) && isset($c['hex'])) {
-                $itemHex = $c['hex'];
-            }
-            if (! is_string($itemHex)) {
-                continue;
-            }
-            $itemNorm = strtolower(trim(str_replace(' ', '', $itemHex)));
-            if ($itemNorm !== '' && $itemNorm[0] !== '#') {
-                $itemNorm = '#' . $itemNorm;
-            }
-            if ($itemNorm === $normalized) {
-                return true;
-            }
+        if (strlen($hex) !== 6 || ! ctype_xdigit($hex)) {
+            return [0, 0, 0];
         }
 
-        return false;
+        return [
+            (int) hexdec(substr($hex, 0, 2)),
+            (int) hexdec(substr($hex, 2, 2)),
+            (int) hexdec(substr($hex, 4, 2)),
+        ];
+    }
+
+    /**
+     * Convert sRGB to XYZ (D65 illuminant).
+     *
+     * @return array{0: float, 1: float, 2: float} [x, y, z]
+     */
+    protected function rgbToXyz(int $r, int $g, int $b): array
+    {
+        $rs = $r / 255.0;
+        $gs = $g / 255.0;
+        $bs = $b / 255.0;
+
+        $rs = $rs <= 0.04045 ? $rs / 12.92 : pow(($rs + 0.055) / 1.055, 2.4);
+        $gs = $gs <= 0.04045 ? $gs / 12.92 : pow(($gs + 0.055) / 1.055, 2.4);
+        $bs = $bs <= 0.04045 ? $bs / 12.92 : pow(($bs + 0.055) / 1.055, 2.4);
+
+        $x = $rs * 0.4124564 + $gs * 0.3575761 + $bs * 0.1804375;
+        $y = $rs * 0.2126729 + $gs * 0.7151522 + $bs * 0.0721750;
+        $z = $rs * 0.0193339 + $gs * 0.1191920 + $bs * 0.9503041;
+
+        return [$x * 100, $y * 100, $z * 100];
+    }
+
+    /**
+     * Convert XYZ to LAB (D65 reference white).
+     *
+     * @return array{0: float, 1: float, 2: float} [L, a, b]
+     */
+    protected function xyzToLab(float $x, float $y, float $z): array
+    {
+        $xn = 95.047;
+        $yn = 100.000;
+        $zn = 108.883;
+
+        $fx = $x / $xn > 0.008856 ? pow($x / $xn, 1 / 3) : (7.787 * $x / $xn + 16 / 116);
+        $fy = $y / $yn > 0.008856 ? pow($y / $yn, 1 / 3) : (7.787 * $y / $yn + 16 / 116);
+        $fz = $z / $zn > 0.008856 ? pow($z / $zn, 1 / 3) : (7.787 * $z / $zn + 16 / 116);
+
+        $L = 116 * $fy - 16;
+        $a = 500 * ($fx - $fy);
+        $b = 200 * ($fy - $fz);
+
+        return [$L, $a, $b];
+    }
+
+    /**
+     * Convert hex to LAB (D65).
+     *
+     * @return array{0: float, 1: float, 2: float} [L, a, b]
+     */
+    protected function hexToLab(string $hex): array
+    {
+        [$r, $g, $b] = $this->hexToRgb($hex);
+        [$x, $y, $z] = $this->rgbToXyz($r, $g, $b);
+
+        return $this->xyzToLab($x, $y, $z);
+    }
+
+    /**
+     * CIE76 delta E between two LAB colors.
+     */
+    protected function deltaE(array $lab1, array $lab2): float
+    {
+        return sqrt(
+            pow($lab1[0] - $lab2[0], 2) +
+            pow($lab1[1] - $lab2[1], 2) +
+            pow($lab1[2] - $lab2[2], 2)
+        );
+    }
+
+    /**
+     * Map delta E to score: ΔE < 10 → 100, < 15 → 85, < 20 → 70, < 30 → 40, else → 0.
+     */
+    protected function deltaEToScore(float $deltaE): int
+    {
+        if ($deltaE < 10) {
+            return 100;
+        }
+        if ($deltaE < 15) {
+            return 85;
+        }
+        if ($deltaE < 20) {
+            return 70;
+        }
+        if ($deltaE < 30) {
+            return 40;
+        }
+
+        return 0;
     }
 
     /**

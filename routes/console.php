@@ -93,4 +93,13 @@ Schedule::job(new \App\Jobs\CleanupExpiredDownloadsJob())
     ->name('cleanup-expired-downloads')
     ->description('Delete expired download ZIPs from storage and verify cleanup');
 
+// Asset deletion: backup for delayed DeleteAssetJob (catches jobs lost on Redis flush, worker restarts, or deploy)
+// Primary path: soft delete dispatches DeleteAssetJob with 30-day delay. This job runs daily and processes
+// any soft-deleted assets past grace period that weren't handled by delayed jobs (e.g. queue store lost).
+Schedule::job(new \App\Jobs\ProcessExpiredAssetDeletionsJob())
+    ->dailyAt('03:00')
+    ->withoutOverlapping()
+    ->name('process-expired-asset-deletions')
+    ->description('Hard-delete soft-deleted assets past grace period (backup for delayed jobs)');
+
 } // end if ($schedulerEnabled)

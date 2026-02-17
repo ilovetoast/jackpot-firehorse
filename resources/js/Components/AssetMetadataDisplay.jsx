@@ -245,11 +245,14 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 {!metadataHealth?.is_complete && metadataHealth && (
                     <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
                         <div className="font-medium text-amber-800">
-                            Some system metadata is missing.
+                            {metadataHealth.dominant_colors && !metadataHealth.dominant_hue_group
+                                ? '⚠ Dominant hue not assigned.'
+                                : 'Some system metadata is missing.'}
                         </div>
                         <div className="text-sm text-amber-700 mt-1">
-                            Dominant colors, embeddings, or thumbnails may not have completed.
-                            You can re-run analysis to ensure brand scoring accuracy.
+                            {metadataHealth.dominant_colors && !metadataHealth.dominant_hue_group
+                                ? 'Dominant colors exist but hue group was not assigned. Re-run analysis to fix.'
+                                : 'Dominant colors, embeddings, or thumbnails may not have completed. You can re-run analysis to ensure brand scoring accuracy.'}
                         </div>
                         <button
                             type="button"

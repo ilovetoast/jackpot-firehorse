@@ -4535,6 +4535,19 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     </div>
                                 ) : null}
                                 
+                                {/* Minimize to tray — continue browsing while uploads run */}
+                                {hasFiles && (hasUploadingItems || batchStatus === 'ready' || batchStatus === 'partial_success' || batchStatus === 'uploading') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsMinimized(true)}
+                                        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                                        title="Minimize to tray — continue browsing while uploads run"
+                                    >
+                                        <ChevronDownIcon className="h-4 w-4" />
+                                        Minimize
+                                    </button>
+                                )}
+                                
                                 {(() => {
                                     const disableClose = batchStatus === 'finalizing' || isFinalizeSuccess
                                     

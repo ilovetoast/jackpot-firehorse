@@ -606,8 +606,8 @@ export default function MetadataFieldModal({
 
     const isTagsField = formData.key === 'tags' || field?.key === 'tags'
     const requiresOptions = (formData.type === 'select' || formData.type === 'multiselect') && !isTagsField
-    // dominant_color_bucket: filter-only system field — user may only control is_filter_hidden
-    const isFilterOnlyField = (field?.key ?? formData?.key) === 'dominant_color_bucket'
+    // dominant_hue_group: filter-only system field — user may only control is_filter_hidden
+    const isFilterOnlyField = (field?.key ?? formData?.key) === 'dominant_hue_group'
 
     // Early return if not open
     if (!isOpen) {

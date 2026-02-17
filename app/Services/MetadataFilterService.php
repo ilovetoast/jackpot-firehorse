@@ -219,9 +219,9 @@ class MetadataFilterService
             return;
         }
 
-        // dominant_color_bucket: exact-match semantics only, JSON_UNQUOTE comparison, OR across selected buckets
-        if ($fieldKey === 'dominant_color_bucket') {
-            $this->applyDominantColorBucketFilter($query, $fieldId, $value);
+        // dominant_hue_group: exact-match semantics, OR across selected clusters. Uses assets.dominant_hue_group column.
+        if ($fieldKey === 'dominant_hue_group') {
+            $this->applyDominantHueGroupFilter($query, $fieldId, $value);
             return;
         }
 
@@ -259,49 +259,24 @@ class MetadataFilterService
     }
 
     /**
-     * Apply filter for dominant_color_bucket only.
-     * Rule: operator = equals, comparison = exact match, logic = OR across selected buckets.
-     * Uses JSON_UNQUOTE(am.value_json) to avoid JSON encoding mismatches; never raw value_json or LIKE.
+     * Apply filter for dominant_hue_group. Uses assets.dominant_hue_group column.
+     * OR across selected clusters. No LAB matching in query layer.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
      * @param int $fieldId
-     * @param mixed $value Single bucket string or array of bucket strings (e.g. ['L50_A10_B20'])
+     * @param mixed $value Single cluster key or array of cluster keys
      */
-    protected function applyDominantColorBucketFilter($query, int $fieldId, $value): void
+    protected function applyDominantHueGroupFilter($query, int $fieldId, $value): void
     {
-        $buckets = is_array($value) ? array_values($value) : [$value];
-        $buckets = array_filter(array_map('strval', $buckets));
+        $clusters = is_array($value) ? array_values($value) : [$value];
+        $clusters = array_filter(array_map('strval', $clusters));
 
-        if (empty($buckets)) {
+        if (empty($clusters)) {
             return;
         }
 
-        $placeholders = implode(',', array_fill(0, count($buckets), '?'));
-        $approvedSources = ['user', 'system', 'ai', 'automatic', 'manual_override'];
-        $query->where(function ($q) use ($fieldId, $buckets, $placeholders, $approvedSources) {
-            // Option 1: asset_metadata table (canonical) — JSON_UNQUOTE exact match, IN (OR across buckets)
-            $q->whereExists(function ($subQ) use ($fieldId, $buckets, $placeholders, $approvedSources) {
-                $subQ->select(DB::raw(1))
-                    ->from('asset_metadata as am')
-                    ->whereColumn('am.asset_id', 'assets.id')
-                    ->where('am.metadata_field_id', $fieldId)
-                    ->whereIn('am.source', $approvedSources)
-                    ->whereNotNull('am.approved_at')
-                    ->whereRaw("am.approved_at = (
-                        SELECT MAX(approved_at)
-                        FROM asset_metadata
-                        WHERE asset_id = am.asset_id
-                        AND metadata_field_id = ?
-                        AND source IN ('" . implode("','", $approvedSources) . "')
-                        AND approved_at IS NOT NULL
-                    )", [$fieldId])
-                    ->whereRaw('JSON_UNQUOTE(am.value_json) IN (' . $placeholders . ')', $buckets);
-            });
-
-            // Option 2: metadata JSON column (legacy) — JSON_UNQUOTE exact match
-            $jsonPath = "JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.fields.dominant_color_bucket'))";
-            $q->orWhereRaw($jsonPath . ' IN (' . $placeholders . ')', $buckets);
-        });
+        $placeholders = implode(',', array_fill(0, count($clusters), '?'));
+        $query->whereIn('dominant_hue_group', $clusters);
     }
     
     /**
@@ -591,8 +566,8 @@ class MetadataFilterService
                 'is_primary' => $field['is_primary'] ?? false,
             ];
 
-            // Color swatch filter: dominant_color_bucket uses filter_type 'color' for swatch UI
-            if (($field['key'] ?? '') === 'dominant_color_bucket') {
+            // Color swatch filter: dominant_hue_group uses filter_type 'color' for swatch UI
+            if (($field['key'] ?? '') === 'dominant_hue_group') {
                 $entry['filter_type'] = 'color';
             }
 
@@ -651,9 +626,9 @@ class MetadataFilterService
             ->where('population_mode', 'automatic')
             ->pluck('id')
             ->toArray();
-        $bucketField = DB::table('metadata_fields')->where('key', 'dominant_color_bucket')->first();
-        if ($bucketField && ! in_array($bucketField->id, $automaticFieldIds, true)) {
-            $automaticFieldIds[] = (int) $bucketField->id;
+        $hueGroupField = DB::table('metadata_fields')->where('key', 'dominant_hue_group')->first();
+        if ($hueGroupField && ! in_array($hueGroupField->id, $automaticFieldIds, true)) {
+            $automaticFieldIds[] = (int) $hueGroupField->id;
         }
 
         $metadataKeys = DB::table('asset_metadata')
@@ -679,21 +654,28 @@ class MetadataFilterService
             $keysWithValues[$k] = true;
         }
 
-        // 2) Collection: at least one asset in scope in a collection
+        // 2) dominant_hue_group: from assets.dominant_hue_group column
+        if (isset($fieldKeys['dominant_hue_group'])) {
+            if ((clone $baseQuery)->whereNotNull('dominant_hue_group')->where('dominant_hue_group', '!=', '')->exists()) {
+                $keysWithValues['dominant_hue_group'] = true;
+            }
+        }
+
+        // 3) Collection: at least one asset in scope in a collection
         if (isset($fieldKeys['collection'])) {
             if (DB::table('asset_collections')->whereIn('asset_id', $scopeIds)->exists()) {
                 $keysWithValues['collection'] = true;
             }
         }
 
-        // 3) Tags: at least one asset in scope has a tag
+        // 4) Tags: at least one asset in scope has a tag
         if (isset($fieldKeys['tags'])) {
             if (DB::table('asset_tags')->whereIn('asset_id', $scopeIds)->whereNotNull('tag')->where('tag', '!=', '')->exists()) {
                 $keysWithValues['tags'] = true;
             }
         }
 
-        // 4) Starred / quality_rating: top-level metadata
+        // 5) Starred / quality_rating: top-level metadata
         foreach (['starred', 'quality_rating'] as $topKey) {
             if (! isset($fieldKeys[$topKey])) {
                 continue;
@@ -709,7 +691,7 @@ class MetadataFilterService
             }
         }
 
-        // 5) Fields that may only have values in metadata->fields (legacy): one EXISTS per remaining key.
+        // 6) Fields that may only have values in metadata->fields (legacy): one EXISTS per remaining key.
         // Scale note: This adds one EXISTS subquery per JSON-only field. Fine at 10–100k assets;
         // if you add many more metadata fields long-term, consider batching or a materialized view.
         $driver = DB::connection()->getDriverName();
@@ -780,12 +762,12 @@ class MetadataFilterService
         };
     }
 
-    public static function warnIfDominantColorBucketDidNotConstrain(int $countBefore, int $countAfter, array $filters): void
+    public static function warnIfDominantHueGroupDidNotConstrain(int $countBefore, int $countAfter, array $filters): void
     {
-        if ($countBefore === 0 || !isset($filters['dominant_color_bucket']['value'])) {
+        if ($countBefore === 0 || !isset($filters['dominant_hue_group']['value'])) {
             return;
         }
-        $val = $filters['dominant_color_bucket']['value'];
+        $val = $filters['dominant_hue_group']['value'];
         if ($val === null || $val === '') {
             return;
         }

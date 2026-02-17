@@ -22,7 +22,7 @@ use Tests\TestCase;
 
 /**
  * Filter normalization tests.
- * Ensures duplicate dominant_color_bucket (and other multi-value) params are deduplicated.
+ * Ensures duplicate dominant_hue_group (and other multi-value) params are deduplicated.
  */
 class FilterNormalizationTest extends TestCase
 {
@@ -95,7 +95,7 @@ class FilterNormalizationTest extends TestCase
     }
 
     /**
-     * Simulate duplicate dominant_color_bucket query params → parsed filters are unique.
+     * Simulate duplicate dominant_hue_group query params → parsed filters are unique.
      */
     public function test_filter_normalization_removes_duplicates(): void
     {
@@ -119,7 +119,7 @@ class FilterNormalizationTest extends TestCase
             ],
         ]);
 
-        // Request with duplicate multi-value filter params (tags or dominant_color_bucket)
+        // Request with duplicate multi-value filter params (tags or dominant_hue_group)
         // Backend normalizes and deduplicates; response should have unique values when filter is present
         $response = $this->actingAs($this->user)
             ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])

@@ -73,7 +73,7 @@ class PermissionMap
             'company_settings.delete_company',
         ];
 
-        // DAM Asset permissions (tenant-scoped)
+        // DAM Asset permissions (tenant-scoped) — excludes delete (handled separately)
         $assetPermissions = [
             'asset.view',
             'asset.download',
@@ -126,11 +126,12 @@ class PermissionMap
         ];
 
         return [
-            // Owner: ALL permissions (full access) including owner-only
+            // Owner: ALL permissions (full access) including owner-only; can delete any asset
             'owner' => array_merge(
                 $companyPermissions,
                 $ownerOnlyPermissions,
                 $assetPermissions,
+                ['assets.delete'],
                 $metadataPermissions,
                 $tagPermissions,
                 $governancePermissions,
@@ -141,10 +142,11 @@ class PermissionMap
                 ]
             ),
 
-            // Admin: All Manager permissions + governance (no owner-only permissions)
+            // Admin: All Manager permissions + governance (no owner-only); can delete any asset
             'admin' => array_merge(
                 $companyPermissions,
                 $assetPermissions,
+                ['assets.delete'],
                 $metadataPermissions,
                 $tagPermissions,
                 $governancePermissions,
@@ -197,7 +199,7 @@ class PermissionMap
      */
     public static function brandPermissions(): array
     {
-        // Asset permissions
+        // Asset permissions (brand admin/manager can delete any; contributor/viewer cannot)
         $assetPermissions = [
             'asset.view',
             'asset.download',
@@ -236,10 +238,11 @@ class PermissionMap
         ];
 
         return [
-            // Admin: Manage brand config (full brand control)
+            // Admin: Manage brand config (full brand control); can delete any asset
             'admin' => array_merge(
                 $brandManagementPermissions,
                 $assetPermissions,
+                ['assets.delete'],
                 $metadataPermissions,
                 $tagPermissions,
                 [
@@ -249,10 +252,12 @@ class PermissionMap
                 ]
             ),
 
-            // Brand Manager: Manage brand settings (can approve assets)
+            // Brand Manager: Manage brand settings (can approve assets); can delete any asset
             // Phase M-1: Brand Manager edits bypass approval (asset-centric workflow)
             'brand_manager' => array_merge(
                 $brandManagementPermissions,
+                $assetPermissions,
+                ['assets.delete'],
                 [
                     'metadata.bypass_approval', // Phase M-1: Brand Manager edits bypass approval
                     'metadata.suggestions.view',

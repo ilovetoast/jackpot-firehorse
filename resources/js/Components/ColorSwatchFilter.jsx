@@ -1,7 +1,7 @@
 /**
  * Color Swatch Filter Component
  *
- * Renders selectable color swatches for filter_type === 'color' (e.g. dominant_color_bucket).
+ * Renders selectable color swatches for filter_type === 'color' (e.g. dominant_hue_group).
  * Options come from field.options with { value, label, swatch }.
  * Multi-select allowed (future-safe); single value also supported.
  */

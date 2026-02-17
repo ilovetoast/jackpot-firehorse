@@ -108,6 +108,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Phase J.3.1: Replace file state
     const [showReplaceFileModal, setShowReplaceFileModal] = useState(false)
     
+    // Asset delete (soft delete) confirmation state
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [deleteLoading, setDeleteLoading] = useState(false)
+    
     // Phase J.3: Approval comments for rejection role display
     const [approvalComments, setApprovalComments] = useState([])
     const [commentsLoading, setCommentsLoading] = useState(false)
@@ -736,6 +740,12 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const canRetryThumbnails = can('assets.retry_thumbnails')
     const canPublish = can('asset.publish')
     const canApproveMetadata = can('metadata.bypass_approval')
+    // Admins/brand_managers: assets.delete (any file). Managers: assets.delete_own (own files only)
+    const canDeleteAny = can('assets.delete')
+    const canDeleteOwn = can('assets.delete_own')
+    const assetOwnerId = displayAsset?.user_id ?? displayAsset?.uploaded_by?.id
+    const isOwnAsset = assetOwnerId != null && String(assetOwnerId) === String(auth?.user?.id)
+    const canDelete = canDeleteAny || (canDeleteOwn && isOwnAsset)
 
     // Check if asset can have thumbnail generated (for previously skipped assets)
     // IMPORTANT: This is for existing assets that were skipped but are now supported
@@ -846,6 +856,28 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     }
     
     
+    // Handle asset delete (soft delete — permanent after grace period)
+    const handleDeleteConfirm = async () => {
+        if (!displayAsset?.id || !canDelete || deleteLoading) return
+        setDeleteLoading(true)
+        try {
+            const response = await window.axios.delete(`/app/assets/${displayAsset.id}`)
+            if (response.data?.message === 'Asset deleted successfully') {
+                setShowDeleteConfirm(false)
+                onClose()
+                router.reload({ only: ['assets'] })
+            } else {
+                setToastMessage(response.data?.message || 'Failed to delete asset')
+                setToastType('error')
+            }
+        } catch (err) {
+            setToastMessage(err.response?.data?.message || err.message || 'Failed to delete asset')
+            setToastType('error')
+        } finally {
+            setDeleteLoading(false)
+        }
+    }
+
     // Cleanup timeout on unmount or when asset changes
     useEffect(() => {
         return () => {
@@ -2648,6 +2680,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     activityEvents={activityEvents}
                     activityLoading={activityLoading}
                     onReplaceFile={() => setShowReplaceFileModal(true)}
+                    onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
                     primaryColor={brandPrimary}
                 />
             )}
@@ -2965,6 +2998,53 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         }, 500)
                     }}
                 />
+            )}
+            
+            {/* Delete asset confirmation modal (soft delete — permanent after grace period) */}
+            {showDeleteConfirm && displayAsset && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div
+                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            onClick={() => !deleteLoading && setShowDeleteConfirm(false)}
+                        />
+                        <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                            <div className="sm:flex sm:items-start">
+                                <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                                    <ExclamationTriangleIcon className="h-6 w-6 text-red-600" />
+                                </div>
+                                <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                                    <h3 className="text-base font-semibold leading-6 text-gray-900">
+                                        Delete asset?
+                                    </h3>
+                                    <div className="mt-2">
+                                        <p className="text-sm text-gray-500">
+                                            This will move &quot;{displayAsset.original_filename || displayAsset.title || 'this asset'}&quot; to trash. It can be restored within {auth?.deletion_grace_period_days ?? 30} days. After that, it will be permanently deleted.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteConfirm}
+                                    disabled={deleteLoading}
+                                    className="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:w-auto disabled:opacity-50"
+                                >
+                                    {deleteLoading ? 'Deleting…' : 'Delete'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => !deleteLoading && setShowDeleteConfirm(false)}
+                                    disabled={deleteLoading}
+                                    className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
             
             {/* Quick Review Modal - opened from drawer */}

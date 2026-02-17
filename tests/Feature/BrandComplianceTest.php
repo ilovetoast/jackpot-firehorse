@@ -185,6 +185,7 @@ class BrandComplianceTest extends TestCase
 
     /**
      * Color match success: dominant color in allowed palette → full color score.
+     * With LAB ΔE: exact hex match (ΔE=0) scores 100.
      */
     public function test_color_match_success_using_dominant_colors(): void
     {
@@ -193,8 +194,7 @@ class BrandComplianceTest extends TestCase
         $asset = $this->createAsset();
         $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [
-            ['hex' => '#003388', 'coverage' => 0.5],
-            ['hex' => '#ff0000', 'coverage' => 0.3],
+            ['hex' => '#003388', 'coverage' => 0.8],
         ]);
 
         $service = app(BrandComplianceService::class);
@@ -253,6 +253,82 @@ class BrandComplianceTest extends TestCase
         $this->assertSame(0, $result['color_score']);
         $this->assertSame(0, $result['overall_score']);
         $this->assertSame('scored', $result['breakdown_payload']['color']['status']);
+    }
+
+    /**
+     * Exact hex match (ΔE=0) scores 100.
+     */
+    public function test_exact_hex_match_scores_100(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#CC9F52']]);
+
+        $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#CC9F52', 'coverage' => 1.0]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertSame(100, $result['color_score']);
+    }
+
+    /**
+     * Perceptually close hex (within ΔE 15) scores high (85+).
+     * #CC9F52 (gold) and #D4A85A (lighter gold) are visually similar.
+     */
+    public function test_close_hex_within_15_deltaE_scores_high(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#CC9F52']]);
+
+        $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#D4A85A', 'coverage' => 1.0]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertGreaterThanOrEqual(70, $result['color_score'], 'Perceptually close colors should score at least 70');
+    }
+
+    /**
+     * Far color (high ΔE) scores zero.
+     */
+    public function test_far_color_scores_zero(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388'], ['hex' => '#ffffff']]);
+
+        $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#00FF00', 'coverage' => 1.0]]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertSame(0, $result['color_score']);
+    }
+
+    /**
+     * Weighted dominant colors affect score: matching primary + non-matching secondary → weighted average.
+     */
+    public function test_weighted_dominant_colors_affect_score(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+
+        $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
+        $this->setAssetDominantColors($asset, [
+            ['hex' => '#003388', 'coverage' => 0.6],
+            ['hex' => '#ff0000', 'coverage' => 0.4],
+        ]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $this->assertSame(60, $result['color_score'], '60% match + 40% far = 60 weighted score');
     }
 
     /**

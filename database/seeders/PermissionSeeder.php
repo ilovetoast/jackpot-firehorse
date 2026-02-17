@@ -52,6 +52,11 @@ class PermissionSeeder extends Seeder
             'asset.archive',
             'asset.restore',
         ];
+        // Delete: admins/brand_managers can delete any; managers can delete only their own files
+        $assetDeletePermissions = [
+            'assets.delete',      // Full delete (owner, admin, brand_manager)
+            'assets.delete_own',  // Delete own files only (manager)
+        ];
 
         // DAM Metadata permissions (tenant-scoped)
         $metadataPermissions = [
@@ -131,6 +136,7 @@ class PermissionSeeder extends Seeder
             $companyPermissions,
             $ownerOnlyPermissions,
             $assetPermissions,
+            $assetDeletePermissions,
             $metadataPermissions,
             $tagPermissions,
             $governancePermissions
@@ -169,10 +175,11 @@ class PermissionSeeder extends Seeder
         $brandPermissions = PermissionMap::brandPermissions();
 
         // Manager: All Contributor permissions + bypass approval + override automatic + bulk edit + suggestions
-        // Legacy role - keep existing behavior
+        // Can delete only their own files (assets.delete_own), not others'
         $manager->syncPermissions(array_merge(
             $companyPermissions,
             $assetPermissions,
+            ['assets.delete_own'],
             $tagPermissions,
             [
                 'metadata.set_on_upload',

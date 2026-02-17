@@ -230,7 +230,8 @@ class Asset extends Model
         'video_height', // Phase V-1: Video height in pixels
         'video_poster_url', // Phase V-1: URL to video poster thumbnail
         'video_preview_url', // Phase V-1: URL to hover preview video
-        'dominant_color_bucket', // Quantized LAB bucket for filtering (format: "L{L}_A{A}_B{B}")
+        'dominant_color_bucket', // Deprecated - kept for safety
+        'dominant_hue_group', // Perceptual hue cluster for filtering
     ];
 
     /**

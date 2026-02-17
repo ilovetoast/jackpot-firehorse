@@ -607,7 +607,7 @@ class DeliverableController extends Controller
         // Do not remove without updating Phase H contract
         // Compute distinct metadata values for the current asset grid result set
         $availableValues = [];
-        $bucketToDominantColors = []; // bucket -> dominant_colors for swatch display (first occurrence wins)
+        $hueGroupToDisplayHex = []; // cluster key -> display_hex from HueClusterService
         
         // When page > 1, use first page's asset IDs for filter options so dropdowns stay consistent
         $assetIdsForAvailableValues = $assetModels->pluck('id')->toArray();
@@ -698,6 +698,23 @@ class DeliverableController extends Controller
                     }
                 }
                 
+                // Source 2a: dominant_hue_group from assets.dominant_hue_group column
+                if (isset($filterableFieldKeys['dominant_hue_group'])) {
+                    $hueGroupValues = \DB::table('assets')
+                        ->whereIn('id', $assetIds)
+                        ->whereNotNull('dominant_hue_group')
+                        ->where('dominant_hue_group', '!=', '')
+                        ->distinct()
+                        ->pluck('dominant_hue_group')
+                        ->all();
+                    if (!empty($hueGroupValues)) {
+                        $availableValues['dominant_hue_group'] = array_values(array_unique(array_merge(
+                            $availableValues['dominant_hue_group'] ?? [],
+                            $hueGroupValues
+                        )));
+                    }
+                }
+
                 // Source 2: Query metadata JSON column (legacy/fallback)
                 // Extract values from metadata->fields structure for assets not in asset_metadata
                 $assetsWithMetadata = $assets->filter(function ($asset) {
@@ -726,10 +743,7 @@ class DeliverableController extends Controller
                                 if (!in_array($value, $availableValues[$fieldKey], true)) {
                                     $availableValues[$fieldKey][] = $value;
                                 }
-                                // For dominant_color_bucket, keep first asset's dominant_colors for swatch display
-                                if ($fieldKey === 'dominant_color_bucket' && !isset($bucketToDominantColors[$value])) {
-                                    $bucketToDominantColors[$value] = $fields['dominant_colors'] ?? null;
-                                }
+                                // dominant_hue_group: swatch from HueClusterService (handled below)
                             }
                         }
                     }
@@ -815,22 +829,20 @@ class DeliverableController extends Controller
             }
         }
 
-        // Attach color swatch data to dominant_color_bucket; attach collection options (id => name) for primary filter dropdown
-        $colorBucketService = app(\App\Services\ColorBucketService::class);
+        // Attach color swatch data to dominant_hue_group; attach collection options (id => name) for primary filter dropdown
+        $hueClusterService = app(\App\Services\Color\HueClusterService::class);
         foreach ($filterableSchema as &$field) {
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
-            if ($fieldKey === 'dominant_color_bucket') {
-                $bucketValues = $availableValues['dominant_color_bucket'] ?? [];
-                $field['options'] = array_values(array_map(function ($bucketValue) use ($colorBucketService, $bucketToDominantColors) {
+            if ($fieldKey === 'dominant_hue_group') {
+                $hueValues = $availableValues['dominant_hue_group'] ?? [];
+                $field['options'] = array_values(array_map(function ($clusterKey) use ($hueClusterService) {
+                    $meta = $hueClusterService->getClusterMeta((string) $clusterKey);
                     return [
-                        'value' => $bucketValue,
-                        'label' => $bucketValue,
-                        'swatch' => $colorBucketService->swatchHexForAsset(
-                            (string) $bucketValue,
-                            $bucketToDominantColors[$bucketValue] ?? null
-                        ),
+                        'value' => (string) $clusterKey,
+                        'label' => $meta['label'] ?? (string) $clusterKey,
+                        'swatch' => $meta['display_hex'] ?? '#999999',
                     ];
-                }, $bucketValues));
+                }, $hueValues));
             }
             // C9.2: Attach collection options (id => name) so primary filter is a dropdown with labels (Phase C checklist #6)
             if ($fieldKey === 'collection') {
