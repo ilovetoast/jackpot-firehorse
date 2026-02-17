@@ -76,10 +76,10 @@ class BrandComplianceService
         $payload = $activeVersion->model_payload ?? [];
         $scoringRules = $payload['scoring_rules'] ?? [];
         $scoringConfig = $payload['scoring_config'] ?? [];
-        $colorWeight = (float) ($scoringConfig['color_weight'] ?? 0.3);
+        $colorWeight = (float) ($scoringConfig['color_weight'] ?? 0.1);
         $typographyWeight = (float) ($scoringConfig['typography_weight'] ?? 0.2);
-        $toneWeight = (float) ($scoringConfig['tone_weight'] ?? 0.3);
-        $imageryWeight = (float) ($scoringConfig['imagery_weight'] ?? 0.2);
+        $toneWeight = (float) ($scoringConfig['tone_weight'] ?? 0.2);
+        $imageryWeight = (float) ($scoringConfig['imagery_weight'] ?? 0.5);
 
         // Wrap each dimension in try-catch so a failure in one never aborts scoring.
         // Dominant color (and other metadata) can be null, missing, or malformed.
@@ -494,6 +494,19 @@ class BrandComplianceService
     }
 
     /**
+     * Normalize vector to unit length (L2 norm).
+     */
+    private function normalizeVector(array $v): array
+    {
+        $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $v)));
+        if ($norm < 1e-10) {
+            return $v;
+        }
+
+        return array_map(fn ($x) => $x / $norm, $v);
+    }
+
+    /**
      * Cosine similarity between two vectors. Uses standard dot product formula.
      * Returns value in [-1, 1]. Assumes vectors are normalized.
      */
@@ -542,27 +555,43 @@ class BrandComplianceService
         }
 
         $assetVec = array_values($assetEmbedding->embedding_vector);
-        $maxSim = -1.0;
+        $refVectors = [];
         foreach ($refs as $ref) {
             $refVec = array_values($ref->embedding_vector ?? []);
-            if (empty($refVec)) {
-                continue;
-            }
-            $sim = $this->cosineSimilarity($assetVec, $refVec);
-            if ($sim > $maxSim) {
-                $maxSim = $sim;
+            if (! empty($refVec) && count($refVec) === count($assetVec)) {
+                $refVectors[] = $refVec;
             }
         }
 
-        if ($maxSim < -1.0) {
+        if (empty($refVectors)) {
             return [0, 'No valid reference embeddings.', 'not_evaluated'];
         }
 
-        // Normalize from [-1, 1] to [0, 100]
-        $score = (int) round((($maxSim + 1) / 2) * 100);
+        // Brand visual centroid: average of reference vectors, then normalize
+        $dim = count($assetVec);
+        $centroid = array_fill(0, $dim, 0.0);
+        foreach ($refVectors as $v) {
+            for ($i = 0; $i < $dim; $i++) {
+                $centroid[$i] += $v[$i] ?? 0;
+            }
+        }
+        $n = count($refVectors);
+        for ($i = 0; $i < $dim; $i++) {
+            $centroid[$i] /= $n;
+        }
+        $centroid = $this->normalizeVector($centroid);
+
+        $similarity = $this->cosineSimilarity($assetVec, $centroid);
+
+        // Map [0, 1] to [0, 100]; negative = unrelated, map to 0
+        $score = (int) round(max(0.0, $similarity) * 100);
         $score = min(100, max(0, $score));
 
-        return [$score, "Imagery similarity: {$score}% (highest match).", 'scored'];
+        $reason = $score >= 70
+            ? 'High visual similarity to brand references.'
+            : ($score >= 40 ? 'Moderate similarity to approved brand imagery.' : 'Low similarity to approved brand imagery.');
+
+        return [$score, $reason, 'scored'];
     }
 
     protected function getAssetPhotographyStyle(Asset $asset): ?string
