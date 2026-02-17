@@ -205,8 +205,7 @@ export default function AppNav({ brand, tenant }) {
     }
 
     useEffect(() => {
-        if (typeof window === 'undefined' || !isAppPage) {
-            setIsInstallAvailable(false)
+        if (typeof window === 'undefined') {
             return
         }
 
@@ -226,7 +225,7 @@ export default function AppNav({ brand, tenant }) {
             window.removeEventListener('jackpot:pwa-installed', updateInstallAvailability)
             document.removeEventListener('visibilitychange', updateInstallAvailability)
         }
-    }, [isAppPage])
+    }, [])
 
     useEffect(() => {
         if (typeof document === 'undefined') {
@@ -701,22 +700,24 @@ export default function AppNav({ brand, tenant }) {
                             </Link>
                         )}
                         {/* Right-side nav: install + utility links (desktop/tablet), then notifications */}
+                        {isInstallAvailable && (
+                            <button
+                                type="button"
+                                onClick={handleInstallApp}
+                                disabled={isInstalling}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-md p-2 md:px-2 md:py-1.5 text-sm font-medium border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{
+                                    color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
+                                }}
+                                aria-label={isInstalling ? 'Installing app' : 'Install app'}
+                                title={isInstalling ? 'Installing app' : 'Install app'}
+                            >
+                                <ArrowDownCircleIcon className="h-5 w-5" />
+                                <span className="hidden lg:inline">{isInstalling ? 'Installing...' : 'Install App'}</span>
+                            </button>
+                        )}
                         {isAppPage && (
                             <>
-                                {isInstallAvailable && (
-                                    <button
-                                        type="button"
-                                        onClick={handleInstallApp}
-                                        disabled={isInstalling}
-                                        className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        style={{
-                                            color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
-                                        }}
-                                    >
-                                        <ArrowDownCircleIcon className="h-5 w-5" />
-                                        <span>{isInstalling ? 'Installing...' : 'Install App'}</span>
-                                    </button>
-                                )}
                                 <Link
                                     href="/app/brand-guidelines"
                                     className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
