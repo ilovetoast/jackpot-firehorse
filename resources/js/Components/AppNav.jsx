@@ -5,6 +5,15 @@ import AppBrandLogo from './AppBrandLogo'
 import PermissionGate from './PermissionGate'
 import Avatar from './Avatar'
 import NotificationBell from './NotificationBell'
+import {
+    ArrowDownCircleIcon,
+    ArrowDownTrayIcon,
+    BookOpenIcon,
+    HomeIcon,
+    PhotoIcon,
+    SparklesIcon,
+    Squares2X2Icon,
+} from '@heroicons/react/24/outline'
 
 export default function AppNav({ brand, tenant }) {
     const page = usePage()
@@ -14,6 +23,8 @@ export default function AppNav({ brand, tenant }) {
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
+    const [isInstallAvailable, setIsInstallAvailable] = useState(false)
+    const [isInstalling, setIsInstalling] = useState(false)
     
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
@@ -191,6 +202,118 @@ export default function AppNav({ brand, tenant }) {
     const handleDismissPlanAlert = () => {
         setShowPlanAlert(false)
     }
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || !isAppPage) {
+            setIsInstallAvailable(false)
+            return
+        }
+
+        const updateInstallAvailability = () => {
+            const isStandalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true
+            setIsInstallAvailable(Boolean(window.__jackpotDeferredInstallPrompt) && !isStandalone)
+        }
+
+        updateInstallAvailability()
+
+        window.addEventListener('jackpot:pwa-installable', updateInstallAvailability)
+        window.addEventListener('jackpot:pwa-installed', updateInstallAvailability)
+        document.addEventListener('visibilitychange', updateInstallAvailability)
+
+        return () => {
+            window.removeEventListener('jackpot:pwa-installable', updateInstallAvailability)
+            window.removeEventListener('jackpot:pwa-installed', updateInstallAvailability)
+            document.removeEventListener('visibilitychange', updateInstallAvailability)
+        }
+    }, [isAppPage])
+
+    useEffect(() => {
+        if (typeof document === 'undefined') {
+            return
+        }
+
+        if (isAppPage && !isCollectionOnlyNav && !isAdminPage) {
+            document.body.classList.add('has-mobile-tabbar')
+        } else {
+            document.body.classList.remove('has-mobile-tabbar')
+        }
+
+        return () => {
+            document.body.classList.remove('has-mobile-tabbar')
+        }
+    }, [isAppPage, isCollectionOnlyNav, isAdminPage])
+
+    const handleInstallApp = async () => {
+        if (typeof window === 'undefined') {
+            return
+        }
+
+        const deferredPrompt = window.__jackpotDeferredInstallPrompt
+        if (!deferredPrompt) {
+            setIsInstallAvailable(false)
+            return
+        }
+
+        setIsInstalling(true)
+
+        try {
+            await deferredPrompt.prompt()
+            await deferredPrompt.userChoice
+        } catch (error) {
+            console.error('App install prompt failed', error)
+        } finally {
+            if (window.__jackpotDeferredInstallPrompt === deferredPrompt) {
+                window.__jackpotDeferredInstallPrompt = null
+            }
+            setIsInstallAvailable(false)
+            setIsInstalling(false)
+        }
+    }
+
+    const mobileAppNavItems = [
+        {
+            href: '/app/dashboard',
+            label: 'Dashboard',
+            shortLabel: 'Dashboard',
+            icon: HomeIcon,
+            isActive: (url) => url === '/app/dashboard',
+        },
+        {
+            href: '/app/assets',
+            label: 'Assets',
+            shortLabel: 'Assets',
+            icon: PhotoIcon,
+            isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/deliverables'),
+        },
+        {
+            href: '/app/deliverables',
+            label: DELIVERABLES_PAGE_LABEL,
+            shortLabel: DELIVERABLES_PAGE_LABEL,
+            icon: Squares2X2Icon,
+            isActive: (url) => url.startsWith('/app/deliverables'),
+        },
+        {
+            href: '/app/generative',
+            label: 'Generate',
+            shortLabel: 'Generate',
+            icon: SparklesIcon,
+            isActive: (url) => url.startsWith('/app/generative'),
+        },
+        {
+            href: '/app/downloads',
+            label: 'Downloads',
+            shortLabel: 'Downloads',
+            icon: ArrowDownTrayIcon,
+            isActive: (url) => url.startsWith('/app/downloads'),
+        },
+        {
+            href: '/app/brand-guidelines',
+            label: 'Brand Guidelines',
+            shortLabel: 'Guides',
+            icon: BookOpenIcon,
+            isActive: (url) => url.startsWith('/app/brand-guidelines') || url.includes('/guidelines'),
+        },
+    ]
     
     return (
         <div>
@@ -286,7 +409,7 @@ export default function AppNav({ brand, tenant }) {
                 <div className="flex h-20 justify-between">
                     <div className="flex flex-1 items-center">
                         {/* Mobile: hamburger to open main nav drawer (main nav links hidden below sm) */}
-                        {isAppPage && (
+                        {isAppPage && isCollectionOnlyNav && (
                             <div className="flex flex-shrink-0 mr-2 sm:mr-0 sm:hidden">
                                 <button
                                     type="button"
@@ -576,37 +699,47 @@ export default function AppNav({ brand, tenant }) {
                                 Collection access
                             </Link>
                         )}
-                        {/* Right-side nav: Downloads + Brand Guidelines (app pages only), then Notifications */}
+                        {/* Right-side nav: install + utility links (desktop/tablet), then notifications */}
                         {isAppPage && (
                             <>
+                                {isInstallAvailable && (
+                                    <button
+                                        type="button"
+                                        onClick={handleInstallApp}
+                                        disabled={isInstalling}
+                                        className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        style={{
+                                            color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
+                                        }}
+                                    >
+                                        <ArrowDownCircleIcon className="h-5 w-5" />
+                                        <span>{isInstalling ? 'Installing...' : 'Install App'}</span>
+                                    </button>
+                                )}
                                 <Link
                                     href="/app/downloads"
-                                    className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                     style={{
                                         color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
                                     }}
                                 >
-                                    <span className="hidden md:inline">Downloads</span>
-                                    <svg className="h-5 w-5 md:hidden" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                                    </svg>
+                                    <span>Downloads</span>
                                 </Link>
                                 <Link
                                     href="/app/brand-guidelines"
-                                    className="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    className="hidden md:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                                     style={{
                                         color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
                                     }}
                                 >
-                                    <span className="hidden md:inline">Brand Guidelines</span>
-                                    <svg className="h-5 w-5 md:hidden" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                                    </svg>
+                                    <span>Brand Guidelines</span>
                                 </Link>
                             </>
                         )}
                         {/* Phase AF-3: Notification Bell */}
-                        <NotificationBell textColor={textColor} />
+                        <div className="hidden sm:block">
+                            <NotificationBell textColor={textColor} />
+                        </div>
                         
                         {/* User Menu */}
                         <div className="relative ml-3">
@@ -624,10 +757,10 @@ export default function AppNav({ brand, tenant }) {
                                             ? `${auth.user.first_name} ${auth.user.last_name}`
                                             : auth.user?.first_name || auth.user?.email}
                                     </span>
-                                    <svg className="ml-2 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <svg className="hidden sm:block ml-2 h-5 w-5" style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                         <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                                     </svg>
-                                    <div className="ml-3">
+                                    <div className="ml-0 sm:ml-3">
                                         <Avatar
                                             avatarUrl={auth.user?.avatar_url}
                                             firstName={auth.user?.first_name}
@@ -911,7 +1044,7 @@ export default function AppNav({ brand, tenant }) {
             </div>
 
             {/* Mobile main nav drawer: slide-in from left (below sm breakpoint) */}
-            {isAppPage && mobileNavOpen && (
+            {isAppPage && isCollectionOnlyNav && mobileNavOpen && (
                 <>
                     <div
                         className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm sm:hidden"
@@ -966,6 +1099,32 @@ export default function AppNav({ brand, tenant }) {
                         </nav>
                     </div>
                 </>
+            )}
+
+            {/* Mobile PWA bottom app navigation */}
+            {isAppPage && !isCollectionOnlyNav && !isAdminPage && (
+                <div className="fixed inset-x-0 bottom-0 z-[95] border-t border-gray-200 bg-white/95 backdrop-blur sm:hidden safe-area-pb">
+                    <div className="grid grid-cols-6 gap-0.5 px-1 py-1.5">
+                        {mobileAppNavItems.map(({ href, label, shortLabel, icon: Icon, isActive }) => {
+                            const active = isActive(currentUrl)
+                            return (
+                                <Link
+                                    key={href}
+                                    href={href}
+                                    className={`flex flex-col items-center justify-center rounded-md px-0.5 py-1.5 text-[10px] font-medium transition-colors ${
+                                        active ? 'text-indigo-700 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'
+                                    }`}
+                                    aria-label={label}
+                                    aria-current={active ? 'page' : undefined}
+                                    style={active ? { color: activeBrand?.primary_color || '#4338ca' } : undefined}
+                                >
+                                    <Icon className="h-5 w-5" aria-hidden="true" />
+                                    <span className="mt-0.5 leading-none truncate max-w-full">{shortLabel}</span>
+                                </Link>
+                            )
+                        })}
+                    </div>
+                </div>
             )}
             </nav>
         </div>

@@ -9,6 +9,38 @@ import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import { BucketProvider } from './contexts/BucketContext'
 
+if (typeof window !== 'undefined' && import.meta.env.PROD && !window.__jackpotPwaInitialized) {
+    window.__jackpotPwaInitialized = true
+    window.__jackpotDeferredInstallPrompt = null
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault()
+        window.__jackpotDeferredInstallPrompt = event
+        window.dispatchEvent(new CustomEvent('jackpot:pwa-installable'))
+    })
+
+    window.addEventListener('appinstalled', () => {
+        window.__jackpotDeferredInstallPrompt = null
+        window.dispatchEvent(new CustomEvent('jackpot:pwa-installed'))
+    })
+
+    const registerServiceWorker = () => {
+        if (!('serviceWorker' in navigator)) {
+            return
+        }
+
+        navigator.serviceWorker.register('/sw.js').catch((error) => {
+            console.error('Service worker registration failed', error)
+        })
+    }
+
+    if (document.readyState === 'complete') {
+        registerServiceWorker()
+    } else {
+        window.addEventListener('load', registerServiceWorker, { once: true })
+    }
+}
+
 const pages = import.meta.glob('./Pages/**/*.jsx', { eager: false })
 
 createInertiaApp({

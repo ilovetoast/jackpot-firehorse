@@ -294,7 +294,7 @@ export default function AssetProcessingTray() {
     }
 
     return (
-        <div className="fixed bottom-4 right-4 z-50">
+        <div className="fixed app-mobile-tray-offset right-4 z-50">
             <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
                 {/* Header - Always visible */}
                 <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">

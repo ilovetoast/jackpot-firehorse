@@ -119,3 +119,34 @@ nav.app-nav[data-collection-only="true"] .app-nav-main-links .nav-link-disabled,
 }
 
 /* Optional: use the CSS variable for your own overrides, e.g. .my-thing { opacity: var(--collection-only-user, 1); } */
+
+/* PWA/mobile safe-area support */
+.safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.app-mobile-bottom-offset {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+
+.app-mobile-tray-offset {
+    bottom: calc(5.5rem + env(safe-area-inset-bottom));
+}
+
+body.has-mobile-tabbar {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+    .app-mobile-bottom-offset {
+        bottom: 0;
+    }
+
+    .app-mobile-tray-offset {
+        bottom: 1rem;
+    }
+
+    body.has-mobile-tabbar {
+        padding-bottom: 0;
+    }
+}
