@@ -330,12 +330,15 @@ class AssetController extends Controller
         $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
 
         // Hue cluster counts for filter badges (clone before paginate consumes the builder)
+        // Clear ORDER BY from cloned query: GROUP BY + aggregate is incompatible with only_full_group_by
+        // when ORDER BY references non-grouped columns (e.g. metadata, quality_rating).
         $hueClusterCounts = [];
         $hueCountQuery = (clone $assetsQuery)
             ->select('assets.dominant_hue_group', \DB::raw('COUNT(*) as cnt'))
             ->whereNotNull('assets.dominant_hue_group')
             ->where('assets.dominant_hue_group', '!=', '')
-            ->groupBy('assets.dominant_hue_group');
+            ->groupBy('assets.dominant_hue_group')
+            ->reorder();
         foreach ($hueCountQuery->get() as $row) {
             $hueClusterCounts[(string) $row->dominant_hue_group] = (int) $row->cnt;
         }
