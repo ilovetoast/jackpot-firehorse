@@ -331,6 +331,17 @@ class DeliverableController extends Controller
         $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
         $this->assetSortService->applySort($assetsQuery, $sort, $sortDirection);
 
+        // Hue cluster counts for filter badges (clone before paginate consumes the builder)
+        $hueClusterCounts = [];
+        $hueCountQuery = (clone $assetsQuery)
+            ->select('assets.dominant_hue_group', \DB::raw('COUNT(*) as cnt'))
+            ->whereNotNull('assets.dominant_hue_group')
+            ->where('assets.dominant_hue_group', '!=', '')
+            ->groupBy('assets.dominant_hue_group');
+        foreach ($hueCountQuery->get() as $row) {
+            $hueClusterCounts[(string) $row->dominant_hue_group] = (int) $row->cnt;
+        }
+
         // Paginate: server-driven pagination (36 per page); next_page_url built from request query so filters/category/sort preserved (match AssetController)
         $perPage = 36;
         $paginator = $assetsQuery->paginate($perPage);
@@ -835,13 +846,18 @@ class DeliverableController extends Controller
             $fieldKey = $field['field_key'] ?? $field['key'] ?? null;
             if ($fieldKey === 'dominant_hue_group') {
                 $hueValues = $availableValues['dominant_hue_group'] ?? [];
-                $field['options'] = array_values(array_map(function ($clusterKey) use ($hueClusterService) {
+                $field['options'] = array_values(array_map(function ($clusterKey) use ($hueClusterService, $hueClusterCounts) {
                     $meta = $hueClusterService->getClusterMeta((string) $clusterKey);
+                    $label = $meta['label'] ?? (string) $clusterKey;
+                    $threshold = $meta['threshold_deltaE'] ?? 18;
+                    $count = $hueClusterCounts[(string) $clusterKey] ?? 0;
                     return [
                         'value' => (string) $clusterKey,
-                        'label' => $meta['label'] ?? (string) $clusterKey,
+                        'label' => $label,
                         'swatch' => $meta['display_hex'] ?? '#999999',
                         'row_group' => $meta['row_group'] ?? 4,
+                        'tooltip' => $label . "\nTypical ΔE threshold: " . $threshold,
+                        'count' => $count,
                     ];
                 }, $hueValues));
             }

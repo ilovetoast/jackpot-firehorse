@@ -800,6 +800,156 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * Repair type field defaults: reset type fields (photo_type, logo_type, etc.) to their initial config.
+     * Type fields should only be visible in their configured category slugs; hidden everywhere else.
+     * Updates existing rows and inserts missing ones. Logs changes.
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @param bool $dryRun If true, return what would be changed without making changes
+     * @return array{updated: int, inserted: int, changes: array<array{field_key: string, action: string}>}
+     */
+    public function repairTypeDefaultsForCategory(Tenant $tenant, Category $category, bool $dryRun = false): array
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $config = config('metadata_category_defaults', []);
+        $categoryConfig = $config['category_config'] ?? [];
+        $slug = $category->slug;
+        $brandId = $category->brand_id;
+        $categoryId = $category->id;
+
+        $typeFieldKeys = array_keys($categoryConfig);
+        if (empty($typeFieldKeys)) {
+            return ['updated' => 0, 'inserted' => 0, 'changes' => []];
+        }
+
+        $fields = DB::table('metadata_fields')
+            ->whereIn('key', $typeFieldKeys)
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
+            ->get(['id', 'key']);
+
+        $existingRows = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brandId)
+            ->where('category_id', $categoryId)
+            ->whereIn('metadata_field_id', $fields->pluck('id'))
+            ->get()
+            ->keyBy('metadata_field_id');
+
+        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
+        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+
+        $updated = 0;
+        $inserted = 0;
+        $changes = [];
+
+        foreach ($fields as $field) {
+            $key = $field->key;
+            $allowedSlugs = array_keys($categoryConfig[$key] ?? []);
+            $isAllowed = in_array($slug, $allowedSlugs, true);
+
+            if ($isAllowed) {
+                $settings = $categoryConfig[$key][$slug] ?? [];
+                $expected = [
+                    'is_hidden' => ! ($settings['enabled'] ?? true),
+                    'is_upload_hidden' => false,
+                    'is_filter_hidden' => false,
+                    'is_primary' => $settings['is_primary'] ?? null,
+                ];
+                if ($hasEditHidden) {
+                    $expected['is_edit_hidden'] = $settings['is_edit_hidden'] ?? false;
+                }
+            } else {
+                $expected = [
+                    'is_hidden' => true,
+                    'is_upload_hidden' => true,
+                    'is_filter_hidden' => true,
+                    'is_primary' => null,
+                ];
+                if ($hasEditHidden) {
+                    $expected['is_edit_hidden'] = true;
+                }
+            }
+
+            $existing = $existingRows[$field->id] ?? null;
+
+            if ($existing) {
+                $needsUpdate = $existing->is_hidden != $expected['is_hidden']
+                    || $existing->is_upload_hidden != $expected['is_upload_hidden']
+                    || $existing->is_filter_hidden != $expected['is_filter_hidden']
+                    || ($hasPrimary && ($existing->is_primary ?? null) != ($expected['is_primary'] ?? null))
+                    || ($hasEditHidden && ($existing->is_edit_hidden ?? false) != ($expected['is_edit_hidden'] ?? false));
+
+                if ($needsUpdate && ! $dryRun) {
+                    $updateData = [
+                        'is_hidden' => $expected['is_hidden'],
+                        'is_upload_hidden' => $expected['is_upload_hidden'],
+                        'is_filter_hidden' => $expected['is_filter_hidden'],
+                        'updated_at' => now(),
+                    ];
+                    if ($hasPrimary) {
+                        $updateData['is_primary'] = $expected['is_primary'];
+                    }
+                    if ($hasEditHidden) {
+                        $updateData['is_edit_hidden'] = $expected['is_edit_hidden'];
+                    }
+                    DB::table('metadata_field_visibility')->where('id', $existing->id)->update($updateData);
+                    Log::info('[metadata:repair-type-defaults] Updated type field visibility', [
+                        'tenant_id' => $tenant->id,
+                        'category_id' => $categoryId,
+                        'category_slug' => $slug,
+                        'field_key' => $key,
+                        'field_id' => $field->id,
+                        'action' => $isAllowed ? 'enabled' : 'hidden',
+                    ]);
+                }
+                if ($needsUpdate) {
+                    $updated++;
+                    $changes[] = ['field_key' => $key, 'action' => $isAllowed ? 'enabled' : 'hidden'];
+                }
+            } else {
+                if (! $dryRun) {
+                    $row = [
+                        'metadata_field_id' => $field->id,
+                        'tenant_id' => $tenant->id,
+                        'brand_id' => $brandId,
+                        'category_id' => $categoryId,
+                        'is_hidden' => $expected['is_hidden'],
+                        'is_upload_hidden' => $expected['is_upload_hidden'],
+                        'is_filter_hidden' => $expected['is_filter_hidden'],
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                    if ($hasPrimary) {
+                        $row['is_primary'] = $expected['is_primary'];
+                    }
+                    if ($hasEditHidden) {
+                        $row['is_edit_hidden'] = $expected['is_edit_hidden'];
+                    }
+                    DB::table('metadata_field_visibility')->insert($row);
+                    Log::info('[metadata:repair-type-defaults] Inserted type field visibility', [
+                        'tenant_id' => $tenant->id,
+                        'category_id' => $categoryId,
+                        'category_slug' => $slug,
+                        'field_key' => $key,
+                        'field_id' => $field->id,
+                        'action' => $isAllowed ? 'enabled' : 'hidden',
+                    ]);
+                }
+                $inserted++;
+                $changes[] = ['field_key' => $key, 'action' => $isAllowed ? 'enabled' : 'hidden'];
+            }
+        }
+
+        return ['updated' => $updated, 'inserted' => $inserted, 'changes' => $changes];
+    }
+
+    /**
      * Compute default visibility for one field in one category from config.
      * Returns array with is_hidden, is_upload_hidden, is_filter_hidden, is_primary (optional), or null to skip row.
      *

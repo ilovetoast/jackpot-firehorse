@@ -66,41 +66,50 @@ export default function ColorSwatchFilter({
             {groupedOptions.map((rowOpts, rowIdx) => (
                 <div key={rowIdx} className={rowClass}>
                     {rowOpts.map((option) => {
-                const optValue = option.value
-                const hex = option.swatch || option.hex || '#808080'
-                const isSelected = selectedValues.includes(optValue)
+                        const optValue = option.value
+                        const hex = option.swatch || option.hex || '#808080'
+                        const isSelected = selectedValues.includes(optValue)
+                        const label = option.label || optValue
+                        const tooltip = option.tooltip || label
+                        const count = option.count
 
-                return (
-                    <button
-                        key={optValue}
-                        type="button"
-                        onClick={() => handleToggle(optValue)}
-                        className={`
-                            ${sizeClass} rounded-sm border-2 flex-shrink-0
-                            transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
-                            ${isSelected
-                                ? 'border-indigo-600 ring-2 ring-indigo-200 shadow-md'
-                                : 'border-gray-300 hover:border-gray-400'
-                            }
-                        `}
-                        style={{ backgroundColor: hex }}
-                        title={option.label || optValue}
-                        aria-label={`${isSelected ? 'Deselect' : 'Select'} color ${option.label || optValue}`}
-                    >
-                        {isSelected && (
-                            <svg
-                                className="w-full h-full text-white drop-shadow-md"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={compact ? 2.5 : 3}
-                            >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                        )}
-                    </button>
-                )
-            })}
+                        return (
+                            <div key={optValue} className="flex flex-col items-center gap-0.5">
+                                <button
+                                    type="button"
+                                    onClick={() => handleToggle(optValue)}
+                                    className={`
+                                        ${sizeClass} rounded-sm border-2 flex-shrink-0
+                                        transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
+                                        ${isSelected
+                                            ? 'border-indigo-600 ring-2 ring-indigo-200 shadow-md'
+                                            : 'border-gray-300 hover:border-gray-400'
+                                        }
+                                    `}
+                                    style={{ backgroundColor: hex }}
+                                    title={tooltip}
+                                    aria-label={`${isSelected ? 'Deselect' : 'Select'} color ${label}`}
+                                >
+                                    {isSelected && (
+                                        <svg
+                                            className="w-full h-full text-white drop-shadow-md"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth={compact ? 2.5 : 3}
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    )}
+                                </button>
+                                {!compact && count != null && count > 0 && (
+                                    <span className="text-[10px] text-gray-500 font-medium tabular-nums">
+                                        ({count})
+                                    </span>
+                                )}
+                            </div>
+                        )
+                    })}
                 </div>
             ))}
         </div>
