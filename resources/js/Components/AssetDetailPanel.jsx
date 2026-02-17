@@ -474,7 +474,7 @@ export default function AssetDetailPanel({
     if (!isOpen) return null
     if (!canViewAsset) return null
 
-    const panelWidth = fullPage ? '100%' : '70%'
+    const panelWidth = fullPage ? '100%' : '92vw'
 
     const handleRequestClose = () => {
         if (fullPage) {
@@ -499,13 +499,13 @@ export default function AssetDetailPanel({
             )}
             <div
                 className={`fixed top-0 right-0 h-full bg-white shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${panelSlideClass}`}
-                style={{ width: panelWidth, maxWidth: fullPage ? '100%' : '1100px' }}
+                style={{ width: panelWidth, maxWidth: fullPage ? '100%' : '1240px' }}
                 role="dialog"
                 aria-labelledby="asset-detail-panel-title"
             >
                 {/* Sticky Header */}
-                <header className="sticky top-0 z-10 bg-white border-b border-gray-200 pb-4 mb-6 flex-shrink-0">
-                    <div className="p-5 space-y-4">
+                <header className="sticky top-0 z-10 bg-white border-b border-gray-200 pb-3 mb-4 flex-shrink-0">
+                    <div className="p-4 space-y-3">
                         {/* Row: Title + Actions + Close */}
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0 flex items-start gap-2">
@@ -900,7 +900,7 @@ export default function AssetDetailPanel({
 
                 {/* Scrollable body */}
                 <div className="flex-1 overflow-y-auto">
-                    <div className="p-8 divide-y divide-gray-200">
+                    <div className="p-4 sm:p-5 divide-y divide-gray-200">
                         {loading && (
                             <div className="py-8 text-center text-sm text-gray-500">
                                 Loading metadata…

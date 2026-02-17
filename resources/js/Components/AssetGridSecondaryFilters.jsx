@@ -412,7 +412,7 @@ export default function AssetGridSecondaryFilters({
         <div>
             {/* Bar: More filters (left) + active filter pills (center) + Sort (right) */}
             <div
-                className="px-3 py-1.5 sm:px-4 flex items-center justify-between gap-2 text-left border-b border-gray-200"
+                className="px-3 py-1.5 sm:px-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between text-left border-b border-gray-200"
                 style={{ borderBottomWidth: '2px', borderBottomColor: brandPrimary }}
             >
                 <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
@@ -548,11 +548,11 @@ export default function AssetGridSecondaryFilters({
                 </div>
 
                 {/* Right: optional trailing content (e.g. Select Multiple, Select all) + count + Sort — same pane */}
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:justify-end min-w-0">
                     {barTrailingContent != null && barTrailingContent}
                     {/* Indicator: result count and filter count in selected category */}
                     {(assetResultCount != null || activeFilterCount > 0) && (
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-gray-500 whitespace-nowrap">
                             {[
                                 assetResultCount != null
                                     ? (totalInCategory != null
@@ -572,7 +572,7 @@ export default function AssetGridSecondaryFilters({
                             id="more-filters-sort-by"
                             value={sortBy}
                             onChange={(e) => onSortChange(e.target.value, sortDirection)}
-                            className="rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="min-w-[7rem] rounded border border-gray-300 bg-white py-1 pl-2 pr-6 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             aria-label="Sort by"
                         >
                             <option value="featured">Featured</option>
