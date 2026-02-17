@@ -22,6 +22,18 @@ export default function ColorSwatchFilter({
         return list.filter((opt) => opt && (opt.swatch || opt.value))
     }, [field.options, filteredOptions])
 
+    // Group by row_group (1=Warm, 2=Cool, 3=Earth, 4=Neutrals) for visual clarity
+    const groupedOptions = useMemo(() => {
+        const groups = {}
+        for (const opt of options) {
+            const rg = opt.row_group ?? 4
+            if (!groups[rg]) groups[rg] = []
+            groups[rg].push(opt)
+        }
+        const order = [1, 2, 3, 4]
+        return order.filter((rg) => groups[rg]?.length).map((rg) => groups[rg])
+    }, [options])
+
     const selectedValues = Array.isArray(value) ? [...new Set(value)] : (value != null ? [value] : [])
 
     const handleToggle = (bucketValue) => {
@@ -45,12 +57,15 @@ export default function ColorSwatchFilter({
 
     const sizeClass = compact ? 'w-4 h-4' : 'w-6 h-6'
     const containerClass = compact
-        ? 'flex flex-wrap items-center gap-1'
-        : 'flex flex-wrap items-center gap-1.5 p-2 bg-gray-50 rounded-lg border border-gray-200'
+        ? 'flex flex-col gap-1'
+        : 'flex flex-col gap-2 p-2 bg-gray-50 rounded-lg border border-gray-200'
+    const rowClass = compact ? 'flex flex-wrap items-center gap-1' : 'flex flex-wrap items-center gap-1.5'
 
     return (
         <div className={containerClass}>
-            {options.map((option) => {
+            {groupedOptions.map((rowOpts, rowIdx) => (
+                <div key={rowIdx} className={rowClass}>
+                    {rowOpts.map((option) => {
                 const optValue = option.value
                 const hex = option.swatch || option.hex || '#808080'
                 const isSelected = selectedValues.includes(optValue)
@@ -86,6 +101,8 @@ export default function ColorSwatchFilter({
                     </button>
                 )
             })}
+                </div>
+            ))}
         </div>
     )
 }

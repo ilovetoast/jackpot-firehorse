@@ -14,26 +14,27 @@ class HueClusterService
     /**
      * Canonical clusters (max 18).
      * Each: key, label, lab_centroid [L,a,b], display_hex, threshold_deltaE (default 18).
+     * display_hex: Hard-coded representative colors for semantic clusters — do NOT compute dynamically.
      */
     protected const CLUSTERS = [
-        ['key' => 'red', 'label' => 'Red', 'lab_centroid' => [53, 80, 67], 'display_hex' => '#E53935', 'threshold_deltaE' => 18],
-        ['key' => 'orange', 'label' => 'Orange', 'lab_centroid' => [70, 45, 65], 'display_hex' => '#FF7043', 'threshold_deltaE' => 18],
-        ['key' => 'yellow', 'label' => 'Yellow', 'lab_centroid' => [95, -15, 90], 'display_hex' => '#FFEB3B', 'threshold_deltaE' => 18],
-        ['key' => 'lime_green', 'label' => 'Lime Green', 'lab_centroid' => [85, -55, 75], 'display_hex' => '#9CCC65', 'threshold_deltaE' => 18],
-        ['key' => 'green', 'label' => 'Green', 'lab_centroid' => [55, -45, 45], 'display_hex' => '#43A047', 'threshold_deltaE' => 18],
-        ['key' => 'teal', 'label' => 'Teal', 'lab_centroid' => [50, -25, -15], 'display_hex' => '#00897B', 'threshold_deltaE' => 18],
-        ['key' => 'cyan', 'label' => 'Cyan', 'lab_centroid' => [75, -35, -35], 'display_hex' => '#26C6DA', 'threshold_deltaE' => 18],
-        ['key' => 'blue', 'label' => 'Blue', 'lab_centroid' => [45, 15, -55], 'display_hex' => '#1E88E5', 'threshold_deltaE' => 18],
-        ['key' => 'indigo', 'label' => 'Indigo', 'lab_centroid' => [35, 25, -45], 'display_hex' => '#3949AB', 'threshold_deltaE' => 18],
-        ['key' => 'purple', 'label' => 'Purple', 'lab_centroid' => [45, 55, -35], 'display_hex' => '#8E24AA', 'threshold_deltaE' => 18],
-        ['key' => 'magenta', 'label' => 'Magenta', 'lab_centroid' => [55, 75, -25], 'display_hex' => '#D81B60', 'threshold_deltaE' => 18],
-        ['key' => 'pink', 'label' => 'Pink', 'lab_centroid' => [75, 45, 5], 'display_hex' => '#F06292', 'threshold_deltaE' => 18],
-        ['key' => 'warm_brown', 'label' => 'Warm Brown', 'lab_centroid' => [45, 25, 45], 'display_hex' => '#8D6E63', 'threshold_deltaE' => 18],
-        ['key' => 'cool_brown', 'label' => 'Cool Brown', 'lab_centroid' => [40, 10, 25], 'display_hex' => '#6D4C41', 'threshold_deltaE' => 18],
-        ['key' => 'black', 'label' => 'Black', 'lab_centroid' => [15, 0, 0], 'display_hex' => '#212121', 'threshold_deltaE' => 18],
-        ['key' => 'gray', 'label' => 'Gray', 'lab_centroid' => [55, 0, 0], 'display_hex' => '#9E9E9E', 'threshold_deltaE' => 18],
-        ['key' => 'white', 'label' => 'White', 'lab_centroid' => [95, 0, 0], 'display_hex' => '#FAFAFA', 'threshold_deltaE' => 18],
-        ['key' => 'neutral', 'label' => 'Neutral', 'lab_centroid' => [65, 2, 5], 'display_hex' => '#BDBDBD', 'threshold_deltaE' => 18],
+        ['key' => 'red', 'label' => 'Red', 'lab_centroid' => [53, 80, 67], 'display_hex' => '#E53935', 'threshold_deltaE' => 18, 'row_group' => 1],
+        ['key' => 'orange', 'label' => 'Orange', 'lab_centroid' => [70, 45, 65], 'display_hex' => '#FB8C00', 'threshold_deltaE' => 18, 'row_group' => 1],
+        ['key' => 'yellow', 'label' => 'Yellow', 'lab_centroid' => [95, -15, 90], 'display_hex' => '#FDD835', 'threshold_deltaE' => 18, 'row_group' => 1],
+        ['key' => 'pink', 'label' => 'Pink', 'lab_centroid' => [75, 45, 5], 'display_hex' => '#D81B60', 'threshold_deltaE' => 18, 'row_group' => 1],
+        ['key' => 'lime_green', 'label' => 'Lime Green', 'lab_centroid' => [85, -55, 75], 'display_hex' => '#9CCC65', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'green', 'label' => 'Green', 'lab_centroid' => [55, -45, 45], 'display_hex' => '#43A047', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'teal', 'label' => 'Teal', 'lab_centroid' => [50, -25, -15], 'display_hex' => '#00897B', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'cyan', 'label' => 'Cyan', 'lab_centroid' => [75, -35, -35], 'display_hex' => '#26C6DA', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'blue', 'label' => 'Blue', 'lab_centroid' => [45, 15, -55], 'display_hex' => '#1E88E5', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'indigo', 'label' => 'Indigo', 'lab_centroid' => [35, 25, -45], 'display_hex' => '#3949AB', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'purple', 'label' => 'Purple', 'lab_centroid' => [45, 55, -35], 'display_hex' => '#8E24AA', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'magenta', 'label' => 'Magenta', 'lab_centroid' => [55, 75, -25], 'display_hex' => '#D81B60', 'threshold_deltaE' => 18, 'row_group' => 2],
+        ['key' => 'warm_brown', 'label' => 'Warm Brown', 'lab_centroid' => [45, 25, 45], 'display_hex' => '#8D6E63', 'threshold_deltaE' => 18, 'row_group' => 3],
+        ['key' => 'cool_brown', 'label' => 'Cool Brown', 'lab_centroid' => [40, 10, 25], 'display_hex' => '#6D4C41', 'threshold_deltaE' => 18, 'row_group' => 3],
+        ['key' => 'black', 'label' => 'Black', 'lab_centroid' => [15, 0, 0], 'display_hex' => '#212121', 'threshold_deltaE' => 18, 'row_group' => 4],
+        ['key' => 'gray', 'label' => 'Gray', 'lab_centroid' => [55, 0, 0], 'display_hex' => '#9E9E9E', 'threshold_deltaE' => 18, 'row_group' => 4],
+        ['key' => 'white', 'label' => 'White', 'lab_centroid' => [95, 0, 0], 'display_hex' => '#FAFAFA', 'threshold_deltaE' => 18, 'row_group' => 4],
+        ['key' => 'neutral', 'label' => 'Neutral', 'lab_centroid' => [65, 2, 5], 'display_hex' => '#BDBDBD', 'threshold_deltaE' => 18, 'row_group' => 4],
     ];
 
     /**

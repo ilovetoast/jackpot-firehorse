@@ -1045,6 +1045,7 @@ class AssetController extends Controller
                         'value' => (string) $clusterKey,
                         'label' => $meta['label'] ?? (string) $clusterKey,
                         'swatch' => $meta['display_hex'] ?? '#999999',
+                        'row_group' => $meta['row_group'] ?? 4,
                     ];
                 }, $hueValues));
             }

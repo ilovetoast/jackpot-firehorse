@@ -685,6 +685,121 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * Repair visibility: insert only missing rows from config. Does NOT override existing values.
+     * Safe to run repeatedly. Logs each inserted row (unless dryRun).
+     *
+     * @param Tenant $tenant
+     * @param Category $category
+     * @param bool $dryRun If true, return what would be inserted without making changes
+     * @return array{inserted: int, changes: array<array{field_key: string, field_id: int}>}
+     */
+    public function repairVisibilityForCategory(Tenant $tenant, Category $category, bool $dryRun = false): array
+    {
+        if ($category->tenant_id !== $tenant->id) {
+            throw new \InvalidArgumentException('Category must belong to the tenant.');
+        }
+
+        $config = config('metadata_category_defaults', []);
+        $categoryConfig = $config['category_config'] ?? [];
+        $restrictFields = $config['restrict_fields'] ?? [];
+        $tagsAndCollectionOnlySlugs = $config['tags_and_collection_only_slugs'] ?? ['video'];
+        $dominantColorsVisibility = $config['dominant_colors_visibility'] ?? [];
+
+        $slug = $category->slug;
+        $assetTypeValue = $category->asset_type?->value ?? 'asset';
+        $isImageCategory = ($assetTypeValue === 'asset');
+        $brandId = $category->brand_id;
+        $categoryId = $category->id;
+
+        $fields = DB::table('metadata_fields')
+            ->where(function ($q) use ($tenant) {
+                $q->where('scope', 'system')
+                    ->orWhere(function ($q2) use ($tenant) {
+                        $q2->where('scope', 'tenant')->where('tenant_id', $tenant->id);
+                    });
+            })
+            ->where('is_active', true)
+            ->whereNull('deprecated_at')
+            ->whereNull('archived_at')
+            ->get(['id', 'key', 'scope']);
+
+        $hasEditHidden = Schema::hasColumn('metadata_field_visibility', 'is_edit_hidden');
+        $hasPrimary = Schema::hasColumn('metadata_field_visibility', 'is_primary');
+        $hasRequired = Schema::hasColumn('metadata_field_visibility', 'is_required');
+
+        $existingKeys = DB::table('metadata_field_visibility')
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brandId)
+            ->where('category_id', $categoryId)
+            ->pluck('metadata_field_id')
+            ->flip()
+            ->all();
+
+        $inserted = 0;
+        $changes = [];
+
+        foreach ($fields as $field) {
+            $key = $field->key;
+            $scope = $field->scope ?? 'system';
+            $visibility = $this->computeSeededDefaultForField(
+                $key,
+                $scope,
+                $slug,
+                $isImageCategory,
+                $categoryConfig,
+                $restrictFields,
+                $tagsAndCollectionOnlySlugs,
+                $dominantColorsVisibility
+            );
+            if ($visibility === null) {
+                continue;
+            }
+
+            if (isset($existingKeys[$field->id])) {
+                continue; // Row exists - do NOT override
+            }
+
+            $row = [
+                'metadata_field_id' => $field->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brandId,
+                'category_id' => $categoryId,
+                'is_hidden' => $visibility['is_hidden'],
+                'is_upload_hidden' => $visibility['is_upload_hidden'],
+                'is_filter_hidden' => $visibility['is_filter_hidden'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+            if ($hasPrimary) {
+                $row['is_primary'] = $visibility['is_primary'] ?? null;
+            }
+            if ($hasEditHidden) {
+                $row['is_edit_hidden'] = $visibility['is_edit_hidden'] ?? false;
+            }
+            if ($hasRequired) {
+                $row['is_required'] = $visibility['is_required'] ?? null;
+            }
+
+            if (! $dryRun) {
+                DB::table('metadata_field_visibility')->insert($row);
+                Log::info('[metadata:repair-visibility] Inserted missing visibility row', [
+                    'tenant_id' => $tenant->id,
+                    'category_id' => $categoryId,
+                    'category_slug' => $slug,
+                    'field_key' => $key,
+                    'field_id' => $field->id,
+                ]);
+            }
+
+            $inserted++;
+            $existingKeys[$field->id] = true; // Avoid duplicate in same batch
+            $changes[] = ['field_key' => $key, 'field_id' => $field->id];
+        }
+
+        return ['inserted' => $inserted, 'changes' => $changes];
+    }
+
+    /**
      * Compute default visibility for one field in one category from config.
      * Returns array with is_hidden, is_upload_hidden, is_filter_hidden, is_primary (optional), or null to skip row.
      *

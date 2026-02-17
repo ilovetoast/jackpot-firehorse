@@ -412,12 +412,23 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                 {['color', 'typography', 'tone', 'imagery'].map((key) => {
                                     const item = complianceBreakdown[key]
                                     if (!item) return null
+                                    const status = item.status ?? 'scored'
                                     const score = item.score ?? item
                                     const label = key.charAt(0).toUpperCase() + key.slice(1)
+                                    const isPending = status === 'pending_processing' || status === 'not_configured'
+                                    const pendingLabels = {
+                                        imagery: 'Imagery analysis pending',
+                                        typography: 'No typography data',
+                                        tone: 'Tone analysis pending',
+                                        color: 'Color analysis pending',
+                                    }
+                                    const displayValue = isPending && pendingLabels[key]
+                                        ? pendingLabels[key]
+                                        : `${score}%`
                                     return (
                                         <div key={key}>
-                                            <span className="font-medium text-gray-700">{label}: {score}%</span>
-                                            {item.reason && <p className="mt-0.5 text-gray-600">{item.reason}</p>}
+                                            <span className="font-medium text-gray-700">{label}: {displayValue}</span>
+                                            {item.reason && !isPending && <p className="mt-0.5 text-gray-600">{item.reason}</p>}
                                         </div>
                                     )
                                 })}
