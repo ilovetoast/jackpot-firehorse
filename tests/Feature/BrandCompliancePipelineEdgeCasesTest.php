@@ -205,9 +205,9 @@ class BrandCompliancePipelineEdgeCasesTest extends TestCase
     }
 
     /**
-     * Image asset missing dominant_hue_group → evaluation_status = pending_processing.
+     * Image asset missing dominant_hue_group, analysis_status=scoring → evaluation_status = pending_processing.
      */
-    public function test_image_missing_hue_group_marks_incomplete(): void
+    public function test_image_missing_hue_group_marks_pending_processing(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
         $asset = $this->createAsset();
@@ -229,9 +229,9 @@ class BrandCompliancePipelineEdgeCasesTest extends TestCase
     }
 
     /**
-     * Image asset missing embedding → evaluation_status = pending_processing.
+     * Image asset missing embedding, analysis_status=scoring → evaluation_status = pending_processing.
      */
-    public function test_missing_embedding_marks_incomplete(): void
+    public function test_missing_embedding_marks_pending_processing(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
         $asset = $this->createAsset();
@@ -248,6 +248,30 @@ class BrandCompliancePipelineEdgeCasesTest extends TestCase
         $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
         $this->assertNotNull($row);
         $this->assertSame('pending_processing', $row->evaluation_status);
+        $this->assertNull($row->overall_score);
+    }
+
+    /**
+     * When analysis_status=complete and data is missing/corrupt → evaluation_status = incomplete.
+     */
+    public function test_complete_with_missing_data_marks_incomplete(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+        $this->setAssetEmbedding($asset);
+
+        // Simulate re-run: pipeline completed previously, but hue_group was cleared/corrupted
+        $asset->update(['dominant_hue_group' => null, 'analysis_status' => 'complete']);
+        $asset->refresh();
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNull($result);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNotNull($row);
+        $this->assertSame('incomplete', $row->evaluation_status);
         $this->assertNull($row->overall_score);
     }
 

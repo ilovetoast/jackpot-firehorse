@@ -277,11 +277,6 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         </button>
                     </div>
                 )}
-                {analysisStatus !== 'complete' && !(evaluationStatus === 'evaluated') && (
-                    <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">Brand analysis in progress</p>
-                    </div>
-                )}
                 {analysisStatus === 'complete' && evaluationStatus === 'pending_processing' && (
                     <div className="mb-3">
                         <p className="text-xs text-gray-500 italic mb-2">Compliance will run once asset processing is complete.</p>
@@ -501,16 +496,66 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     <div className="text-sm text-gray-500 italic">No editable metadata fields available</div>
                 ) : (
                     <dl className="space-y-2 md:space-y-3">
-                        {fields.filter(field => !isExcludedFromGenericLoop(field)).sort((a, b) => {
-                            // Sort: non-auto fields first, auto fields last
-                            const aIsAuto = a.readonly || a.population_mode === 'automatic'
-                            const bIsAuto = b.readonly || b.population_mode === 'automatic'
-                            
-                            if (aIsAuto && !bIsAuto) return 1  // a is auto, b is not - a goes after b
-                            if (!aIsAuto && bIsAuto) return -1 // a is not auto, b is - a goes before b
-                            return 0 // Both same type, maintain original order
-                        }).flatMap((field) => {
-                            const fieldHasValue = hasValue(field.current_value)
+                        {(() => {
+                            const filtered = fields.filter(field => !isExcludedFromGenericLoop(field))
+                            const isAuto = (f) => f.readonly || f.population_mode === 'automatic'
+                            const nonAutoFields = filtered.filter(f => !isAuto(f)).sort((a, b) => 0)
+                            const autoFields = filtered.filter(f => isAuto(f)).sort((a, b) => 0)
+                            // Order: user-managed fields first, then Collection, then system automated fields last
+                            const collectionElement = (collectionDisplay && Array.isArray(collectionDisplay.collections)) ? (
+                                <div
+                                    key="collection-field"
+                                    className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
+                                >
+                                    <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
+                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                            <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
+                                                Collection
+                                            </span>
+                                        </dt>
+                                        <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
+                                            {collectionDisplay.loading ? (
+                                                <span className="text-gray-400">Loading…</span>
+                                            ) : collectionDisplay.collections.length > 0 ? (
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    {collectionDisplay.collections.map((c) => (
+                                                        <span
+                                                            key={c.id}
+                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium"
+                                                            style={{ backgroundColor: badgeBg, color: brandPrimary }}
+                                                            title={c.is_public ? 'Public collection' : undefined}
+                                                        >
+                                                            <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
+                                                            {c.name}
+                                                            {c.is_public && (
+                                                                <GlobeAltIcon className="h-3 w-3 opacity-80" aria-hidden="true" title="Public" />
+                                                            )}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-gray-400">No collections</span>
+                                            )}
+                                        </dd>
+                                    </div>
+                                    {collectionDisplay.showEditButton !== false && typeof collectionDisplay.onEdit === 'function' && (
+                                        <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={collectionDisplay.onEdit}
+                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
+                                                style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
+                                            >
+                                                <PencilIcon className="h-3 w-3" />
+                                                {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : null
+
+                            const renderField = (field) => {
+                                const fieldHasValue = hasValue(field.current_value)
                             const widget = resolve(field, CONTEXT.DISPLAY)
                             const isRating = widget === WIDGET.RATING
                             const isDominantColors = widget === WIDGET.DOMINANT_COLORS
@@ -560,9 +605,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             const isSystemField = systemFieldKeys.includes(field.key || field.field_key)
                             const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly) || isSystemField
                             
-                            if (!shouldShow) {
-                                return [];
-                            }
+                                if (!shouldShow) {
+                                    return []
+                                }
                             
                             const fieldElement = (
                                 <div 
@@ -659,61 +704,13 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                 </div>
                             )
                             
-                            return [fieldElement]
-                        }).concat(
-                            // C9.2: Show Collections whenever collectionDisplay is provided (all asset types including video)
-                            (collectionDisplay && Array.isArray(collectionDisplay.collections)) ? [
-                                <div
-                                    key="collection-field"
-                                    className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
-                                >
-                                    <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
-                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
-                                            <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                                Collection
-                                            </span>
-                                        </dt>
-                                        <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                            {collectionDisplay.loading ? (
-                                                <span className="text-gray-400">Loading…</span>
-                                            ) : collectionDisplay.collections.length > 0 ? (
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    {collectionDisplay.collections.map((c) => (
-                                                        <span
-                                                            key={c.id}
-                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium"
-                                                            style={{ backgroundColor: badgeBg, color: brandPrimary }}
-                                                            title={c.is_public ? 'Public collection' : undefined}
-                                                        >
-                                                            <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
-                                                            {c.name}
-                                                            {c.is_public && (
-                                                                <GlobeAltIcon className="h-3 w-3 opacity-80" aria-hidden="true" title="Public" />
-                                                            )}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-400">No collections</span>
-                                            )}
-                                        </dd>
-                                    </div>
-                                    {collectionDisplay.showEditButton !== false && typeof collectionDisplay.onEdit === 'function' && (
-                                        <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={collectionDisplay.onEdit}
-                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
-                                                style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
-                                            >
-                                                <PencilIcon className="h-3 w-3" />
-                                                {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            ] : []
-                        )}
+                                return [fieldElement]
+                            }
+
+                            const nonAutoElements = nonAutoFields.flatMap(renderField)
+                            const autoElements = autoFields.flatMap(renderField)
+                            return [...nonAutoElements, ...(collectionElement ? [collectionElement] : []), ...autoElements]
+                        })()}
                     </dl>
                 )}
             </div>

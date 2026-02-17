@@ -356,7 +356,8 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
-     * Malformed dominant_colors (null, string) must not throw; upsert incomplete for image assets.
+     * Malformed dominant_colors (null, string) must not throw.
+     * When analysis_status=complete (re-run after pipeline finished), upsert incomplete.
      */
     public function test_malformed_dominant_colors_does_not_throw_upserts_incomplete(): void
     {
@@ -364,7 +365,11 @@ class BrandComplianceTest extends TestCase
 
         $asset = $this->createAsset();
         $this->setAssetEmbedding($asset);
-        $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['dominant_colors' => null])]);
+        $asset->update([
+            'metadata' => array_merge($asset->metadata ?? [], ['dominant_colors' => null]),
+            'analysis_status' => 'complete', // Simulate re-run: pipeline finished, data now corrupt
+        ]);
+        $asset->refresh();
 
         $service = app(BrandComplianceService::class);
         $result = $service->scoreAsset($asset, $this->brand);
@@ -379,7 +384,11 @@ class BrandComplianceTest extends TestCase
         // String (malformed) also must not throw
         $asset2 = $this->createAsset();
         $this->setAssetEmbedding($asset2);
-        $asset2->update(['metadata' => array_merge($asset2->metadata ?? [], ['dominant_colors' => 'not-an-array'])]);
+        $asset2->update([
+            'metadata' => array_merge($asset2->metadata ?? [], ['dominant_colors' => 'not-an-array']),
+            'analysis_status' => 'complete',
+        ]);
+        $asset2->refresh();
 
         $result2 = $service->scoreAsset($asset2, $this->brand);
         $this->assertNull($result2);

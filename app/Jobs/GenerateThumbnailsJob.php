@@ -606,7 +606,8 @@ class GenerateThumbnailsJob implements ShouldQueue
             // Step 4: Only mark as COMPLETED after verification passes
             // Clear thumbnail_started_at when completed (no longer needed)
             $asset->update($updateData);
-            
+            \App\Services\AnalysisStatusLogger::log($asset, 'generating_thumbnails', 'extracting_metadata', 'GenerateThumbnailsJob');
+
             // Refresh asset to ensure metadata is loaded correctly
             $asset->refresh();
             

@@ -11,6 +11,7 @@ use App\Models\Brand;
 use App\Models\BrandComplianceScore;
 use App\Models\BrandVisualReference;
 use App\Services\ActivityRecorder;
+use App\Services\AnalysisStatusLogger;
 use App\Services\AssetCompletionService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,13 @@ use Illuminate\Support\Facades\Log;
 /**
  * Brand Compliance Service — deterministic scoring against Brand DNA rules.
  * No AI. Compares asset metadata to scoring_rules from active BrandModelVersion.
+ *
+ * evaluation_status semantics:
+ * - pending_processing: AI pipeline not finished (analysis_status not complete)
+ * - incomplete: AI finished but insufficient brand data (e.g. malformed dominant colors)
+ * - evaluated: Fully scored
+ * - not_configured: Brand DNA missing
+ * - not_applicable: Asset excluded
  */
 class BrandComplianceService
 {
@@ -41,6 +49,8 @@ class BrandComplianceService
      */
     public function scoreAsset(Asset $asset, Brand $brand): ?array
     {
+        $startTime = microtime(true);
+
         if ($asset->brand_id !== $brand->id) {
             return null;
         }
@@ -55,8 +65,16 @@ class BrandComplianceService
             return null;
         }
 
-        // Centralized readiness gate: only allow scoring when analysis_status is 'scoring' or 'complete'.
         $analysisStatus = $asset->analysis_status ?? 'uploading';
+
+        // pending_processing: AI pipeline not finished
+        // incomplete: AI finished (analysis_status=complete) but insufficient/corrupt brand data
+        $evaluationStatusForNotReady = $analysisStatus === 'complete' ? 'incomplete' : 'pending_processing';
+        $reasonForNotReady = $analysisStatus === 'complete'
+            ? 'Visual analysis incomplete (data missing or corrupt after pipeline completed)'
+            : 'Visual processing incomplete';
+
+        // Centralized readiness gate: only allow scoring when analysis_status is 'scoring' or 'complete'.
         if (! in_array($analysisStatus, ['scoring', 'complete'], true)) {
             $this->upsertScore($asset, $brand, [
                 'overall_score' => null,
@@ -85,18 +103,19 @@ class BrandComplianceService
                 'tone_score' => 0,
                 'imagery_score' => 0,
                 'breakdown_payload' => [
-                    'color' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
-                    'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
-                    'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
-                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
+                    'color' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'typography' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'tone' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
                 ],
-                'evaluation_status' => 'pending_processing',
+                'evaluation_status' => $evaluationStatusForNotReady,
             ]);
 
             return null;
         }
 
         // STEP 2: Image analysis guard — image assets require dominant colors, hue group, embedding
+        // If analysis_status=complete and we fail here: incomplete (AI finished, data insufficient)
         if (! $this->isImageAnalysisReady($asset)) {
             $this->upsertScore($asset, $brand, [
                 'overall_score' => null,
@@ -105,12 +124,12 @@ class BrandComplianceService
                 'tone_score' => 0,
                 'imagery_score' => 0,
                 'breakdown_payload' => [
-                    'color' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
-                    'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
-                    'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
-                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
+                    'color' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'typography' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'tone' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
                 ],
-                'evaluation_status' => 'pending_processing',
+                'evaluation_status' => $evaluationStatusForNotReady,
             ]);
 
             return null;
@@ -263,6 +282,17 @@ class BrandComplianceService
         ];
 
         $this->upsertScore($asset, $brand, $result);
+
+        // Snapshot consistency assertion: if analysis_status will be complete, debug_snapshot must have has_embedding
+        $snapshot = $this->buildDebugSnapshot($asset, $result);
+        if ($snapshot['has_embedding'] === false && str_starts_with($asset->mime_type ?? '', 'image/')) {
+            Log::critical('[BrandComplianceService] State inconsistency: evaluated image asset has no embedding', [
+                'asset_id' => $asset->id,
+                'analysis_status' => $asset->analysis_status,
+                'debug_snapshot' => $snapshot,
+            ]);
+        }
+
         // 5. When scoring finishes successfully: set analysis_status = 'complete'
         // Guard: only mutate when in expected previous state
         $currentStatus = $asset->analysis_status ?? 'uploading';
@@ -275,6 +305,15 @@ class BrandComplianceService
             return $result;
         }
         $asset->update(['analysis_status' => 'complete']);
+        AnalysisStatusLogger::log($asset, 'scoring', 'complete', 'BrandComplianceService');
+
+        $duration = microtime(true) - $startTime;
+        if ($duration > 2.0) {
+            Log::warning('[BrandComplianceService] Scoring duration exceeded 2s', [
+                'asset_id' => $asset->id,
+                'duration_seconds' => round($duration, 3),
+            ]);
+        }
         $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_EVALUATED, [
             'overall_score' => $overallScore,
             'evaluation_status' => 'evaluated',

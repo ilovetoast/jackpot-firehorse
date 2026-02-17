@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Services\AnalysisStatusLogger;
 use App\Services\AssetProcessingFailureService;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
@@ -185,6 +186,7 @@ class ProcessAssetJob implements ShouldQueue
 
         // 1. When upload finishes: set analysis_status = 'generating_thumbnails'
         $asset->update(['analysis_status' => 'generating_thumbnails']);
+        AnalysisStatusLogger::log($asset, 'uploading', 'generating_thumbnails', 'ProcessAssetJob');
 
         // Mark processing as started in metadata (for idempotency)
         // IMPORTANT: Asset.status must NOT be mutated here.

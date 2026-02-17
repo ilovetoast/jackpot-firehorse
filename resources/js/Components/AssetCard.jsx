@@ -198,7 +198,8 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     
     const isCinematic = cardVariant === 'cinematic'
     const isGuidelines = cardStyle === 'guidelines'
-    const cardBgClass = isGuidelines ? 'bg-transparent' : isCinematic ? 'bg-white/10 backdrop-blur-md' : 'bg-white'
+    const cardBgClass = isGuidelines ? 'bg-transparent' : isCinematic ? 'bg-white/10 backdrop-blur-md' : 'bg-transparent'
+    // Default: outline around image only, not title. Guidelines/cinematic keep full-card styling.
     const cardBorderClass = isGuidelines
         ? 'border-0'
         : isCinematic
@@ -206,7 +207,13 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             : (isSelected ? 'border-2' : 'border-gray-200 hover:border-gray-300')
     const cardShadowClass = isGuidelines
         ? 'shadow-none' // Guidelines: shadow lives on image only (see image container)
-        : isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-md hover:shadow-lg'
+        : isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-none'
+    const imageBorderClass = !isGuidelines && !isCinematic
+        ? `rounded-2xl border transition-all duration-200 ${cardBorderClass}`
+        : ''
+    const imageShadowClass = !isGuidelines && !isCinematic
+        ? (isSelected ? '' : 'shadow-md group-hover:shadow-lg')
+        : isGuidelines ? 'shadow-none group-hover:shadow-lg' : ''
     const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]' // More elongated for guidelines
 
     return (
@@ -216,15 +223,17 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
-            className={`group relative ${cardBgClass} rounded-2xl border transition-all duration-200 cursor-pointer ${cardBorderClass} ${cardShadowClass} ${isGuidelines ? 'overflow-visible flex flex-col' : 'overflow-hidden'}`}
+            className={`group relative ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${!isGuidelines && !isCinematic ? '' : `border ${cardBorderClass} ${cardShadowClass}`}`}
             style={{
-                ...shadowStyle,
+                ...(isGuidelines || isCinematic ? shadowStyle : {}),
                 '--primary-color': primaryColor,
             }}
         >
             {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) or elongated (5:3) for guidelines */}
+            {/* Default: border/outline wraps image only. Guidelines/cinematic: border on outer card. */}
             <div 
-                className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-shadow duration-200 ${isGuidelines ? 'bg-white shadow-none group-hover:shadow-lg' : isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
+                className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? 'bg-white shadow-none group-hover:shadow-lg' : isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
+                style={!isGuidelines && !isCinematic ? shadowStyle : {}}
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
                 onMouseLeave={() => {
                     setIsHovering(false)
@@ -344,7 +353,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                         </span>
                     </div>
                 ) : (
-                    <div className={`p-3 border-t ${isCinematic ? 'border-white/20' : 'border-gray-100'}`}>
+                    <div className={`p-3 pt-2 ${isCinematic ? 'border-t border-white/20' : 'mt-1'}`}>
                         <h3 
                             className={`text-sm font-medium truncate transition-colors duration-200 group-hover:text-[var(--primary-color)] ${isCinematic ? 'text-white drop-shadow-sm' : 'text-gray-900'}`}
                         >

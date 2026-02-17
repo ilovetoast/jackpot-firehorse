@@ -332,6 +332,7 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 ]);
                 // 3. When dominant colors + hue group stored: set analysis_status = 'generating_embedding'
                 $asset->update(['analysis_status' => 'generating_embedding']);
+                \App\Services\AnalysisStatusLogger::log($asset, 'extracting_metadata', 'generating_embedding', 'PopulateAutomaticMetadataJob');
             } catch (\Throwable $e) {
                 PipelineLogger::error('[PopulateAutomaticMetadataJob] DOMINANT_COLORS_EXTRACTION_FAILED', [
                     'asset_id' => $asset->id,
@@ -363,6 +364,7 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             ]);
             // Non-image assets: skip to scoring (no embedding needed)
             $asset->update(['analysis_status' => 'scoring']);
+            \App\Services\AnalysisStatusLogger::log($asset, 'extracting_metadata', 'scoring', 'PopulateAutomaticMetadataJob');
         }
 
         // Write metadata values (respects manual overrides)

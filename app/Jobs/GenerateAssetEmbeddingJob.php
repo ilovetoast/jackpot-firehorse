@@ -100,6 +100,7 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
             );
             // 4. When embedding saved: set analysis_status = 'scoring'
             $asset->update(['analysis_status' => 'scoring']);
+            \App\Services\AnalysisStatusLogger::log($asset, 'generating_embedding', 'scoring', 'GenerateAssetEmbeddingJob');
             ScoreAssetComplianceJob::dispatch($asset->id);
         }
 
