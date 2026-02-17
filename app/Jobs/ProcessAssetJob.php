@@ -171,6 +171,21 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
 
+        // Guard: only mutate analysis_status when in expected previous state
+        $expectedStatus = 'uploading';
+        $currentStatus = $asset->analysis_status ?? 'uploading';
+        if ($currentStatus !== $expectedStatus) {
+            Log::warning('[ProcessAssetJob] Invalid analysis_status transition aborted', [
+                'asset_id' => $asset->id,
+                'expected' => $expectedStatus,
+                'actual' => $currentStatus,
+            ]);
+            return;
+        }
+
+        // 1. When upload finishes: set analysis_status = 'generating_thumbnails'
+        $asset->update(['analysis_status' => 'generating_thumbnails']);
+
         // Mark processing as started in metadata (for idempotency)
         // IMPORTANT: Asset.status must NOT be mutated here.
         // Asset.status represents VISIBILITY (UPLOADED = visible in grid, COMPLETED = visible in dashboard),
@@ -260,7 +275,7 @@ class ProcessAssetJob implements ShouldQueue
 
         PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
             'asset_id' => $asset->id,
-            'job_id' => $this->job->getJobId() ?? 'unknown',
+            'job_id' => $this->job?->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
             'chain_job_count' => count($chainJobs),
             'chain_jobs' => array_map(fn($job) => get_class($job), $chainJobs),
@@ -279,7 +294,7 @@ class ProcessAssetJob implements ShouldQueue
 
             Log::error('[ProcessAssetJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
-                'job_id' => $this->job->getJobId() ?? 'unknown',
+                'job_id' => $this->job?->getJobId() ?? 'unknown',
                 'attempt' => $this->attempts(),
                 'exception' => get_class($e),
                 'message' => $e->getMessage(),

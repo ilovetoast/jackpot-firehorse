@@ -99,13 +99,13 @@ class GenerateThumbnailsJob implements ShouldQueue
         // This log MUST appear if the job is dispatched
         PipelineLogger::warning('THUMBNAILS: HANDLE START', [
             'asset_id' => $this->assetId,
-            'job_id' => $this->job->getJobId() ?? 'unknown',
+            'job_id' => $this->job?->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
         ]);
 
         Log::info('[GenerateThumbnailsJob] Job started', [
             'asset_id' => $this->assetId,
-            'job_id' => $this->job->getJobId() ?? 'unknown',
+            'job_id' => $this->job?->getJobId() ?? 'unknown',
             'attempt' => $this->attempts(),
         ]);
 
@@ -561,12 +561,26 @@ class GenerateThumbnailsJob implements ShouldQueue
             $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
             $currentMetadata['thumbnails'] = $finalThumbnails; // Only final thumbnails (exclude preview)
 
+            // Guard: only mutate analysis_status when in expected previous state
+            $expectedStatus = 'generating_thumbnails';
+            $currentStatus = $asset->analysis_status ?? 'uploading';
+            if ($currentStatus !== $expectedStatus) {
+                Log::warning('[GenerateThumbnailsJob] Invalid analysis_status transition aborted', [
+                    'asset_id' => $asset->id,
+                    'expected' => $expectedStatus,
+                    'actual' => $currentStatus,
+                ]);
+                return;
+            }
+
             // Phase V-1: For video assets, store poster URL from thumbnail
+            // 2. When thumbnails complete: set analysis_status = 'extracting_metadata'
             $updateData = [
                 'thumbnail_status' => ThumbnailStatus::COMPLETED,
                 'thumbnail_error' => null,
                 'thumbnail_started_at' => null, // Clear start time on completion
                 'metadata' => $currentMetadata,
+                'analysis_status' => 'extracting_metadata',
             ];
             
             // Check if asset is a video and set poster path
@@ -663,7 +677,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             
             Log::info('[GenerateThumbnailsJob] Job completed successfully', [
                 'asset_id' => $asset->id,
-                'job_id' => $this->job->getJobId() ?? 'unknown',
+                'job_id' => $this->job?->getJobId() ?? 'unknown',
                 'attempt' => $this->attempts(),
             ]);
             
@@ -702,7 +716,7 @@ class GenerateThumbnailsJob implements ShouldQueue
 
             Log::error('[GenerateThumbnailsJob] Job failed with exception', [
                 'asset_id' => $this->assetId,
-                'job_id' => $this->job->getJobId() ?? 'unknown',
+                'job_id' => $this->job?->getJobId() ?? 'unknown',
                 'attempt' => $this->attempts(),
                 'exception' => get_class($e),
                 'message' => $e->getMessage(),

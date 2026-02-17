@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
+use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\BrandVisualReference;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -67,6 +68,19 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
             return;
         }
 
+        // Guard: only mutate analysis_status when in expected previous state
+        $expectedStatus = 'generating_embedding';
+        $currentStatus = $asset->analysis_status ?? 'uploading';
+        if ($currentStatus !== $expectedStatus) {
+            Log::warning('[GenerateAssetEmbeddingJob] Invalid analysis_status transition aborted', [
+                'asset_id' => $asset->id,
+                'expected' => $expectedStatus,
+                'actual' => $currentStatus,
+            ]);
+
+            return;
+        }
+
         $vector = $existing?->embedding_vector ?? $embeddingService->embedAsset($asset);
         if (empty($vector)) {
             Log::warning('[GenerateAssetEmbeddingJob] Empty embedding returned', ['asset_id' => $asset->id]);
@@ -78,12 +92,15 @@ class GenerateAssetEmbeddingJob implements ShouldQueue
 
         if (! $existing) {
             AssetEmbedding::updateOrCreate(
-            ['asset_id' => $asset->id],
-            [
-                'embedding_vector' => $vector,
-                'model' => $model,
-            ]
-        );
+                ['asset_id' => $asset->id],
+                [
+                    'embedding_vector' => $vector,
+                    'model' => $model,
+                ]
+            );
+            // 4. When embedding saved: set analysis_status = 'scoring'
+            $asset->update(['analysis_status' => 'scoring']);
+            ScoreAssetComplianceJob::dispatch($asset->id);
         }
 
         if ($this->brandVisualReferenceId) {

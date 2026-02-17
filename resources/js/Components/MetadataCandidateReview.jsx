@@ -13,14 +13,19 @@ import {
     InformationCircleIcon,
 } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
+import { usePage } from '@inertiajs/react'
 
-export default function MetadataCandidateReview({ assetId }) {
+export default function MetadataCandidateReview({ assetId, primaryColor }) {
     const [reviewItems, setReviewItems] = useState([])
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(new Set())
     const [showConfirmApprove, setShowConfirmApprove] = useState(null)
     const [showConfirmReject, setShowConfirmReject] = useState(null)
     
+    const { auth } = usePage().props
+    const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
+
     // Check if user can view metadata suggestions
     const { can } = usePermission()
     const canViewSuggestions = can('metadata.suggestions.view')
@@ -331,8 +336,8 @@ export default function MetadataCandidateReview({ assetId }) {
 
     if (loading) {
         return (
-            <div className="px-6 py-4 border-t border-gray-200">
-                <div className="text-sm text-gray-500">Loading metadata candidates for review...</div>
+            <div className="px-4 py-3 border-t border-gray-200">
+                <div className="text-xs text-gray-500">Loading metadata candidates for review...</div>
             </div>
         )
     }
@@ -343,94 +348,94 @@ export default function MetadataCandidateReview({ assetId }) {
 
     return (
         <>
-            <div className="px-6 py-4 border-t border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center">
-                    <InformationCircleIcon className="h-4 w-4 mr-2 text-blue-500" />
+            <div className="px-4 py-3 border-t border-gray-200">
+                <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
+                    <InformationCircleIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
                     Metadata Candidate Review
                 </h3>
-                <p className="text-xs text-gray-500 mb-4">
+                <p className="text-[11px] text-gray-500 mb-3">
                     Review and approve or reject AI metadata suggestions. Approved suggestions maintain their AI attribution.
                 </p>
-                <div className="space-y-6">
+                <div className="space-y-3">
                     {reviewItems.map((item) => (
-                        <div key={item.metadata_field_id} className="border border-blue-200 rounded-lg p-4 bg-blue-50">
-                            <div className="mb-3">
-                                <dt className="text-sm font-medium text-gray-900 mb-2">
+                        <div key={item.metadata_field_id} className="rounded-md p-2.5 border" style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}>
+                            <div>
+                                <dt className="text-xs font-medium text-gray-900 mb-1.5">
                                     {item.field_label}
                                 </dt>
                                 
                                 {/* Current Resolved Value */}
                                 {item.current_resolved_value !== null && (
-                                    <div className="mb-3 p-2 bg-white rounded border border-gray-200">
-                                        <div className="text-xs text-gray-500 mb-1">Current Value:</div>
-                                        <div className="text-sm text-gray-900">
-                                            {formatValue(item.field_type, item.current_resolved_value, item.options || [])}
+                                    <div className="mb-2 p-1.5 bg-white rounded border border-gray-200">
+                                        <div className="text-[10px] text-gray-500 mb-0.5">Current Value:</div>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-xs text-gray-900">
+                                                {formatValue(item.field_type, item.current_resolved_value, item.options || [])}
+                                            </span>
+                                            {item.current_resolved_producer && (
+                                                <>
+                                                    {formatProducer(item.current_resolved_producer)}
+                                                    {item.current_resolved_confidence && (
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {formatConfidence(item.current_resolved_confidence)} confidence
+                                                        </span>
+                                                    )}
+                                                </>
+                                            )}
                                         </div>
-                                        {item.current_resolved_producer && (
-                                            <div className="mt-1 flex items-center gap-2">
-                                                {formatProducer(item.current_resolved_producer)}
-                                                {item.current_resolved_confidence && (
-                                                    <span className="text-xs text-gray-500">
-                                                        {formatConfidence(item.current_resolved_confidence)} confidence
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
                                     </div>
                                 )}
 
                                 {/* Candidates */}
-                                <div className="space-y-2">
-                                    <div className="text-xs text-gray-500 mb-1">Candidates for Review:</div>
+                                <div className="space-y-1.5">
+                                    <div className="text-[10px] text-gray-500">Candidates for Review:</div>
                                     {item.candidates.map((candidate) => (
                                         <div
                                             key={candidate.id}
-                                            className="p-3 bg-white rounded border border-gray-200"
+                                            className="p-2 bg-white rounded border border-gray-200"
                                         >
-                                            <div className="flex items-start justify-between">
-                                                <div className="flex-1">
-                                                    <div className="text-sm font-medium text-gray-900 mb-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                                                    <span className="text-xs font-medium text-gray-900">
                                                         {formatValue(item.field_type, candidate.value, item.options || [])}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        {formatProducer(candidate.producer)}
-                                                        {candidate.confidence && (
-                                                            <span className="text-xs text-gray-500">
-                                                                {formatConfidence(candidate.confidence)} confidence
-                                                            </span>
-                                                        )}
-                                                        <span className="text-xs text-gray-400">
-                                                            Source: {candidate.source}
+                                                    </span>
+                                                    {formatProducer(candidate.producer)}
+                                                    {candidate.confidence && (
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {formatConfidence(candidate.confidence)} confidence
                                                         </span>
-                                                    </div>
+                                                    )}
+                                                    <span className="text-[10px] text-gray-400">
+                                                        Source: {candidate.source}
+                                                    </span>
                                                 </div>
                                                 {canApplySuggestions && (
-                                                    <div className="flex items-center gap-2 ml-4">
+                                                    <div className="flex items-center gap-1.5 flex-shrink-0">
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowConfirmApprove(candidate.id)}
                                                             disabled={processing.has(candidate.id)}
-                                                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-white bg-green-600 hover:bg-green-700 rounded focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
-                                                            <CheckIcon className="h-3 w-3 mr-1" />
+                                                            <CheckIcon className="h-2.5 w-2.5 mr-0.5" />
                                                             Approve
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowConfirmReject(candidate.id)}
                                                             disabled={processing.has(candidate.id)}
-                                                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
-                                                            <XMarkIcon className="h-3 w-3 mr-1" />
+                                                            <XMarkIcon className="h-2.5 w-2.5 mr-0.5" />
                                                             Reject
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => handleDefer(candidate.id)}
                                                             disabled={processing.has(candidate.id)}
-                                                            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
-                                                            <ClockIcon className="h-3 w-3 mr-1" />
+                                                            <ClockIcon className="h-2.5 w-2.5 mr-0.5" />
                                                             Defer
                                                         </button>
                                                     </div>

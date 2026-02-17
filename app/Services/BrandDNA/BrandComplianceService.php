@@ -13,6 +13,7 @@ use App\Models\BrandVisualReference;
 use App\Services\ActivityRecorder;
 use App\Services\AssetCompletionService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Brand Compliance Service — deterministic scoring against Brand DNA rules.
@@ -54,52 +55,25 @@ class BrandComplianceService
             return null;
         }
 
-        // STEP 1a: Image-specific visual processing guard — do not score image assets until
-        // embedding, dominant color, and thumbnails are ready. Non-image assets (PDF, etc.)
-        // bypass this and can still score based on tone.
-        $isImage = str_starts_with($asset->mime_type ?? '', 'image/');
-        if ($isImage) {
-            $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
-            $hasEmbedding = $assetEmbedding !== null && ! empty($assetEmbedding->embedding_vector ?? []);
-            $hasDominantColor = $this->hasDominantColors($asset);
-            $thumbnailsComplete = $asset->thumbnail_status === ThumbnailStatus::COMPLETED;
+        // Centralized readiness gate: only allow scoring when analysis_status is 'scoring' or 'complete'.
+        $analysisStatus = $asset->analysis_status ?? 'uploading';
+        if (! in_array($analysisStatus, ['scoring', 'complete'], true)) {
+            $this->upsertScore($asset, $brand, [
+                'overall_score' => null,
+                'color_score' => 0,
+                'typography_score' => 0,
+                'tone_score' => 0,
+                'imagery_score' => 0,
+                'breakdown_payload' => [
+                    'color' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                    'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                    'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                ],
+                'evaluation_status' => 'pending_processing',
+            ]);
 
-            if (! $hasEmbedding || ! $hasDominantColor || ! $thumbnailsComplete) {
-                // Timeline: Record analysis_incomplete_detected when thumbnails done but metadata missing
-                if ($thumbnailsComplete && (! $hasEmbedding || ! $hasDominantColor)) {
-                    \App\Models\ActivityEvent::firstOrCreate(
-                        [
-                            'tenant_id' => $asset->tenant_id,
-                            'brand_id' => $asset->brand_id,
-                            'event_type' => \App\Enums\EventType::ASSET_ANALYSIS_INCOMPLETE_DETECTED,
-                            'subject_type' => \App\Models\Asset::class,
-                            'subject_id' => $asset->id,
-                        ],
-                        [
-                            'actor_type' => 'system',
-                            'actor_id' => null,
-                            'metadata' => null,
-                            'created_at' => now(),
-                        ]
-                    );
-                }
-                $this->upsertScore($asset, $brand, [
-                    'overall_score' => null,
-                    'color_score' => 0,
-                    'typography_score' => 0,
-                    'tone_score' => 0,
-                    'imagery_score' => 0,
-                    'breakdown_payload' => [
-                        'color' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
-                        'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
-                        'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
-                        'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
-                    ],
-                    'evaluation_status' => 'pending_processing',
-                ]);
-
-                return null;
-            }
+            return null;
         }
 
         // STEP 1: Asset processing guard — do not score before processing is complete
@@ -115,6 +89,26 @@ class BrandComplianceService
                     'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
                     'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
                     'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Processing incomplete', 'status' => 'pending_processing'],
+                ],
+                'evaluation_status' => 'pending_processing',
+            ]);
+
+            return null;
+        }
+
+        // STEP 2: Image analysis guard — image assets require dominant colors, hue group, embedding
+        if (! $this->isImageAnalysisReady($asset)) {
+            $this->upsertScore($asset, $brand, [
+                'overall_score' => null,
+                'color_score' => 0,
+                'typography_score' => 0,
+                'tone_score' => 0,
+                'imagery_score' => 0,
+                'breakdown_payload' => [
+                    'color' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
+                    'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
+                    'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
+                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Visual analysis incomplete', 'status' => 'pending_processing'],
                 ],
                 'evaluation_status' => 'pending_processing',
             ]);
@@ -239,7 +233,8 @@ class BrandComplianceService
         $finalScore = (int) round($curved * 100);
         $overallScore = max(0, min(100, $finalScore));
 
-        // Alignment confidence: reference count, embedding availability, metadata completeness
+        // Alignment confidence: result metadata (high/medium/low) — not a readiness check.
+        // Scoring assumes analysis-ready; this only classifies confidence in the result.
         $referenceCount = BrandVisualReference::where('brand_id', $brand->id)
             ->whereNotNull('embedding_vector')
             ->whereIn('type', BrandVisualReference::IMAGERY_TYPES)
@@ -268,6 +263,18 @@ class BrandComplianceService
         ];
 
         $this->upsertScore($asset, $brand, $result);
+        // 5. When scoring finishes successfully: set analysis_status = 'complete'
+        // Guard: only mutate when in expected previous state
+        $currentStatus = $asset->analysis_status ?? 'uploading';
+        if ($currentStatus !== 'scoring') {
+            Log::warning('[BrandComplianceService] Invalid analysis_status transition aborted', [
+                'asset_id' => $asset->id,
+                'expected' => 'scoring',
+                'actual' => $currentStatus,
+            ]);
+            return $result;
+        }
+        $asset->update(['analysis_status' => 'complete']);
         $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_EVALUATED, [
             'overall_score' => $overallScore,
             'evaluation_status' => 'evaluated',
@@ -442,6 +449,46 @@ class BrandComplianceService
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /**
+     * Centralized readiness gate: image assets must not be scored until ALL required background jobs complete.
+     * Non-image assets return true (bypass).
+     *
+     * Requirements for image assets:
+     * - mime_type starts with "image/"
+     * - thumbnail_status === ThumbnailStatus::COMPLETED
+     * - dominant_colors present in metadata
+     * - dominant_hue_group present on assets table
+     * - AssetEmbedding exists with non-empty embedding_vector
+     *
+     * @return bool False if any requirement missing (or not an image); true if ready to score
+     */
+    protected function isImageAnalysisReady(Asset $asset): bool
+    {
+        if (! str_starts_with($asset->mime_type ?? '', 'image/')) {
+            return true; // Non-image assets bypass
+        }
+
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            return false;
+        }
+
+        if (! $this->hasDominantColors($asset)) {
+            return false;
+        }
+
+        $dominantHueGroup = $asset->dominant_hue_group ?? null;
+        if ($dominantHueGroup === null || $dominantHueGroup === '') {
+            return false;
+        }
+
+        $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
+        if (! $assetEmbedding || empty($assetEmbedding->embedding_vector ?? [])) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -809,6 +856,9 @@ class BrandComplianceService
      * Compares asset to the centroid (average) of all brand visual references.
      * When no references configured, returns not_configured (caller should use scoreImagery instead).
      *
+     * Assumes analysis-ready for image assets (isImageAnalysisReady gate guarantees embedding).
+     * For non-image assets when brand has visual refs, embedding may be absent → not_evaluated.
+     *
      * @return array{0: int, 1: string, 2: string}
      */
     protected function scoreImagerySimilarity(Asset $asset, Brand $brand): array
@@ -823,11 +873,11 @@ class BrandComplianceService
         }
 
         $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
-        if (! $assetEmbedding || empty($assetEmbedding->embedding_vector)) {
+        $assetVec = array_values($assetEmbedding?->embedding_vector ?? []);
+        if (empty($assetVec)) {
             return [0, 'Asset embedding not yet generated.', 'not_evaluated'];
         }
 
-        $assetVec = array_values($assetEmbedding->embedding_vector);
         $embeddings = [];
         foreach ($refs as $ref) {
             $refVec = array_values($ref->embedding_vector ?? []);
@@ -933,6 +983,7 @@ class BrandComplianceService
             'tone_score' => $result['tone_score'],
             'imagery_score' => $result['imagery_score'],
             'breakdown_payload' => $result['breakdown_payload'],
+            'debug_snapshot' => $this->buildDebugSnapshot($asset, $result),
         ];
         if (isset($result['evaluation_status'])) {
             $data['evaluation_status'] = $result['evaluation_status'];
@@ -948,5 +999,24 @@ class BrandComplianceService
             ],
             $data
         );
+    }
+
+    /**
+     * Build structured debug snapshot for scoreAsset() runs.
+     */
+    protected function buildDebugSnapshot(Asset $asset, array $result): array
+    {
+        $embedding = AssetEmbedding::where('asset_id', $asset->id)->first();
+        $hasEmbedding = $embedding !== null && ! empty($embedding->embedding_vector ?? []);
+
+        return [
+            'analysis_status' => $asset->analysis_status ?? 'uploading',
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+            'has_dominant_colors' => $this->hasDominantColors($asset),
+            'has_dominant_hue_group' => ! empty($asset->dominant_hue_group ?? null),
+            'has_embedding' => $hasEmbedding,
+            'evaluation_status' => $result['evaluation_status'] ?? null,
+            'overall_score' => $result['overall_score'] ?? null,
+        ];
     }
 }

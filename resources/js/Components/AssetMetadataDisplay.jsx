@@ -33,6 +33,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
     const [brandDnaEnabled, setBrandDnaEnabled] = useState(false)
     const [rescoreLoading, setRescoreLoading] = useState(false)
     const [metadataHealth, setMetadataHealth] = useState(null)
+    const [analysisStatus, setAnalysisStatus] = useState('uploading')
     const [reanalyzeLoading, setReanalyzeLoading] = useState(false)
 
     // Step 1: Removed inline approval handlers - approval actions consolidated in Pending Metadata section
@@ -61,6 +62,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 setAlignmentConfidence(data.alignment_confidence ?? 'low')
                 setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                 setMetadataHealth(data.metadata_health ?? null)
+                setAnalysisStatus(data.analysis_status ?? 'uploading')
                 if (onPendingCountChange) {
                     onPendingCountChange(count)
                 }
@@ -130,6 +132,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     setAlignmentConfidence(data.alignment_confidence ?? 'low')
                     setBrandDnaEnabled(data.brand_dna_enabled ?? false)
                     setMetadataHealth(data.metadata_health ?? null)
+                    setAnalysisStatus(data.analysis_status ?? 'uploading')
                 })
                 .catch((err) => {
                     console.error('[AssetMetadataDisplay] Failed to refresh metadata', err)
@@ -245,14 +248,10 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 {!metadataHealth?.is_complete && metadataHealth && (
                     <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
                         <div className="font-medium text-amber-800">
-                            {metadataHealth.dominant_colors && !metadataHealth.dominant_hue_group
-                                ? '⚠ Dominant hue not assigned.'
-                                : 'Some system metadata is missing.'}
+                            System analysis still running
                         </div>
                         <div className="text-sm text-amber-700 mt-1">
-                            {metadataHealth.dominant_colors && !metadataHealth.dominant_hue_group
-                                ? 'Dominant colors exist but hue group was not assigned. Re-run analysis to fix.'
-                                : 'Dominant colors, embeddings, or thumbnails may not have completed. You can re-run analysis to ensure brand scoring accuracy.'}
+                            Dominant colors, embeddings, or thumbnails may not have completed. You can re-run analysis to ensure brand scoring accuracy.
                         </div>
                         <button
                             type="button"
@@ -264,12 +263,41 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         </button>
                     </div>
                 )}
-                {evaluationStatus === 'pending_processing' && (
-                    <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">Compliance will run once asset processing is complete.</p>
+                {evaluationStatus === 'evaluated' && analysisStatus !== 'complete' && (
+                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-sm font-medium text-amber-800">System inconsistency detected — re-run analysis</p>
+                        <p className="text-xs text-amber-700 mt-1">The compliance score may be stale. Re-run analysis to resolve.</p>
+                        <button
+                            type="button"
+                            onClick={handleReanalyze}
+                            disabled={reanalyzeLoading}
+                            className="mt-3 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                        >
+                            {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
+                        </button>
                     </div>
                 )}
-                {evaluationStatus === 'pending' && (
+                {analysisStatus !== 'complete' && !(evaluationStatus === 'evaluated') && (
+                    <div className="mb-3">
+                        <p className="text-xs text-gray-500 italic">Brand analysis in progress</p>
+                    </div>
+                )}
+                {analysisStatus === 'complete' && evaluationStatus === 'pending_processing' && (
+                    <div className="mb-3">
+                        <p className="text-xs text-gray-500 italic mb-2">Compliance will run once asset processing is complete.</p>
+                        <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs space-y-2">
+                            {['color', 'typography', 'tone', 'imagery'].map((key) => {
+                                const label = key.charAt(0).toUpperCase() + key.slice(1)
+                                return (
+                                    <div key={key}>
+                                        <span className="font-medium text-gray-700">{label}: Analysis pending</span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                )}
+                {analysisStatus === 'complete' && evaluationStatus === 'pending' && (
                     <div className="mb-3 flex items-center gap-2">
                         <Activity className="h-4 w-4 text-indigo-500 animate-pulse" aria-hidden />
                         <p className="text-xs text-gray-500 italic">Analyzing brand alignment...</p>
@@ -306,9 +334,9 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         )}
                     </div>
                 )}
-                {evaluationStatus === 'not_applicable' && (
+                {analysisStatus === 'complete' && (evaluationStatus === 'not_applicable' || evaluationStatus === 'not_configured') && (
                     <div className="mb-3">
-                        <p className="text-xs text-gray-500 italic">Brand compliance not configured.</p>
+                        <p className="text-xs text-gray-500 italic">Brand DNA not configured.</p>
                         {brandDnaEnabled && (
                             <button
                                 type="button"
@@ -342,7 +370,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         )}
                     </div>
                 )}
-                {evaluationStatus === 'incomplete' && (
+                {analysisStatus === 'complete' && evaluationStatus === 'incomplete' && (
                     <div className="mb-3">
                         <p className="text-xs text-amber-600 font-medium">⚠ Incomplete brand data.</p>
                         <p className="mt-0.5 text-[11px] text-gray-500">This asset is missing required metadata for evaluation.</p>
@@ -379,7 +407,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         )}
                     </div>
                 )}
-                {evaluationStatus === 'evaluated' && complianceScore != null && (
+                {analysisStatus === 'complete' && evaluationStatus === 'evaluated' && complianceScore != null && (
                     <div className="mb-3">
                         <button
                             type="button"
@@ -417,10 +445,10 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                     const label = key.charAt(0).toUpperCase() + key.slice(1)
                                     const isPending = status === 'pending_processing' || status === 'not_configured'
                                     const pendingLabels = {
-                                        imagery: 'Imagery analysis pending',
-                                        typography: 'No typography data',
-                                        tone: 'Tone analysis pending',
-                                        color: 'Color analysis pending',
+                                        imagery: 'Analysis pending',
+                                        typography: 'Analysis pending',
+                                        tone: 'Analysis pending',
+                                        color: 'Analysis pending',
                                     }
                                     const displayValue = isPending && pendingLabels[key]
                                         ? pendingLabels[key]
@@ -527,7 +555,10 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                             // 1. They have a value (displayValue or dominantColorsArray)
                             // 2. They are rating fields (so users can add ratings)
                             // 3. They are not automatic/readonly (editable fields show even without values)
-                            const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly)
+                            // 4. They are system fields (always visible in details view, even when empty or still calculating)
+                            const systemFieldKeys = ['dominant_colors', 'dominant_hue_group', 'orientation', 'resolution_class']
+                            const isSystemField = systemFieldKeys.includes(field.key || field.field_key)
+                            const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly) || isSystemField
                             
                             if (!shouldShow) {
                                 return [];
@@ -545,8 +576,8 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                 {field.display_label}
                                             </span>
                                         </dt>
-                                        {/* Show the value if there is one, or nothing if no value */}
-                                        {(displayValue || dominantColorsArray || isRating) ? (
+                                        {/* Show the value if there is one; system fields show label even when empty */}
+                                        {(displayValue || dominantColorsArray || isRating || isSystemField) ? (
                                             <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
                                                 {/* Rating: inline control. Starred/other booleans with display_widget=toggle use Edit → modal (brand-colored toggle). */}
                                                 {isRating ? (
@@ -592,9 +623,11 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                                                     />
                                                 ) : dominantColorsArray ? (
                                                     <DominantColorsSwatches dominantColors={dominantColorsArray} />
-                                                ) : (
+                                                ) : displayValue != null && displayValue !== '' ? (
                                                     displayValue
-                                                )}
+                                                ) : isSystemField ? (
+                                                    <span className="text-gray-400 italic">—</span>
+                                                ) : null}
                                             </dd>
                                         ) : null}
                                     </div>

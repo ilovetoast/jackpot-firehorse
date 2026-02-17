@@ -108,6 +108,18 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             return;
         }
 
+        // Guard: only mutate analysis_status when in expected previous state
+        $expectedStatus = 'extracting_metadata';
+        $currentStatus = $asset->analysis_status ?? 'uploading';
+        if ($currentStatus !== $expectedStatus) {
+            Log::warning('[PopulateAutomaticMetadataJob] Invalid analysis_status transition aborted', [
+                'asset_id' => $asset->id,
+                'expected' => $expectedStatus,
+                'actual' => $currentStatus,
+            ]);
+            return;
+        }
+
         // CANONICAL INVARIANT: Image-derived jobs (color analysis, dominant colors) require thumbnails
         // Thumbnail readiness is the gate: thumbnail_status MUST be COMPLETED before image analysis
         // This prevents jobs from running before thumbnails are generated, which breaks:
@@ -318,6 +330,8 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'color_count' => $colorCount,
                 ]);
+                // 3. When dominant colors + hue group stored: set analysis_status = 'generating_embedding'
+                $asset->update(['analysis_status' => 'generating_embedding']);
             } catch (\Throwable $e) {
                 PipelineLogger::error('[PopulateAutomaticMetadataJob] DOMINANT_COLORS_EXTRACTION_FAILED', [
                     'asset_id' => $asset->id,
@@ -347,6 +361,8 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'asset_type' => $this->determineAssetType($asset),
             ]);
+            // Non-image assets: skip to scoring (no embedding needed)
+            $asset->update(['analysis_status' => 'scoring']);
         }
 
         // Write metadata values (respects manual overrides)

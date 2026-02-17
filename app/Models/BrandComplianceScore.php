@@ -22,12 +22,14 @@ class BrandComplianceScore extends Model
         'breakdown_payload',
         'evaluation_status',
         'alignment_confidence',
+        'debug_snapshot',
     ];
 
     protected function casts(): array
     {
         return [
             'breakdown_payload' => 'array',
+            'debug_snapshot' => 'array',
         ];
     }
 

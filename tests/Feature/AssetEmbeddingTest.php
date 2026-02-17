@@ -112,6 +112,7 @@ class AssetEmbeddingTest extends TestCase
                 'dominant_colors' => [['hex' => '#003388', 'coverage' => 1]],
             ],
             'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'analysis_status' => 'scoring',
             'published_at' => now(),
             'published_by_id' => $this->user->id,
         ]);

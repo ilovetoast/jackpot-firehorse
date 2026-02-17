@@ -332,7 +332,7 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
-     * No dominant color (image asset) → evaluation_status pending_processing, overall_score null.
+     * No dominant color (image asset) → evaluation_status incomplete, overall_score null.
      */
     public function test_no_dominant_color_returns_null_overall_score(): void
     {
@@ -349,14 +349,14 @@ class BrandComplianceTest extends TestCase
         $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
-            'evaluation_status' => 'pending_processing',
+            'evaluation_status' => 'incomplete',
         ]);
         $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
         $this->assertNull($row->overall_score);
     }
 
     /**
-     * Malformed dominant_colors (null, string) must not throw; upsert pending_processing for image assets.
+     * Malformed dominant_colors (null, string) must not throw; upsert incomplete for image assets.
      */
     public function test_malformed_dominant_colors_does_not_throw_upserts_incomplete(): void
     {
@@ -373,7 +373,7 @@ class BrandComplianceTest extends TestCase
         $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
-            'evaluation_status' => 'pending_processing',
+            'evaluation_status' => 'incomplete',
         ]);
 
         // String (malformed) also must not throw
@@ -386,7 +386,7 @@ class BrandComplianceTest extends TestCase
         $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset2->id,
             'brand_id' => $this->brand->id,
-            'evaluation_status' => 'pending_processing',
+            'evaluation_status' => 'incomplete',
         ]);
     }
 
@@ -717,13 +717,19 @@ class BrandComplianceTest extends TestCase
 
     protected function makeAssetComplete(Asset $asset): void
     {
-        $asset->update([
+        $updates = [
             'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'analysis_status' => 'scoring',
             'metadata' => array_merge($asset->metadata ?? [], [
                 'ai_tagging_completed' => true,
                 'metadata_extracted' => true,
             ]),
-        ]);
+        ];
+        // Image assets need dominant_hue_group for isImageAnalysisReady
+        if (str_starts_with($asset->mime_type ?? '', 'image/')) {
+            $updates['dominant_hue_group'] = $asset->dominant_hue_group ?? 'green';
+        }
+        $asset->update($updates);
     }
 
     /**
@@ -773,6 +779,32 @@ class BrandComplianceTest extends TestCase
         $asset = $this->createAsset();
         // Revert to fail image-specific guard: thumbnail pending, no embedding, no dominant color
         $asset->update(['thumbnail_status' => ThumbnailStatus::PENDING]);
+        // Do not call setAssetDominantColors or setAssetEmbedding
+
+        app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
+
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'pending_processing',
+        ]);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNull($row->overall_score);
+    }
+
+    /**
+     * Image assets must not be scored until ALL required background jobs are complete.
+     * Centralized readiness gate: thumbnail_status, embedding, dominant_colors, dominant_hue_group.
+     */
+    public function test_image_asset_not_scored_until_all_analysis_complete(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        // Simulate incomplete analysis: thumbnail pending, no embedding, no dominant_hue_group
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'dominant_hue_group' => null,
+        ]);
         // Do not call setAssetDominantColors or setAssetEmbedding
 
         app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
@@ -1186,5 +1218,38 @@ class BrandComplianceTest extends TestCase
         $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
         $this->assertNotNull($row);
         $this->assertSame('low', $row->alignment_confidence);
+    }
+
+    /**
+     * Debug snapshot is persisted when scoreAsset() runs.
+     */
+    public function test_debug_snapshot_persisted_on_score(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        $service = app(BrandComplianceService::class);
+        $service->scoreAsset($asset, $this->brand);
+
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNotNull($row);
+        $this->assertNotNull($row->debug_snapshot);
+
+        $snap = $row->debug_snapshot;
+        $this->assertArrayHasKey('analysis_status', $snap);
+        $this->assertArrayHasKey('thumbnail_status', $snap);
+        $this->assertArrayHasKey('has_dominant_colors', $snap);
+        $this->assertArrayHasKey('has_dominant_hue_group', $snap);
+        $this->assertArrayHasKey('has_embedding', $snap);
+        $this->assertArrayHasKey('evaluation_status', $snap);
+        $this->assertArrayHasKey('overall_score', $snap);
+
+        $this->assertTrue($snap['has_dominant_colors']);
+        $this->assertTrue($snap['has_dominant_hue_group']);
+        $this->assertTrue($snap['has_embedding']);
+        $this->assertSame('evaluated', $snap['evaluation_status']);
+        $this->assertSame(100, $snap['overall_score']);
     }
 }

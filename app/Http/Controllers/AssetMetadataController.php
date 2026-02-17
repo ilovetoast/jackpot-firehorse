@@ -949,6 +949,50 @@ class AssetMetadataController extends Controller
             ];
         }
 
+        // System fields (dominant_colors, dominant_hue_group, orientation, resolution_class) must always
+        // appear in details view, even when not marked visible. Show labels with or without values.
+        $existingKeys = array_column($editableFields, 'key');
+        $systemFieldKeys = ['dominant_colors', 'dominant_hue_group', 'orientation', 'resolution_class'];
+        foreach ($systemFieldKeys as $systemKey) {
+            if (in_array($systemKey, $existingKeys, true)) {
+                continue;
+            }
+            $fieldDef = DB::table('metadata_fields')->where('key', $systemKey)->first();
+            if (!$fieldDef) {
+                continue;
+            }
+            $currentValue = $fieldValues[$fieldDef->id] ?? null;
+            if ($currentValue === null && $systemKey === 'dominant_hue_group') {
+                $currentValue = $asset->dominant_hue_group;
+            }
+            if ($currentValue === null && $systemKey === 'dominant_colors') {
+                $currentValue = data_get($asset->metadata, 'dominant_colors');
+            }
+            $options = [];
+            if (($fieldDef->type ?? 'text') === 'select') {
+                $options = DB::table('metadata_options')
+                    ->where('metadata_field_id', $fieldDef->id)
+                    ->get()
+                    ->map(fn ($o) => ['value' => $o->value, 'display_label' => $o->system_label ?? $o->value])
+                    ->all();
+            }
+            $editableFields[] = [
+                'metadata_field_id' => $fieldDef->id,
+                'field_key' => $systemKey,
+                'key' => $systemKey,
+                'display_label' => $fieldDef->system_label ?? $systemKey,
+                'type' => $fieldDef->type ?? 'text',
+                'options' => $options,
+                'is_user_editable' => false,
+                'can_edit' => false,
+                'current_value' => $currentValue,
+                'has_pending' => false,
+                'pending_metadata_ids' => [],
+                'is_value_pending' => false,
+                'readonly' => true,
+                'population_mode' => 'automatic',
+            ];
+        }
 
         // Determine if approval is required and if user can approve
         $approvalRequired = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
@@ -1006,6 +1050,7 @@ class AssetMetadataController extends Controller
             'alignment_confidence' => $alignmentConfidence,
             'brand_dna_enabled' => $brandDnaEnabled,
             'metadata_health' => $metadataHealth,
+            'analysis_status' => $asset->analysis_status ?? 'uploading',
         ]);
     }
 

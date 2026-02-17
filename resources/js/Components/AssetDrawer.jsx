@@ -1690,14 +1690,14 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
                 {/* Phase B9: Metadata Candidate Review (moved up from bottom) */}
                 {displayAsset?.id && (
-                    <MetadataCandidateReview assetId={displayAsset.id} />
+                    <MetadataCandidateReview assetId={displayAsset.id} primaryColor={brandPrimary} />
                 )}
 
                 {/* Remove standalone Tag Management - will be moved into metadata section */}
 
                 {/* AI Tag Suggestions */}
                 {displayAsset?.id && (
-                    <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} />
+                    <AiTagSuggestionsInline key={`ai-tags-${displayAsset.id}`} assetId={displayAsset.id} primaryColor={brandPrimary} />
                 )}
 
                 {/* Tags and Metadata */}

@@ -232,6 +232,7 @@ class Asset extends Model
         'video_preview_url', // Phase V-1: URL to hover preview video
         'dominant_color_bucket', // Deprecated - kept for safety
         'dominant_hue_group', // Perceptual hue cluster for filtering
+        'analysis_status', // Pipeline progress: uploading, generating_thumbnails, extracting_metadata, generating_embedding, scoring, complete
     ];
 
     /**
