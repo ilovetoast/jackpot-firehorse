@@ -210,7 +210,7 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
         : isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-none'
     const imageBorderClass = !isGuidelines && !isCinematic
         ? `rounded-2xl border transition-all duration-200 ${cardBorderClass}`
-        : ''
+        : (isGuidelines && isSelected ? 'rounded-2xl border-2 transition-all duration-200' : '')
     const imageShadowClass = !isGuidelines && !isCinematic
         ? (isSelected ? '' : 'shadow-md group-hover:shadow-lg')
         : isGuidelines ? 'shadow-none group-hover:shadow-lg' : ''
@@ -225,15 +225,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
             onDragStart={(e) => e.preventDefault()}
             className={`group relative ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${!isGuidelines && !isCinematic ? '' : `border ${cardBorderClass} ${cardShadowClass}`}`}
             style={{
-                ...(isGuidelines || isCinematic ? shadowStyle : {}),
+                ...(isCinematic ? shadowStyle : {}),
                 '--primary-color': primaryColor,
             }}
         >
             {/* Phase 3.1: Thumbnail container - fixed aspect ratio (4:3) or elongated (5:3) for guidelines */}
-            {/* Default: border/outline wraps image only. Guidelines/cinematic: border on outer card. */}
+            {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
             <div 
                 className={`${aspectRatio} relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? 'bg-white shadow-none group-hover:shadow-lg' : isCinematic ? 'bg-black/20' : 'bg-gray-50'}`}
-                style={!isGuidelines && !isCinematic ? shadowStyle : {}}
+                style={(!isGuidelines && !isCinematic) || isGuidelines ? shadowStyle : {}}
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
                 onMouseLeave={() => {
                     setIsHovering(false)
