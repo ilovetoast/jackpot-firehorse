@@ -265,10 +265,18 @@ class BrandDNAController extends Controller
     public function storeVisualReferences(Request $request, Brand $brand)
     {
         $tenant = app('tenant');
-        if ($brand->tenant_id !== $tenant->id) {
+        if (! $tenant || $brand->tenant_id !== $tenant->id) {
             abort(403, 'Brand does not belong to this tenant.');
         }
         $this->authorize('update', $brand);
+
+        $logoInput = $request->input('logo_asset_id');
+        $photoInput = $request->input('photography_asset_ids', []);
+        $photoInput = is_array($photoInput) ? array_values(array_filter($photoInput)) : [];
+        $request->merge([
+            'logo_asset_id' => $logoInput && $logoInput !== '' ? $logoInput : null,
+            'photography_asset_ids' => $photoInput,
+        ]);
 
         $validated = $request->validate([
             'logo_asset_id' => 'nullable|exists:assets,id',
@@ -277,6 +285,7 @@ class BrandDNAController extends Controller
         ]);
 
         $logoAssetId = $validated['logo_asset_id'] ?? null;
+        $logoAssetId = $logoAssetId && $logoAssetId !== '' ? $logoAssetId : null;
         $photoIds = array_slice($validated['photography_asset_ids'] ?? [], 0, 3);
 
         $allAssetIds = array_filter(array_merge($logoAssetId ? [$logoAssetId] : [], $photoIds));
