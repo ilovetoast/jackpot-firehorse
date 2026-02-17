@@ -1,4 +1,5 @@
 import { Link, usePage, router } from '@inertiajs/react'
+import { usePermission } from '../../../hooks/usePermission'
 import { useState } from 'react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -15,15 +16,15 @@ import {
 } from '@heroicons/react/24/outline'
 
 export default function MetadataRegistryIndex({ fields = [] }) {
-    const { auth } = usePage().props
+    const { can } = usePermission()
     const [categoryModalOpen, setCategoryModalOpen] = useState(false)
     const [selectedField, setSelectedField] = useState(null)
     const [categories, setCategories] = useState([])
     const [loadingCategories, setLoadingCategories] = useState(false)
     const [saving, setSaving] = useState(false)
 
-    // Check if user has permission to manage visibility
-    const canManageVisibility = Array.isArray(auth.permissions) && auth.permissions.includes('metadata.system.visibility.manage')
+    // Check if user has permission to manage visibility (unified: effective_permissions)
+    const canManageVisibility = can('metadata.system.visibility.manage')
 
     /**
      * Get badge color for population mode

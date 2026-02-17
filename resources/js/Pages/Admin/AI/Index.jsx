@@ -1,4 +1,5 @@
 import { Link, usePage, router } from '@inertiajs/react'
+import { usePermission } from '../../../hooks/usePermission'
 import { useState, useEffect } from 'react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -25,7 +26,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 export default function AIDashboardIndex({ stats, environment, canManage, budgetStatus, budgetRemaining, currentMonthCost, costTrends, costSpikes, canViewBudgets, activeTab: initialTab = 'activity', tabContent = {} }) {
-    const { auth } = usePage().props
+    const { can } = usePermission()
     const [activeTab, setActiveTab] = useState(initialTab || 'activity')
 
     const tabs = [
@@ -314,7 +315,7 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                                 <BudgetsTabContent 
                                     budgets={tabContent.budgets.budgets}
                                     environment={environment}
-                                    canManage={canManage && Array.isArray(auth.permissions) && auth.permissions.includes('ai.budgets.manage')}
+                                    canManage={canManage && can('ai.budgets.manage')}
                                 />
                             ) : (
                                 <div className="rounded-lg bg-white p-8 shadow-sm ring-1 ring-gray-200 text-center">

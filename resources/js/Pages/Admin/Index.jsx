@@ -25,6 +25,7 @@ import {
     CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
+import { usePermission } from '../../hooks/usePermission'
 import AppFooter from '../../Components/AppFooter'
 import UserSelector from '../../Components/UserSelector'
 import Avatar from '../../Components/Avatar'
@@ -33,6 +34,7 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 
 export default function AdminIndex({ companies: initialCompanies, users: initialUsers, stats: initialStats, all_users, pagination }) {
     const { auth, url } = usePage().props
+    const { can } = usePermission()
     const [companies, setCompanies] = useState(initialCompanies || [])
     const [activeTab, setActiveTab] = useState('companies')
 
@@ -132,23 +134,9 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         // No need to reload - the dropdown is controlled by value prop, so it will show the current plan from props
     }
 
-    // Use effective_permissions (tenant + site role permissions); fallback to legacy auth.permissions
-    const permissionsArray = Array.isArray(auth.effective_permissions)
-        ? auth.effective_permissions
-        : Array.isArray(auth.permissions)
-            ? auth.permissions
-            : auth.permissions
-                ? Object.values(auth.permissions)
-                : []
-    
-    // Site roles that always have AI dashboard access (stable visibility when effective_permissions may lag)
-    const siteRoles = Array.isArray(auth.site_roles) ? auth.site_roles : []
-    const hasSiteAdminRole = siteRoles.some(r => r === 'site_admin' || r === 'site_owner' || r === 'site_compliance')
-    
-    // Check if user has AI dashboard view permission (permission or site role)
-    const canViewAIDashboard = permissionsArray.includes('ai.dashboard.view') || hasSiteAdminRole
-    // Check if user has metadata registry view permission
-    const canViewMetadataRegistry = permissionsArray.includes('metadata.registry.view')
+    // Unified permission checks via usePermission (auth.effective_permissions — single source of truth)
+    const canViewAIDashboard = can('ai.dashboard.view')
+    const canViewMetadataRegistry = can('metadata.registry.view')
 
     const adminToolGroups = [
         {

@@ -42,6 +42,18 @@ class AuthPermissionService
             );
         }
 
+        // Platform super-owner (user ID 1): always has site_owner permissions
+        // Matches authorizeSiteAdmin() — ensures admin tiles (AI Dashboard, etc.) show even if role not assigned in Spatie
+        if ($user->id === 1) {
+            $siteOwnerRole = Role::where('name', 'site_owner')->where('guard_name', 'web')->first();
+            if ($siteOwnerRole) {
+                $permissions = array_merge(
+                    $permissions,
+                    $siteOwnerRole->permissions->pluck('name')->toArray()
+                );
+            }
+        }
+
         // Brand role permissions (from brand_user pivot; lookup via PermissionMap)
         // CRITICAL: Verify brand belongs to tenant to prevent cross-tenant permission leakage
         if ($brand && $tenant && $brand->tenant_id === $tenant->id) {

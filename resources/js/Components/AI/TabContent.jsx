@@ -1,4 +1,5 @@
 import { router, useForm, usePage } from '@inertiajs/react'
+import { usePermission } from '../../hooks/usePermission'
 import { useState } from 'react'
 import { CheckCircleIcon, XCircleIcon, XMarkIcon, CurrencyDollarIcon, ChartBarIcon, ExclamationTriangleIcon, InformationCircleIcon, TicketIcon, DocumentTextIcon, ChevronDownIcon, ChevronRightIcon, CodeBracketIcon, CheckIcon } from '@heroicons/react/24/outline'
 import BudgetStatusBadge from './BudgetStatusBadge'
@@ -810,7 +811,8 @@ export function BudgetsTabContent({ budgets, environment, canManage }) {
 
 // Alerts Tab Content (Phase 5B: Admin Observability UI)
 export function AlertsTabContent({ alerts, filterOptions }) {
-    const { auth } = usePage().props
+    const { can } = usePermission()
+    const canViewAIDashboard = can('ai.dashboard.view')
     // Initialize filters (backend defaults to open alerts if no status filter provided)
     const [localFilters, setLocalFilters] = useState({})
     const [confirmAction, setConfirmAction] = useState({ open: false, alertId: null, action: null, alertName: null })
@@ -1020,7 +1022,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket Status</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">First Detected</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Detected</th>
-                                {Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') && (
+                                {canViewAIDashboard && (
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 )}
                             </tr>
@@ -1084,7 +1086,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                     {new Date(alert.last_detected_at).toLocaleString()}
                                                 </td>
-                                                {Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') && (
+                                                {canViewAIDashboard && (
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                                         <div className="flex items-center space-x-2">
                                                             {alert.status === 'open' && (
@@ -1120,7 +1122,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                             </tr>
                                             {isExpanded && (
                                                 <tr key={`${alert.id}-detail`} className="bg-gray-50">
-                                                    <td colSpan={Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') ? "10" : "9"} className="px-6 py-4">
+                                                    <td colSpan={canViewAIDashboard ? "10" : "9"} className="px-6 py-4">
                                                         <div className="space-y-4">
                                                             {/* AI Summary */}
                                                             {alert.has_summary && alert.summary && (
@@ -1203,7 +1205,7 @@ export function AlertsTabContent({ alerts, filterOptions }) {
                                 })
                             ) : (
                                 <tr>
-                                    <td colSpan={Array.isArray(auth.permissions) && auth.permissions.includes('ai.dashboard.view') ? "10" : "9"} className="px-6 py-8 text-center text-sm text-gray-500">
+                                    <td colSpan={canViewAIDashboard ? "10" : "9"} className="px-6 py-8 text-center text-sm text-gray-500">
                                         No alerts found
                                     </td>
                                 </tr>

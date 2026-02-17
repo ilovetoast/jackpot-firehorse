@@ -1,4 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react'
+import { usePermission } from '../../hooks/usePermission'
 import { useForm } from '@inertiajs/react'
 import { useState } from 'react'
 import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
@@ -11,6 +12,7 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 
 export default function BrandsIndex({ brands, limits }) {
     const { auth } = usePage().props
+    const { can } = usePermission()
     const { post, processing } = useForm()
     const [expandedBrand, setExpandedBrand] = useState(null)
     const [categoryTab, setCategoryTab] = useState({}) // Track active tab per brand: { brandId: 'asset' | 'deliverable' }
@@ -334,7 +336,7 @@ export default function BrandsIndex({ brands, limits }) {
                                                     </div>
 
                                                     {/* Metadata Section */}
-                                                    {Array.isArray(auth.permissions) && (auth.permissions.includes('metadata.registry.view') || auth.permissions.includes('metadata.tenant.visibility.manage')) && (
+                                                    {(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) && (
                                                         <div>
                                                             <div className="flex items-center justify-between mb-4">
                                                                 <h3 className="text-base font-semibold leading-6 text-gray-900">

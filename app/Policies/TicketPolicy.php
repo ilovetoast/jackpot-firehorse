@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Enums\TicketType;
 use App\Models\Ticket;
 use App\Models\User;
+use App\Services\AuthPermissionService;
 
 /**
  * Ticket Policy
@@ -96,16 +97,17 @@ class TicketPolicy
 
     /**
      * Determine if the user can view any tickets in the staff/admin interface.
-     * Requires 'tickets.view_staff' permission OR has a site role (backward compatibility).
+     * Requires 'tickets.view_staff' permission (site roles only; admin has no tenant).
      */
     public function viewAnyForStaff(User $user): bool
     {
-        // Check permission first
-        if ($user->can('tickets.view_staff')) {
+        // Use AuthPermissionService for consistency with site permission hierarchy
+        // Admin pages have no tenant — pass null so we get only Spatie (site) role permissions
+        if (app(AuthPermissionService::class)->can($user, 'tickets.view_staff', null, null)) {
             return true;
         }
-        
-        // Backward compatibility: check for site roles
+
+        // Fallback: has site role (backward compatibility)
         return $user->hasAnyRole([
             'site_support',
             'site_admin',
@@ -131,151 +133,82 @@ class TicketPolicy
     }
 
     /**
+     * Check site permission via AuthPermissionService (admin context: no tenant).
+     */
+    private function hasSitePermission(User $user, string $permission): bool
+    {
+        return app(AuthPermissionService::class)->can($user, $permission, null, null);
+    }
+
+    /**
      * Determine if the user can assign or reassign tickets.
-     * Requires 'tickets.assign' permission OR has site_support/site_admin/site_owner role (backward compatibility).
      */
     public function assign(User $user, Ticket $ticket): bool
     {
-        // Check permission first
-        if ($user->can('tickets.assign')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_support',
-            'site_admin',
-            'site_owner',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.assign')
+            || $user->hasAnyRole(['site_support', 'site_admin', 'site_owner']);
     }
 
     /**
      * Determine if the user can add internal notes to tickets.
-     * Requires 'tickets.add_internal_note' permission OR has site_support/site_admin/site_owner/site_engineering role (backward compatibility).
      */
     public function addInternalNote(User $user, Ticket $ticket): bool
     {
-        // Check permission first
-        if ($user->can('tickets.add_internal_note')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_support',
-            'site_admin',
-            'site_owner',
-            'site_engineering',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.add_internal_note')
+            || $user->hasAnyRole(['site_support', 'site_admin', 'site_owner', 'site_engineering']);
     }
 
     /**
      * Determine if the user can create internal engineering tickets.
-     * Requires 'tickets.create_engineering' permission OR has site_engineering/site_admin/site_owner role (backward compatibility).
      */
     public function createEngineeringTicket(User $user): bool
     {
-        // Check permission first
-        if ($user->can('tickets.create_engineering')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_engineering',
-            'site_admin',
-            'site_owner',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.create_engineering')
+            || $user->hasAnyRole(['site_engineering', 'site_admin', 'site_owner']);
     }
 
     /**
      * Determine if the user can view engineering tickets.
-     * Requires 'tickets.view_engineering' permission OR has site_engineering/site_admin/site_owner/compliance role (backward compatibility).
      */
     public function viewEngineeringTickets(User $user): bool
     {
-        // Check permission first
-        if ($user->can('tickets.view_engineering')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_engineering',
-            'site_admin',
-            'site_owner',
-            'site_compliance',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.view_engineering')
+            || $user->hasAnyRole(['site_engineering', 'site_admin', 'site_owner', 'site_compliance']);
     }
 
     /**
      * Determine if the user can link diagnostic items to tickets.
-     * Requires 'tickets.link_diagnostic' permission OR has site_engineering/site_admin/site_owner role (backward compatibility).
      */
     public function linkDiagnostic(User $user, Ticket $ticket): bool
     {
-        // Check permission first
-        if ($user->can('tickets.link_diagnostic')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_engineering',
-            'site_admin',
-            'site_owner',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.link_diagnostic')
+            || $user->hasAnyRole(['site_engineering', 'site_admin', 'site_owner']);
     }
 
     /**
      * Determine if the user can convert a tenant ticket to an internal ticket.
-     * Requires 'tickets.convert' permission OR has site_admin/site_owner role (backward compatibility).
      */
     public function convert(User $user, Ticket $ticket): bool
     {
-        // Check permission first
-        if ($user->can('tickets.convert')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_admin',
-            'site_owner',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.convert')
+            || $user->hasAnyRole(['site_admin', 'site_owner']);
     }
 
     /**
      * Determine if the user can view SLA data for tickets.
-     * Requires 'tickets.view_sla' permission OR has site role (backward compatibility).
-     * Never allowed for tenant users.
      */
     public function viewSLA(User $user, Ticket $ticket): bool
     {
-        // Check permission first
-        if ($user->can('tickets.view_sla')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $this->viewAnyForStaff($user);
+        return $this->hasSitePermission($user, 'tickets.view_sla')
+            || $this->viewAnyForStaff($user);
     }
 
     /**
      * Determine if the user can view the audit log for tickets.
-     * Requires 'tickets.view_audit_log' permission OR has site_owner/compliance role (backward compatibility).
      */
     public function viewAuditLog(User $user, Ticket $ticket): bool
     {
-        // Check permission first
-        if ($user->can('tickets.view_audit_log')) {
-            return true;
-        }
-        
-        // Backward compatibility: check for site roles
-        return $user->hasAnyRole([
-            'site_owner',
-            'site_compliance',
-        ]);
+        return $this->hasSitePermission($user, 'tickets.view_audit_log')
+            || $user->hasAnyRole(['site_owner', 'site_compliance']);
     }
 }
