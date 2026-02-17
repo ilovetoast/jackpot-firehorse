@@ -1743,9 +1743,9 @@ class SiteAdminController extends Controller
         // Only user ID 1 (Site Owner) can access
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
-        // Laravel Cashier uses STRIPE_KEY and STRIPE_SECRET from env
-        $stripeKey = env('STRIPE_KEY');
-        $stripeSecret = env('STRIPE_SECRET');
+        // Use config() not env() — env() returns null when config is cached (staging/production)
+        $stripeKey = config('services.stripe.key');
+        $stripeSecret = config('services.stripe.secret');
         $hasKeys = !empty($stripeKey) && !empty($stripeSecret);
 
         // Diagnostics to help debug why keys might not be found on staging
@@ -2183,7 +2183,7 @@ class SiteAdminController extends Controller
         }
 
         try {
-            Stripe::setApiKey(env('STRIPE_SECRET'));
+            Stripe::setApiKey(config('services.stripe.secret'));
             
             // Get customer's subscriptions from Stripe
             $stripeCustomer = \Stripe\Customer::retrieve($tenant->stripe_id);
@@ -2638,7 +2638,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can reset subscriptions.');
 
         try {
-            $stripeSecret = env('STRIPE_SECRET');
+            $stripeSecret = config('services.stripe.secret');
             if ($stripeSecret) {
                 Stripe::setApiKey($stripeSecret);
             }

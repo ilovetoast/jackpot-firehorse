@@ -217,7 +217,7 @@ class CompanyCostService
 
             // Fetch actual paid invoices from Stripe API
             // This matches the pattern used in SiteAdminController::stripeStatus()
-            $stripeSecret = env('STRIPE_SECRET');
+            $stripeSecret = config('services.stripe.secret');
             if (!$stripeSecret) {
                 Log::warning('Stripe secret not configured - cannot fetch invoice data', [
                     'tenant_id' => $tenant->id,
@@ -319,7 +319,7 @@ class CompanyCostService
 
         if ($subscription && $subscription->stripe_status === 'active') {
             // Fetch actual price from Stripe API (matches pattern from SiteAdminController)
-            $stripeSecret = env('STRIPE_SECRET');
+            $stripeSecret = config('services.stripe.secret');
             if ($stripeSecret && $subscription->stripe_price) {
                 try {
                     Stripe::setApiKey($stripeSecret);

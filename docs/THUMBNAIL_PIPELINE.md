@@ -66,8 +66,7 @@ The thumbnail pipeline supports the following file types:
 ### Thumbnail Styles
 
 - **preview**: LQIP (blurred, small)
-- **thumb**, **medium**, **large**: Standard styles; white logos get gray background for visibility in pickers
-- **medium_display**: Same as medium but preserves transparency (no gray block). Used for public page logo and theme preview. Existing assets need thumbnail regeneration to get this style.
+- **thumb**, **medium**, **large**: Standard styles. Medium preserves transparency for logos (no gray block on public pages).
 
 ### Key Components
 

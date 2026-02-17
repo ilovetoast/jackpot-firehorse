@@ -149,7 +149,7 @@ export default function PublicPageTheme({
           logoUrl={(() => {
             const lid = data.download_landing_settings?.logo_asset_id
             if (lid && typeof route === 'function') {
-              return route('assets.thumbnail.final', { asset: lid, style: 'medium_display' })
+              return route('assets.thumbnail.final', { asset: lid, style: 'medium' })
             }
             return brand.logo_path
           })()}

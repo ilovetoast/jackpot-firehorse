@@ -109,6 +109,7 @@ class AssetEmbeddingTest extends TestCase
                 'ai_tagging_completed' => true,
                 'metadata_extracted' => true,
                 'thumbnails' => ['medium' => ['path' => 'assets/test/thumb.jpg']],
+                'dominant_colors' => [['hex' => '#003388', 'coverage' => 1]],
             ],
             'thumbnail_status' => ThumbnailStatus::COMPLETED,
             'published_at' => now(),

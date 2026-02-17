@@ -1711,6 +1711,27 @@ class ThumbnailGenerationService
                 throw new \RuntimeException('Illustrator file has invalid dimensions');
             }
 
+            // Detect AI files saved without PDF compatibility - they render as text instructions
+            // instead of the design. Such files have very few colors (black text on white).
+            $clone = clone $imagick;
+            $clone->thumbnailImage(64, 64);
+            $histogram = $clone->getImageHistogram();
+            $uniqueColors = $histogram ? count($histogram) : 0;
+            $clone->clear();
+            $clone->destroy();
+            if ($uniqueColors > 0 && $uniqueColors < 32) {
+                Log::warning('[ThumbnailGenerationService] Illustrator file appears to lack PDF compatibility', [
+                    'source_path' => $sourcePath,
+                    'unique_colors' => $uniqueColors,
+                ]);
+                $imagick->clear();
+                $imagick->destroy();
+                throw new \RuntimeException(
+                    'This Illustrator file was saved without PDF compatibility. Re-save it in Adobe Illustrator with ' .
+                    '"Create PDF Compatible File" enabled (File → Save As → Illustrator Options) to generate a visual preview.'
+                );
+            }
+
             Log::info('[ThumbnailGenerationService] Illustrator file read successfully', [
                 'source_path' => $sourcePath,
                 'source_width' => $sourceWidth,

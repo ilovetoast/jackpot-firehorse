@@ -3,6 +3,7 @@
 namespace App\Services\BrandDNA;
 
 use App\Enums\EventType;
+use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
@@ -51,6 +52,36 @@ class BrandComplianceService
         $activeVersion = $brandModel->activeVersion;
         if (! $activeVersion) {
             return null;
+        }
+
+        // STEP 1a: Image-specific visual processing guard — do not score image assets until
+        // embedding, dominant color, and thumbnails are ready. Non-image assets (PDF, etc.)
+        // bypass this and can still score based on tone.
+        $isImage = str_starts_with($asset->mime_type ?? '', 'image/');
+        if ($isImage) {
+            $assetEmbedding = AssetEmbedding::where('asset_id', $asset->id)->first();
+            $hasEmbedding = $assetEmbedding !== null && ! empty($assetEmbedding->embedding_vector ?? []);
+            $hasDominantColor = $this->hasDominantColors($asset);
+            $thumbnailsComplete = $asset->thumbnail_status === ThumbnailStatus::COMPLETED;
+
+            if (! $hasEmbedding || ! $hasDominantColor || ! $thumbnailsComplete) {
+                $this->upsertScore($asset, $brand, [
+                    'overall_score' => null,
+                    'color_score' => 0,
+                    'typography_score' => 0,
+                    'tone_score' => 0,
+                    'imagery_score' => 0,
+                    'breakdown_payload' => [
+                        'color' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                        'typography' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                        'tone' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                        'imagery' => ['score' => null, 'weight' => 0, 'reason' => 'Visual processing incomplete', 'status' => 'pending_processing'],
+                    ],
+                    'evaluation_status' => 'pending_processing',
+                ]);
+
+                return null;
+            }
         }
 
         // STEP 1: Asset processing guard — do not score before processing is complete

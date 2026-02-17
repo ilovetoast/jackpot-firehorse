@@ -28,7 +28,7 @@ class SyncStripeSubscriptions extends Command
      */
     public function handle(): int
     {
-        $stripeSecret = env('STRIPE_SECRET') ?? config('services.stripe.secret');
+        $stripeSecret = config('services.stripe.secret');
         
         if (!$stripeSecret) {
             $this->error('Stripe secret key not configured. Set STRIPE_SECRET in .env');

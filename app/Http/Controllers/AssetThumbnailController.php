@@ -331,7 +331,7 @@ class AssetThumbnailController extends Controller
      * GET /d/{download}/logo
      *
      * Resolves the download's brand logo_asset_id, then streams the asset's
-     * medium_display thumbnail (transparent, no gray block) or falls back to medium.
+     * medium thumbnail (transparent for logos).
      *
      * @param Request $request
      * @param Download $download
@@ -354,7 +354,7 @@ class AssetThumbnailController extends Controller
         if (! $asset || $asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
             abort(404, 'Logo not available.');
         }
-        $thumbnailPath = $asset->thumbnailPathForStyle('medium_display') ?: $asset->thumbnailPathForStyle('medium');
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium') ?: $asset->thumbnailPathForStyle('medium_display');
         if (! $thumbnailPath) {
             abort(404, 'Logo not available.');
         }
@@ -376,7 +376,7 @@ class AssetThumbnailController extends Controller
      * GET /b/{brand_slug}/collections/{collection_slug}/logo
      *
      * Resolves logo_asset_id from download_landing_settings, or falls back to brand
-     * identity (logo_id) when empty. Streams the asset's medium_display or medium thumbnail.
+     * identity (logo_id) when empty. Streams the asset's medium thumbnail.
      */
     public function streamLogoForPublicCollection(string $brand_slug, string $collection_slug): \Symfony\Component\HttpFoundation\Response
     {
@@ -418,7 +418,7 @@ class AssetThumbnailController extends Controller
             abort(404, 'Logo not available.');
         }
 
-        $thumbnailPath = $asset->thumbnailPathForStyle('medium_display') ?: $asset->thumbnailPathForStyle('medium');
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium') ?: $asset->thumbnailPathForStyle('medium_display');
         if (! $thumbnailPath) {
             abort(404, 'Logo not available.');
         }

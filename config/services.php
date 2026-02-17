@@ -46,4 +46,9 @@ return [
         'model' => env('IMAGE_EMBEDDING_MODEL', 'clip-vit-base-patch32'),
     ],
 
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+    ],
+
 ];

@@ -191,6 +191,7 @@ class BrandComplianceTest extends TestCase
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388'], ['hex' => '#ffffff']]);
 
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [
             ['hex' => '#003388', 'coverage' => 0.5],
             ['hex' => '#ff0000', 'coverage' => 0.3],
@@ -218,6 +219,7 @@ class BrandComplianceTest extends TestCase
         $this->enableBrandDnaWithColorPalette([['hex' => '003388'], ['hex' => '#FFFFFF']]);
 
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [
             ['hex' => '#003388', 'coverage' => 0.6],
             ['hex' => 'ffffff', 'coverage' => 0.2],
@@ -238,6 +240,7 @@ class BrandComplianceTest extends TestCase
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388'], ['hex' => '#ffffff']]);
 
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [
             ['hex' => '#ff0000', 'coverage' => 0.5],
             ['hex' => '#00ff00', 'coverage' => 0.3],
@@ -253,13 +256,14 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
-     * No dominant color → evaluation_status incomplete, overall_score null.
+     * No dominant color (image asset) → evaluation_status pending_processing, overall_score null.
      */
     public function test_no_dominant_color_returns_null_overall_score(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
 
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         // No dominant colors set
 
         $service = app(BrandComplianceService::class);
@@ -269,20 +273,21 @@ class BrandComplianceTest extends TestCase
         $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
-            'evaluation_status' => 'incomplete',
+            'evaluation_status' => 'pending_processing',
         ]);
         $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
         $this->assertNull($row->overall_score);
     }
 
     /**
-     * Malformed dominant_colors (null, string) must not throw; upsert incomplete.
+     * Malformed dominant_colors (null, string) must not throw; upsert pending_processing for image assets.
      */
     public function test_malformed_dominant_colors_does_not_throw_upserts_incomplete(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
 
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['dominant_colors' => null])]);
 
         $service = app(BrandComplianceService::class);
@@ -292,11 +297,12 @@ class BrandComplianceTest extends TestCase
         $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset->id,
             'brand_id' => $this->brand->id,
-            'evaluation_status' => 'incomplete',
+            'evaluation_status' => 'pending_processing',
         ]);
 
         // String (malformed) also must not throw
         $asset2 = $this->createAsset();
+        $this->setAssetEmbedding($asset2);
         $asset2->update(['metadata' => array_merge($asset2->metadata ?? [], ['dominant_colors' => 'not-an-array'])]);
 
         $result2 = $service->scoreAsset($asset2, $this->brand);
@@ -304,7 +310,7 @@ class BrandComplianceTest extends TestCase
         $this->assertDatabaseHas('brand_compliance_scores', [
             'asset_id' => $asset2->id,
             'brand_id' => $this->brand->id,
-            'evaluation_status' => 'incomplete',
+            'evaluation_status' => 'pending_processing',
         ]);
     }
 
@@ -354,9 +360,11 @@ class BrandComplianceTest extends TestCase
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388'], ['hex' => '#ffffff']]);
 
         $assetLow = $this->createAsset();
+        $this->setAssetEmbedding($assetLow);
         $this->setAssetDominantColors($assetLow, [['hex' => '#ff0000', 'coverage' => 1]]);
 
         $assetHigh = $this->createAsset();
+        $this->setAssetEmbedding($assetHigh);
         $this->setAssetDominantColors($assetHigh, [['hex' => '#003388', 'coverage' => 1]]);
 
         app(BrandComplianceService::class)->scoreAsset($assetLow, $this->brand);
@@ -396,6 +404,7 @@ class BrandComplianceTest extends TestCase
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
 
         $assetScored = $this->createAsset();
+        $this->setAssetEmbedding($assetScored);
         $this->setAssetDominantColors($assetScored, [['hex' => '#003388', 'coverage' => 1]]);
         app(BrandComplianceService::class)->scoreAsset($assetScored, $this->brand);
 
@@ -438,7 +447,7 @@ class BrandComplianceTest extends TestCase
         ]);
         $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
 
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         $service = app(BrandComplianceService::class);
         $result = $service->scoreAsset($asset, $this->brand);
 
@@ -454,11 +463,12 @@ class BrandComplianceTest extends TestCase
 
     /**
      * evaluation_status = incomplete when rules exist but metadata missing.
+     * Uses PDF (non-image) so image guard does not apply; color not_evaluated → incomplete.
      */
     public function test_evaluation_status_incomplete_when_metadata_missing(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         // No dominant colors
 
         $service = app(BrandComplianceService::class);
@@ -481,6 +491,7 @@ class BrandComplianceTest extends TestCase
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
 
         $service = app(BrandComplianceService::class);
@@ -563,6 +574,7 @@ class BrandComplianceTest extends TestCase
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
 
         app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
@@ -583,11 +595,12 @@ class BrandComplianceTest extends TestCase
 
     /**
      * No duplicate timeline event when same evaluation_status written consecutively.
+     * Uses PDF (non-image) so we reach incomplete path.
      */
     public function test_no_duplicate_timeline_event_for_same_status(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         // No dominant colors -> incomplete both times
 
         $service = app(BrandComplianceService::class);
@@ -603,11 +616,12 @@ class BrandComplianceTest extends TestCase
 
     /**
      * Timeline event created when evaluation_status is incomplete.
+     * Uses PDF (non-image) so we reach incomplete path.
      */
     public function test_incomplete_status_creates_timeline_event(): void
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         // No dominant colors -> incomplete
 
         app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
@@ -637,6 +651,18 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
+     * Add embedding to asset (required for image assets to pass visual processing guard).
+     */
+    protected function setAssetEmbedding(Asset $asset): void
+    {
+        $vec = array_fill(0, 384, 0.01);
+        AssetEmbedding::updateOrCreate(
+            ['asset_id' => $asset->id],
+            ['embedding_vector' => $vec, 'model' => 'test-model']
+        );
+    }
+
+    /**
      * Compliance does not run before processing complete; upserts pending_processing.
      */
     public function test_compliance_does_not_run_before_processing_complete(): void
@@ -662,7 +688,31 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
+     * Image assets are not scored until embedding, dominant color, and thumbnails are ready.
+     * Upserts pending_processing when any is missing.
+     */
+    public function test_image_asset_not_scored_until_embedding_and_color_ready(): void
+    {
+        $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
+        $asset = $this->createAsset();
+        // Revert to fail image-specific guard: thumbnail pending, no embedding, no dominant color
+        $asset->update(['thumbnail_status' => ThumbnailStatus::PENDING]);
+        // Do not call setAssetDominantColors or setAssetEmbedding
+
+        app(BrandComplianceService::class)->scoreAsset($asset, $this->brand);
+
+        $this->assertDatabaseHas('brand_compliance_scores', [
+            'asset_id' => $asset->id,
+            'brand_id' => $this->brand->id,
+            'evaluation_status' => 'pending_processing',
+        ]);
+        $row = BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $this->brand->id)->first();
+        $this->assertNull($row->overall_score);
+    }
+
+    /**
      * Missing dominant color does not zero score; dimension excluded, weights normalize.
+     * Uses non-image asset (PDF) so tone-only scoring applies; image guard does not.
      */
     public function test_missing_dominant_color_does_not_zero_score(): void
     {
@@ -690,7 +740,7 @@ class BrandComplianceTest extends TestCase
         ]);
         $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
 
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         $this->makeAssetComplete($asset);
         // No dominant colors - color returns not_evaluated
         $asset->update(['title' => 'Professional quality asset']);
@@ -712,7 +762,7 @@ class BrandComplianceTest extends TestCase
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
         $asset = $this->createAsset();
-        $this->makeAssetComplete($asset);
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
 
         $service = app(BrandComplianceService::class);
@@ -754,7 +804,7 @@ class BrandComplianceTest extends TestCase
         $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
 
         $asset = $this->createAsset();
-        $this->makeAssetComplete($asset);
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
         $asset->update(['title' => 'Brand asset']);
 
@@ -809,7 +859,7 @@ class BrandComplianceTest extends TestCase
     public function test_starred_asset_receives_boost(): void
     {
         $this->enableBrandDnaWithBaseline70();
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['starred' => true])]);
 
         $service = app(BrandComplianceService::class);
@@ -826,7 +876,7 @@ class BrandComplianceTest extends TestCase
     public function test_high_quality_rating_receives_boost(): void
     {
         $this->enableBrandDnaWithBaseline70();
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         $asset->update(['metadata' => array_merge($asset->metadata ?? [], ['quality_rating' => 4])]);
 
         $service = app(BrandComplianceService::class);
@@ -843,7 +893,7 @@ class BrandComplianceTest extends TestCase
     public function test_approved_asset_receives_larger_boost(): void
     {
         $this->enableBrandDnaWithBaseline70();
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         $asset->update(['approved_at' => now(), 'approved_by_user_id' => $this->user->id]);
 
         $service = app(BrandComplianceService::class);
@@ -885,7 +935,7 @@ class BrandComplianceTest extends TestCase
         ]);
         $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
 
-        $asset = $this->createAsset(['title' => 'Spam content']);
+        $asset = $this->createAsset(['mime_type' => 'application/pdf', 'title' => 'Spam content']);
         $asset->update([
             'metadata' => array_merge($asset->metadata ?? [], ['starred' => true]),
             'approved_at' => now(),
@@ -906,7 +956,7 @@ class BrandComplianceTest extends TestCase
     public function test_boost_does_not_exceed_100(): void
     {
         $this->enableBrandDnaWithBaseline70();
-        $asset = $this->createAsset(['title' => 'Brand asset']);
+        $asset = $this->createAsset(['mime_type' => 'application/pdf', 'title' => 'Brand asset']);
         $asset->update([
             'metadata' => array_merge($asset->metadata ?? [], ['starred' => true, 'quality_rating' => 5]),
             'approved_at' => now(),
@@ -926,7 +976,7 @@ class BrandComplianceTest extends TestCase
     public function test_score_curve_spreads_midrange_values(): void
     {
         $this->enableBrandDnaWithBaseline70();
-        $asset = $this->createAsset();
+        $asset = $this->createAsset(['mime_type' => 'application/pdf']);
         // No tone keyword match -> baseline 70
 
         $service = app(BrandComplianceService::class);
@@ -968,6 +1018,7 @@ class BrandComplianceTest extends TestCase
         $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
 
         $asset = $this->createAsset(['title' => 'Brand asset']);
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
 
         $service = app(BrandComplianceService::class);
@@ -1050,6 +1101,7 @@ class BrandComplianceTest extends TestCase
     {
         $this->enableBrandDnaWithColorPalette([['hex' => '#003388']]);
         $asset = $this->createAsset();
+        $this->setAssetEmbedding($asset);
         $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
 
         $service = app(BrandComplianceService::class);

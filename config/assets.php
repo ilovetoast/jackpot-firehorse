@@ -92,25 +92,14 @@ return [
 
         /*
          * Medium drawer preview.
-         * Used for asset detail drawers and modal previews.
+         * Used for asset detail drawers, modal previews, and public page logos.
+         * preserve_transparency ensures logos display without gray background block.
          */
         'medium' => [
             'width' => 1024,
             'height' => 1024,
             'quality' => 90,
             'fit' => 'contain', // maintain aspect ratio, fit within dimensions
-        ],
-
-        /*
-         * Medium display (logo/public page).
-         * Same dimensions as medium but preserves transparency for white logos.
-         * Used for public page logo and theme preview — no gray background block.
-         */
-        'medium_display' => [
-            'width' => 1024,
-            'height' => 1024,
-            'quality' => 90,
-            'fit' => 'contain',
             'preserve_transparency' => true,
         ],
 

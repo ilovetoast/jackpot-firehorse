@@ -2,7 +2,7 @@
  * Public Page Theme Preview
  * Simulates hero header, logo, accent CTA, background, download card.
  * Live updates when accent color, logo, or background changes.
- * Logo uses transparent display (no gray block) — logoUrl should be medium_display style.
+ * Logo uses transparent display (no gray block) — logoUrl uses medium style.
  */
 export default function PublicPageThemePreview({ logoUrl, logoUrlFallback, accentColor = '#6366f1', backgroundUrl }) {
     return (

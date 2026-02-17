@@ -94,7 +94,7 @@ class BillingService
             
             // Get price info to determine new plan
             if (!$newPlanId) {
-                $stripeSecret = env('STRIPE_SECRET');
+                $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret) {
                     Stripe::setApiKey($stripeSecret);
                     try {
@@ -127,7 +127,7 @@ class BillingService
                 }
                 
                 // Also check subscription status from Stripe before updating
-                $stripeSecret = env('STRIPE_SECRET');
+                $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret && $oldSubscription->stripe_id) {
                     Stripe::setApiKey($stripeSecret);
                     try {
@@ -208,7 +208,7 @@ class BillingService
         }
         
         try {
-            $stripeSecret = env('STRIPE_SECRET');
+            $stripeSecret = config('services.stripe.secret');
             if ($stripeSecret) {
                 Stripe::setApiKey($stripeSecret);
                 $price = Price::retrieve($priceId);
@@ -434,7 +434,7 @@ class BillingService
             throw new \RuntimeException('Tenant must have an active subscription to add storage.');
         }
 
-        $stripeSecret = env('STRIPE_SECRET');
+        $stripeSecret = config('services.stripe.secret');
         if (empty($stripeSecret)) {
             throw new \RuntimeException('Stripe is not configured.');
         }
@@ -484,7 +484,7 @@ class BillingService
             return (new PlanService())->getStorageInfo($tenant);
         }
 
-        $stripeSecret = env('STRIPE_SECRET');
+        $stripeSecret = config('services.stripe.secret');
         if (empty($stripeSecret)) {
             throw new \RuntimeException('Stripe is not configured.');
         }

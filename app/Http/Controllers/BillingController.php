@@ -94,7 +94,7 @@ class BillingController extends Controller
             // Skip free plan
             if ($key !== 'free' && $plan['stripe_price_id'] !== 'price_free') {
                 try {
-                    $stripeSecret = env('STRIPE_SECRET');
+                    $stripeSecret = config('services.stripe.secret');
                     if ($stripeSecret) {
                         Stripe::setApiKey($stripeSecret);
                         $price = Price::retrieve($plan['stripe_price_id']);
@@ -454,7 +454,7 @@ class BillingController extends Controller
         
         if ($tenant->stripe_id && $subscription) {
             try {
-                $stripeSecret = env('STRIPE_SECRET');
+                $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret) {
                     \Stripe\Stripe::setApiKey($stripeSecret);
                     
@@ -525,7 +525,7 @@ class BillingController extends Controller
             try {
                 // Fetch Stripe subscription directly using the subscription's stripe_id
                 // This ensures we get the latest status from Stripe, not stale database data
-                $stripeSecret = env('STRIPE_SECRET');
+                $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret) {
                     \Stripe\Stripe::setApiKey($stripeSecret);
                     $stripeSubscription = \Stripe\Subscription::retrieve($subscription->stripe_id);
@@ -851,7 +851,7 @@ class BillingController extends Controller
         }
 
         try {
-            $stripeSecret = env('STRIPE_SECRET');
+            $stripeSecret = config('services.stripe.secret');
             if ($stripeSecret) {
                 \Stripe\Stripe::setApiKey($stripeSecret);
                 $stripeSubscription = \Stripe\Subscription::retrieve($subscription->stripe_id);
@@ -890,7 +890,7 @@ class BillingController extends Controller
         }
 
         try {
-            $stripeSecret = env('STRIPE_SECRET');
+            $stripeSecret = config('services.stripe.secret');
             if (!$stripeSecret) {
                 throw new \RuntimeException('Stripe is not configured.');
             }
