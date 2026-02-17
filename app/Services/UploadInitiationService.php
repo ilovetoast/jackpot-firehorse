@@ -619,16 +619,35 @@ class UploadInitiationService
         $maxUploadSize = $this->planService->getMaxUploadSize($tenant);
 
         if ($fileSize > $maxUploadSize) {
+            $fileSizeFormatted = self::formatFileSizeForDisplay($fileSize);
+            $maxFormatted = self::formatFileSizeForDisplay($maxUploadSize);
             throw new PlanLimitExceededException(
                 'upload_size',
                 $fileSize,
                 $maxUploadSize,
-                "File size ({$fileSize} bytes) exceeds maximum upload size ({$maxUploadSize} bytes) for your plan."
+                "File size ({$fileSizeFormatted}) exceeds maximum upload size ({$maxFormatted}) for your plan."
             );
         }
 
         // Check total storage limit
         $this->planService->enforceStorageLimit($tenant, $fileSize);
+    }
+
+    /**
+     * Format bytes for user-facing display (KB, MB, or GB).
+     */
+    protected static function formatFileSizeForDisplay(int $bytes): string
+    {
+        if ($bytes >= 1024 * 1024 * 1024) {
+            return round($bytes / 1024 / 1024 / 1024, 2) . ' GB';
+        }
+        if ($bytes >= 1024 * 1024) {
+            return round($bytes / 1024 / 1024, 2) . ' MB';
+        }
+        if ($bytes >= 1024) {
+            return round($bytes / 1024, 2) . ' KB';
+        }
+        return $bytes . ' B';
     }
 
     /**

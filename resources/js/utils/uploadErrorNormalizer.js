@@ -30,6 +30,20 @@
 
 import { allowDiagnostics } from './environment' // Phase 2.5 Step 4: Centralized environment detection
 
+/** Format bytes for display (KB, MB, GB) — used when backend sends raw bytes in error messages */
+function formatBytesForDisplay(bytes) {
+    if (bytes >= 1024 * 1024 * 1024) return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+    if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB'
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB'
+    return bytes + ' B'
+}
+
+/** Replace raw byte numbers in file-size error messages with human-readable format */
+function humanizeBytesInMessage(message) {
+    if (!message || typeof message !== 'string') return message
+    return message.replace(/(\d+)\s+bytes/gi, (_, n) => formatBytesForDisplay(parseInt(n, 10)))
+}
+
 /**
  * Normalized error shape for upload failures
  * 
@@ -107,9 +121,11 @@ export function normalizeUploadError(error, context = {}) {
     }
     resolvedFileType = resolvedFileType || 'unknown';
 
-    // Extract error message
+    // Extract error message — prefer API response body when available (e.g. 403 plan limit with formatted message)
     let errorMessage = 'Unknown upload error';
-    if (error instanceof Error) {
+    if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
+    } else if (error instanceof Error) {
         errorMessage = error.message;
     } else if (typeof error === 'string') {
         errorMessage = error;
@@ -173,11 +189,18 @@ export function normalizeUploadError(error, context = {}) {
                 : 'Authentication required. Please log in and try again.';
             retryable = false; // Requires user action (refresh/login)
         } else if (resolvedHttpStatus === 403) {
-            // 403 Forbidden - could be auth or permission
-            category = 'AUTH';
-            errorCode = 'UPLOAD_PERMISSION_DENIED';
-            userMessage = 'Upload permission denied. Please check your account permissions.';
-            retryable = false;
+            // 403 Forbidden - auth/permission OR plan limit (file size, storage)
+            if (errorMessage.includes('file size') || errorMessage.includes('exceeds') || errorMessage.includes('storage limit')) {
+                category = 'VALIDATION';
+                errorCode = 'UPLOAD_FILE_TOO_LARGE';
+                userMessage = humanizeBytesInMessage(errorMessage);
+                retryable = false;
+            } else {
+                category = 'AUTH';
+                errorCode = 'UPLOAD_PERMISSION_DENIED';
+                userMessage = 'Upload permission denied. Please check your account permissions.';
+                retryable = false;
+            }
         } else if (resolvedHttpStatus === 404) {
             // 404 Not Found - could be expired session or invalid endpoint
             category = stage === 'finalize' ? 'PIPELINE' : 'UNKNOWN';
@@ -260,7 +283,7 @@ export function normalizeUploadError(error, context = {}) {
     ) {
         category = 'VALIDATION';
         errorCode = 'UPLOAD_FILE_VALIDATION_FAILED';
-        userMessage = errorMessage;
+        userMessage = humanizeBytesInMessage(errorMessage);
         retryable = false;
     }
 
