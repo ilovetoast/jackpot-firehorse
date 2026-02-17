@@ -13,6 +13,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasTable('brand_visual_references')) {
+            return;
+        }
+
         Schema::create('brand_visual_references', function (Blueprint $table) {
             $table->id();
             $table->foreignId('brand_id')->constrained()->onDelete('cascade');
