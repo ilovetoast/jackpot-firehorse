@@ -18,6 +18,7 @@ import {
     ArrowPathIcon,
     ArrowUturnLeftIcon,
     WrenchScrewdriverIcon,
+    ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -129,6 +130,16 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                     <ArrowPathIcon className="h-4 w-4" />
                                     Retry Pipeline
                                 </button>
+                                <a
+                                    href={`/app/admin/assets/${asset.id}/download-source`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
+                                    title="Download the original uploaded file"
+                                >
+                                    <ArrowDownTrayIcon className="h-4 w-4" />
+                                    Download source file
+                                </a>
                                 {asset?.deleted_at && (
                                     <button
                                         onClick={() => onAction(asset.id, 'restore')}

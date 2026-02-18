@@ -520,10 +520,11 @@ class Asset extends Model
     }
 
     /**
-     * Check if asset type produces a raster thumbnail (image, SVG, PDF, video).
+     * Check if asset type produces a raster thumbnail (image, SVG, PDF, video, AI/EPS).
      *
      * Used for capability-based logic: orientation, resolution_class, dominant_colors
      * can be derived from thumbnails for these types. Does NOT treat PDF/video as true images.
+     * AI/EPS (Illustrator, Encapsulated PostScript) produce raster thumbnails via Imagick.
      *
      * @return bool
      */
@@ -532,7 +533,7 @@ class Asset extends Model
         $fileTypeService = app(\App\Services\FileTypeService::class);
         $fileType = $fileTypeService->detectFileTypeFromAsset($this);
 
-        return in_array($fileType, ['image', 'tiff', 'avif', 'svg', 'pdf', 'video'], true);
+        return in_array($fileType, ['image', 'tiff', 'avif', 'svg', 'pdf', 'video', 'ai'], true);
     }
 
     /**

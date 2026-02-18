@@ -6,6 +6,7 @@ use App\Enums\UploadStatus;
 use App\Events\UploadCleanupAttempted;
 use App\Events\UploadCleanupCompleted;
 use App\Events\UploadCleanupFailed;
+use App\Models\Asset;
 use App\Models\UploadSession;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -179,6 +180,16 @@ class UploadCleanupService
 
         // Generate temp upload path using immutable contract
         $objectKeyPrefix = $this->generateTempUploadPath($uploadSession->id);
+
+        // CRITICAL: Never delete temp files still needed by assets (not yet promoted)
+        // Prevents 404 when thumbnail generation or promotion runs after cleanup
+        if ($this->assetStillNeedsTempFile($uploadSession->id, $objectKeyPrefix)) {
+            Log::info('Skipping temp cleanup - asset still references this path', [
+                'upload_session_id' => $uploadSession->id,
+                'path' => $objectKeyPrefix,
+            ]);
+            return ['success' => true, 'error' => null, 'multipartAborted' => false];
+        }
         
         // Emit attempted event
         event(new UploadCleanupAttempted(
@@ -366,6 +377,21 @@ class UploadCleanupService
 
             return ['success' => false, 'error' => $error];
         }
+    }
+
+    /**
+     * Check if any asset still references this temp path (not yet promoted).
+     * Prevents deleting temp files needed for thumbnail generation or promotion.
+     *
+     * @param string $uploadSessionId
+     * @param string $tempPath Expected: temp/uploads/{id}/original
+     * @return bool
+     */
+    protected function assetStillNeedsTempFile(string $uploadSessionId, string $tempPath): bool
+    {
+        return Asset::where('upload_session_id', $uploadSessionId)
+            ->where('storage_root_path', $tempPath)
+            ->exists();
     }
 
     /**

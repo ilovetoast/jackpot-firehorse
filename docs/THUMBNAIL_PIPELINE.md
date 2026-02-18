@@ -202,6 +202,7 @@ When `GenerateThumbnailsJob` fails at `downloadFromS3()` with `storage_error`:
    - **AccessDenied**: Worker IAM lacks `s3:GetObject` for the bucket
    - **NoSuchBucket**: Per-tenant bucket not provisioned
 3. **Fix**: Ensure worker uses credentials with S3 access; run `tenants:ensure-buckets` if buckets are missing.
+4. **Prevention**: `UploadCleanupService` and `AssetsCleanupStaging` now skip temp files that are still referenced by assets (not yet promoted). This prevents NoSuchKey when thumbnail generation or promotion runs after cleanup.
 
 ### White Logos on Transparent Background
 

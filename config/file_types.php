@@ -234,14 +234,14 @@ return [
 
         'ai' => [
             'name' => 'Illustrator',
-            'description' => 'Adobe Illustrator files',
+            'description' => 'Adobe Illustrator and Encapsulated PostScript files',
             
             'mime_types' => [
                 'application/postscript',
                 'application/vnd.adobe.illustrator',
                 'application/illustrator',
             ],
-            'extensions' => ['ai'],
+            'extensions' => ['ai', 'eps'],
             
             'capabilities' => [
                 'thumbnail' => true, // Via Imagick (PDF-compatible AI files)

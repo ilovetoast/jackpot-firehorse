@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\UploadStatus;
+use App\Models\Asset;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Services\TenantBucketService;
@@ -125,6 +126,10 @@ class AssetsCleanupStaging extends Command
 
         $objectCount = 0;
         foreach ($sessions as $session) {
+            $tempPath = self::TEMP_PREFIX . $session->id . '/original';
+            if ($this->assetReferencesTempPath($tempPath)) {
+                continue; // Skip - asset still needs this file for thumbnail/promotion
+            }
             $prefix = self::TEMP_PREFIX . $session->id . '/';
             $count = $this->countOrDeletePrefix($bucketName, $prefix, $dryRun);
             $objectCount += $count;
@@ -217,7 +222,10 @@ class AssetsCleanupStaging extends Command
                 if (count($parts) >= 3) {
                     $sessionId = $parts[2];
                     if (! isset($validSessionIds[$sessionId])) {
-                        $orphanKeys[] = $key;
+                        // Never delete temp files still referenced by assets (not yet promoted)
+                        if (! $this->assetReferencesTempPath($key)) {
+                            $orphanKeys[] = $key;
+                        }
                     }
                 }
             }
@@ -226,6 +234,15 @@ class AssetsCleanupStaging extends Command
         } while ($continuationToken);
 
         return $orphanKeys;
+    }
+
+    /**
+     * Check if any asset has storage_root_path = this temp key (not yet promoted).
+     * Prevents deleting temp files needed for thumbnail generation or promotion.
+     */
+    protected function assetReferencesTempPath(string $s3Key): bool
+    {
+        return Asset::where('storage_root_path', $s3Key)->exists();
     }
 
     protected function countOrDeletePrefix(string $bucketName, string $prefix, bool $dryRun): int

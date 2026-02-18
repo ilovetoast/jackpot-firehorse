@@ -21,8 +21,10 @@ use App\Models\Brand;
 use App\Services\Assets\AssetStateReconciliationService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
+use App\Services\TenantBucketService;
 use App\Services\ThumbnailRetryService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
@@ -260,6 +262,30 @@ class AdminAssetController extends Controller
     }
 
     /**
+     * GET /app/admin/assets/{asset}/download-source
+     *
+     * Admin-only download of the source file. Redirects to presigned S3 URL.
+     */
+    public function downloadSource(string $asset): RedirectResponse
+    {
+        $this->authorizeAdmin();
+
+        $model = Asset::withTrashed()->with(['storageBucket', 'tenant'])->findOrFail($asset);
+        if (!$model->storage_root_path) {
+            abort(404, 'Source file path not available.');
+        }
+
+        $bucketService = app(TenantBucketService::class);
+        $bucket = $model->storageBucket
+            ?? $bucketService->resolveActiveBucketOrFail($model->tenant);
+        $filename = $model->original_filename ?? basename($model->storage_root_path);
+        $disposition = 'attachment; filename="' . addcslashes($filename, '"\\') . '"';
+        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $model->storage_root_path, 15, $disposition);
+
+        return redirect($signedUrl);
+    }
+
+    /**
      * POST /app/admin/assets/{asset}/restore
      */
     public function restore(string $asset): JsonResponse
@@ -406,6 +432,7 @@ class AdminAssetController extends Controller
         $search = trim($request->get('search', ''));
         $parsed = [
             'search' => $search,
+            'asset_id' => $request->filled('asset_id') ? trim($request->asset_id) : null,
             'tenant_id' => $request->filled('tenant_id') ? (int) $request->tenant_id : null,
             'brand_id' => $request->filled('brand_id') ? (int) $request->brand_id : null,
             'category_id' => $request->filled('category_id') ? (int) $request->category_id : null,
@@ -458,6 +485,10 @@ class AdminAssetController extends Controller
     protected function buildQuery(array $filters): \Illuminate\Database\Eloquent\Builder
     {
         $query = Asset::query()->withTrashed();
+
+        if (!empty($filters['asset_id'])) {
+            $query->where('assets.id', $filters['asset_id']);
+        }
 
         if (!empty($filters['search'])) {
             $q = $filters['search'];

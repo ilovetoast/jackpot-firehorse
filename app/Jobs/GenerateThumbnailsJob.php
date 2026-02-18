@@ -1211,7 +1211,9 @@ class GenerateThumbnailsJob implements ShouldQueue
             'imagecreatefrom.*failed' => 'Unable to process image. The file format may not be supported.',
             'imagecopyresampled.*failed' => 'Unable to resize image. Please try again.',
             
-            // Storage errors
+            // Storage errors - NoSuchKey when temp file was cleaned up before promotion
+            'NoSuchKey' => 'Source file no longer exists in storage. The temporary upload may have been cleaned up before processing completed. Please re-upload the file.',
+            'specified key does not exist' => 'Source file no longer exists in storage. Please re-upload the file.',
             'S3.*error' => 'Unable to save thumbnail. Please try again.',
             'Storage.*failed' => 'Unable to save thumbnail. Please check storage configuration.',
             

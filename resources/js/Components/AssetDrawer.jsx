@@ -2435,12 +2435,28 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 </dd>
                             </div>
                         )}
-                        {/* Asset ID (UUID) — at bottom for copy/reference */}
+                        {/* Asset ID (UUID) — at bottom for copy/reference; admin link for site roles */}
                         {displayAsset.id && (
                             <div className="flex items-start gap-4 pt-2 mt-2 border-t border-gray-100">
                                 <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Asset ID</dt>
                                 <dd className="text-sm font-mono text-gray-900 flex-1 min-w-0 break-all text-left" title={displayAsset.id}>
-                                    {displayAsset.id}
+                                    {(() => {
+                                        const siteRoles = Array.isArray(auth?.user?.site_roles) ? auth.user.site_roles : []
+                                        const canViewAdminAssets = ['site_owner', 'site_admin', 'site_engineering', 'site_support'].some((r) => siteRoles.includes(r))
+                                        if (canViewAdminAssets) {
+                                            return (
+                                                <a
+                                                    href={`/app/admin/assets?asset_id=${encodeURIComponent(displayAsset.id)}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                                >
+                                                    {displayAsset.id}
+                                                </a>
+                                            )
+                                        }
+                                        return displayAsset.id
+                                    })()}
                                 </dd>
                             </div>
                         )}
