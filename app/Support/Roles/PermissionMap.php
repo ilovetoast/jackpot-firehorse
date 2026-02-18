@@ -4,7 +4,11 @@ namespace App\Support\Roles;
 
 /**
  * Canonical Permission Map
- * 
+ *
+ * This is the canonical source of tenant/brand role permissions.
+ * All services must delegate through TenantPermissionResolver.
+ * No other service should reimplement permission resolution logic.
+ *
  * Maps roles to permissions explicitly.
  * This is the single source of truth for role-to-permission mappings.
  * 
@@ -325,7 +329,7 @@ class PermissionMap
 
     /**
      * Get all permissions for a brand role.
-     * 
+     *
      * @param string $role Brand role name
      * @return array<string> Array of permission strings
      */
@@ -333,5 +337,21 @@ class PermissionMap
     {
         $permissions = self::brandPermissions();
         return $permissions[strtolower($role)] ?? [];
+    }
+
+    /**
+     * Get all unique permission strings from the registry.
+     * Used by AuthPermissionService::effectivePermissions() to iterate and check can().
+     *
+     * @return array<string>
+     */
+    public static function allPermissions(): array
+    {
+        $perms = [];
+        foreach (array_merge(self::tenantPermissions(), self::brandPermissions()) as $rolePerms) {
+            $perms = array_merge($perms, $rolePerms);
+        }
+
+        return array_values(array_unique($perms));
     }
 }

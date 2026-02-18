@@ -86,7 +86,15 @@ class TenantPermissionResolver
             return true;
         }
 
-        // Check brand-level permission
+        // Check brand-level permission: PermissionMap FIRST, then Spatie
+        $brandRole = $user->getRoleForBrand($brand);
+        if ($brandRole) {
+            $brandPermissions = PermissionMap::brandPermissions()[strtolower($brandRole)] ?? [];
+            if (in_array($permission, $brandPermissions)) {
+                return true;
+            }
+        }
+
         return $user->hasPermissionForBrand($brand, $permission);
     }
 }

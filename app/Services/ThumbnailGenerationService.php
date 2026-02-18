@@ -564,21 +564,50 @@ class ThumbnailGenerationService
             // Preview thumbnails are stored separately in metadata but returned together
             $allThumbnails = array_merge($previewThumbnails, $thumbnails);
             
-            // Persist thumbnail_dimensions for ALL thumbnail-producing types (image, svg, pdf, video)
-            // Avoids S3 re-download for ComputedMetadataService thumbnail fallback
+            // Persist thumbnail_dimensions for ALL styles (thumb, medium, large) - required for visualMetadataReady
             $metadata = $asset->metadata ?? [];
             $metadataUpdated = false;
-            if (isset($thumbnails['medium']['width'], $thumbnails['medium']['height'])) {
-                $metadata['thumbnail_dimensions'] = array_merge(
-                    $metadata['thumbnail_dimensions'] ?? [],
-                    [
-                        'medium' => [
-                            'width' => $thumbnails['medium']['width'],
-                            'height' => $thumbnails['medium']['height'],
-                        ],
-                    ]
-                );
-                $metadataUpdated = true;
+            $thumbnailDimensions = $metadata['thumbnail_dimensions'] ?? [];
+            foreach (['thumb', 'medium', 'large'] as $style) {
+                if (isset($thumbnails[$style]['width'], $thumbnails[$style]['height'])) {
+                    $thumbnailDimensions[$style] = [
+                        'width' => $thumbnails[$style]['width'],
+                        'height' => $thumbnails[$style]['height'],
+                    ];
+                    $metadataUpdated = true;
+                }
+            }
+            if ($metadataUpdated) {
+                $metadata['thumbnail_dimensions'] = $thumbnailDimensions;
+            }
+
+            // Guard: Low-resolution raster for SVG/PDF — report diagnostic, do NOT fail job
+            if (in_array($fileType, ['svg', 'pdf'], true)) {
+                $mediumWidth = $thumbnails['medium']['width'] ?? 0;
+                if ($mediumWidth > 0 && $mediumWidth < 1000) {
+                    try {
+                        app(\App\Services\Reliability\ReliabilityEngine::class)->report([
+                            'source_type' => 'asset',
+                            'source_id' => $asset->id,
+                            'tenant_id' => $asset->tenant_id,
+                            'severity' => 'warning',
+                            'context' => 'low_raster_quality',
+                            'title' => 'Vector rasterized below quality threshold',
+                            'message' => 'Vector rasterized below quality threshold',
+                            'metadata' => [
+                                'file_type' => $fileType,
+                                'medium_width' => $mediumWidth,
+                                'mime_type' => $asset->mime_type,
+                            ],
+                            'unique_signature' => "low_raster_quality:{$asset->id}:{$mediumWidth}",
+                        ]);
+                    } catch (\Throwable $e) {
+                        Log::warning('[ThumbnailGenerationService] Failed to report low raster quality', [
+                            'asset_id' => $asset->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             }
             
             // Store source image dimensions in metadata ONLY for image file types
@@ -820,6 +849,9 @@ class ThumbnailGenerationService
     /**
      * Rasterize SVG to raster thumbnail using Imagick.
      *
+     * High-DPI policy: Render at 300 DPI, large base width (min 4096px), then downscale.
+     * Preserves alpha transparency and sharpness.
+     *
      * @param string $sourcePath
      * @param array $styleConfig
      * @return string Path to generated raster thumbnail
@@ -827,8 +859,8 @@ class ThumbnailGenerationService
     protected function generateSvgRasterizedThumbnail(string $sourcePath, array $styleConfig): string
     {
         $imagick = new \Imagick();
-        // Set resolution before reading so SVG renders at sufficient quality
-        $imagick->setResolution(144, 144);
+        $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
+        $imagick->setResolution(300, 300);
         $imagick->readImage($sourcePath);
         $imagick->setIteratorIndex(0);
         $imagick = $imagick->getImage();
@@ -841,12 +873,25 @@ class ThumbnailGenerationService
             throw new \RuntimeException('SVG rendered with invalid dimensions');
         }
 
+        // Render at LARGE base width (minimum 4096px) before downscaling to target
+        $baseMinWidth = 4096;
+        if ($sourceWidth < $baseMinWidth || $sourceHeight < $baseMinWidth) {
+            $scale = $baseMinWidth / max($sourceWidth, $sourceHeight, 1);
+            $largeWidth = (int) round($sourceWidth * $scale);
+            $largeHeight = (int) round($sourceHeight * $scale);
+            $imagick->resizeImage($largeWidth, $largeHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+        }
+
         $targetWidth = $styleConfig['width'] ?? 1024;
         $targetHeight = $styleConfig['height'] ?? 1024;
         $fit = $styleConfig['fit'] ?? 'contain';
+        $currentWidth = $imagick->getImageWidth();
+        $currentHeight = $imagick->getImageHeight();
         [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
-            $sourceWidth,
-            $sourceHeight,
+            $currentWidth,
+            $currentHeight,
             $targetWidth,
             $targetHeight,
             $fit
@@ -1378,6 +1423,11 @@ class ThumbnailGenerationService
             // Note: spatie/pdf-to-image v3.x does not provide getNumberOfPages() method
             // We rely on the library to handle invalid page numbers gracefully
             // If page 1 doesn't exist, the save() method will fail, which we catch below
+
+            // Set resolution to 300 DPI for high-quality rasterization before conversion
+            if (method_exists($pdf, 'setResolution')) {
+                $pdf->setResolution(300);
+            }
 
             // Set timeout for PDF processing (prevents stuck jobs)
             $timeout = config('assets.thumbnail.pdf.timeout_seconds', 60);
