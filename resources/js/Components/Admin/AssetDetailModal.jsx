@@ -34,7 +34,7 @@ const STATUS_COLORS = {
 
 export default function AssetDetailModal({ data, onClose, onAction, onRefresh, showThumbnail = false }) {
     const [tab, setTab] = useState('overview')
-    const { asset, incidents, pipeline_flags } = data || {}
+    const { asset, incidents, pipeline_flags, failed_jobs } = data || {}
 
     const TABS = [
         { id: 'overview', label: 'Overview' },
@@ -115,6 +115,14 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                     Attempt Repair
                                 </button>
                                 <button
+                                    onClick={() => onAction(asset.id, 'reanalyze')}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-2 text-sm text-white hover:bg-amber-500"
+                                    title="Re-run thumbnails, metadata, and embedding to fix incomplete brand data"
+                                >
+                                    <ArrowPathIcon className="h-4 w-4" />
+                                    Re-run Analysis
+                                </button>
+                                <button
                                     onClick={() => onAction(asset.id, 'retry-pipeline')}
                                     className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
                                 >
@@ -189,7 +197,23 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                         </div>
                     )}
                     {tab === 'failed_jobs' && (
-                        <p className="text-slate-500">Failed jobs would be listed here (placeholder)</p>
+                        <div className="space-y-3">
+                            {failed_jobs?.length ? (
+                                failed_jobs.map((j) => (
+                                    <div key={j.id} className="rounded border border-red-200 bg-red-50/50 p-4 text-sm">
+                                        <div className="flex justify-between text-slate-600">
+                                            <span className="font-mono text-xs">{j.queue}</span>
+                                            <span>{j.failed_at ? new Date(j.failed_at).toLocaleString() : '—'}</span>
+                                        </div>
+                                        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 text-xs text-red-800">
+                                            {j.exception_preview}
+                                        </pre>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-slate-500">No failed jobs for this asset.</p>
+                            )}
+                        </div>
                     )}
                     {tab === 'tickets' && (
                         <p className="text-slate-500">Support tickets would be listed here (placeholder)</p>

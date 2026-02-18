@@ -206,6 +206,8 @@ export default function AdminAssetsIndex({
                 await axios.post(`/app/admin/assets/${assetId}/restore`)
             } else if (action === 'retry-pipeline') {
                 await axios.post(`/app/admin/assets/${assetId}/retry-pipeline`)
+            } else if (action === 'reanalyze') {
+                await axios.post(`/app/admin/assets/${assetId}/reanalyze`)
             }
             if (detailAsset?.asset?.id === assetId) {
                 openDetail({ id: assetId })

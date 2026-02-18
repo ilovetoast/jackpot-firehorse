@@ -162,6 +162,8 @@ export default function OperationsCenterIndex({
                 await axios.post(`/app/admin/assets/${assetId}/retry-pipeline`)
             } else if (action === 'restore') {
                 await axios.post(`/app/admin/assets/${assetId}/restore`)
+            } else if (action === 'reanalyze') {
+                await axios.post(`/app/admin/assets/${assetId}/reanalyze`)
             }
             closeQuickView()
             router.reload({ only: ['incidents'] })

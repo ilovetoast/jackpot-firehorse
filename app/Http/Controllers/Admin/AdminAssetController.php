@@ -3,10 +3,17 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\AssetStatus;
+use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateAssetEmbeddingJob;
+use App\Jobs\GenerateThumbnailsJob;
+use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
+use App\Models\ActivityEvent;
+use App\Models\AssetEmbedding;
+use App\Models\BrandComplianceScore;
 use App\Models\Asset;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
@@ -18,6 +25,7 @@ use App\Services\ThumbnailRetryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -134,10 +142,29 @@ class AdminAssetController extends Controller
             'auto_recover_attempted' => (bool) ($metadata['auto_recover_attempted'] ?? false),
         ];
 
+        $assetIdStr = (string) $asset->id;
+        $failedJobs = \DB::table('failed_jobs')
+            ->where('payload', 'like', '%' . $assetIdStr . '%')
+            ->orderByDesc('failed_at')
+            ->limit(20)
+            ->get(['id', 'uuid', 'queue', 'payload', 'exception', 'failed_at'])
+            ->filter(fn ($j) => str_contains($j->payload ?? '', $assetIdStr))
+            ->values()
+            ->map(fn ($j) => [
+                'id' => $j->id,
+                'uuid' => $j->uuid,
+                'queue' => $j->queue,
+                'failed_at' => $j->failed_at?->toIso8601String(),
+                'exception_preview' => \Str::limit($j->exception, 300),
+                'exception_full' => $j->exception,
+            ])
+            ->all();
+
         return response()->json([
             'asset' => $this->formatAssetForDetail($asset),
             'incidents' => $incidents,
             'pipeline_flags' => $pipelineFlags,
+            'failed_jobs' => $failedJobs,
         ]);
     }
 
@@ -309,6 +336,48 @@ class AdminAssetController extends Controller
         ProcessAssetJob::dispatch($asset->id);
 
         return response()->json(['dispatched' => true]);
+    }
+
+    /**
+     * POST /app/admin/assets/{asset}/reanalyze
+     *
+     * Re-run analysis (thumbnails, metadata, embedding) to fix incomplete brand data.
+     * Dispatches: GenerateThumbnailsJob -> PopulateAutomaticMetadataJob -> GenerateAssetEmbeddingJob.
+     */
+    public function reanalyze(string $assetId): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $asset = Asset::withTrashed()->findOrFail($assetId);
+
+        BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $asset->brand_id)->delete();
+        $asset->update([
+            'analysis_status' => 'generating_thumbnails',
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'thumbnail_error' => null,
+        ]);
+
+        AssetEmbedding::where('asset_id', $asset->id)->delete();
+
+        Bus::chain([
+            new GenerateThumbnailsJob($asset->id),
+            new PopulateAutomaticMetadataJob($asset->id),
+            new GenerateAssetEmbeddingJob($asset->id),
+        ])->dispatch();
+
+        ActivityEvent::create([
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'event_type' => EventType::ASSET_ANALYSIS_RERUN_REQUESTED,
+            'subject_type' => Asset::class,
+            'subject_id' => $asset->id,
+            'actor_type' => 'user',
+            'actor_id' => Auth::id(),
+            'metadata' => null,
+            'created_at' => now(),
+        ]);
+
+        return response()->json(['status' => 'queued']);
     }
 
     protected function parseFilters(Request $request): array
