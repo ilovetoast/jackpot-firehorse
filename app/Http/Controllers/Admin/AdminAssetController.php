@@ -25,7 +25,7 @@ use App\Services\TenantBucketService;
 use App\Services\ThumbnailRetryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -267,7 +267,7 @@ class AdminAssetController extends Controller
      * Admin-only download of the source file. Streams from S3 through the backend
      * to avoid cross-tenant IAM issues with presigned URLs.
      */
-    public function downloadSource(string $asset): Response
+    public function downloadSource(string $asset): HttpResponse
     {
         $this->authorizeAdmin();
 
