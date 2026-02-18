@@ -791,6 +791,7 @@ class ThumbnailGenerationService
             return null;
         }
         
+        $styleConfig['_asset_id'] = $asset->id;
         return $this->$handler($sourcePath, $styleConfig);
     }
 
@@ -835,8 +836,9 @@ class ThumbnailGenerationService
     /**
      * Rasterize SVG to raster thumbnail using Imagick.
      *
-     * High-DPI policy: Render at 300 DPI, large base width (min 4096px), then downscale.
-     * Preserves alpha transparency and sharpness.
+     * Policy: 300 DPI max, control pixel output via resize (not DPI).
+     * SVG-specific widths: thumb 400, medium 1600, large 4096.
+     * Preserves alpha transparency and sharpness without excessive CPU.
      *
      * @param string $sourcePath
      * @param array $styleConfig
@@ -844,12 +846,21 @@ class ThumbnailGenerationService
      */
     protected function generateSvgRasterizedThumbnail(string $sourcePath, array $styleConfig): string
     {
+        // SVG-specific pixel sizes (control output via resize, not DPI)
+        $svgSizes = [
+            32 => ['width' => 32, 'height' => 32],     // preview
+            320 => ['width' => 400, 'height' => 400],  // thumb
+            1024 => ['width' => 1600, 'height' => 1600], // medium
+            4096 => ['width' => 4096, 'height' => 4096], // large
+        ];
+        $configWidth = $styleConfig['width'] ?? 1024;
+        $svgTarget = $svgSizes[$configWidth] ?? ['width' => min(4096, $configWidth), 'height' => min(4096, $configWidth)];
+
+        $start = microtime(true);
+
         $imagick = new \Imagick();
         $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
-        // High DPI for SVG: vector→raster pixel size = (viewBox_units * density) / 72.
-        // At 300 DPI a 100×100 viewBox yields ~417px; scaling up causes blur.
-        // Use 2880 DPI so typical logos (100–200pt) render at 4000+ px from the start.
-        $imagick->setResolution(2880, 2880);
+        $imagick->setResolution(300, 300);
         $imagick->readImage($sourcePath);
         $imagick->setIteratorIndex(0);
         $imagick = $imagick->getImage();
@@ -862,27 +873,12 @@ class ThumbnailGenerationService
             throw new \RuntimeException('SVG rendered with invalid dimensions');
         }
 
-        // Render at LARGE base width (minimum 4096px) before downscaling to target
-        $baseMinWidth = 4096;
-        if ($sourceWidth < $baseMinWidth || $sourceHeight < $baseMinWidth) {
-            $scale = $baseMinWidth / max($sourceWidth, $sourceHeight, 1);
-            $largeWidth = (int) round($sourceWidth * $scale);
-            $largeHeight = (int) round($sourceHeight * $scale);
-            $imagick->resizeImage($largeWidth, $largeHeight, \Imagick::FILTER_LANCZOS, 1, true);
-            $imagick->setIteratorIndex(0);
-            $imagick = $imagick->getImage();
-        }
-
-        $targetWidth = $styleConfig['width'] ?? 1024;
-        $targetHeight = $styleConfig['height'] ?? 1024;
         $fit = $styleConfig['fit'] ?? 'contain';
-        $currentWidth = $imagick->getImageWidth();
-        $currentHeight = $imagick->getImageHeight();
         [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
-            $currentWidth,
-            $currentHeight,
-            $targetWidth,
-            $targetHeight,
+            $sourceWidth,
+            $sourceHeight,
+            $svgTarget['width'],
+            $svgTarget['height'],
             $fit
         );
 
@@ -902,16 +898,18 @@ class ThumbnailGenerationService
         $imagick->clear();
         $imagick->destroy();
 
+        $duration = microtime(true) - $start;
+
         if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
             throw new \RuntimeException('SVG rasterization produced empty output');
         }
 
-        Log::info('[ThumbnailGenerationService] SVG rasterized to thumbnail', [
-            'source_path' => $sourcePath,
-            'thumb_path' => $thumbPath,
-            'thumb_width' => $thumbWidth,
-            'thumb_height' => $thumbHeight,
+        Log::info('[SVG Raster]', [
+            'asset_id' => $styleConfig['_asset_id'] ?? null,
+            'duration' => round($duration, 3),
+            'width' => $thumbWidth,
         ]);
+
         return $thumbPath;
     }
 

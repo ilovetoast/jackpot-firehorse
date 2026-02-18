@@ -141,28 +141,23 @@ class GenerateThumbnailsJob implements ShouldQueue
             // we should set it to a terminal state (FAILED) before proceeding to prevent stuck state
             // This handles the case where a job was interrupted and left PROCESSING
             if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
+                $timeoutMinutes = (int) config('assets.thumbnail.timeout_minutes', 5);
                 PipelineLogger::warning('THUMBNAILS: DETECTED STUCK PROCESSING', [
                     'asset_id' => $asset->id,
                     'thumbnail_started_at' => $asset->thumbnail_started_at?->toIso8601String() ?? 'null',
                 ]);
                 
-                // Check if processing started too long ago (5 minutes = timeout)
                 $startedAt = $asset->thumbnail_started_at;
-                // Use Carbon's diffInMinutes - if startedAt is in the past, this returns positive number
-                // The second parameter (false) means absolute difference (always positive)
                 $minutesElapsed = $startedAt ? now()->diffInMinutes($startedAt, false) : 0;
                 PipelineLogger::warning('THUMBNAILS: CHECKING TIMEOUT', [
                     'asset_id' => $asset->id,
                     'started_at' => $startedAt?->toIso8601String() ?? 'null',
                     'minutes_elapsed' => $minutesElapsed,
-                    'threshold' => 5,
+                    'threshold' => $timeoutMinutes,
                     'is_past' => $startedAt ? $startedAt->isPast() : 'null',
                     'now' => now()->toIso8601String(),
                 ]);
-                if ($startedAt && $startedAt->isPast() && $minutesElapsed > 5) {
-                    // Processing started more than 5 minutes ago - likely stuck
-                    // TASK 2: Set to FAILED (terminal state) instead of PENDING
-                    // This ensures we never leave PROCESSING forever
+                if ($startedAt && $startedAt->isPast() && $minutesElapsed > $timeoutMinutes) {
                     PipelineLogger::warning('THUMBNAILS: TIMEOUT DETECTED - SETTING FAILED', [
                         'asset_id' => $asset->id,
                         'started_at' => $startedAt->toIso8601String(),
@@ -175,7 +170,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                     ]);
                     $asset->update([
                         'thumbnail_status' => ThumbnailStatus::FAILED,
-                        'thumbnail_error' => 'Thumbnail generation timed out (processing started more than 5 minutes ago)',
+                        'thumbnail_error' => "Thumbnail generation timed out (processing started more than {$timeoutMinutes} minutes ago)",
                         'thumbnail_started_at' => null,
                     ]);
                     // Return early - asset is now in terminal state (FAILED)

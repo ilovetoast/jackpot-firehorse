@@ -152,6 +152,14 @@ return [
         'max_retries' => env('THUMBNAIL_MAX_RETRIES', 3),
 
         /*
+         * Timeout for thumbnail generation (minutes). Assets stuck in PROCESSING longer
+         * than this are marked FAILED by ThumbnailTimeoutGuard.
+         * SVG/PDF use a longer timeout (svg_timeout_minutes) due to rasterization cost.
+         */
+        'timeout_minutes' => env('THUMBNAIL_TIMEOUT_MINUTES', 5),
+        'svg_timeout_minutes' => env('THUMBNAIL_SVG_TIMEOUT_MINUTES', 12),
+
+        /*
          * PDF thumbnail generation limits and safety guards.
          * These limits prevent resource exhaustion from large or malformed PDFs.
          */

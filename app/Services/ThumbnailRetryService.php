@@ -188,10 +188,12 @@ class ThumbnailRetryService
             'metadata' => $metadata,
         ];
         
-        // Reset SKIPPED status to PENDING to allow regeneration
-        if ($asset->thumbnail_status === ThumbnailStatus::SKIPPED) {
+        // Reset SKIPPED or FAILED status to PENDING to allow regeneration
+        if ($asset->thumbnail_status === ThumbnailStatus::SKIPPED || $asset->thumbnail_status === ThumbnailStatus::FAILED) {
             $updateData['thumbnail_status'] = ThumbnailStatus::PENDING;
             $updateData['thumbnail_error'] = null;
+            unset($metadata['thumbnail_timeout'], $metadata['thumbnail_timeout_at'], $metadata['thumbnail_timeout_reason']);
+            $updateData['metadata'] = $metadata;
         }
         
         $asset->update($updateData);

@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
  * 
  * Enforces hard terminal states for thumbnail generation by detecting
  * and automatically failing assets that have been stuck in processing
- * for longer than the timeout threshold (5 minutes).
+ * for longer than the timeout threshold.
  * 
  * This prevents infinite processing states where assets remain in
  * thumbnail_status = processing forever.
@@ -30,10 +30,17 @@ use Illuminate\Support\Facades\Log;
 class ThumbnailTimeoutGuard
 {
     /**
-     * Timeout threshold in minutes.
-     * Assets processing longer than this will be marked as FAILED.
+     * Default timeout threshold in minutes (fallback).
      */
-    protected const TIMEOUT_MINUTES = 5;
+    protected const DEFAULT_TIMEOUT_MINUTES = 5;
+
+    /**
+     * Get timeout in minutes for an asset.
+     */
+    protected function getTimeoutMinutes(?Asset $asset = null): int
+    {
+        return (int) config('assets.thumbnail.timeout_minutes', self::DEFAULT_TIMEOUT_MINUTES);
+    }
 
     /**
      * Check and repair stuck assets.
@@ -51,29 +58,30 @@ class ThumbnailTimeoutGuard
         if ($asset) {
             // Check single asset
             if ($this->isStuck($asset)) {
-                $this->markAsFailed($asset, 'Thumbnail generation timed out after ' . self::TIMEOUT_MINUTES . ' minutes');
+                $timeout = $this->getTimeoutMinutes($asset);
+                $this->markAsFailed($asset, "Thumbnail generation timed out after {$timeout} minutes", $timeout);
                 $repairedCount = 1;
             }
         } else {
-            // Check all stuck assets
-            // Include assets with thumbnail_started_at OR assets without it (fallback to created_at)
+            // Check all stuck assets - use shortest timeout (5 min) so we catch all candidates
+            $queryTimeout = $this->getTimeoutMinutes(null);
             $stuckAssets = Asset::where('thumbnail_status', ThumbnailStatus::PROCESSING)
-                ->where(function ($query) {
-                    // Assets with thumbnail_started_at older than timeout
+                ->where(function ($query) use ($queryTimeout) {
                     $query->whereNotNull('thumbnail_started_at')
-                        ->where('thumbnail_started_at', '<', now()->subMinutes(self::TIMEOUT_MINUTES))
-                        // OR assets without thumbnail_started_at but created more than timeout ago
-                        // (fallback for assets that started processing before thumbnail_started_at was added)
-                        ->orWhere(function ($q) {
+                        ->where('thumbnail_started_at', '<', now()->subMinutes($queryTimeout))
+                        ->orWhere(function ($q) use ($queryTimeout) {
                             $q->whereNull('thumbnail_started_at')
-                                ->where('created_at', '<', now()->subMinutes(self::TIMEOUT_MINUTES));
+                                ->where('created_at', '<', now()->subMinutes($queryTimeout));
                         });
                 })
                 ->get();
             
             foreach ($stuckAssets as $stuckAsset) {
-                $this->markAsFailed($stuckAsset, 'Thumbnail generation timed out after ' . self::TIMEOUT_MINUTES . ' minutes');
-                $repairedCount++;
+                if ($this->isStuck($stuckAsset)) {
+                    $timeout = $this->getTimeoutMinutes($stuckAsset);
+                    $this->markAsFailed($stuckAsset, "Thumbnail generation timed out after {$timeout} minutes", $timeout);
+                    $repairedCount++;
+                }
             }
         }
         
@@ -84,33 +92,32 @@ class ThumbnailTimeoutGuard
      * Check if an asset is stuck in processing.
      * 
      * @param Asset $asset
+     * @param int|null $timeoutMinutes Override timeout (uses asset-specific default if null)
      * @return bool True if asset is stuck (processing longer than timeout)
      */
-    public function isStuck(Asset $asset): bool
+    public function isStuck(Asset $asset, ?int $timeoutMinutes = null): bool
     {
         if ($asset->thumbnail_status !== ThumbnailStatus::PROCESSING) {
             return false;
         }
         
+        $timeout = $timeoutMinutes ?? $this->getTimeoutMinutes($asset);
+        
         if (!$asset->thumbnail_started_at) {
-            // No start time recorded - consider it stuck if it's been processing for a while
-            // Use created_at as fallback (asset was created when processing started)
             $startTime = $asset->created_at;
         } else {
             $startTime = $asset->thumbnail_started_at;
         }
         
-        // Ensure $startTime is a Carbon instance (handle case where it might be a string)
         if (!$startTime) {
             return false;
         }
         
-        // Convert to Carbon if it's a string (defensive programming)
         if (is_string($startTime)) {
             $startTime = \Carbon\Carbon::parse($startTime);
         }
         
-        return $startTime->lt(now()->subMinutes(self::TIMEOUT_MINUTES));
+        return $startTime->lt(now()->subMinutes($timeout));
     }
 
     /**
@@ -118,13 +125,14 @@ class ThumbnailTimeoutGuard
      * 
      * @param Asset $asset
      * @param string $errorMessage
+     * @param int $timeoutMinutes
      */
-    protected function markAsFailed(Asset $asset, string $errorMessage): void
+    protected function markAsFailed(Asset $asset, string $errorMessage, int $timeoutMinutes = 5): void
     {
         Log::warning('[ThumbnailTimeoutGuard] Marking stuck asset as FAILED', [
             'asset_id' => $asset->id,
             'thumbnail_started_at' => $asset->thumbnail_started_at?->toIso8601String(),
-            'timeout_minutes' => self::TIMEOUT_MINUTES,
+            'timeout_minutes' => $timeoutMinutes,
             'error' => $errorMessage,
         ]);
         
@@ -148,7 +156,7 @@ class ThumbnailTimeoutGuard
                 [
                     'error' => $errorMessage,
                     'reason' => 'timeout',
-                    'timeout_minutes' => self::TIMEOUT_MINUTES,
+                    'timeout_minutes' => $timeoutMinutes,
                 ]
             );
         } catch (\Exception $e) {
