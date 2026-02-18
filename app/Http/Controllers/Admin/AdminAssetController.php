@@ -24,8 +24,8 @@ use App\Services\SystemIncidentRecoveryService;
 use App\Services\TenantBucketService;
 use App\Services\ThumbnailRetryService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -264,9 +264,10 @@ class AdminAssetController extends Controller
     /**
      * GET /app/admin/assets/{asset}/download-source
      *
-     * Admin-only download of the source file. Redirects to presigned S3 URL.
+     * Admin-only download of the source file. Streams from S3 through the backend
+     * to avoid cross-tenant IAM issues with presigned URLs.
      */
-    public function downloadSource(string $asset): RedirectResponse
+    public function downloadSource(string $asset): Response
     {
         $this->authorizeAdmin();
 
@@ -278,11 +279,37 @@ class AdminAssetController extends Controller
         $bucketService = app(TenantBucketService::class);
         $bucket = $model->storageBucket
             ?? $bucketService->resolveActiveBucketOrFail($model->tenant);
-        $filename = $model->original_filename ?? basename($model->storage_root_path);
-        $disposition = 'attachment; filename="' . addcslashes($filename, '"\\') . '"';
-        $signedUrl = $bucketService->getPresignedGetUrl($bucket, $model->storage_root_path, 15, $disposition);
+        $s3Client = $bucketService->getS3Client();
 
-        return redirect($signedUrl);
+        try {
+            $result = $s3Client->getObject([
+                'Bucket' => $bucket->name,
+                'Key' => $model->storage_root_path,
+            ]);
+        } catch (\Aws\S3\Exception\S3Exception $e) {
+            if ($e->getStatusCode() === 404) {
+                abort(404, 'Source file not found in storage. It may have been deleted or never promoted.');
+            }
+            throw $e;
+        }
+
+        $filename = $model->original_filename ?? basename($model->storage_root_path);
+        $contentType = $result['ContentType'] ?? 'application/octet-stream';
+        $contentLength = $result['ContentLength'] ?? 0;
+        $disposition = 'attachment; filename="' . addcslashes($filename, '"\\') . '"';
+
+        return response()->stream(function () use ($result) {
+            $body = $result['Body'];
+            while (!$body->eof()) {
+                echo $body->read(8192);
+                flush();
+            }
+        }, 200, [
+            'Content-Type' => $contentType,
+            'Content-Length' => $contentLength,
+            'Content-Disposition' => $disposition,
+            'Cache-Control' => 'private, no-cache',
+        ]);
     }
 
     /**

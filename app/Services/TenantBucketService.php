@@ -402,6 +402,14 @@ class TenantBucketService
         ]);
     }
 
+    /**
+     * Get the S3 client instance. Used by controllers that need to stream objects.
+     */
+    public function getS3Client(): S3Client
+    {
+        return $this->s3Client ?? $this->createS3Client();
+    }
+
     protected function createS3Client(): S3Client
     {
         if (! class_exists(S3Client::class)) {

@@ -106,6 +106,15 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         {asset?.thumbnail_status}
                                     </span>
                                 </div>
+                                <div><span className="text-slate-500">Deleted</span><br />
+                                    {asset?.deleted_at ? (
+                                        <span className="rounded px-2 py-0.5 text-xs bg-red-100 text-red-800">
+                                            Yes — {new Date(asset.deleted_at).toLocaleString()}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-600">No</span>
+                                    )}
+                                </div>
                             </div>
                             <div className="flex flex-wrap gap-2 pt-4">
                                 <button
