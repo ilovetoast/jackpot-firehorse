@@ -29,13 +29,17 @@ function IncidentRow({ incident: i, onAction }) {
                 if (data.ticket_id) {
                     router.visit(`/app/admin/support/tickets/${data.ticket_id}`)
                 } else if (!data.created) {
-                    alert('Could not create ticket. A ticket may already exist for this asset, or the incident may be resolved.')
+                    const msg = data.error
+                        ? `Could not create ticket: ${data.error}`
+                        : 'Could not create ticket. A ticket may already exist for this asset, or the incident may be resolved.'
+                    alert(msg)
                 }
             }
         } catch (e) {
             console.error(e)
             if (action === 'create-ticket') {
-                alert('Failed to create ticket. Please try again.')
+                const msg = e?.response?.data?.error || e?.message || 'Failed to create ticket. Please try again.'
+                alert(msg)
             }
         } finally {
             setLoading(null)

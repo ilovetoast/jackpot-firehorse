@@ -45,12 +45,25 @@ class IncidentActionsController extends Controller
     {
         $this->authorizeAdmin();
 
-        $ticket = $recoveryService->createTicket($incident);
+        try {
+            $ticket = $recoveryService->createTicket($incident);
 
-        return response()->json([
-            'created' => $ticket !== null,
-            'ticket_id' => $ticket?->id,
-        ]);
+            return response()->json([
+                'created' => $ticket !== null,
+                'ticket_id' => $ticket?->id,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('[IncidentActionsController] createTicket failed', [
+                'incident_id' => $incident->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'created' => false,
+                'ticket_id' => null,
+                'error' => $e->getMessage(),
+            ], 200);
+        }
     }
 
     public function resolve(SystemIncident $incident, SystemIncidentRecoveryService $recoveryService): JsonResponse

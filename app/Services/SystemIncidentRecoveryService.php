@@ -109,12 +109,17 @@ class SystemIncidentRecoveryService
             return null;
         }
 
+        $tenantId = $asset?->tenant_id ?? $incident->tenant_id;
+        if ($tenantId && !\App\Models\Tenant::where('id', $tenantId)->exists()) {
+            $tenantId = null;
+        }
+
         try {
-            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severity, $creator) {
+            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severity, $creator, $tenantId) {
                 $ticket = Ticket::create([
                     'type' => TicketType::INTERNAL,
                     'status' => TicketStatus::OPEN,
-                    'tenant_id' => $asset?->tenant_id ?? $incident->tenant_id,
+                    'tenant_id' => $tenantId,
                     'created_by_user_id' => $creator->id,
                     'assigned_team' => \App\Enums\TicketTeam::ENGINEERING,
                     'severity' => $severity,
@@ -154,8 +159,9 @@ class SystemIncidentRecoveryService
             Log::error('[SystemIncidentRecoveryService] Failed to create ticket', [
                 'incident_id' => $incident->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
-            return null;
+            throw $e;
         }
     }
 
