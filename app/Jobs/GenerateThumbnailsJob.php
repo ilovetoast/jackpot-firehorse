@@ -760,15 +760,19 @@ class GenerateThumbnailsJob implements ShouldQueue
                 
                 // Sanitize error message for user display (remove technical details)
                 $userFriendlyError = $this->sanitizeErrorMessage($errorMessage);
-                
-                // TASK 2: Terminal state guarantee - ALWAYS set FAILED in catch block
+
+                // P2: Never leave failed if thumbnails exist — overwrite with completed
+                $existingThumbnails = $asset->metadata['thumbnails'] ?? [];
+                $hasThumbnails = !empty($existingThumbnails) && is_array($existingThumbnails);
+
+                // TASK 2: Terminal state guarantee - ALWAYS set FAILED in catch block (unless thumbnails exist)
                 // This prevents assets from remaining in PROCESSING forever
                 // CRITICAL: Use direct property assignment + save() to ensure commit
                 // Even if we re-throw for retry, we set FAILED now as a safety guard
                 // If the job retries and succeeds, it will set COMPLETED (overriding FAILED)
                 // If it retries and fails again, at least we have a terminal state
-                $asset->thumbnail_status = ThumbnailStatus::FAILED;
-                $asset->thumbnail_error = $userFriendlyError;
+                $asset->thumbnail_status = $hasThumbnails ? ThumbnailStatus::COMPLETED : ThumbnailStatus::FAILED;
+                $asset->thumbnail_error = $hasThumbnails ? null : $userFriendlyError;
                 $asset->thumbnail_started_at = null;
                 $asset->save(); // Explicit save to ensure commit before re-throw
                 

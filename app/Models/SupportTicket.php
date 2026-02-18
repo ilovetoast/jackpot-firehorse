@@ -47,12 +47,16 @@ class SupportTicket extends Model
      */
     protected $fillable = [
         'alert_candidate_id',
+        'source_type',
+        'source_id',
         'summary',
         'description',
         'severity',
         'status',
         'source',
         'external_reference',
+        'payload',
+        'auto_created',
     ];
 
     /**
@@ -64,7 +68,14 @@ class SupportTicket extends Model
     {
         return [
             'alert_candidate_id' => 'integer',
+            'payload' => 'array',
+            'auto_created' => 'boolean',
         ];
+    }
+
+    public function asset(): BelongsTo
+    {
+        return $this->belongsTo(Asset::class, 'source_id', 'id');
     }
 
     /**

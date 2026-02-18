@@ -232,6 +232,22 @@ class PromoteAssetJob implements ShouldQueue
                     'error' => $e->getMessage(),
                 ]);
             }
+
+            // P1: Invoke reconciliation at end of chain (last job)
+            try {
+                $result = app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+                if ($result['updated']) {
+                    Log::info('[PromoteAssetJob] Reconciliation applied', [
+                        'asset_id' => $asset->id,
+                        'changes' => $result['changes'],
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('[PromoteAssetJob] Reconciliation failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         } catch (\Exception $e) {
             Log::error('Asset promotion failed', [
                 'asset_id' => $asset->id,

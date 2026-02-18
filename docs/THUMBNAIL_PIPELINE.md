@@ -111,17 +111,13 @@ The `ThumbnailTimeoutGuard` service:
 
 ### Repairing Stuck Assets
 
-Use the Artisan command to manually repair stuck assets:
+All reconciliation happens automatically via:
 
-```bash
-php artisan thumbnails:repair-stuck
-```
+- **AssetStateReconciliationService** — invoked at end of pipeline, in getIncidents, in retry-processing, and in assets:watchdog
+- **assets:watchdog** — detects stuck assets and records incidents; auto-creates SupportTickets when needed
+- **Admin Support Ticket resolve-and-reconcile** — POST /admin/support-tickets/{id}/resolve-and-reconcile
 
-Or with dry-run to preview:
-
-```bash
-php artisan thumbnails:repair-stuck --dry-run
-```
+Do NOT manually update asset state in the database. Use the reconciliation flow or ticket resolution endpoint.
 
 ## UI Behavior
 

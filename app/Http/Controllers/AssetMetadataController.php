@@ -1161,6 +1161,13 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
+        // P1: Reconcile before returning incidents
+        try {
+            app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+        } catch (\Throwable $e) {
+            // Non-blocking
+        }
+
         $incidents = SystemIncident::whereNull('resolved_at')
             ->where(function ($q) use ($asset) {
                 $q->where('source_type', 'asset')->where('source_id', $asset->id)
@@ -1225,7 +1232,96 @@ class AssetMetadataController extends Controller
 
         ProcessAssetJob::dispatch($asset->id);
 
+        // P1: Reconcile after retry-processing
+        try {
+            app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+        } catch (\Throwable $e) {
+            // Non-blocking
+        }
+
         return response()->json(['status' => 'queued']);
+    }
+
+    /**
+     * Submit support ticket for asset with full diagnostic payload.
+     * POST /assets/{asset}/submit-ticket
+     */
+    public function submitTicket(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $incidents = SystemIncident::whereNull('resolved_at')
+            ->where(function ($q) use ($asset) {
+                $q->where('source_type', 'asset')->where('source_id', $asset->id)
+                    ->orWhere(function ($q2) use ($asset) {
+                        $q2->where('source_type', 'job')->where('source_id', $asset->id);
+                    });
+            })
+            ->orderBy('detected_at', 'desc')
+            ->get(['id', 'severity', 'title'])
+            ->map(fn ($i) => ['id' => $i->id, 'severity' => $i->severity, 'title' => $i->title])
+            ->toArray();
+
+        $lastFailedJob = \Illuminate\Support\Facades\DB::table('failed_jobs')
+            ->where('payload', 'like', '%' . $asset->id . '%')
+            ->orderBy('failed_at', 'desc')
+            ->first();
+
+        $metadata = $asset->metadata ?? [];
+        $payload = [
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'analysis_status' => $asset->analysis_status ?? 'uploading',
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+            'thumbnail_error' => $asset->thumbnail_error,
+            'metadata' => [
+                'pipeline_completed_at' => $metadata['pipeline_completed_at'] ?? null,
+                'thumbnail_timeout' => $metadata['thumbnail_timeout'] ?? null,
+                'thumbnail_timeout_reason' => $metadata['thumbnail_timeout_reason'] ?? null,
+            ],
+            'thumbnail_retry_count' => $metadata['thumbnail_retry_count'] ?? 0,
+            'recent_incidents' => $incidents,
+            'last_failed_job' => $lastFailedJob ? [
+                'id' => $lastFailedJob->id,
+                'failed_at' => $lastFailedJob->failed_at,
+            ] : null,
+        ];
+
+        $maxSeverity = 'info';
+        foreach ($incidents as $i) {
+            if (($i['severity'] ?? '') === 'critical') {
+                $maxSeverity = 'critical';
+                break;
+            }
+            if (($i['severity'] ?? '') === 'error') {
+                $maxSeverity = 'warning';
+            }
+        }
+
+        $ticket = \App\Models\SupportTicket::create([
+            'source_type' => 'asset',
+            'source_id' => $asset->id,
+            'summary' => "Asset processing issue: {$asset->title}",
+            'description' => "User-submitted support ticket for asset {$asset->id} with processing issues.",
+            'severity' => $maxSeverity,
+            'status' => 'open',
+            'source' => 'manual',
+            'payload' => $payload,
+            'auto_created' => false,
+        ]);
+
+        return response()->json([
+            'status' => 'created',
+            'ticket_id' => $ticket->id,
+        ]);
     }
 
     /**

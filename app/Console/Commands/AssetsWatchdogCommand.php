@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Asset;
+use App\Models\SupportTicket;
 use App\Services\SystemIncidentService;
 use Illuminate\Console\Command;
 
@@ -30,6 +31,17 @@ class AssetsWatchdogCommand extends Command
         $recorded = 0;
 
         foreach ($stuck as $asset) {
+            // P1: Reconcile before recording incident
+            try {
+                app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+                $asset->refresh();
+                if (!in_array($asset->analysis_status, ['uploading', 'generating_thumbnails'], true)) {
+                    continue;
+                }
+            } catch (\Throwable $e) {
+                // Continue to record incident
+            }
+
             $metadata = $asset->metadata ?? [];
             $uniqueSignature = "asset_stuck:{$asset->id}:{$asset->analysis_status}:" . ($asset->updated_at?->timestamp ?? 0);
 
@@ -64,6 +76,47 @@ class AssetsWatchdogCommand extends Command
             $incident = $incidentService->recordIfNotExists($basePayload);
             if ($incident) {
                 $recorded++;
+
+                // P6: Auto-create SupportTicket if stuck and no open ticket exists
+                $signature = "asset_stalled:{$asset->id}";
+                $hasOpenTicket = SupportTicket::where('source_type', 'asset')
+                    ->where('source_id', $asset->id)
+                    ->whereIn('status', ['open', 'in_progress'])
+                    ->exists();
+
+                if (!$hasOpenTicket) {
+                    try {
+                        $metadata = $asset->metadata ?? [];
+                        $payload = [
+                            'asset_id' => $asset->id,
+                            'tenant_id' => $asset->tenant_id,
+                            'brand_id' => $asset->brand_id,
+                            'analysis_status' => $asset->analysis_status,
+                            'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+                            'thumbnail_error' => $asset->thumbnail_error,
+                            'metadata' => [
+                                'pipeline_completed_at' => $metadata['pipeline_completed_at'] ?? null,
+                                'thumbnail_timeout' => $metadata['thumbnail_timeout'] ?? null,
+                                'thumbnail_timeout_reason' => $metadata['thumbnail_timeout_reason'] ?? null,
+                            ],
+                            'unique_signature' => $signature,
+                        ];
+
+                        SupportTicket::create([
+                            'source_type' => 'asset',
+                            'source_id' => $asset->id,
+                            'summary' => "Asset stalled: {$asset->title}",
+                            'description' => "Auto-created by assets:watchdog. Asset stuck in {$asset->analysis_status}.",
+                            'severity' => $asset->analysis_status === 'uploading' ? 'critical' : 'warning',
+                            'status' => 'open',
+                            'source' => 'system',
+                            'payload' => $payload,
+                            'auto_created' => true,
+                        ]);
+                    } catch (\Throwable $e) {
+                        $this->warn("Failed to create auto-ticket for asset {$asset->id}: {$e->getMessage()}");
+                    }
+                }
             }
         }
 

@@ -14,7 +14,7 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { resolve, isExcludedFromGenericLoop, isDominantColorsSwatches, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
-export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null, primaryColor }) {
+export default function AssetMetadataDisplay({ assetId, onPendingCountChange, collectionDisplay = null, primaryColor, suppressAnalysisRunningBanner = false }) {
     const { auth } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const badgeBg = brandPrimary.startsWith('#') ? `${brandPrimary}18` : `#${brandPrimary}18`
@@ -260,7 +260,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 </div>
             )}
             <div>
-                {!metadataHealth?.is_complete && metadataHealth && (
+                {!suppressAnalysisRunningBanner && !metadataHealth?.is_complete && metadataHealth && (
                     <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
                         <div className="font-medium text-amber-800">
                             System analysis still running
@@ -278,7 +278,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         </button>
                     </div>
                 )}
-                {evaluationStatus === 'evaluated' && analysisStatus !== 'complete' && (
+                {!suppressAnalysisRunningBanner && evaluationStatus === 'evaluated' && analysisStatus !== 'complete' && (
                     <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
                         <p className="text-sm font-medium text-amber-800">System inconsistency detected — re-run analysis</p>
                         <p className="text-xs text-amber-700 mt-1">The compliance score may be stale. Re-run analysis to resolve.</p>
@@ -292,7 +292,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         </button>
                     </div>
                 )}
-                {analysisStatus === 'complete' && evaluationStatus === 'pending_processing' && (
+                {!suppressAnalysisRunningBanner && analysisStatus === 'complete' && evaluationStatus === 'pending_processing' && (
                     <div className="mb-3">
                         <p className="text-xs text-gray-500 italic mb-2">Compliance will run once asset processing is complete.</p>
                         <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-xs space-y-2">
@@ -307,7 +307,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         </div>
                     </div>
                 )}
-                {analysisStatus === 'complete' && evaluationStatus === 'pending' && (
+                {!suppressAnalysisRunningBanner && analysisStatus === 'complete' && evaluationStatus === 'pending' && (
                     <div className="mb-3 flex items-center gap-2">
                         <Activity className="h-4 w-4 text-indigo-500 animate-pulse" aria-hidden />
                         <p className="text-xs text-gray-500 italic">Analyzing brand alignment...</p>

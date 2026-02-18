@@ -1167,13 +1167,25 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                             {retryProcessingLoading ? 'Retrying…' : 'Retry Processing'}
                                         </button>
                                     )}
-                                    <a
-                                        href="/app/support/tickets/create"
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            try {
+                                                const res = await window.axios.post(`/app/assets/${displayAsset.id}/submit-ticket`)
+                                                if (res.data?.ticket_id) {
+                                                    setAssetIncidents([])
+                                                    if (onAssetUpdate) onAssetUpdate()
+                                                    router.reload({ only: ['assets'] })
+                                                }
+                                            } catch (e) {
+                                                // Ignore
+                                            }
+                                        }}
                                         className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
                                     >
                                         <TicketIcon className="h-3.5 w-3.5 mr-1" />
                                         Submit Support Ticket
-                                    </a>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1823,6 +1835,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 assetId={displayAsset.id} 
                                 onPendingCountChange={setPendingMetadataCount}
                                 primaryColor={brandPrimary}
+                                suppressAnalysisRunningBanner={assetIncidents?.length > 0}
                                 collectionDisplay={{
                                     collections: assetCollections,
                                     loading: assetCollectionsLoading,
