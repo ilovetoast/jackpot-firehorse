@@ -846,7 +846,10 @@ class ThumbnailGenerationService
     {
         $imagick = new \Imagick();
         $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
-        $imagick->setResolution(300, 300);
+        // High DPI for SVG: vector→raster pixel size = (viewBox_units * density) / 72.
+        // At 300 DPI a 100×100 viewBox yields ~417px; scaling up causes blur.
+        // Use 2880 DPI so typical logos (100–200pt) render at 4000+ px from the start.
+        $imagick->setResolution(2880, 2880);
         $imagick->readImage($sourcePath);
         $imagick->setIteratorIndex(0);
         $imagick = $imagick->getImage();
