@@ -198,7 +198,7 @@ export default function BulkMetadataEditModal({
                             credentials: 'same-origin',
                         })
                         const data = await res.json()
-                        const currentCollectionIds = (data.collections || []).map((c) => c.id)
+                        const currentCollectionIds = (data.collections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)
                         const newCollectionIds = operationType === 'clear' ? [] : selectedCollectionIds
                         const willChange = JSON.stringify(currentCollectionIds.sort()) !== JSON.stringify(newCollectionIds.sort())
 

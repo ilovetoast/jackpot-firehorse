@@ -20,7 +20,7 @@ export function BucketProvider({ children }) {
         })
             .then((r) => r.ok ? r.json() : Promise.reject(new Error('Failed to load bucket')))
             .then((data) => {
-                const ids = (data.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+                const ids = (data.items || []).filter(Boolean).map((i) => (typeof i === 'string' ? i : i?.id)).filter(Boolean)
                 setBucketAssetIds(ids)
             })
             .catch(() => setBucketAssetIds([]))
@@ -31,7 +31,7 @@ export function BucketProvider({ children }) {
     }, [fetchBucket])
 
     const applyBucketResponse = useCallback((data) => {
-        const ids = (data?.items || []).map((i) => (typeof i === 'string' ? i : i.id))
+        const ids = (data?.items || []).filter(Boolean).map((i) => (typeof i === 'string' ? i : i?.id)).filter(Boolean)
         setBucketAssetIds(ids)
     }, [])
 

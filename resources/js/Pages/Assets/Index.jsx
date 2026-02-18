@@ -135,7 +135,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
 
     const bucketAdd = useCallback((assetId) => {
         return ctxBucketAdd(assetId).then((data) => {
-            const ids = (data?.items || [])?.map((i) => (typeof i === 'string' ? i : i.id))
+            const ids = (data?.items || []).filter(Boolean).map((i) => (typeof i === 'string' ? i : i?.id)).filter(Boolean)
             if (ids && !ids.includes(assetId)) {
                 setBucketAddFeedback("This asset can't be added to the download (it may not be published yet).")
                 setTimeout(() => setBucketAddFeedback(null), 4000)

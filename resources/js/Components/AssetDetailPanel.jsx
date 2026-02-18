@@ -194,7 +194,7 @@ export default function AssetDetailPanel({
         setAssetCollectionsLoading(true)
         window.axios
             .get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-            .then((res) => setAssetCollections(res.data?.collections ?? []))
+            .then((res) => setAssetCollections((res.data?.collections ?? []).filter(Boolean)))
             .catch(() => setAssetCollections([]))
             .finally(() => setAssetCollectionsLoading(false))
     }, [isOpen, asset?.id])
@@ -1167,7 +1167,7 @@ export default function AssetDetailPanel({
                                                                 ) : (
                                                                     <CollectionSelector
                                                                         collections={dropdownCollections}
-                                                                        selectedIds={assetCollections.map((c) => c.id)}
+                                                                        selectedIds={(assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)}
                                                                         onChange={async (newCollectionIds) => {
                                                                             if (!asset?.id || syncCollectionsLoading) return
                                                                             setSyncCollectionsLoading(true)
@@ -1178,10 +1178,10 @@ export default function AssetDetailPanel({
                                                                                     { headers: { Accept: 'application/json' } }
                                                                                 )
                                                                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
                                                                             } catch (err) {
                                                                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
                                                                             } finally {
                                                                                 setSyncCollectionsLoading(false)
                                                                             }

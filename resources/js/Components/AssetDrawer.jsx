@@ -325,7 +325,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     collections: res.data?.collections ?? [],
                     collections_count: (res.data?.collections ?? []).length,
                 })
-                setAssetCollections(res.data?.collections ?? [])
+                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
             })
             .catch((err) => {
                 // C9.1: DEBUG - Log error
@@ -349,7 +349,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         setDropdownCollectionsLoading(true)
         window.axios.get('/app/collections/list', { headers: { Accept: 'application/json' } })
             .then(res => {
-                setDropdownCollections(res.data?.collections ?? [])
+                setDropdownCollections((res.data?.collections ?? []).filter(Boolean))
             })
             .catch(() => setDropdownCollections([]))
             .finally(() => setDropdownCollectionsLoading(false))
@@ -1980,7 +1980,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                                 )
                                                                 // Refresh collections from backend to reflect truth
                                                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
                                                                 // Notify parent if callback provided
                                                                 const added = newCollectionIds.filter((id) => !(assetCollections || []).filter(Boolean).some((c) => c?.id === id))
                                                                 const removed = (assetCollections || []).filter(Boolean).filter((c) => !newCollectionIds.includes(c?.id)).map((c) => c?.id).filter(Boolean)
@@ -1997,7 +1997,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                                 setToastType('error')
                                                                 // Refresh to restore backend truth on error
                                                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                setAssetCollections(res.data?.collections ?? [])
+                                                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
                                                             } finally {
                                                                 setAddToCollectionLoading(false)
                                                             }
@@ -2054,7 +2054,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 )
                                 // Refresh collections from backend
                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                setAssetCollections(res.data?.collections ?? [])
+                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
                                 setToastMessage('Collection created and added to asset')
                                 setToastType('success')
                                 setTimeout(() => setToastMessage(null), 3000)
@@ -2064,7 +2064,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 setToastType('error')
                                 // Refresh to restore backend truth
                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                setAssetCollections(res.data?.collections ?? [])
+                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
                             } finally {
                                 setAddToCollectionLoading(false)
                             }

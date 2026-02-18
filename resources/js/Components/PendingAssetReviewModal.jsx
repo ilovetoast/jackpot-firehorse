@@ -377,7 +377,7 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
                 },
                 credentials: 'same-origin',
                 body: JSON.stringify({
-                    collection_ids: assetCollections.map((c) => c.id),
+                    collection_ids: (assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean),
                 }),
             })
         } catch (error) {
@@ -856,7 +856,7 @@ export default function PendingAssetReviewModal({ isOpen, onClose, initialAssetI
                                             ) : (
                                                 <CollectionSelector
                                                     collections={collectionsList}
-                                                    selectedIds={assetCollections.map((c) => c.id)}
+                                                    selectedIds={(assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)}
                                                     onChange={async (newCollectionIds) => {
                                                         if (processing) return
                                                         try {
