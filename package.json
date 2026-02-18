@@ -22,6 +22,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@heroicons/react": "^2.2.0",
         "@inertiajs/react": "^2.3.6",
+        "@uiw/react-json-view": "^2.0.0-alpha.41",
         "lucide-react": "^0.564.0",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",

@@ -37,6 +37,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
+import { trackImageLoad } from '../utils/performanceTracking'
 import FileTypeIcon from './FileTypeIcon'
 import AssetPlaceholder from './AssetPlaceholder'
 
@@ -186,9 +187,10 @@ export default function ThumbnailPreview({
        - Preview errors are NON-TERMINAL
        - Final errors are TERMINAL
     ------------------------------------------------------------ */
-    const handleImageLoad = () => {
+    const handleImageLoad = (e) => {
         setImageLoaded(true)
         setImageError(false)
+        trackImageLoad(e)
     }
 
     const handleImageError = () => {

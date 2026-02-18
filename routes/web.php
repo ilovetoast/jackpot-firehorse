@@ -84,6 +84,11 @@ Route::get('/csrf-token', function (Request $request) {
     return response()->json(['token' => csrf_token()]);
 })->middleware(['web']);
 
+// Performance client metrics (web + optional auth; guests can send, user_id will be null)
+Route::post('/app/admin/performance/client-metric', [\App\Http\Controllers\Admin\PerformanceController::class, 'clientMetric'])
+    ->middleware(['web'])
+    ->name('admin.performance.client-metric');
+
 Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(function () {
     // GET /app → redirect to dashboard (avoids 405 from OPTIONS catch-all matching path /app)
     Route::get('', fn () => redirect()->route('dashboard'))->name('app');
@@ -239,6 +244,14 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/admin/stripe-status', [\App\Http\Controllers\SiteAdminController::class, 'stripeStatus'])->name('admin.stripe-status');
     Route::get('/admin/documentation', [\App\Http\Controllers\SiteAdminController::class, 'documentation'])->name('admin.documentation');
     Route::get('/admin/system-status', [\App\Http\Controllers\Admin\SystemStatusController::class, 'index'])->name('admin.system-status');
+    Route::get('/admin/performance', [\App\Http\Controllers\Admin\PerformanceController::class, 'index'])->name('admin.performance.index');
+    Route::get('/admin/performance/api', [\App\Http\Controllers\Admin\PerformanceController::class, 'api'])->name('admin.performance.api');
+    Route::get('/admin/assets', [\App\Http\Controllers\Admin\AdminAssetController::class, 'index'])->name('admin.assets.index');
+    Route::post('/admin/assets/bulk-action', [\App\Http\Controllers\Admin\AdminAssetController::class, 'bulkAction'])->name('admin.assets.bulk-action');
+    Route::get('/admin/assets/{asset}', [\App\Http\Controllers\Admin\AdminAssetController::class, 'show'])->name('admin.assets.show');
+    Route::post('/admin/assets/{asset}/repair', [\App\Http\Controllers\Admin\AdminAssetController::class, 'repair'])->name('admin.assets.repair');
+    Route::post('/admin/assets/{asset}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restore'])->name('admin.assets.restore');
+    Route::post('/admin/assets/{asset}/retry-pipeline', [\App\Http\Controllers\Admin\AdminAssetController::class, 'retryPipeline'])->name('admin.assets.retry-pipeline');
     Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');
     Route::post('/admin/incidents/bulk-actions', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'bulkActions'])->name('admin.incidents.bulk-actions');
     Route::post('/admin/incidents/{incident}/attempt-repair', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'attemptRepair'])->name('admin.incidents.attempt-repair');

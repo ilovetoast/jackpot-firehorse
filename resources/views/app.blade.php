@@ -20,6 +20,7 @@
 
         <!-- Scripts -->
         @viteReactRefresh
+        <script>window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));</script>
     @vite('resources/js/app.jsx')
     @inertiaHead
     @routes

@@ -1,5 +1,8 @@
 import './bootstrap'
 import '../css/app.css'
+import { initPerformanceTracking } from './utils/performanceTracking'
+
+initPerformanceTracking()
 
 import { createInertiaApp } from '@inertiajs/react'
 import { createRoot } from 'react-dom/client'
