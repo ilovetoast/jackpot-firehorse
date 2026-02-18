@@ -6,7 +6,7 @@ use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
-use App\Services\SystemIncidentService;
+use App\Services\Reliability\ReliabilityEngine;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Bus\Queueable;
@@ -571,7 +571,7 @@ class PromoteAssetJob implements ShouldQueue
             'analysis_status' => 'promotion_failed',
         ]);
 
-        app(SystemIncidentService::class)->record([
+        app(ReliabilityEngine::class)->report([
             'source_type' => 'asset',
             'source_id' => $asset->id,
             'tenant_id' => $asset->tenant_id,

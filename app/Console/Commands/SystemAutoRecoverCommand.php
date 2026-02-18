@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\SystemIncident;
-use App\Services\SystemIncidentRecoveryService;
+use App\Services\Reliability\ReliabilityEngine;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -24,7 +24,7 @@ class SystemAutoRecoverCommand extends Command
     protected const MAX_INCIDENTS_PER_RUN = 200;
     protected const MAX_RECOVERIES_PER_RUN = 50;
 
-    public function handle(SystemIncidentRecoveryService $recoveryService): int
+    public function handle(ReliabilityEngine $reliabilityEngine): int
     {
         $incidents = SystemIncident::whereNull('resolved_at')
             ->orderBy('detected_at', 'asc')
@@ -41,14 +41,6 @@ class SystemAutoRecoverCommand extends Command
                 break;
             }
 
-            // Escalate: "Expected visual metadata missing" stuck >15 min → critical
-            if ($incident->title === 'Expected visual metadata missing' && $incident->detected_at) {
-                $minutesStuck = $incident->detected_at->diffInMinutes(now());
-                if ($minutesStuck >= 15 && strtolower($incident->severity ?? '') !== 'critical') {
-                    $incident->update(['severity' => 'critical']);
-                }
-            }
-
             Log::info('[SystemAutoRecover] Auto recovery attempt', [
                 'incident_id' => $incident->id,
                 'source_type' => $incident->source_type,
@@ -56,7 +48,7 @@ class SystemAutoRecoverCommand extends Command
                 'severity' => $incident->severity,
             ]);
 
-            $result = $recoveryService->attemptRepair($incident);
+            $result = $reliabilityEngine->attemptRecovery($incident);
 
             if ($result['resolved']) {
                 $resolved++;
@@ -75,27 +67,17 @@ class SystemAutoRecoverCommand extends Command
             ]);
             $incident->update(['metadata' => $metadata]);
 
-            // SLA: create ticket after 3 repair attempts, or per severity rules
-            $shouldCreateTicket = $recoveryService->shouldCreateTicketBySeverity($incident, $repairAttempts);
-            if ($shouldCreateTicket) {
-                $ticket = $recoveryService->createTicket($incident);
+            // SLA: create ticket per EscalationPolicy (critical→immediate, error→1 attempt, warning→3 attempts, age>15min escalates)
+            $ticket = $reliabilityEngine->escalate($incident);
                 if ($ticket) {
                     $ticketsCreated++;
                 }
             }
 
-            // Retry if retryable (for job) and not already retried this run
-            if ($incident->source_type === 'job' && $incident->retryable && !($metadata['retried'] ?? false)) {
-                if ($recoveryService->dispatchRetry($incident)) {
-                    $retriesDispatched++;
-                }
-            }
-
-            // For asset: retry if retryable
-            if ($incident->source_type === 'asset' && $incident->retryable && !($metadata['retried'] ?? false)) {
-                if ($recoveryService->dispatchRetry($incident)) {
-                    $retriesDispatched++;
-                }
+            // Retry dispatched by repair strategies during attemptRecovery
+            $incident->refresh();
+            if (($incident->metadata['retried'] ?? false) && !($metadata['retried'] ?? false)) {
+                $retriesDispatched++;
             }
 
             $processed++;

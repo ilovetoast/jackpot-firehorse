@@ -12,8 +12,8 @@ use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Models\Brand;
 use App\Services\Assets\AssetStateReconciliationService;
+use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
-use App\Services\SystemIncidentService;
 use App\Services\ThumbnailRetryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,7 +33,7 @@ class AdminAssetController extends Controller
     public function __construct(
         protected AssetStateReconciliationService $reconciliationService,
         protected SystemIncidentRecoveryService $recoveryService,
-        protected SystemIncidentService $incidentService,
+        protected ReliabilityEngine $reliabilityEngine,
         protected ThumbnailRetryService $thumbnailRetryService
     ) {}
 
@@ -482,7 +482,7 @@ class AdminAssetController extends Controller
                 if ($incident) {
                     $this->recoveryService->createTicket($incident);
                 } else {
-                    $this->incidentService->recordIfNotExists([
+                    $this->reliabilityEngine->report([
                         'source_type' => 'asset',
                         'source_id' => $asset->id,
                         'tenant_id' => $asset->tenant_id,

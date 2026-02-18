@@ -12,7 +12,7 @@ use App\Services\AutomaticMetadataWriter;
 use App\Services\Automation\ColorAnalysisService;
 use App\Services\Automation\DominantColorsExtractor;
 use App\Services\MetadataSchemaResolver;
-use App\Services\SystemIncidentService;
+use App\Services\Reliability\ReliabilityEngine;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -295,12 +295,12 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             // Severity escalation: warning → error (repeated) → critical (timeout+no dims, or stuck >15min)
             if ($asset->supportsThumbnailMetadata() && !$asset->visualMetadataReady()) {
                 try {
-                    $severity = $this->computeVisualMetadataIncidentSeverity($asset);
-                    app(SystemIncidentService::class)->recordIfNotExists([
+                    app(ReliabilityEngine::class)->report([
                         'source_type' => 'asset',
                         'source_id' => $asset->id,
                         'tenant_id' => $asset->tenant_id,
-                        'severity' => $severity,
+                        'context' => 'visual_metadata_missing',
+                        'asset_id' => $asset->id,
                         'title' => 'Expected visual metadata missing',
                         'message' => 'Thumbnail path exists but dimensions/timeout invalid — color analysis skipped',
                         'metadata' => [
@@ -415,33 +415,6 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             'skipped' => count($results['skipped']),
             'skipped_reasons' => array_column($results['skipped'], 'reason'),
         ]);
-    }
-
-    /**
-     * Compute severity for "Expected visual metadata missing" incident.
-     * Escalation: warning (first) → error (repeated) → critical (timeout+no dims).
-     *
-     * @param Asset $asset
-     * @return string 'warning' | 'error' | 'critical'
-     */
-    protected function computeVisualMetadataIncidentSeverity(Asset $asset): string
-    {
-        $metadata = $asset->metadata ?? [];
-        $thumbnailTimeout = (bool) ($metadata['thumbnail_timeout'] ?? false);
-        $hasDimensions = !empty($asset->thumbnailDimensions('medium'));
-        $retryCount = $asset->thumbnail_retry_count ?? 0;
-
-        // Critical: thumbnail timeout + no dimensions (corrupted/stuck)
-        if ($thumbnailTimeout && !$hasDimensions) {
-            return 'critical';
-        }
-
-        // Error: repeated failure (>= 2 retries)
-        if ($retryCount >= 2) {
-            return 'error';
-        }
-
-        return 'warning';
     }
 
     /**

@@ -20,10 +20,20 @@ class AuthPermissionService
     {
         $permissions = [];
 
-        // Tenant role permissions (from tenant_user pivot; lookup via Spatie Role)
+        // Tenant role permissions (from tenant_user pivot)
+        // Use PermissionMap as primary source to match User::hasPermissionForTenant and AssetPolicy.
+        // Spatie role permissions can drift (e.g. if PermissionSeeder wasn't run or DB was modified);
+        // PermissionMap is the canonical source for tenant roles.
         if ($tenant) {
             $tenantRole = $user->getRoleForTenant($tenant);
             if ($tenantRole) {
+                $roleKey = strtolower($tenantRole);
+                $permissionMap = PermissionMap::tenantPermissions();
+                $mapPermissions = $permissionMap[$roleKey] ?? [];
+                if (!empty($mapPermissions)) {
+                    $permissions = array_merge($permissions, $mapPermissions);
+                }
+                // Fallback: also include Spatie role permissions (for custom permissions not yet in PermissionMap)
                 $roleModel = Role::where('name', $tenantRole)->first();
                 if ($roleModel) {
                     $permissions = array_merge(

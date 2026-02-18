@@ -10,7 +10,7 @@ use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetProcessingFailureService;
-use App\Services\SystemIncidentService;
+use App\Services\Reliability\ReliabilityEngine;
 use App\Services\ThumbnailGenerationService;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
@@ -850,7 +850,7 @@ class GenerateThumbnailsJob implements ShouldQueue
 
                 // Unified Operations: Record system incident for visibility
                 try {
-                    app(SystemIncidentService::class)->record([
+                    app(ReliabilityEngine::class)->report([
                         'source_type' => 'job',
                         'source_id' => $asset->id,
                         'tenant_id' => $asset->tenant_id,
@@ -866,7 +866,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         ],
                     ]);
                 } catch (\Throwable $t2Ex) {
-                    Log::warning('[GenerateThumbnailsJob] SystemIncidentService recording failed', [
+                    Log::warning('[GenerateThumbnailsJob] ReliabilityEngine recording failed', [
                         'asset_id' => $asset->id,
                         'error' => $t2Ex->getMessage(),
                     ]);
@@ -883,7 +883,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 ]);
                 // Unified Operations: Record incident even when asset not found
                 try {
-                    app(SystemIncidentService::class)->record([
+                    app(ReliabilityEngine::class)->report([
                         'source_type' => 'job',
                         'source_id' => $this->assetId,
                         'tenant_id' => null,
@@ -898,7 +898,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         ],
                     ]);
                 } catch (\Throwable $t2Ex) {
-                    Log::warning('[GenerateThumbnailsJob] SystemIncidentService recording failed (asset not found)', [
+                    Log::warning('[GenerateThumbnailsJob] ReliabilityEngine recording failed (asset not found)', [
                         'asset_id' => $this->assetId,
                         'error' => $t2Ex->getMessage(),
                     ]);

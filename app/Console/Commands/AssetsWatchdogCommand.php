@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Asset;
 use App\Models\SupportTicket;
-use App\Services\SystemIncidentService;
+use App\Services\Reliability\ReliabilityEngine;
 use Illuminate\Console\Command;
 
 /**
@@ -19,7 +19,7 @@ class AssetsWatchdogCommand extends Command
 
     protected $description = 'Detect assets stuck in uploading or thumbnail generation and record incidents';
 
-    public function handle(SystemIncidentService $incidentService): int
+    public function handle(ReliabilityEngine $reliabilityEngine): int
     {
         $cutoff = now()->subMinutes(10);
 
@@ -73,7 +73,7 @@ class AssetsWatchdogCommand extends Command
                 $basePayload['retryable'] = true;
             }
 
-            $incident = $incidentService->recordIfNotExists($basePayload);
+            $incident = $reliabilityEngine->report($basePayload);
             if ($incident) {
                 $recorded++;
 

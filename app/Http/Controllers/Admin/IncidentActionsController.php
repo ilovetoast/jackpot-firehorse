@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\SystemIncident;
+use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,11 +30,11 @@ class IncidentActionsController extends Controller
         }
     }
 
-    public function attemptRepair(SystemIncident $incident, SystemIncidentRecoveryService $recoveryService): JsonResponse
+    public function attemptRepair(SystemIncident $incident, ReliabilityEngine $reliabilityEngine): JsonResponse
     {
         $this->authorizeAdmin();
 
-        $result = $recoveryService->attemptRepair($incident);
+        $result = $reliabilityEngine->attemptRecovery($incident);
 
         return response()->json([
             'resolved' => $result['resolved'],
@@ -80,7 +81,7 @@ class IncidentActionsController extends Controller
      * POST /admin/incidents/bulk-actions
      * Body: { action: 'attempt-repair'|'create-ticket'|'resolve', incident_ids: [1,2,...] }
      */
-    public function bulkActions(Request $request, SystemIncidentRecoveryService $recoveryService): JsonResponse
+    public function bulkActions(Request $request, ReliabilityEngine $reliabilityEngine, SystemIncidentRecoveryService $recoveryService): JsonResponse
     {
         $this->authorizeAdmin();
 
@@ -102,13 +103,13 @@ class IncidentActionsController extends Controller
         foreach ($incidents as $incident) {
             try {
                 if ($action === 'attempt-repair') {
-                    $result = $recoveryService->attemptRepair($incident);
+                    $result = $reliabilityEngine->attemptRecovery($incident);
                     $results[] = ['id' => $incident->id, 'ok' => true, 'resolved' => $result['resolved'] ?? false];
                 } elseif ($action === 'create-ticket') {
                     $ticket = $recoveryService->createTicket($incident);
                     $results[] = ['id' => $incident->id, 'ok' => $ticket !== null, 'ticket_id' => $ticket?->id];
                 } else {
-                    $recoveryService->resolve($incident, false);
+                    $reliabilityEngine->resolve($incident, false);
                     $results[] = ['id' => $incident->id, 'ok' => true];
                 }
             } catch (\Throwable $e) {

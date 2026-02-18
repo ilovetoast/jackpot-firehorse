@@ -9,10 +9,7 @@ import {
     XCircleIcon,
     ClockIcon,
     QueueListIcon,
-    ExclamationCircleIcon,
     LinkIcon,
-    CubeIcon,
-    PhotoIcon,
     ServerStackIcon,
     ChartBarIcon,
     ChartBarSquareIcon,
@@ -108,27 +105,20 @@ function IncidentRow({ incident: i, onAction, selected, onSelect }) {
 }
 
 const TABS = [
+    { id: 'overview', label: 'Overview', icon: ChartBarSquareIcon },
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
-    { id: 'mttr', label: 'MTTR', icon: ChartBarSquareIcon },
-    { id: 'queue', label: 'Queue Health', icon: QueueListIcon },
-    { id: 'scheduler', label: 'Scheduler', icon: ClockIcon },
-    { id: 'visual-metadata', label: 'Visual Metadata Integrity', icon: ChartBarIcon },
-    { id: 'assets-stalled', label: 'Assets Stalled', icon: PhotoIcon },
-    { id: 'derivative-failures', label: 'Derivative Failures', icon: ExclamationCircleIcon },
+    { id: 'reliability', label: 'Reliability Metrics', icon: ChartBarIcon },
     { id: 'failed-jobs', label: 'Failed Jobs', icon: ServerStackIcon },
 ]
 
 export default function OperationsCenterIndex({
     auth,
-    tab,
+    tab = 'overview',
     incidents,
-    assetsStalled,
-    derivativeFailures,
     failedJobs,
     queueHealth,
     schedulerHealth,
-    visualMetadataIntegrity,
-    mttrMetric,
+    reliabilityMetrics,
     horizonAvailable,
     horizonUrl,
 }) {
@@ -170,7 +160,7 @@ export default function OperationsCenterIndex({
             const res = await axios.post('/app/admin/incidents/bulk-actions', { action, incident_ids: ids })
             const data = res?.data ?? {}
             setSelectedIds(new Set())
-            router.reload({ only: ['incidents', 'assetsStalled'] })
+            router.reload({ only: ['incidents'] })
             if (action === 'create-ticket' && (data.failed_count ?? 0) > 0) {
                 const created = data.ticket_ids?.length ?? 0
                 const err = (data.results ?? []).find((r) => !r.ok)
@@ -247,6 +237,80 @@ export default function OperationsCenterIndex({
 
                     {/* Tab content */}
                     <div className="mt-6">
+                        {tab === 'overview' && (
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <QueueListIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                            <h3 className="text-sm font-medium text-gray-900">Queue</h3>
+                                        </div>
+                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${queueStatus.className}`}>
+                                            <QueueStatusIcon className="h-4 w-4 mr-1" />
+                                            {queueStatus.label}
+                                        </span>
+                                    </div>
+                                    <div className="mt-4 grid grid-cols-2 gap-4">
+                                        <div>
+                                            <span className="text-sm text-gray-500">Pending</span>
+                                            <p className="text-lg font-semibold">{queueHealth?.pending_count ?? 0}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-sm text-gray-500">Failed</span>
+                                            <p className="text-lg font-semibold text-red-600">{queueHealth?.failed_count ?? 0}</p>
+                                        </div>
+                                    </div>
+                                    {horizonAvailable && horizonUrl && (
+                                        <a href={horizonUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800">
+                                            <LinkIcon className="h-4 w-4 mr-1" /> Open Horizon
+                                        </a>
+                                    )}
+                                </div>
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <ClockIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                            <h3 className="text-sm font-medium text-gray-900">Scheduler</h3>
+                                        </div>
+                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${schedulerStatus.className}`}>
+                                            <SchedulerStatusIcon className="h-4 w-4 mr-1" />
+                                            {schedulerStatus.label}
+                                        </span>
+                                    </div>
+                                    <p className="mt-4 text-sm text-gray-500">
+                                        Last heartbeat: {schedulerHealth?.last_heartbeat ? formatDate(schedulerHealth.last_heartbeat) : 'Never'}
+                                    </p>
+                                </div>
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 lg:col-span-2">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <ExclamationTriangleIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                            <h3 className="text-sm font-medium text-gray-900">Incidents</h3>
+                                        </div>
+                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                            incidentList.length === 0 ? 'bg-green-100 text-green-800' : incidentList.length > 10 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                                        }`}>
+                                            {incidentList.length} unresolved
+                                        </span>
+                                    </div>
+                                    <p className="mt-4 text-sm text-gray-500">
+                                        {incidentList.length === 0
+                                            ? 'No open incidents. System reliability is healthy.'
+                                            : 'View the Incidents tab for details and actions.'}
+                                    </p>
+                                    {incidentList.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setTab('incidents')}
+                                            className="mt-4 inline-flex rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+                                        >
+                                            View Incidents
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         {tab === 'incidents' && (
                             <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
                                 <div className="px-4 py-4 sm:px-6 flex items-center justify-between">
@@ -310,7 +374,7 @@ export default function OperationsCenterIndex({
                                                 <IncidentRow
                                                     key={i.id}
                                                     incident={i}
-                                                    onAction={() => router.reload({ only: ['incidents', 'assetsStalled'] })}
+                                                    onAction={() => router.reload({ only: ['incidents'] })}
                                                     selected={selectedIds.has(i.id)}
                                                     onSelect={(checked) => toggleSelect(i.id, checked)}
                                                 />
@@ -324,196 +388,96 @@ export default function OperationsCenterIndex({
                             </div>
                         )}
 
-                        {tab === 'mttr' && (
-                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center">
-                                        <ChartBarSquareIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                        <h3 className="text-sm font-medium text-gray-900">Mean Time To Repair (MTTR)</h3>
-                                    </div>
-                                </div>
-                                <p className="mt-4 text-sm text-gray-500">
-                                    Average resolution time (detected_at → resolved_at) for incidents resolved in the last {mttrMetric?.window_hours ?? 24}h.
-                                </p>
-                                <div className="mt-4 grid grid-cols-2 gap-4">
-                                    <div>
-                                        <span className="text-sm text-gray-500">MTTR (avg minutes)</span>
-                                        <p className="text-lg font-semibold">
-                                            {mttrMetric?.mttr_minutes_avg != null
-                                                ? `${Math.round(mttrMetric.mttr_minutes_avg)} min`
-                                                : '—'}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span className="text-sm text-gray-500">Resolved (24h)</span>
-                                        <p className="text-lg font-semibold">{mttrMetric?.resolved_count_24h ?? 0}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {tab === 'queue' && (
-                            <div className="space-y-4">
-                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center">
-                                            <QueueListIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                            <h3 className="text-sm font-medium text-gray-900">Queue</h3>
-                                        </div>
-                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${queueStatus.className}`}>
-                                            <QueueStatusIcon className="h-4 w-4 mr-1" />
-                                            {queueStatus.label}
-                                        </span>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-2 gap-4">
-                                        <div>
-                                            <span className="text-sm text-gray-500">Pending</span>
-                                            <p className="text-lg font-semibold">{queueHealth?.pending_count ?? 0}</p>
-                                        </div>
-                                        <div>
-                                            <span className="text-sm text-gray-500">Failed</span>
-                                            <p className="text-lg font-semibold text-red-600">{queueHealth?.failed_count ?? 0}</p>
-                                        </div>
-                                    </div>
-                                    {horizonAvailable && horizonUrl && (
-                                        <a href={horizonUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800">
-                                            <LinkIcon className="h-4 w-4 mr-1" /> Open Horizon
-                                        </a>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {tab === 'scheduler' && (
-                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center">
-                                        <ClockIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                        <h3 className="text-sm font-medium text-gray-900">Scheduler Heartbeat</h3>
-                                    </div>
-                                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${schedulerStatus.className}`}>
-                                        <SchedulerStatusIcon className="h-4 w-4 mr-1" />
-                                        {schedulerStatus.label}
-                                    </span>
-                                </div>
-                                <p className="mt-4 text-sm text-gray-500">
-                                    Last heartbeat: {schedulerHealth?.last_heartbeat ? formatDate(schedulerHealth.last_heartbeat) : 'Never'}
-                                </p>
-                            </div>
-                        )}
-
-                        {tab === 'visual-metadata' && (
-                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center">
-                                        <ChartBarIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                        <h3 className="text-sm font-medium text-gray-900">Visual Metadata Integrity</h3>
-                                    </div>
-                                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                        (visualMetadataIntegrity?.status || 'unknown') === 'healthy' ? 'bg-green-100 text-green-800' :
-                                        (visualMetadataIntegrity?.status || 'unknown') === 'warning' ? 'bg-amber-100 text-amber-800' :
-                                        'bg-red-100 text-red-800'
-                                    }`}>
-                                        {(visualMetadataIntegrity?.status || 'unknown') === 'healthy' ? 'Healthy' :
-                                         (visualMetadataIntegrity?.status || 'unknown') === 'warning' ? 'Warning' : 'Critical'}
-                                    </span>
-                                </div>
-                                <p className="mt-4 text-sm text-gray-500">
-                                    State-derived: % of eligible assets (supportsThumbnailMetadata) where visualMetadataReady. SLO target: {visualMetadataIntegrity?.slo_target_percent ?? 95}%.
-                                </p>
-                                <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                                    <div>
-                                        <span className="text-sm text-gray-500">Integrity rate</span>
-                                        <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.rate_percent ?? 100) >= 95 ? '' : 'text-amber-600'}`}>
-                                            {visualMetadataIntegrity?.rate_percent ?? 100}%
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span className="text-sm text-gray-500">Eligible</span>
-                                        <p className="text-lg font-semibold">{visualMetadataIntegrity?.eligible ?? 0}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-sm text-gray-500">Invalid</span>
-                                        <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.invalid ?? 0) > 0 ? 'text-amber-600' : ''}`}>
-                                            {visualMetadataIntegrity?.invalid ?? 0}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span className="text-sm text-gray-500">Incidents (diagnostic)</span>
-                                        <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.incidents_count ?? 0) > 0 ? 'text-amber-600' : ''}`}>
-                                            {visualMetadataIntegrity?.incidents_count ?? 0}
-                                        </p>
-                                    </div>
-                                </div>
-                                {(visualMetadataIntegrity?.invalid ?? 0) > 0 && (
-                                    <p className="mt-4 text-sm text-amber-700">
-                                        Run <code className="bg-amber-100 px-1 rounded">assets:backfill-thumbnail-dimensions</code> for legacy assets missing dimensions.
-                                    </p>
-                                )}
-                            </div>
-                        )}
-
-                        {tab === 'assets-stalled' && (
-                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-                                <div className="px-4 py-4 sm:px-6">
-                                    <h2 className="text-lg font-semibold text-gray-900">Assets Stalled</h2>
-                                    <p className="mt-1 text-sm text-gray-500">{assetsStalled?.length ?? 0} assets stuck in uploading or thumbnail generation</p>
-                                </div>
-                                <div className="border-t border-gray-200 overflow-x-auto">
-                                    <table className="min-w-full divide-y divide-gray-300">
-                                        <thead>
-                                            <tr>
-                                                <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Asset ID</th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Title</th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-200">
-                                            {(assetsStalled || []).map((i) => (
-                                                <tr key={i.id}>
-                                                    <td className="whitespace-nowrap py-3 pl-4 pr-3 text-sm font-mono">{i.source_id}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-500">{formatDate(i.detected_at)}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                    {(!assetsStalled || assetsStalled.length === 0) && (
-                                        <p className="py-8 text-center text-sm text-gray-500">No stalled assets</p>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {tab === 'derivative-failures' && (
-                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-                                <div className="px-4 py-4 sm:px-6">
-                                    <h2 className="text-lg font-semibold text-gray-900">Derivative Failures</h2>
-                                    <p className="mt-1 text-sm text-gray-500">Thumbnail/preview failures (from incidents)</p>
-                                </div>
-                                <div className="border-t border-gray-200 overflow-x-auto">
-                                    <table className="min-w-full divide-y divide-gray-300">
-                                        <thead>
-                                            <tr>
-                                                <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Asset ID</th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Title</th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-200">
-                                            {(derivativeFailures || []).map((i) => (
-                                                <tr key={i.id}>
-                                                    <td className="whitespace-nowrap py-3 pl-4 pr-3 text-sm font-mono">{i.source_id}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-500">{formatDate(i.detected_at)}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                    {(!derivativeFailures || derivativeFailures.length === 0) && (
-                                        <p className="py-8 text-center text-sm text-gray-500">No derivative failures</p>
-                                    )}
-                                </div>
+                        {tab === 'reliability' && (
+                            <div className="space-y-6">
+                                {(() => {
+                                    const integrity = reliabilityMetrics?.integrity ?? {}
+                                    const mttr = reliabilityMetrics?.mttr ?? {}
+                                    const recovery = reliabilityMetrics?.recovery_success ?? {}
+                                    const escalation = reliabilityMetrics?.ticket_escalation ?? {}
+                                    return (
+                                        <>
+                                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                                <h3 className="text-sm font-medium text-gray-900">Visual Metadata Integrity</h3>
+                                                <p className="mt-2 text-sm text-gray-500">
+                                                    % of eligible assets where visualMetadataReady. SLO: {integrity?.slo_target_percent ?? 95}%.
+                                                </p>
+                                                <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Integrity rate</span>
+                                                        <p className={`text-lg font-semibold ${(integrity?.rate_percent ?? 100) >= 95 ? '' : 'text-amber-600'}`}>
+                                                            {integrity?.rate_percent ?? 100}%
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Eligible</span>
+                                                        <p className="text-lg font-semibold">{integrity?.eligible ?? 0}</p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Invalid</span>
+                                                        <p className={`text-lg font-semibold ${(integrity?.invalid ?? 0) > 0 ? 'text-amber-600' : ''}`}>
+                                                            {integrity?.invalid ?? 0}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Open incidents</span>
+                                                        <p className="text-lg font-semibold">{integrity?.incidents_count ?? 0}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                                <h3 className="text-sm font-medium text-gray-900">Mean Time To Repair (MTTR)</h3>
+                                                <p className="mt-2 text-sm text-gray-500">
+                                                    Average resolution time (detected_at → resolved_at) in last {mttr?.window_hours ?? 24}h.
+                                                </p>
+                                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">MTTR (avg min)</span>
+                                                        <p className="text-lg font-semibold">
+                                                            {mttr?.mttr_minutes_avg != null ? `${Math.round(mttr.mttr_minutes_avg)} min` : '—'}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Resolved (24h)</span>
+                                                        <p className="text-lg font-semibold">{mttr?.resolved_count_24h ?? 0}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                                <h3 className="text-sm font-medium text-gray-900">Recovery Success Rate</h3>
+                                                <p className="mt-2 text-sm text-gray-500">
+                                                    % of resolved incidents that were auto-recovered.
+                                                </p>
+                                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Auto-recovered</span>
+                                                        <p className="text-lg font-semibold">{recovery?.auto_resolved_count ?? 0}</p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Recovery rate</span>
+                                                        <p className="text-lg font-semibold">{recovery?.recovery_rate_percent ?? 0}%</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                                <h3 className="text-sm font-medium text-gray-900">Ticket Escalation</h3>
+                                                <p className="mt-2 text-sm text-gray-500">
+                                                    Incidents escalated to tickets in last {escalation?.window_hours ?? 24}h.
+                                                </p>
+                                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Escalated (24h)</span>
+                                                        <p className="text-lg font-semibold">{escalation?.escalated_count_24h ?? 0}</p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-sm text-gray-500">Unresolved</span>
+                                                        <p className="text-lg font-semibold">{escalation?.unresolved_count ?? 0}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )
+                                })()}
                             </div>
                         )}
 

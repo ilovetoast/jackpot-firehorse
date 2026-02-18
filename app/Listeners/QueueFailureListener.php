@@ -2,7 +2,7 @@
 
 namespace App\Listeners;
 
-use App\Services\SystemIncidentService;
+use App\Services\Reliability\ReliabilityEngine;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Log;
 
@@ -32,7 +32,7 @@ class QueueFailureListener
             $command = $payload['data']['command'] ?? null;
             $assetId = $this->extractAssetId($command, $payload);
 
-            app(SystemIncidentService::class)->record([
+            app(ReliabilityEngine::class)->report([
                 'source_type' => 'job',
                 'source_id' => $assetId,
                 'tenant_id' => null, // Could be extracted from asset if needed

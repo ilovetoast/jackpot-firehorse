@@ -73,7 +73,7 @@ class TenantBucketService
 
         // Unified Operations: Record system incident for storage bucket missing
         try {
-            app(SystemIncidentService::class)->recordIfNotExists([
+            app(\App\Services\Reliability\ReliabilityEngine::class)->report([
                 'source_type' => 'storage',
                 'source_id' => (string) $tenant->id,
                 'tenant_id' => $tenant->id,
@@ -88,7 +88,7 @@ class TenantBucketService
                 'unique_signature' => "storage_bucket_missing:{$tenant->id}:{$expectedName}",
             ]);
         } catch (\Throwable $e) {
-            Log::warning('[TenantBucketService] SystemIncidentService recording failed', [
+            Log::warning('[TenantBucketService] ReliabilityEngine recording failed', [
                 'tenant_id' => $tenant->id,
                 'error' => $e->getMessage(),
             ]);

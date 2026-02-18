@@ -4,7 +4,7 @@ namespace App\Services\Assets;
 
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
-use App\Services\SystemIncidentService;
+use App\Services\Reliability\ReliabilityEngine;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -55,7 +55,7 @@ class AssetStateReconciliationService
         if (($asset->analysis_status ?? 'uploading') === 'promotion_failed') {
             $hasThumbnails = (bool) data_get($asset->metadata, 'thumbnails.large.path');
             if (!$hasThumbnails) {
-                app(SystemIncidentService::class)->recordIfNotExists([
+                app(ReliabilityEngine::class)->report([
                     'source_type' => 'asset',
                     'source_id' => $asset->id,
                     'tenant_id' => $asset->tenant_id,

@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Asset;
 use App\Models\SystemIncident;
+use App\Services\Reliability\ReliabilityMetricsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -35,7 +35,7 @@ class OperationsCenterController extends Controller
     {
         $this->authorizeAdmin();
 
-        $tab = $request->get('tab', 'incidents');
+        $tab = $request->get('tab', 'overview');
 
         $incidents = SystemIncident::whereNull('resolved_at')
             ->orderByRaw("CASE severity WHEN 'critical' THEN 1 WHEN 'error' THEN 2 WHEN 'warning' THEN 3 ELSE 4 END")
@@ -57,24 +57,6 @@ class OperationsCenterController extends Controller
                 'last_repair_attempt_at' => $i->metadata['last_repair_attempt_at'] ?? $i->metadata['last_recovery_attempt_at'] ?? null,
             ]);
 
-        $assetsStalled = $incidents->where('source_type', 'asset')->values();
-
-        $derivativeFailures = SystemIncident::whereNull('resolved_at')
-            ->where(function ($q) {
-                $q->where('source_type', 'derivative')
-                    ->orWhere('metadata->derivative_failure', true);
-            })
-            ->orderBy('detected_at', 'desc')
-            ->limit(50)
-            ->get()
-            ->map(fn ($i) => [
-                'id' => $i->id,
-                'source_id' => $i->source_id,
-                'title' => $i->title,
-                'severity' => $i->severity,
-                'detected_at' => $i->detected_at?->toIso8601String(),
-            ]);
-
         $failedJobs = DB::table('failed_jobs')
             ->orderBy('failed_at', 'desc')
             ->limit(25)
@@ -91,10 +73,10 @@ class OperationsCenterController extends Controller
                 ];
             });
 
+        $metricsService = app(ReliabilityMetricsService::class);
         $queueHealth = $this->getQueueHealth();
         $schedulerHealth = $this->getSchedulerHealth();
-        $visualMetadataIntegrity = $this->getVisualMetadataIntegrity();
-        $mttrMetric = $this->getMTTRMetric();
+        $reliabilityMetrics = $metricsService->getAll();
 
         $horizonAvailable = class_exists(\Laravel\Horizon\Horizon::class);
         $horizonUrl = $horizonAvailable ? url(config('horizon.path', 'horizon')) : null;
@@ -102,13 +84,10 @@ class OperationsCenterController extends Controller
         return Inertia::render('Admin/OperationsCenter/Index', [
             'tab' => $tab,
             'incidents' => $incidents,
-            'assetsStalled' => $assetsStalled,
-            'derivativeFailures' => $derivativeFailures,
             'failedJobs' => $failedJobs,
             'queueHealth' => $queueHealth,
             'schedulerHealth' => $schedulerHealth,
-            'visualMetadataIntegrity' => $visualMetadataIntegrity,
-            'mttrMetric' => $mttrMetric,
+            'reliabilityMetrics' => $reliabilityMetrics,
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
         ]);
@@ -136,80 +115,6 @@ class OperationsCenterController extends Controller
             ];
         } catch (\Throwable $e) {
             return ['status' => 'unknown', 'pending_count' => 0, 'failed_count' => 0];
-        }
-    }
-
-    /**
-     * Visual Metadata Integrity Rate — SLO for media reliability.
-     * State-derived: % of eligible assets where visualMetadataReady.
-     * Incidents are diagnostic (visibility), not source of truth.
-     */
-    protected function getVisualMetadataIntegrity(): array
-    {
-        try {
-            $eligible = Asset::whereSupportsThumbnailMetadata()->count();
-            $invalid = Asset::whereSupportsThumbnailMetadata()->whereVisualMetadataInvalid()->count();
-            $valid = max(0, $eligible - $invalid);
-            $ratePercent = $eligible > 0 ? round(100 * $valid / $eligible, 1) : 100;
-
-            $incidentsCount = SystemIncident::whereNull('resolved_at')
-                ->where('title', 'Expected visual metadata missing')
-                ->count();
-
-            $sloTarget = 95;
-            $status = $ratePercent >= $sloTarget ? 'healthy' : ($ratePercent >= 80 ? 'warning' : 'critical');
-
-            return [
-                'status' => $status,
-                'rate_percent' => $ratePercent,
-                'eligible' => $eligible,
-                'invalid' => $invalid,
-                'valid' => $valid,
-                'incidents_count' => $incidentsCount,
-                'slo_target_percent' => $sloTarget,
-            ];
-        } catch (\Throwable $e) {
-            return [
-                'status' => 'unknown',
-                'rate_percent' => 0,
-                'eligible' => 0,
-                'invalid' => 0,
-                'valid' => 0,
-                'incidents_count' => 0,
-                'slo_target_percent' => 95,
-            ];
-        }
-    }
-
-    /**
-     * Mean Time To Repair (MTTR) — average resolution time for incidents in last 24h.
-     * Enterprise telemetry: detected_at → resolved_at.
-     */
-    protected function getMTTRMetric(): array
-    {
-        try {
-            $since = now()->subHours(24);
-            $result = SystemIncident::whereNotNull('resolved_at')
-                ->where('resolved_at', '>=', $since)
-                ->selectRaw('AVG(TIMESTAMPDIFF(MINUTE, detected_at, resolved_at)) as mttr_minutes_avg')
-                ->selectRaw('COUNT(*) as resolved_count')
-                ->first();
-
-            $mttrMinutes = $result && $result->mttr_minutes_avg !== null
-                ? (float) $result->mttr_minutes_avg
-                : null;
-
-            return [
-                'mttr_minutes_avg' => $mttrMinutes,
-                'resolved_count_24h' => (int) ($result->resolved_count ?? 0),
-                'window_hours' => 24,
-            ];
-        } catch (\Throwable $e) {
-            return [
-                'mttr_minutes_avg' => null,
-                'resolved_count_24h' => 0,
-                'window_hours' => 24,
-            ];
         }
     }
 
