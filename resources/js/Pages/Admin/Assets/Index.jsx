@@ -500,7 +500,6 @@ export default function AdminAssetsIndex({
                                                         {a.thumbnail_status}
                                                     </span>
                                                 )}
-                                                </span>
                                             </td>
                                             <td className="px-4 py-2">
                                                 {a.incident_count > 0 ? (
