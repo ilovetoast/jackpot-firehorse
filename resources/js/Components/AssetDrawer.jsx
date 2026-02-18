@@ -1172,10 +1172,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         onClick={async () => {
                                             try {
                                                 const res = await window.axios.post(`/app/assets/${displayAsset.id}/submit-ticket`)
-                                                if (res.data?.ticket_id) {
-                                                    setAssetIncidents([])
-                                                    if (onAssetUpdate) onAssetUpdate()
-                                                    router.reload({ only: ['assets'] })
+                                                const ticket = res.data?.ticket ?? null
+                                                if (ticket?.id) {
+                                                    router.visit(`/app/support/tickets/${ticket.id}`)
                                                 }
                                             } catch (e) {
                                                 // Ignore

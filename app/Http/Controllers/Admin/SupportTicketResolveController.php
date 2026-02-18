@@ -43,8 +43,16 @@ class SupportTicketResolveController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
+        $asset->refresh();
+        $analysisStatusBefore = $asset->analysis_status ?? 'uploading';
+        $thumbnailStatusBefore = $asset->thumbnail_status?->value ?? null;
+
         $reconciliationService = app(AssetStateReconciliationService::class);
         $result = $reconciliationService->reconcile($asset->fresh());
+
+        $asset->refresh();
+        $analysisStatusAfter = $asset->analysis_status ?? 'uploading';
+        $thumbnailStatusAfter = $asset->thumbnail_status?->value ?? null;
 
         SystemIncident::whereNull('resolved_at')
             ->where(function ($q) use ($asset) {
@@ -56,7 +64,13 @@ class SupportTicketResolveController extends Controller
             ->update(['resolved_at' => now(), 'auto_resolved' => true]);
 
         $metadata = $supportTicket->payload ?? [];
-        $metadata['resolved_at'] = now()->toIso8601String();
+        $metadata['reconciliation'] = [
+            'analysis_status_before' => $analysisStatusBefore,
+            'analysis_status_after' => $analysisStatusAfter,
+            'thumbnail_status_before' => $thumbnailStatusBefore,
+            'thumbnail_status_after' => $thumbnailStatusAfter,
+            'resolved_at' => now()->toIso8601String(),
+        ];
         $metadata['reconciliation_changes'] = $result['changes'];
 
         $supportTicket->update([

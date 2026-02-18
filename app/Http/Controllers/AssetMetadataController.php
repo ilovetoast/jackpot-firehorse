@@ -9,6 +9,7 @@ use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\ScoreAssetComplianceJob;
+use App\Models\SupportTicket;
 use App\Models\SystemIncident;
 use App\Models\ActivityEvent;
 use App\Models\AssetEmbedding;
@@ -1245,6 +1246,9 @@ class AssetMetadataController extends Controller
     /**
      * Submit support ticket for asset with full diagnostic payload.
      * POST /assets/{asset}/submit-ticket
+     *
+     * Returns structured JSON: { ticket, incidents, last_failed_job }
+     * Idempotent: returns existing open ticket if one exists.
      */
     public function submitTicket(Asset $asset): JsonResponse
     {
@@ -1257,22 +1261,29 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
-        $incidents = SystemIncident::whereNull('resolved_at')
-            ->where(function ($q) use ($asset) {
-                $q->where('source_type', 'asset')->where('source_id', $asset->id)
-                    ->orWhere(function ($q2) use ($asset) {
-                        $q2->where('source_type', 'job')->where('source_id', $asset->id);
-                    });
-            })
+        $recentIncidents = SystemIncident::query()
+            ->whereIn('source_type', ['asset', 'job'])
+            ->where('source_id', $asset->id)
+            ->whereNull('resolved_at')
             ->orderBy('detected_at', 'desc')
             ->get(['id', 'severity', 'title'])
-            ->map(fn ($i) => ['id' => $i->id, 'severity' => $i->severity, 'title' => $i->title])
+            ->map(fn ($i) => [
+                'id' => (string) $i->id,
+                'severity' => $i->severity,
+                'title' => $i->title,
+            ])
+            ->values()
             ->toArray();
 
-        $lastFailedJob = \Illuminate\Support\Facades\DB::table('failed_jobs')
+        $failedJob = DB::table('failed_jobs')
             ->where('payload', 'like', '%' . $asset->id . '%')
-            ->orderBy('failed_at', 'desc')
+            ->orderByDesc('failed_at')
             ->first();
+
+        $lastFailedJob = $failedJob ? [
+            'id' => $failedJob->id,
+            'failed_at' => $failedJob->failed_at,
+        ] : null;
 
         $metadata = $asset->metadata ?? [];
         $payload = [
@@ -1288,39 +1299,63 @@ class AssetMetadataController extends Controller
                 'thumbnail_timeout_reason' => $metadata['thumbnail_timeout_reason'] ?? null,
             ],
             'thumbnail_retry_count' => $metadata['thumbnail_retry_count'] ?? 0,
-            'recent_incidents' => $incidents,
-            'last_failed_job' => $lastFailedJob ? [
-                'id' => $lastFailedJob->id,
-                'failed_at' => $lastFailedJob->failed_at,
-            ] : null,
+            'recent_incidents' => $recentIncidents,
+            'last_failed_job' => $lastFailedJob,
         ];
 
-        $maxSeverity = 'info';
-        foreach ($incidents as $i) {
-            if (($i['severity'] ?? '') === 'critical') {
-                $maxSeverity = 'critical';
+        $severity = 'info';
+        foreach ($recentIncidents as $i) {
+            $s = $i['severity'] ?? '';
+            if ($s === 'critical') {
+                $severity = 'critical';
                 break;
             }
-            if (($i['severity'] ?? '') === 'error') {
-                $maxSeverity = 'warning';
+            if ($s === 'error') {
+                $severity = 'warning';
+            } elseif ($s === 'warning' && $severity === 'info') {
+                $severity = 'warning';
             }
         }
 
-        $ticket = \App\Models\SupportTicket::create([
+        $existing = SupportTicket::where('source_type', 'asset')
+            ->where('source_id', $asset->id)
+            ->where('status', 'open')
+            ->first();
+
+        if ($existing) {
+            Log::info('[SupportTicket] Returned existing ticket (idempotent)', [
+                'asset_id' => $asset->id,
+                'ticket_id' => $existing->id,
+            ]);
+
+            return response()->json([
+                'ticket' => $existing->fresh(),
+                'incidents' => $recentIncidents,
+                'last_failed_job' => $lastFailedJob,
+            ]);
+        }
+
+        $ticket = SupportTicket::create([
             'source_type' => 'asset',
             'source_id' => $asset->id,
             'summary' => "Asset processing issue: {$asset->title}",
             'description' => "User-submitted support ticket for asset {$asset->id} with processing issues.",
-            'severity' => $maxSeverity,
+            'severity' => $severity,
             'status' => 'open',
             'source' => 'manual',
             'payload' => $payload,
             'auto_created' => false,
         ]);
 
-        return response()->json([
-            'status' => 'created',
+        Log::info('[SupportTicket] Created from asset processing issue', [
+            'asset_id' => $asset->id,
             'ticket_id' => $ticket->id,
+        ]);
+
+        return response()->json([
+            'ticket' => $ticket->fresh(),
+            'incidents' => $recentIncidents,
+            'last_failed_job' => $lastFailedJob,
         ]);
     }
 

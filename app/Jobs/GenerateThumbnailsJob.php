@@ -557,11 +557,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
             
             // Step 6: All FINAL thumbnails are valid - update metadata and mark as completed
+            // P5: Clear failure state - thumbnail success must clear timeout/error flags
             // Preview thumbnails are already stored separately above and remain in metadata
             $currentMetadata = $asset->metadata ?? [];
             $currentMetadata['thumbnails_generated'] = true;
             $currentMetadata['thumbnails_generated_at'] = now()->toIso8601String();
             $currentMetadata['thumbnails'] = $finalThumbnails; // Only final thumbnails (exclude preview)
+            $currentMetadata['thumbnail_timeout'] = false;
+            $currentMetadata['thumbnail_timeout_reason'] = null;
 
             // Guard: only mutate analysis_status when in expected previous state
             $expectedStatus = 'generating_thumbnails';
