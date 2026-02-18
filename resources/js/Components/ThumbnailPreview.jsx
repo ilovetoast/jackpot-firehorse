@@ -33,6 +33,7 @@
  * @param {boolean} props.shouldAnimateThumbnail - Whether to animate thumbnail appearance
  * @param {string|null} props.primaryColor - Brand primary color for placeholder
  * @param {string|null} props.forceObjectFit - Force object-fit value ('cover' or 'contain'), overrides category-based logic
+ * @param {boolean} props.preferLargeForVector - When true, use 'large' style (4096px) for SVG/vector assets in detail view for crisp rendering
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
@@ -55,7 +56,8 @@ export default function ThumbnailPreview({
     thumbnailVersion = null,
     shouldAnimateThumbnail = false,
     primaryColor = null,
-    forceObjectFit = null
+    forceObjectFit = null,
+    preferLargeForVector = false
 }) {
     const { auth } = usePage().props
     // Use current brand's primary color, fallback to default if not provided
@@ -75,11 +77,19 @@ export default function ThumbnailPreview({
     // DRAWER CONTEXT: If thumbnailVersion is provided, allow live updates
     // This enables drawer previews to update when new thumbnails are generated
     const isDrawerContext = thumbnailVersion !== null
-    
+
+    // For SVG/vector assets in detail view: use 'large' style (4096px) for crisp rendering
+    const isSvg = asset?.mime_type === 'image/svg+xml' ||
+        (asset?.original_filename?.toLowerCase().endsWith('.svg') || asset?.file_extension === 'svg')
+    const useLargeForVector = preferLargeForVector && isSvg && asset?.id
+    const effectiveFinalUrl = asset?.final_thumbnail_url && useLargeForVector
+        ? `/app/assets/${asset.id}/thumbnail/final/large${asset.thumbnail_version ? `?v=${encodeURIComponent(asset.thumbnail_version)}` : ''}`
+        : asset?.final_thumbnail_url
+
     // Lock the URL on first render for grid, but allow updates for drawer
     const [lockedUrl, setLockedUrl] = useState(() => {
         // Determine initial URL: final > preview > null
-        const initialFinal = asset?.final_thumbnail_url
+        const initialFinal = effectiveFinalUrl
         const initialPreview = asset?.preview_thumbnail_url
         return initialFinal || initialPreview || null
     })
@@ -97,7 +107,7 @@ export default function ThumbnailPreview({
     // Update URL when asset changes (drawer context) OR when thumbnail becomes available (grid context with polling)
     useEffect(() => {
         if (asset) {
-            const newFinal = asset?.final_thumbnail_url
+            const newFinal = effectiveFinalUrl
             const newPreview = asset?.preview_thumbnail_url
             const newUrl = newFinal || newPreview || null
             const assetIdChanged = prevAssetIdRef.current !== asset?.id
@@ -128,7 +138,7 @@ export default function ThumbnailPreview({
             // Asset became null (drawer closed) - reset tracking
             prevAssetIdRef.current = null
         }
-    }, [isDrawerContext, asset?.id, asset?.final_thumbnail_url, asset?.preview_thumbnail_url, thumbnailVersion, lockedUrl])
+    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, thumbnailVersion, lockedUrl])
     
     // Handle case where preview was removed - if locked URL exists but asset data shows no preview, clear it
     useEffect(() => {

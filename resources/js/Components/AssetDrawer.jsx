@@ -1480,6 +1480,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         size="lg"
                                         thumbnailVersion={thumbnailVersion}
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                        preferLargeForVector
                                     />
                                     {/* Zoom overlay (only shown when thumbnail is available) */}
                                     {(displayAsset.thumbnail_url || displayAsset.final_thumbnail_url || displayAsset.preview_thumbnail_url) && (
@@ -1504,6 +1505,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     size="lg"
                                     thumbnailVersion={thumbnailVersion}
                                     shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                    preferLargeForVector
                                 />
                             )}
                         </div>

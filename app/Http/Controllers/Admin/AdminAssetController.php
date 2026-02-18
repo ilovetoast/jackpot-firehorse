@@ -511,13 +511,17 @@ class AdminAssetController extends Controller
 
     protected function adminThumbnailUrl(Asset $asset): ?string
     {
-        if ($asset->thumbnail_status?->value !== 'completed') {
-            return null;
+        // Prefer completed thumbnail when available
+        if ($asset->thumbnail_status?->value === 'completed' && $asset->thumbnailPathForStyle('medium')) {
+            return route('admin.assets.thumbnail', ['asset' => $asset->id]);
         }
-        if (!$asset->thumbnailPathForStyle('medium')) {
-            return null;
+        // Fallback: show preview when main thumbnail skipped/failed but preview exists
+        $metadata = $asset->metadata ?? [];
+        $previewPath = $metadata['preview_thumbnails']['preview']['path'] ?? null;
+        if ($previewPath) {
+            return route('admin.assets.thumbnail', ['asset' => $asset->id]);
         }
-        return route('admin.assets.thumbnail', ['asset' => $asset->id]);
+        return null;
     }
 
     protected function formatAssetForList(Asset $asset): array

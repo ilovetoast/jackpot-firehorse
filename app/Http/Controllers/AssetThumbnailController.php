@@ -102,24 +102,48 @@ class AssetThumbnailController extends Controller
         $asset = Asset::withTrashed()->with('storageBucket')->findOrFail($asset);
         $this->validateStyle('medium');
 
-        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
-            abort(404, 'Thumbnail not ready');
+        // Prefer completed thumbnail when available
+        if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
+            $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+            if ($thumbnailPath) {
+                try {
+                    return $this->streamThumbnailFromS3($asset, $thumbnailPath);
+                } catch (\Throwable $e) {
+                    Log::warning('Admin asset thumbnail stream failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    abort(404, 'Thumbnail not available');
+                }
+            }
         }
 
-        $thumbnailPath = $asset->thumbnailPathForStyle('medium');
-        if (!$thumbnailPath) {
-            abort(404, 'Thumbnail path not found');
+        // Fallback: serve preview when main thumbnail not completed but preview exists
+        $metadata = $asset->metadata ?? [];
+        $previewData = $metadata['preview_thumbnails']['preview'] ?? null;
+        $previewPath = $previewData['path'] ?? null;
+        if ($previewPath && $asset->storageBucket) {
+            try {
+                $s3Client = $this->getS3Client();
+                $result = $s3Client->getObject([
+                    'Bucket' => $asset->storageBucket->name,
+                    'Key' => $previewPath,
+                ]);
+                $content = $result['Body']->getContents();
+                $contentType = $result['ContentType'] ?? 'image/jpeg';
+                return response($content, 200)
+                    ->header('Content-Type', $contentType)
+                    ->header('Cache-Control', 'public, max-age=3600')
+                    ->header('X-Thumbnail-Type', 'preview');
+            } catch (\Throwable $e) {
+                Log::warning('Admin asset preview thumbnail stream failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
-        try {
-            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
-        } catch (\Throwable $e) {
-            Log::warning('Admin asset thumbnail stream failed', [
-                'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
-            ]);
-            abort(404, 'Thumbnail not available');
-        }
+        abort(404, 'Thumbnail not ready');
     }
 
     /**

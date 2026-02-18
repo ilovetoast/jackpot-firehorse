@@ -594,6 +594,7 @@ export default function AdminAssetsIndex({
                                 onClose={closeDetail}
                                 onAction={runSingleAction}
                                 onRefresh={() => { closeDetail(); router.reload() }}
+                                showThumbnail
                             />
                         ) : null}
                     </div>

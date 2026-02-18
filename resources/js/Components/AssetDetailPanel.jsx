@@ -874,6 +874,7 @@ export default function AssetDetailPanel({
                                     alt={asset?.title || asset?.original_filename || 'Preview'}
                                     className="w-full h-full object-contain"
                                     size="lg"
+                                    preferLargeForVector
                                 />
                             )}
                             <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm border border-gray-200">
