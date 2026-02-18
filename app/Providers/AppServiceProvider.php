@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
 use App\Events\CompanyTransferCompleted;
+use App\Listeners\QueueFailureListener;
+use Illuminate\Queue\Events\JobFailed;
 use App\Listeners\ActivateAgencyReferral;
 use App\Listeners\GrantAgencyPartnerReward;
 use App\Listeners\ProcessAssetOnUpload;
@@ -74,6 +76,9 @@ class AppServiceProvider extends ServiceProvider
         
         // Phase AG-10: Agency referral activation (attribution only, no rewards)
         Event::listen(CompanyTransferCompleted::class, ActivateAgencyReferral::class);
+
+        // Unified Operations: Capture queue failures for asset-processing jobs
+        Event::listen(JobFailed::class, QueueFailureListener::class);
     }
 
     /**

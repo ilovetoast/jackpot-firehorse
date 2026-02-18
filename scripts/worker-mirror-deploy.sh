@@ -142,10 +142,20 @@ echo "🔁 current → $RELEASE_DIR"
 ############################################
 # GRACEFUL WORKER RESTART (NEW CODE)
 ############################################
+# When Horizon is terminated on deploy, workers restart cleanly.
+# queue:restart signals workers to finish current job then exit.
+# horizon:terminate gracefully stops Horizon (workers drain and restart).
+# Chain interruption: Jobs in Bus::chain() may be interrupted mid-chain.
+# Interrupted jobs are recorded in system_incidents / failed_jobs for visibility.
+# See docs/DEPLOY_INTERRUPTION_BEHAVIOR.md
 
-if command -v php >/dev/null && php artisan list | grep -q horizon; then
-  echo "♻️ Gracefully restarting Horizon"
-  php artisan horizon:terminate || true
+if command -v php >/dev/null; then
+  echo "♻️ Signaling queue workers to restart"
+  php artisan queue:restart || true
+  if php artisan list 2>/dev/null | grep -q horizon; then
+    echo "♻️ Gracefully terminating Horizon"
+    php artisan horizon:terminate || true
+  fi
 fi
 
 

@@ -43,7 +43,7 @@
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon } from '@heroicons/react/24/outline'
 import { usePage, router } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -116,6 +116,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Phase J.3: Approval comments for rejection role display
     const [approvalComments, setApprovalComments] = useState([])
     const [commentsLoading, setCommentsLoading] = useState(false)
+
+    // Unified Operations: Unresolved incidents for asset (processing issues)
+    const [assetIncidents, setAssetIncidents] = useState([])
+    const [incidentsLoading, setIncidentsLoading] = useState(false)
+    const [retryProcessingLoading, setRetryProcessingLoading] = useState(false)
     
     // Metadata approval state
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
@@ -482,6 +487,21 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // CRITICAL: Drawer must tolerate undefined asset during async updates
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
+
+    // Fetch unresolved incidents when display asset changes (Unified Operations)
+    useEffect(() => {
+        if (!displayAsset?.id) {
+            setAssetIncidents([])
+            return
+        }
+        setIncidentsLoading(true)
+        window.axios.get(`/app/assets/${displayAsset.id}/incidents`)
+            .then(res => {
+                setAssetIncidents(res.data?.incidents ?? [])
+            })
+            .catch(() => setAssetIncidents([]))
+            .finally(() => setIncidentsLoading(false))
+    }, [displayAsset?.id])
 
     // Phase V-1: Detect if asset is a video
     const isVideo = useMemo(() => {
@@ -1106,6 +1126,60 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
             {/* Content */}
             <div className="px-4 py-4 space-y-4">
+                {/* Unified Operations: Processing issue banner when unresolved incident exists */}
+                {assetIncidents?.length > 0 && (
+                    <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-md">
+                        <div className="flex">
+                            <div className="flex-shrink-0">
+                                <ExclamationTriangleIcon className="h-5 w-5 text-amber-400" />
+                            </div>
+                            <div className="ml-3 flex-1">
+                                <p className="text-sm font-medium text-amber-800">
+                                    Processing Issue Detected
+                                </p>
+                                <p className="mt-1 text-sm text-amber-700">
+                                    {assetIncidents[0]?.title || 'Thumbnail stalled'}
+                                </p>
+                                <p className="mt-1 text-xs text-amber-600">
+                                    System retry attempted. Support recommended.
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    {assetIncidents.some(i => i.retryable) && (
+                                        <button
+                                            type="button"
+                                            disabled={retryProcessingLoading}
+                                            onClick={async () => {
+                                                setRetryProcessingLoading(true)
+                                                try {
+                                                    await window.axios.post(`/app/assets/${displayAsset.id}/retry-processing`)
+                                                    setAssetIncidents([])
+                                                    if (onAssetUpdate) onAssetUpdate()
+                                                    router.reload({ only: ['assets'] })
+                                                } catch (e) {
+                                                    // Ignore
+                                                } finally {
+                                                    setRetryProcessingLoading(false)
+                                                }
+                                            }}
+                                            className="inline-flex items-center rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                                        >
+                                            <ArrowPathIcon className="h-3.5 w-3.5 mr-1" />
+                                            {retryProcessingLoading ? 'Retrying…' : 'Retry Processing'}
+                                        </button>
+                                    )}
+                                    <a
+                                        href={typeof route !== 'undefined' ? route('support.tickets.create') : '/app/support/tickets/create'}
+                                        className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                                    >
+                                        <TicketIcon className="h-3.5 w-3.5 mr-1" />
+                                        Submit Support Ticket
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Phase J.3: Status Banners for Contributors */}
                 {auth?.approval_features?.approvals_enabled && displayAsset?.approval_status && (
                     <>

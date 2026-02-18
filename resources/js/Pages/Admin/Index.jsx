@@ -154,6 +154,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                 { name: 'Derivative Failures', icon: ExclamationTriangleIcon, description: stats ? `Total: ${stats.derivative_failures_total ?? 0}, Escalated: ${stats.derivative_failures_escalated ?? 0}` : 'Thumbnail/preview failures, by processor and type', href: '/app/admin/derivative-failures' },
                 { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
                 { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
+                { name: 'Operations Center', icon: ExclamationTriangleIcon, description: 'Unified incidents, queue, scheduler, failed jobs', href: '/app/admin/operations-center' },
                 { name: 'Logs', icon: DocumentTextIcon, description: 'Error and warning logs from web and workers (Redis-backed)', href: '/app/admin/logs' },
                 ...(canViewMetadataRegistry ? [{ name: 'Metadata Registry', icon: TagIcon, description: 'Inspect system metadata fields and their behavior', href: '/app/admin/metadata/registry' }] : []),
                 { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },

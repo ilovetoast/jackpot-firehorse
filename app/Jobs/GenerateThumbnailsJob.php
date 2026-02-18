@@ -10,6 +10,7 @@ use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetProcessingFailureService;
+use App\Services\SystemIncidentService;
 use App\Services\ThumbnailGenerationService;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
@@ -839,6 +840,30 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'error' => $t1Ex->getMessage(),
                     ]);
                 }
+
+                // Unified Operations: Record system incident for visibility
+                try {
+                    app(SystemIncidentService::class)->record([
+                        'source_type' => 'job',
+                        'source_id' => $asset->id,
+                        'tenant_id' => $asset->tenant_id,
+                        'severity' => 'error',
+                        'title' => 'Thumbnail generation failed',
+                        'message' => $e->getMessage(),
+                        'retryable' => true,
+                        'metadata' => [
+                            'exception_class' => get_class($e),
+                            'exception_message' => $e->getMessage(),
+                            'attempts' => $this->attempts(),
+                            'derivative_failure' => true,
+                        ],
+                    ]);
+                } catch (\Throwable $t2Ex) {
+                    Log::warning('[GenerateThumbnailsJob] SystemIncidentService recording failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $t2Ex->getMessage(),
+                    ]);
+                }
             } else {
                 // Asset not found - log error but can't update
                 // TASK 2: Even if asset not found, we've logged the failure
@@ -849,6 +874,28 @@ class GenerateThumbnailsJob implements ShouldQueue
                     'exception_class' => get_class($e),
                     'attempt' => $this->attempts(),
                 ]);
+                // Unified Operations: Record incident even when asset not found
+                try {
+                    app(SystemIncidentService::class)->record([
+                        'source_type' => 'job',
+                        'source_id' => $this->assetId,
+                        'tenant_id' => null,
+                        'severity' => 'error',
+                        'title' => 'Thumbnail generation failed',
+                        'message' => $errorMessage,
+                        'retryable' => true,
+                        'metadata' => [
+                            'exception_class' => get_class($e),
+                            'attempts' => $this->attempts(),
+                            'asset_not_found' => true,
+                        ],
+                    ]);
+                } catch (\Throwable $t2Ex) {
+                    Log::warning('[GenerateThumbnailsJob] SystemIncidentService recording failed (asset not found)', [
+                        'asset_id' => $this->assetId,
+                        'error' => $t2Ex->getMessage(),
+                    ]);
+                }
             }
 
             // TASK 2: Terminal state guarantee

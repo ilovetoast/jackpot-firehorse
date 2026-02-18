@@ -18,11 +18,14 @@ $schedulerEnabled = config('app.env') !== 'staging'
 if ($schedulerEnabled) {
 
 // Scheduler heartbeat: written by the process that runs schedule:run (worker in staging, same machine in local).
-// Stored in the default cache store (Cache::put). For web and worker to see the same value, use shared storage:
-// - CACHE_STORE=redis or CACHE_STORE=database (same DB/Redis as web). Do NOT use "file" or "array" when
-// scheduler runs on a different host than the web server; otherwise the web cannot see the heartbeat.
+// Use explicit redis store so web and worker see the same value (CACHE_STORE=redis on both).
+// TTL 120 seconds; SystemStatusController marks unhealthy if null or older than 2 minutes.
 Schedule::call(function () {
-    Cache::put('laravel_scheduler_last_heartbeat', now()->toIso8601String(), now()->addMinutes(10));
+    try {
+        Cache::store('redis')->put('scheduler:heartbeat', now(), 120);
+    } catch (\Throwable $e) {
+        Cache::put('laravel_scheduler_last_heartbeat', now()->toIso8601String(), now()->addMinutes(10));
+    }
 })->everyMinute()
     ->name('scheduler:heartbeat')
     ->withoutOverlapping()
@@ -50,6 +53,12 @@ Schedule::command('ai:reset-monthly-budgets')
     ->monthlyOn(1, '00:00')
     ->withoutOverlapping()
     ->description('Reset monthly AI budget usage records for the new month');
+
+// Asset Processing Watchdog: detect stuck assets (uploading, generating_thumbnails > 10 min)
+Schedule::command('assets:watchdog')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->description('Detect assets stuck in uploading or thumbnail generation');
 
 // Abandoned upload session detection (runs every 15 minutes)
 Schedule::command('uploads:detect-abandoned')

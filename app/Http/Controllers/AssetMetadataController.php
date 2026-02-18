@@ -7,7 +7,9 @@ use App\Enums\ThumbnailStatus;
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
+use App\Jobs\ProcessAssetJob;
 use App\Jobs\ScoreAssetComplianceJob;
+use App\Models\SystemIncident;
 use App\Models\ActivityEvent;
 use App\Models\AssetEmbedding;
 use App\Models\BrandComplianceScore;
@@ -1140,6 +1142,88 @@ class AssetMetadataController extends Controller
             'metadata' => null,
             'created_at' => now(),
         ]);
+
+        return response()->json(['status' => 'queued']);
+    }
+
+    /**
+     * Get unresolved system incidents for an asset.
+     * GET /assets/{asset}/incidents
+     */
+    public function getIncidents(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $incidents = SystemIncident::whereNull('resolved_at')
+            ->where(function ($q) use ($asset) {
+                $q->where('source_type', 'asset')->where('source_id', $asset->id)
+                    ->orWhere(function ($q2) use ($asset) {
+                        $q2->where('source_type', 'job')->where('source_id', $asset->id);
+                    });
+            })
+            ->orderBy('detected_at', 'desc')
+            ->get(['id', 'source_type', 'severity', 'title', 'message', 'retryable', 'requires_support', 'detected_at'])
+            ->map(fn ($i) => [
+                'id' => $i->id,
+                'source_type' => $i->source_type,
+                'severity' => $i->severity,
+                'title' => $i->title,
+                'message' => $i->message,
+                'retryable' => $i->retryable,
+                'requires_support' => $i->requires_support,
+                'detected_at' => $i->detected_at?->toIso8601String(),
+            ]);
+
+        return response()->json(['incidents' => $incidents]);
+    }
+
+    /**
+     * Retry processing for an asset (dispatches ProcessAssetJob).
+     * POST /assets/{asset}/retry-processing
+     * Only when incident retryable = true.
+     */
+    public function retryProcessing(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $hasRetryableIncident = SystemIncident::whereNull('resolved_at')
+            ->where(function ($q) use ($asset) {
+                $q->where('source_type', 'asset')->where('source_id', $asset->id)
+                    ->orWhere(function ($q2) use ($asset) {
+                        $q2->where('source_type', 'job')->where('source_id', $asset->id);
+                    });
+            })
+            ->where('retryable', true)
+            ->exists();
+
+        if (!$hasRetryableIncident) {
+            return response()->json(['message' => 'No retryable incident for this asset'], 422);
+        }
+
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['processing_started'], $metadata['processing_started_at']);
+        $asset->update([
+            'analysis_status' => 'uploading',
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'thumbnail_error' => null,
+            'metadata' => $metadata,
+        ]);
+
+        ProcessAssetJob::dispatch($asset->id);
 
         return response()->json(['status' => 'queued']);
     }

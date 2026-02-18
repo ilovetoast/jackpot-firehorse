@@ -249,8 +249,17 @@ class SystemStatusController extends Controller
     protected function getSchedulerHealth(): array
     {
         try {
-            $lastHeartbeat = Cache::get('laravel_scheduler_last_heartbeat');
-            
+            // Prefer redis store (unified ops: web + worker must use same redis)
+            $lastHeartbeat = null;
+            try {
+                $lastHeartbeat = Cache::store('redis')->get('scheduler:heartbeat');
+            } catch (\Throwable $e) {
+                // Fallback to legacy key
+            }
+            if (! $lastHeartbeat) {
+                $lastHeartbeat = Cache::get('laravel_scheduler_last_heartbeat');
+            }
+
             if (! $lastHeartbeat) {
                 $cacheStore = config('cache.default');
                 $hint = 'Ensure the worker runs schedule:run and web and worker use the same cache (CACHE_STORE=redis or database).';
@@ -266,20 +275,21 @@ class SystemStatusController extends Controller
                     'cache_store' => $cacheStore,
                 ];
             }
-            
-            $lastHeartbeatTime = \Carbon\Carbon::parse($lastHeartbeat);
+
+            $lastHeartbeatTime = $lastHeartbeat instanceof \Carbon\Carbon
+                ? $lastHeartbeat
+                : \Carbon\Carbon::parse($lastHeartbeat);
             $minutesSinceHeartbeat = $lastHeartbeatTime->diffInMinutes(now());
             
             $status = 'healthy';
             $message = 'Scheduler is running normally.';
             
-            if ($minutesSinceHeartbeat > 5) {
-                $status = 'delayed';
-                $message = "Scheduler heartbeat is delayed ({$minutesSinceHeartbeat} minutes ago).";
-            }
-            if ($minutesSinceHeartbeat > 15) {
+            if ($minutesSinceHeartbeat >= 2) {
                 $status = 'unhealthy';
-                $message = "Scheduler appears to be down ({$minutesSinceHeartbeat} minutes since last heartbeat).";
+                $message = "Scheduler heartbeat stale ({$minutesSinceHeartbeat} minutes ago).";
+            } elseif ($minutesSinceHeartbeat >= 1) {
+                $status = 'delayed';
+                $message = "Scheduler heartbeat is delayed ({$minutesSinceHeartbeat} minute(s) ago).";
             }
             
             return [

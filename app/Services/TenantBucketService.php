@@ -71,6 +71,29 @@ class TenantBucketService
             'env' => app()->environment(),
         ]);
 
+        // Unified Operations: Record system incident for storage bucket missing
+        try {
+            app(SystemIncidentService::class)->recordIfNotExists([
+                'source_type' => 'storage',
+                'source_id' => (string) $tenant->id,
+                'tenant_id' => $tenant->id,
+                'severity' => 'critical',
+                'title' => 'Storage bucket missing',
+                'message' => "No active bucket for tenant {$tenant->id}. Expected: {$expectedName}. Run tenants:ensure-buckets on worker.",
+                'requires_support' => true,
+                'metadata' => [
+                    'expected_bucket' => $expectedName,
+                    'env' => app()->environment(),
+                ],
+                'unique_signature' => "storage_bucket_missing:{$tenant->id}:{$expectedName}",
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[TenantBucketService] SystemIncidentService recording failed', [
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         throw new BucketNotProvisionedException($tenant->id);
     }
 
