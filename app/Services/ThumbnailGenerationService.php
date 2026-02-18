@@ -834,11 +834,40 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Render SVG directly at target pixel width using Imagick::setSize().
+     * No DPI, no resize after render. Intrinsic width equals requested width.
+     *
+     * @param string $svgPath Path to SVG file
+     * @param int $targetWidth Target pixel width (height auto from aspect ratio)
+     * @return \Imagick Rendered image instance
+     */
+    private function renderSvgAtWidth(string $svgPath, int $targetWidth): \Imagick
+    {
+        $imagick = new \Imagick();
+
+        // Transparent background
+        $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
+
+        // Critical: define render width BEFORE loading SVG
+        $imagick->setSize($targetWidth, 0);
+
+        // Read SVG
+        $imagick->readImage($svgPath);
+
+        // Ensure output format
+        $imagick->setImageFormat('webp');
+
+        // Remove metadata
+        $imagick->stripImage();
+
+        return $imagick;
+    }
+
+    /**
      * Rasterize SVG to raster thumbnail using Imagick.
      *
-     * Policy: 300 DPI max, control pixel output via resize (not DPI).
-     * SVG-specific widths: thumb 400, medium 1600, large 4096.
-     * Preserves alpha transparency and sharpness without excessive CPU.
+     * Deterministic pixel rendering: render directly at target width via setSize(),
+     * no DPI, no resize after render. Intrinsic width equals requested width.
      *
      * @param string $sourcePath
      * @param array $styleConfig
@@ -846,59 +875,32 @@ class ThumbnailGenerationService
      */
     protected function generateSvgRasterizedThumbnail(string $sourcePath, array $styleConfig): string
     {
-        // SVG-specific pixel sizes (control output via resize, not DPI)
-        $svgSizes = [
-            32 => ['width' => 32, 'height' => 32],     // preview
-            320 => ['width' => 400, 'height' => 400],  // thumb
-            1024 => ['width' => 1600, 'height' => 1600], // medium
-            4096 => ['width' => 4096, 'height' => 4096], // large
+        // SVG-specific pixel widths: preview 32, thumb 400, medium 1600, large 4096
+        $svgWidths = [
+            32 => 32,
+            320 => 400,
+            1024 => 1600,
+            4096 => 4096,
         ];
         $configWidth = $styleConfig['width'] ?? 1024;
-        $svgTarget = $svgSizes[$configWidth] ?? ['width' => min(4096, $configWidth), 'height' => min(4096, $configWidth)];
+        $targetWidth = $svgWidths[$configWidth] ?? min(4096, $configWidth);
 
-        $start = microtime(true);
+        $imagick = $this->renderSvgAtWidth($sourcePath, $targetWidth);
 
-        $imagick = new \Imagick();
-        $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
-        $imagick->setResolution(300, 300);
-        $imagick->readImage($sourcePath);
-        $imagick->setIteratorIndex(0);
-        $imagick = $imagick->getImage();
-
-        $sourceWidth = $imagick->getImageWidth();
-        $sourceHeight = $imagick->getImageHeight();
-        if ($sourceWidth === 0 || $sourceHeight === 0) {
-            $imagick->clear();
-            $imagick->destroy();
-            throw new \RuntimeException('SVG rendered with invalid dimensions');
-        }
-
-        $fit = $styleConfig['fit'] ?? 'contain';
-        [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
-            $sourceWidth,
-            $sourceHeight,
-            $svgTarget['width'],
-            $svgTarget['height'],
-            $fit
-        );
-
-        $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
         if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
             $imagick->blurImage(0, 2);
         }
 
-        $outputFormat = config('assets.thumbnail.output_format', 'webp');
         $quality = $styleConfig['quality'] ?? 85;
-        $imagick->setImageFormat($outputFormat);
         $imagick->setImageCompressionQuality($quality);
 
-        $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
-        $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.' . $extension;
+        $rasterWidth = $imagick->getImageWidth();
+        $rasterHeight = $imagick->getImageHeight();
+
+        $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.webp';
         $imagick->writeImage($thumbPath);
         $imagick->clear();
         $imagick->destroy();
-
-        $duration = microtime(true) - $start;
 
         if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
             throw new \RuntimeException('SVG rasterization produced empty output');
@@ -906,8 +908,8 @@ class ThumbnailGenerationService
 
         Log::info('[SVG Raster]', [
             'asset_id' => $styleConfig['_asset_id'] ?? null,
-            'duration' => round($duration, 3),
-            'width' => $thumbWidth,
+            'width' => $rasterWidth,
+            'height' => $rasterHeight,
         ]);
 
         return $thumbPath;
