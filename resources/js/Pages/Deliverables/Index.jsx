@@ -132,7 +132,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         else bucketAdd(assetId)
     }, [bucketAssetIds, bucketAdd, bucketRemove])
 
-    const visibleIds = useMemo(() => (assetsList || []).map((a) => a.id).filter(Boolean), [assetsList])
+    const visibleIds = useMemo(() => (assetsList || []).filter(Boolean).map((a) => a?.id).filter(Boolean), [assetsList])
     const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
     const handleSelectAllToggle = useCallback(async () => {
         if (visibleIds.length === 0) return

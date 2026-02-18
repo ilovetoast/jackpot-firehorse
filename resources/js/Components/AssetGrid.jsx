@@ -40,13 +40,14 @@ export default function AssetGrid({
     isPendingPublicationFilter = false, // Phase J.3.1: Pending publication filter active
     onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
 }) {
-    if (!assets || assets.length === 0) {
+    const safeAssets = (assets || []).filter(Boolean)
+    if (safeAssets.length === 0) {
         return null
     }
     
     return (
         <AssetGridContainer cardSize={cardSize}>
-            {assets.map((asset) => (
+            {safeAssets.map((asset) => (
                 <AssetCard
                     // CRITICAL: Stable key to prevent remounts/flashing.
                     // Asset cards must be keyed by asset.id ONLY.

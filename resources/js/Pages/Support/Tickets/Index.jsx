@@ -62,7 +62,7 @@ export default function TicketsIndex({ tickets, pagination }) {
                     </Link>
                 </div>
 
-                {tickets.length === 0 ? (
+                {(!tickets || tickets.length === 0) ? (
                     <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg overflow-hidden">
                         <div className="px-6 py-12 text-center">
                             <svg
@@ -124,8 +124,8 @@ export default function TicketsIndex({ tickets, pagination }) {
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
-                                    {tickets.map((ticket) => (
-                                        <tr key={ticket.id} className="hover:bg-gray-50">
+                                    {(tickets || []).filter(Boolean).map((ticket, idx) => (
+                                        <tr key={ticket?.id ?? idx} className="hover:bg-gray-50">
                                             <td className="px-6 py-4">
                                                 <div className="text-sm font-medium text-gray-900">{ticket.subject || '—'}</div>
                                                 <div className="text-xs text-gray-500 mt-0.5">{ticket.ticket_number}</div>
@@ -157,16 +157,16 @@ export default function TicketsIndex({ tickets, pagination }) {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    {ticket.brands.length > 0 ? (
-                                                        ticket.brands.map((brand) => (
-                                                            <div key={brand.id} className="flex items-center" title={brand.name}>
+                                                    {(ticket.brands || []).length > 0 ? (
+                                                        (ticket.brands || []).filter(Boolean).map((brand, idx) => (
+                                                            <div key={brand?.id ?? idx} className="flex items-center" title={brand?.name}>
                                                                 <BrandAvatar
-                                                                    logoPath={brand.logo_path}
-                                                                    iconPath={brand.icon_path}
-                                                                    name={brand.name}
-                                                                    primaryColor={brand.primary_color}
-                                                                    icon={brand.icon}
-                                                                    iconBgColor={brand.icon_bg_color}
+                                                                    logoPath={brand?.logo_path}
+                                                                    iconPath={brand?.icon_path}
+                                                                    name={brand?.name}
+                                                                    primaryColor={brand?.primary_color}
+                                                                    icon={brand?.icon}
+                                                                    iconBgColor={brand?.icon_bg_color}
                                                                     showIcon={true}
                                                                     size="sm"
                                                                 />

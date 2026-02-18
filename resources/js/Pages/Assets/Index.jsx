@@ -55,7 +55,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     const [isAutoClosing, setIsAutoClosing] = useState(false)
     
     // Server-driven pagination: assets list and next page URL (single source of truth)
-    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
+    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
@@ -69,7 +69,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             loadMoreAbortRef.current.abort()
             loadMoreAbortRef.current = null
         }
-        setAssetsList(Array.isArray(assets) ? assets : [])
+        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
             window.__assetGridStaleness.hasStaleAssetGrid = false
@@ -156,7 +156,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
         }
     }, [bucketAssetIds, bucketAdd, bucketRemove])
 
-    const visibleIds = useMemo(() => (assetsList || []).map((a) => a.id).filter(Boolean), [assetsList])
+    const visibleIds = useMemo(() => (assetsList || []).filter(Boolean).map((a) => a?.id).filter(Boolean), [assetsList])
     const allVisibleInBucket = visibleIds.length > 0 && visibleIds.every((id) => bucketAssetIds.includes(id))
 
     const handleSelectAllToggle = useCallback(async () => {
