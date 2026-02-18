@@ -239,10 +239,18 @@ class AssetsCleanupStaging extends Command
     /**
      * Check if any asset has storage_root_path = this temp key (not yet promoted).
      * Prevents deleting temp files needed for thumbnail generation or promotion.
+     *
+     * CRITICAL: Never delete temp files referenced by any asset. Primary guard against
+     * dead assets (source file missing). Also check path prefix for multipart/subpaths.
      */
     protected function assetReferencesTempPath(string $s3Key): bool
     {
-        return Asset::where('storage_root_path', $s3Key)->exists();
+        if (Asset::where('storage_root_path', $s3Key)->exists()) {
+            return true;
+        }
+        // Path prefix: asset path may be under this key (e.g. temp/uploads/xxx/original/file.ext)
+        $prefix = rtrim($s3Key, '/') . '/';
+        return Asset::where('storage_root_path', 'like', $prefix . '%')->exists();
     }
 
     protected function countOrDeletePrefix(string $bucketName, string $prefix, bool $dryRun): int

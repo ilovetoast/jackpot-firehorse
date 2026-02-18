@@ -55,12 +55,14 @@ LOG_FILE="$DEPLOY_DIR/deploy.log"
 RUN_SEED=false
 RUN_BUILD=true
 DRY_RUN=false
+ROLLBACK=false
 
 for arg in "$@"; do
   case "$arg" in
     --seed) RUN_SEED=true ;;
     --no-build) RUN_BUILD=false ;;
     --dry-run) DRY_RUN=true ;;
+    --rollback) ROLLBACK=true ;;
   esac
 done
 
@@ -75,7 +77,7 @@ echo "🚀 DEPLOY START"
 echo "Time:    $(date -u)"
 echo "User:    $(whoami)"
 echo "Release: $RELEASE_ID"
-echo "Flags:   seed=$RUN_SEED build=$RUN_BUILD dry=$DRY_RUN"
+echo "Flags:   seed=$RUN_SEED build=$RUN_BUILD dry=$DRY_RUN rollback=$ROLLBACK"
 echo "PWD:     $(pwd)"
 echo "========================================"
 
@@ -85,6 +87,26 @@ echo "========================================"
 LOCKFILE="$APP_DIR/deploy.lock"
 exec 9>"$LOCKFILE"
 flock -n 9 || { echo "❌ Deploy already running"; exit 1; }
+
+############################################
+# ROLLBACK (revert to previous release)
+############################################
+
+if [[ "$ROLLBACK" == true ]]; then
+  echo "⏪ ROLLBACK: Reverting to previous release"
+  PREV=$(ls -dt "$RELEASES_DIR"/* 2>/dev/null | sed -n '2p')
+  if [[ -z "$PREV" || ! -d "$PREV" ]]; then
+    echo "❌ No previous release found to rollback to"
+    exit 1
+  fi
+  ln -sfn "$PREV" "$CURRENT_LINK"
+  echo "🔁 current → $(basename "$PREV")"
+  sudo systemctl reload nginx
+  sudo systemctl restart php8.4-fpm
+  echo "✅ ROLLBACK COMPLETE"
+  echo "========================================"
+  exit 0
+fi
 
 ############################################
 # NODE + NPM

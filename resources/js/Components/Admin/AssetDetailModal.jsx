@@ -91,6 +91,18 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                 <div className="p-6">
                     {tab === 'overview' && (
                         <div className="space-y-4">
+                            {asset?.storage_missing && (
+                                <div className="rounded-lg border-2 border-red-500 bg-red-50 p-4">
+                                    <div className="flex items-center gap-2">
+                                        <span className="rounded px-2 py-1 text-sm font-bold uppercase tracking-wide bg-red-600 text-white">
+                                            Dead
+                                        </span>
+                                        <span className="text-sm text-red-800 font-medium">
+                                            Source file missing from storage. Cannot be recovered. Delete and re-upload.
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div><span className="text-slate-500">ID</span><br />{asset?.id}</div>
                                 <div><span className="text-slate-500">Tenant</span><br />{asset?.tenant?.name ?? '—'}</div>

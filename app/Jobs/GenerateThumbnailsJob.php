@@ -821,6 +821,21 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $currentMetadata['thumbnail_generation_failed'] = true;
                 $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
                 $currentMetadata['thumbnail_generation_error'] = $errorMessage;
+
+                // CRITICAL: Detect DEAD asset — source file missing from storage (NoSuchKey)
+                // This is the most severe state: asset cannot be recovered without re-upload
+                $isStorageMissing = $e instanceof S3Exception && $e->getAwsErrorCode() === 'NoSuchKey'
+                    || str_contains($errorMessage, 'NoSuchKey')
+                    || str_contains($errorMessage, '404')
+                    || str_contains(strtolower($errorMessage), 'specified key does not exist');
+                if ($isStorageMissing) {
+                    $currentMetadata['storage_missing'] = true;
+                    $currentMetadata['storage_missing_detected_at'] = now()->toIso8601String();
+                    Log::critical('[GenerateThumbnailsJob] DEAD ASSET — source file missing from storage', [
+                        'asset_id' => $asset->id,
+                        'storage_root_path' => $asset->storage_root_path,
+                    ]);
+                }
                 $asset->update(['metadata' => $currentMetadata]);
 
                 // Phase T-1: Record derivative failure for observability (never affects Asset.status)
@@ -845,21 +860,33 @@ class GenerateThumbnailsJob implements ShouldQueue
 
                 // Unified Operations: Record system incident for visibility
                 try {
-                    app(ReliabilityEngine::class)->report([
-                        'source_type' => 'job',
+                    $reportPayload = [
+                        'source_type' => 'asset',
                         'source_id' => $asset->id,
                         'tenant_id' => $asset->tenant_id,
-                        'severity' => 'error',
-                        'title' => 'Thumbnail generation failed',
                         'message' => $e->getMessage(),
-                        'retryable' => true,
                         'metadata' => [
                             'exception_class' => get_class($e),
                             'exception_message' => $e->getMessage(),
                             'attempts' => $this->attempts(),
                             'derivative_failure' => true,
                         ],
-                    ]);
+                    ];
+                    if ($isStorageMissing ?? false) {
+                        // DEAD asset — highest severity, requires immediate attention
+                        $reportPayload['severity'] = 'critical';
+                        $reportPayload['title'] = 'Source file missing (DEAD asset)';
+                        $reportPayload['requires_support'] = true;
+                        $reportPayload['retryable'] = false;
+                        $reportPayload['unique_signature'] = "storage_missing:{$asset->id}";
+                        $reportPayload['metadata']['storage_missing'] = true;
+                        $reportPayload['metadata']['storage_root_path'] = $asset->storage_root_path;
+                    } else {
+                        $reportPayload['severity'] = 'error';
+                        $reportPayload['title'] = 'Thumbnail generation failed';
+                        $reportPayload['retryable'] = true;
+                    }
+                    app(ReliabilityEngine::class)->report($reportPayload);
                 } catch (\Throwable $t2Ex) {
                     Log::warning('[GenerateThumbnailsJob] ReliabilityEngine recording failed', [
                         'asset_id' => $asset->id,

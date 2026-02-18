@@ -383,15 +383,24 @@ class UploadCleanupService
      * Check if any asset still references this temp path (not yet promoted).
      * Prevents deleting temp files needed for thumbnail generation or promotion.
      *
+     * CRITICAL: Never delete temp files referenced by any asset. This is the primary
+     * guard against "dead" assets (source file missing). If an asset points to a temp
+     * path, we MUST NOT delete it until the asset is promoted or the asset is deleted.
+     *
      * @param string $uploadSessionId
      * @param string $tempPath Expected: temp/uploads/{id}/original
      * @return bool
      */
     protected function assetStillNeedsTempFile(string $uploadSessionId, string $tempPath): bool
     {
-        return Asset::where('upload_session_id', $uploadSessionId)
+        // Primary check: asset with this session and path
+        if (Asset::where('upload_session_id', $uploadSessionId)
             ->where('storage_root_path', $tempPath)
-            ->exists();
+            ->exists()) {
+            return true;
+        }
+        // Belt-and-suspenders: ANY asset pointing to this path (covers upload_session_id null/mismatch)
+        return Asset::where('storage_root_path', $tempPath)->exists();
     }
 
     /**

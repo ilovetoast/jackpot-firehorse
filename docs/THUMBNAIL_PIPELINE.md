@@ -202,7 +202,8 @@ When `GenerateThumbnailsJob` fails at `downloadFromS3()` with `storage_error`:
    - **AccessDenied**: Worker IAM lacks `s3:GetObject` for the bucket
    - **NoSuchBucket**: Per-tenant bucket not provisioned
 3. **Fix**: Ensure worker uses credentials with S3 access; run `tenants:ensure-buckets` if buckets are missing.
-4. **Prevention**: `UploadCleanupService` and `AssetsCleanupStaging` now skip temp files that are still referenced by assets (not yet promoted). This prevents NoSuchKey when thumbnail generation or promotion runs after cleanup.
+4. **Prevention**: `UploadCleanupService` and `AssetsCleanupStaging` NEVER delete temp files that any asset references. Multiple guards: (a) asset with matching upload_session_id + storage_root_path, (b) ANY asset with storage_root_path = temp path, (c) path prefix match for subpaths. This must never be relaxed.
+5. **DEAD state**: When NoSuchKey is detected, the asset is marked `metadata.storage_missing = true` (DEAD). A critical incident "Source file missing (DEAD asset)" is created. Admin UI shows "Dead" prominently. These assets cannot be recovered — delete and re-upload.
 
 ### White Logos on Transparent Background
 

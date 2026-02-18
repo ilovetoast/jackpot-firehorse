@@ -598,14 +598,28 @@ class Asset extends Model
     }
 
     /**
+     * Check if asset is DEAD — source file missing from storage (NoSuchKey).
+     * Cannot be recovered without re-upload.
+     */
+    public function isStorageMissing(): bool
+    {
+        return (bool) ($this->metadata['storage_missing'] ?? false);
+    }
+
+    /**
      * Compute asset health status for Ops/support visibility.
-     * Derived from: open incidents, visualMetadataReady(), thumbnail_status.
+     * Derived from: storage_missing (DEAD), open incidents, visualMetadataReady(), thumbnail_status.
      *
      * @param string|null $worstIncidentSeverity 'critical'|'error'|'warning' from unresolved incidents
      * @return 'healthy'|'warning'|'critical'
      */
     public function computeHealthStatus(?string $worstIncidentSeverity): string
     {
+        // DEAD asset — source file missing — always critical
+        if ($this->isStorageMissing()) {
+            return 'critical';
+        }
+
         $ts = $this->thumbnail_status instanceof ThumbnailStatus
             ? $this->thumbnail_status->value
             : (string) ($this->thumbnail_status ?? 'pending');

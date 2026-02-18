@@ -370,6 +370,17 @@ export default function AdminAssetsIndex({
                                 </select>
                             </div>
                             <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Dead</label>
+                                <select
+                                    value={initialFilters?.storage_missing === true ? '1' : ''}
+                                    onChange={(e) => applyFilters({ storage_missing: e.target.value === '1' ? true : null, page: 1 })}
+                                    className="block w-full rounded border-slate-300 text-sm"
+                                >
+                                    <option value="">All</option>
+                                    <option value="1">Dead (source missing)</option>
+                                </select>
+                            </div>
+                            <div>
                                 <label className="block text-xs font-medium text-slate-500 mb-1">Incident</label>
                                 <select
                                     value={initialFilters?.has_incident === true ? '1' : initialFilters?.has_incident === false ? '0' : ''}
@@ -480,8 +491,15 @@ export default function AdminAssetsIndex({
                                                 </span>
                                             </td>
                                             <td className="px-4 py-2">
-                                                <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.thumbnail_status] || STATUS_COLORS.unknown}`}>
-                                                    {a.thumbnail_status}
+                                                {a.storage_missing ? (
+                                                    <span className="inline-flex rounded px-2 py-0.5 text-xs font-bold uppercase bg-red-600 text-white">
+                                                        Dead
+                                                    </span>
+                                                ) : (
+                                                    <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[a.thumbnail_status] || STATUS_COLORS.unknown}`}>
+                                                        {a.thumbnail_status}
+                                                    </span>
+                                                )}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-2">

@@ -493,6 +493,7 @@ class AdminAssetController extends Controller
             '/tag:([a-z0-9_-]+)/i' => 'tag',
             '/category:(\w+)/i' => 'category_slug',
             '/user:(\d+)/i' => 'created_by',
+            '/dead:(true|1)/i' => 'storage_missing',
         ];
 
         foreach ($patterns as $regex => $key) {
@@ -500,6 +501,8 @@ class AdminAssetController extends Controller
                 $val = $m[1];
                 if ($key === 'has_incident') {
                     $parsed[$key] = in_array(strtolower($val), ['true', '1']);
+                } elseif ($key === 'storage_missing') {
+                    $parsed[$key] = true;
                 } elseif ($key === 'brand_slug' || $key === 'category_slug') {
                     $parsed[$key] = $val;
                 } else {
@@ -570,6 +573,9 @@ class AdminAssetController extends Controller
         }
         if (!empty($filters['thumbnail_status'])) {
             $query->where('thumbnail_status', $filters['thumbnail_status']);
+        }
+        if (($filters['storage_missing'] ?? null) === true) {
+            $query->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.storage_missing')) IN ('true', '1')");
         }
         if ($filters['has_incident'] === true) {
             $query->whereExists(function ($sub) {
@@ -698,6 +704,7 @@ class AdminAssetController extends Controller
             'category_id' => $metadata['category_id'] ?? null,
             'analysis_status' => $asset->analysis_status ?? 'unknown',
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'unknown',
+            'storage_missing' => $asset->isStorageMissing(),
             'incident_count' => $incidentCount,
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
