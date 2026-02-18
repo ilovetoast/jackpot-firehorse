@@ -284,8 +284,8 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                             Manually triggered by user
                                                         </p>
                                                     )}
-                                                    {/* Show style indicators for thumbnail completed events */}
-                                                    {event.metadata.styles && event.event_type === 'asset.thumbnail.completed' && (
+                                                    {/* Show style indicators for thumbnail completed events (hide when styles is empty) */}
+                                                    {event.metadata.styles?.length > 0 && event.event_type === 'asset.thumbnail.completed' && (
                                                         <div className="mt-1.5 flex items-center gap-2">
                                                             <span className="text-xs text-gray-500">Styles:</span>
                                                             <div className="flex items-center gap-1.5">
@@ -310,7 +310,7 @@ export default function AssetTimeline({ events = [], loading = false, onThumbnai
                                                         </div>
                                                     )}
                                                     {/* Show text for other events that mention styles */}
-                                                    {event.metadata.styles && event.event_type !== 'asset.thumbnail.completed' && (
+                                                    {event.metadata.styles?.length > 0 && event.event_type !== 'asset.thumbnail.completed' && (
                                                         <p className="text-xs text-gray-500">Styles: {event.metadata.styles.join(', ')}</p>
                                                     )}
                                                     {/* Phase 3.1: Hide temp upload paths from timeline (internal-only detail, confusing for users) */}

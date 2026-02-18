@@ -69,6 +69,8 @@ export default function AssetDetailPanel({
     activityLoading: externalActivityLoading = false,
     onReplaceFile = null,
     onDelete = null,
+    onReprocessAsset = null,
+    reprocessLoading = false,
     primaryColor,
     fullPage = false,
 }) {
@@ -81,6 +83,7 @@ export default function AssetDetailPanel({
     const canEditMetadata = can('metadata.edit_post_upload')
     const canRegenerateAiMetadata = can('assets.ai_metadata.regenerate')
     const canRegenerateThumbnailsAdmin = can('assets.regenerate_thumbnails_admin')
+    const canRetryThumbnails = can('assets.retry_thumbnails')
     const canPublish = can('asset.publish')
     const canUnpublish = can('asset.unpublish')
     const canArchive = can('asset.archive')
@@ -682,11 +685,22 @@ export default function AssetDetailPanel({
                                                     </button>
                                                 )}
                                             </div>
-                                            {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin) && (
+                                            {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin || (canRetryThumbnails && onReprocessAsset)) && (
                                                 <>
                                                     <div className="border-t border-gray-100 my-2" />
                                                     <div className="px-2 py-1">
                                                         <p className="px-3 py-1 text-xs font-medium text-gray-400 uppercase tracking-wider">Reprocess</p>
+                                                        {canRetryThumbnails && onReprocessAsset && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => { setShowActionsDropdown(false); onReprocessAsset(); }}
+                                                                disabled={reprocessLoading}
+                                                                className="w-full text-left px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 rounded-md flex items-center gap-2"
+                                                            >
+                                                                <ArrowPathIcon className={`h-4 w-4 flex-shrink-0 ${reprocessLoading ? 'animate-spin' : ''}`} />
+                                                                Reprocess asset (full pipeline)
+                                                            </button>
+                                                        )}
                                                         {canRegenerateAiMetadataForTroubleshooting && (
                                                             <>
                                                                 <button

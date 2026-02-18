@@ -3001,6 +3001,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     activityLoading={activityLoading}
                     onReplaceFile={() => setShowReplaceFileModal(true)}
                     onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
+                    onReprocessAsset={canRetryThumbnails ? handleReprocessAsset : undefined}
+                    reprocessLoading={reprocessLoading}
                     primaryColor={brandPrimary}
                 />
             )}
