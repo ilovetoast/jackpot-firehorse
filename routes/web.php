@@ -249,6 +249,7 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/admin/assets', [\App\Http\Controllers\Admin\AdminAssetController::class, 'index'])->name('admin.assets.index');
     Route::post('/admin/assets/bulk-action', [\App\Http\Controllers\Admin\AdminAssetController::class, 'bulkAction'])->name('admin.assets.bulk-action');
     Route::get('/admin/assets/{asset}', [\App\Http\Controllers\Admin\AdminAssetController::class, 'show'])->name('admin.assets.show');
+    Route::get('/admin/assets/{asset}/thumbnail', [\App\Http\Controllers\AssetThumbnailController::class, 'adminThumbnail'])->name('admin.assets.thumbnail');
     Route::post('/admin/assets/{asset}/repair', [\App\Http\Controllers\Admin\AdminAssetController::class, 'repair'])->name('admin.assets.repair');
     Route::post('/admin/assets/{asset}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restore'])->name('admin.assets.restore');
     Route::post('/admin/assets/{asset}/retry-pipeline', [\App\Http\Controllers\Admin\AdminAssetController::class, 'retryPipeline'])->name('admin.assets.retry-pipeline');

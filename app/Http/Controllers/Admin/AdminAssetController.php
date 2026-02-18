@@ -459,6 +459,17 @@ class AdminAssetController extends Controller
         }
     }
 
+    protected function adminThumbnailUrl(Asset $asset): ?string
+    {
+        if ($asset->thumbnail_status?->value !== 'completed') {
+            return null;
+        }
+        if (!$asset->thumbnailPathForStyle('medium')) {
+            return null;
+        }
+        return route('admin.assets.thumbnail', ['asset' => $asset->id]);
+    }
+
     protected function formatAssetForList(Asset $asset): array
     {
         $metadata = $asset->metadata ?? [];
@@ -481,7 +492,7 @@ class AdminAssetController extends Controller
             'created_by' => $asset->user ? ['id' => $asset->user->id, 'name' => $asset->user->first_name . ' ' . $asset->user->last_name] : null,
             'created_at' => $asset->created_at?->toIso8601String(),
             'deleted_at' => $asset->deleted_at?->toIso8601String(),
-            'thumbnail_url' => $asset->medium_thumbnail_url ?? null,
+            'thumbnail_url' => $this->adminThumbnailUrl($asset),
         ];
     }
 

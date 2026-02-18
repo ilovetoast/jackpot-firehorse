@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\Collection;
+use Illuminate\Support\Facades\Auth;
 use App\Models\Download;
 use App\Services\FeatureGate;
 use Aws\S3\S3Client;
@@ -73,6 +74,52 @@ class AssetThumbnailController extends Controller
         protected FeatureGate $featureGate
     ) {
         // Lazy-load S3 client only when needed
+    }
+
+    /**
+     * Stream thumbnail for Admin Asset Operations (cross-tenant).
+     *
+     * GET /app/admin/assets/{asset}/thumbnail
+     *
+     * Uses the asset's storage bucket (not the default s3 disk) so thumbnails
+     * load correctly in staging/production where per-tenant buckets are used.
+     */
+    public function adminThumbnail(string $asset): \Symfony\Component\HttpFoundation\Response
+    {
+        $user = Auth::user();
+        if (!$user) {
+            abort(403);
+        }
+        $siteRoles = $user->getSiteRoles();
+        $isSiteOwner = $user->id === 1;
+        $isSiteAdmin = in_array('site_admin', $siteRoles) || in_array('site_owner', $siteRoles);
+        $isEngineering = in_array('site_engineering', $siteRoles);
+        $canRegenerate = $user->can('assets.regenerate_thumbnails_admin');
+        if (!$isSiteOwner && !$isSiteAdmin && !$isEngineering && !$canRegenerate) {
+            abort(403, 'Admin access required');
+        }
+
+        $asset = Asset::withTrashed()->with('storageBucket')->findOrFail($asset);
+        $this->validateStyle('medium');
+
+        if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
+            abort(404, 'Thumbnail not ready');
+        }
+
+        $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+        if (!$thumbnailPath) {
+            abort(404, 'Thumbnail path not found');
+        }
+
+        try {
+            return $this->streamThumbnailFromS3($asset, $thumbnailPath);
+        } catch (\Throwable $e) {
+            Log::warning('Admin asset thumbnail stream failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404, 'Thumbnail not available');
+        }
     }
 
     /**
