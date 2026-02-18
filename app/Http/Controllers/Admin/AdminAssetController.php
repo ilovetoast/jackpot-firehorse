@@ -154,7 +154,7 @@ class AdminAssetController extends Controller
                 'id' => $j->id,
                 'uuid' => $j->uuid,
                 'queue' => $j->queue,
-                'failed_at' => $j->failed_at?->toIso8601String(),
+                'failed_at' => $j->failed_at ? \Carbon\Carbon::parse($j->failed_at)->toIso8601String() : null,
                 'exception_preview' => \Str::limit($j->exception, 300),
                 'exception_full' => $j->exception,
             ])
