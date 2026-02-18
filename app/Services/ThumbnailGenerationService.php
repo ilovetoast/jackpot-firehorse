@@ -834,40 +834,41 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Render SVG directly at target pixel width using Imagick::setSize().
-     * No DPI, no resize after render. Intrinsic width equals requested width.
+     * Render SVG to PNG via rsvg-convert (librsvg).
      *
-     * @param string $svgPath Path to SVG file
+     * @param string $sourcePath Path to SVG file
      * @param int $targetWidth Target pixel width (height auto from aspect ratio)
-     * @return \Imagick Rendered image instance
+     * @return string Path to temporary PNG file
      */
-    private function renderSvgAtWidth(string $svgPath, int $targetWidth): \Imagick
+    private function renderSvgViaRsvg(string $sourcePath, int $targetWidth): string
     {
-        $imagick = new \Imagick();
+        $tmpDir = storage_path('app/tmp');
+        if (!is_dir($tmpDir)) {
+            mkdir($tmpDir, 0755, true);
+        }
 
-        // Transparent background
-        $imagick->setBackgroundColor(new \ImagickPixel('transparent'));
+        $tempPngPath = $tmpDir . '/svg_' . uniqid() . '.png';
 
-        // Critical: define render width BEFORE loading SVG
-        $imagick->setSize($targetWidth, 0);
+        $command = sprintf(
+            'rsvg-convert -w %d %s -o %s',
+            $targetWidth,
+            escapeshellarg($sourcePath),
+            escapeshellarg($tempPngPath)
+        );
 
-        // Read SVG
-        $imagick->readImage($svgPath);
+        exec($command, $output, $exitCode);
 
-        // Ensure output format
-        $imagick->setImageFormat('webp');
+        if ($exitCode !== 0 || !file_exists($tempPngPath)) {
+            throw new \RuntimeException('rsvg-convert failed.');
+        }
 
-        // Remove metadata
-        $imagick->stripImage();
-
-        return $imagick;
+        return $tempPngPath;
     }
 
     /**
-     * Rasterize SVG to raster thumbnail using Imagick.
+     * Rasterize SVG to raster thumbnail using rsvg-convert + Imagick.
      *
-     * Deterministic pixel rendering: render directly at target width via setSize(),
-     * no DPI, no resize after render. Intrinsic width equals requested width.
+     * SVG → PNG via rsvg-convert, then PNG → WebP via Imagick.
      *
      * @param string $sourcePath
      * @param array $styleConfig
@@ -885,22 +886,31 @@ class ThumbnailGenerationService
         $configWidth = $styleConfig['width'] ?? 1024;
         $targetWidth = $svgWidths[$configWidth] ?? min(4096, $configWidth);
 
-        $imagick = $this->renderSvgAtWidth($sourcePath, $targetWidth);
+        $pngPath = $this->renderSvgViaRsvg($sourcePath, $targetWidth);
 
-        if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
-            $imagick->blurImage(0, 2);
+        try {
+            $imagick = new \Imagick($pngPath);
+            $imagick->setImageFormat('webp');
+            $imagick->setImageCompressionQuality(92);
+            $imagick->stripImage();
+
+            if (!empty($styleConfig['blur'])) {
+                $imagick->blurImage(0, 8);
+            }
+
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.webp';
+            $imagick->writeImage($thumbPath);
+
+            $width  = $imagick->getImageWidth();
+            $height = $imagick->getImageHeight();
+
+            $imagick->clear();
+            $imagick->destroy();
+        } finally {
+            if (file_exists($pngPath)) {
+                unlink($pngPath);
+            }
         }
-
-        $quality = $styleConfig['quality'] ?? 85;
-        $imagick->setImageCompressionQuality($quality);
-
-        $rasterWidth = $imagick->getImageWidth();
-        $rasterHeight = $imagick->getImageHeight();
-
-        $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.webp';
-        $imagick->writeImage($thumbPath);
-        $imagick->clear();
-        $imagick->destroy();
 
         if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
             throw new \RuntimeException('SVG rasterization produced empty output');
@@ -908,8 +918,8 @@ class ThumbnailGenerationService
 
         Log::info('[SVG Raster]', [
             'asset_id' => $styleConfig['_asset_id'] ?? null,
-            'width' => $rasterWidth,
-            'height' => $rasterHeight,
+            'width' => $width,
+            'height' => $height,
         ]);
 
         return $thumbPath;

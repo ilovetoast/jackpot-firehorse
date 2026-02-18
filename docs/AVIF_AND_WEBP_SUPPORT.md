@@ -4,6 +4,10 @@
 
 Added support for AVIF image previews using ImageMagick, and implemented WebP as the default thumbnail output format for better compression and performance.
 
+install librsvg
+sudo apt update
+sudo apt install librsvg2-bin librsvg2-dev
+
 ## AVIF Support
 
 ### Requirements
