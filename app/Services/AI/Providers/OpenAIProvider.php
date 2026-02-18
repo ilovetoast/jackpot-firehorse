@@ -72,11 +72,11 @@ class OpenAIProvider implements AIProviderInterface
 
     public function __construct()
     {
-        $this->baseUrl = env('OPENAI_API_BASE_URL', 'https://api.openai.com/v1');
-        $this->apiKey = env('OPENAI_API_KEY');
+        $this->baseUrl = config('ai.openai.base_url', 'https://api.openai.com/v1');
+        $this->apiKey = config('ai.openai.api_key') ?? '';
 
-        if (!$this->apiKey) {
-            throw new \RuntimeException('OPENAI_API_KEY environment variable is required for OpenAI provider.');
+        if ($this->apiKey === '') {
+            throw new \RuntimeException('OPENAI_API_KEY is required for OpenAI provider. Set it in .env or config/ai.php.');
         }
     }
 

@@ -29,6 +29,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | OpenAI Provider
+    |--------------------------------------------------------------------------
+    |
+    | Credentials for OpenAI API. Use config() not env() in application code
+    | so values work correctly when config is cached (e.g. staging/production).
+    |
+    */
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'base_url' => env('OPENAI_API_BASE_URL', 'https://api.openai.com/v1'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Models Registry
     |--------------------------------------------------------------------------
     |
