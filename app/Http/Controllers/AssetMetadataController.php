@@ -31,6 +31,7 @@ use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
 use App\Services\MetadataApprovalResolver;
 use App\Services\PlanService;
+use App\Services\SystemIncidentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -1171,8 +1172,16 @@ class AssetMetadataController extends Controller
         // P1: Reconcile before returning incidents
         try {
             app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+            $asset->refresh();
         } catch (\Throwable $e) {
             // Non-blocking
+        }
+
+        // Resolve stale incidents: asset is now complete, old "stuck" incidents are obsolete
+        $status = $asset->analysis_status ?? 'uploading';
+        if ($status === 'complete') {
+            app(SystemIncidentService::class)->resolveBySource('asset', $asset->id);
+            app(SystemIncidentService::class)->resolveBySource('job', $asset->id);
         }
 
         $incidents = SystemIncident::whereNull('resolved_at')
@@ -1343,7 +1352,7 @@ class AssetMetadataController extends Controller
                 'ticket_id' => $existing->id,
             ]);
 
-            $tenantTicket = $this->findOrCreateTenantTicketForAsset($asset, $existing, $payload);
+            $tenantTicket = $this->findOrCreateTenantTicketForAssetSafe($asset, $existing, $payload);
             return response()->json([
                 'ticket' => $existing->fresh(),
                 'tenant_ticket' => $tenantTicket ? [
@@ -1373,7 +1382,7 @@ class AssetMetadataController extends Controller
             'ticket_id' => $supportTicket->id,
         ]);
 
-        $tenantTicket = $this->createTenantTicketForAsset($asset, $supportTicket, $payload);
+        $tenantTicket = $this->createTenantTicketForAssetSafe($asset, $supportTicket, $payload);
 
         return response()->json([
             'ticket' => $supportTicket->fresh(),
@@ -1385,6 +1394,38 @@ class AssetMetadataController extends Controller
             'incidents' => $recentIncidents,
             'last_failed_job' => $lastFailedJob,
         ]);
+    }
+
+    /**
+     * Safe wrapper: find or create tenant Ticket. Catches errors to prevent 500 on submit-ticket.
+     */
+    protected function findOrCreateTenantTicketForAssetSafe(Asset $asset, SupportTicket $supportTicket, array $payload): ?Ticket
+    {
+        try {
+            return $this->findOrCreateTenantTicketForAsset($asset, $supportTicket, $payload);
+        } catch (\Throwable $e) {
+            Log::warning('[SupportTicket] Tenant Ticket creation failed (non-fatal)', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Safe wrapper: create tenant Ticket. Catches errors to prevent 500 on submit-ticket.
+     */
+    protected function createTenantTicketForAssetSafe(Asset $asset, SupportTicket $supportTicket, array $payload): ?Ticket
+    {
+        try {
+            return $this->createTenantTicketForAsset($asset, $supportTicket, $payload);
+        } catch (\Throwable $e) {
+            Log::warning('[SupportTicket] Tenant Ticket creation failed (non-fatal)', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**
