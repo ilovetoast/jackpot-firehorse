@@ -239,8 +239,39 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
             const data = await res.json()
             if (data.status === 'queued') {
                 fetchMetadata()
+                // Poll until pipeline finishes (analysis complete or metadata_health.is_complete) or 60s
+                let attempts = 0
+                const poll = () => {
+                    if (attempts >= 30) {
+                        setReanalyzeLoading(false)
+                        return
+                    }
+                    attempts++
+                    setTimeout(() => {
+                        fetch(`/app/assets/${assetId}/metadata/editable`, {
+                            headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content },
+                            credentials: 'same-origin',
+                        })
+                            .then((r) => r.json())
+                            .then((d) => {
+                                setMetadataHealth(d.metadata_health ?? null)
+                                setAnalysisStatus(d.analysis_status ?? 'uploading')
+                                setThumbnailStatus(d.thumbnail_status ?? 'pending')
+                                const done = (d.analysis_status ?? '') === 'complete' || (d.metadata_health?.is_complete === true)
+                                if (done || attempts >= 30) setReanalyzeLoading(false)
+                                else poll()
+                            })
+                            .catch(() => {
+                                if (attempts >= 30) setReanalyzeLoading(false)
+                                else poll()
+                            })
+                    }, 2000)
+                }
+                poll()
+            } else {
+                setReanalyzeLoading(false)
             }
-        } finally {
+        } catch {
             setReanalyzeLoading(false)
         }
     }
@@ -261,7 +292,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                 </div>
             )}
             <div>
-                {!suppressAnalysisRunningBanner && !metadataHealth?.is_complete && metadataHealth && (
+                {!suppressAnalysisRunningBanner && !metadataHealth?.is_complete && metadataHealth && analysisStatus !== 'complete' && (
                     <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
                         <div className="font-medium text-amber-800">
                             System analysis still running

@@ -67,6 +67,13 @@ class AssetStateReconciliationService
             }
         }
 
+        // Rule 5 — Pipeline outputs present but analysis_status stuck (e.g. post-lifecycle migration)
+        // Fixes assets that completed pipeline but weren't backfilled (migration only touched brand_compliance_scores)
+        if (($asset->analysis_status ?? 'uploading') !== 'complete') {
+            $promotions = $this->applyRule5($asset);
+            $changes = array_merge($changes, $promotions);
+        }
+
         return [
             'updated' => !empty($changes),
             'changes' => $changes,
@@ -149,5 +156,32 @@ class AssetStateReconciliationService
         }
 
         return $changes;
+    }
+
+    /**
+     * Rule 5: All pipeline outputs present → analysis_status=complete
+     *
+     * Fixes assets that completed the pipeline but analysis_status was never set
+     * (e.g. post analysis_status migration, assets without brand_compliance_scores).
+     */
+    protected function applyRule5(Asset $asset): array
+    {
+        $hasDominantColors = ! empty(data_get($asset->metadata, 'dominant_colors'))
+            || ! empty(data_get($asset->metadata, 'fields.dominant_colors'));
+        $hasDominantHueGroup = ! empty($asset->dominant_hue_group);
+        $hasEmbedding = $asset->embedding()->exists();
+        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus ? $asset->thumbnail_status : null;
+        $thumbnailDone = $thumbEnum === ThumbnailStatus::COMPLETED || $thumbEnum === ThumbnailStatus::SKIPPED;
+
+        if (!$hasDominantColors || !$hasDominantHueGroup || !$hasEmbedding || !$thumbnailDone) {
+            return [];
+        }
+
+        $asset->update(['analysis_status' => 'complete']);
+        Log::info('[AssetStateReconciliationService] Rule 5 applied (pipeline outputs present)', [
+            'asset_id' => $asset->id,
+        ]);
+
+        return ['analysis_status → complete'];
     }
 }

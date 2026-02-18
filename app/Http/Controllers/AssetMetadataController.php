@@ -667,6 +667,14 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
+        // Reconcile asset state (fixes analysis_status stuck from lifecycle migration)
+        try {
+            app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+            $asset->refresh();
+        } catch (\Throwable $e) {
+            // Non-blocking
+        }
+
         // Phase 4: Get user role for permission checks
         $userRole = $user ? ($user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member') : 'member';
 
