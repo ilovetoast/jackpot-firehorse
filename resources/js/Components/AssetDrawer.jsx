@@ -1174,10 +1174,17 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 const res = await window.axios.post(`/app/assets/${displayAsset.id}/submit-ticket`)
                                                 const ticket = res.data?.ticket ?? null
                                                 if (ticket?.id) {
-                                                    router.visit(`/app/support/tickets/${ticket.id}`)
+                                                    setAssetIncidents([])
+                                                    if (onAssetUpdate) onAssetUpdate()
+                                                    router.reload({ only: ['assets'] })
+                                                    setToastMessage('Support ticket submitted. Our team will review the processing issue.')
+                                                    setToastType('success')
+                                                    setTimeout(() => setToastMessage(null), 6000)
                                                 }
                                             } catch (e) {
-                                                // Ignore
+                                                setToastMessage('Failed to submit support ticket.')
+                                                setToastType('error')
+                                                setTimeout(() => setToastMessage(null), 5000)
                                             }
                                         }}
                                         className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
