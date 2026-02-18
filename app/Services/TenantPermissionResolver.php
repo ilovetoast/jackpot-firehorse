@@ -65,6 +65,60 @@ class TenantPermissionResolver
     }
 
     /**
+     * Debug check: returns result and source for admin troubleshooting.
+     *
+     * @return array{result: bool, source: string} source: 'PermissionMap', 'Spatie', or 'denied'
+     */
+    public function debugCheck(?User $user, ?Tenant $tenant, ?Brand $brand, string $permission): array
+    {
+        if (!$user) {
+            return ['result' => false, 'source' => 'denied'];
+        }
+
+        if ($brand) {
+            $tenant = $brand->tenant;
+            $tenantRole = $user->getRoleForTenant($tenant);
+            if ($tenantRole) {
+                $rolePermissions = PermissionMap::tenantPermissions()[strtolower($tenantRole)] ?? [];
+                if (in_array($permission, $rolePermissions)) {
+                    return ['result' => true, 'source' => 'PermissionMap'];
+                }
+            }
+            $brandRole = $user->getRoleForBrand($brand);
+            if ($brandRole) {
+                $brandPerms = PermissionMap::brandPermissions()[strtolower($brandRole)] ?? [];
+                if (in_array($permission, $brandPerms)) {
+                    return ['result' => true, 'source' => 'PermissionMap'];
+                }
+            }
+            if ($user->hasPermissionForBrand($brand, $permission)) {
+                return ['result' => true, 'source' => 'Spatie'];
+            }
+            return ['result' => false, 'source' => 'denied'];
+        }
+
+        if ($tenant) {
+            $tenantRole = $user->getRoleForTenant($tenant);
+            if ($tenantRole) {
+                $rolePermissions = PermissionMap::tenantPermissions()[strtolower($tenantRole)] ?? [];
+                if (in_array($permission, $rolePermissions)) {
+                    return ['result' => true, 'source' => 'PermissionMap'];
+                }
+            }
+            if ($user->hasPermissionForTenant($tenant, $permission)) {
+                return ['result' => true, 'source' => 'Spatie'];
+            }
+            return ['result' => false, 'source' => 'denied'];
+        }
+
+        // Site-level (no tenant)
+        if ($user->can($permission)) {
+            return ['result' => true, 'source' => 'Spatie'];
+        }
+        return ['result' => false, 'source' => 'denied'];
+    }
+
+    /**
      * Check if a user has a permission for a brand.
      * 
      * Brand permissions are checked after tenant permissions.

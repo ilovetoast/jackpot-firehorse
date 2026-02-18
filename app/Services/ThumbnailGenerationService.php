@@ -45,6 +45,13 @@ use Illuminate\Support\Facades\Storage;
  * @todo Office document previews (LibreOffice)
  * @todo Asset versioning (future phase)
  * @todo Activity timeline integration
+ *
+ * CDN Migration Prep (when moving to CDN):
+ * - large: cache aggressively (modal preview, high quality)
+ * - preview: can be low quality (hover/quick view)
+ * - medium: optimize for grid display
+ * - thumb: smallest, grid thumbnails
+ * Current structure already supports per-style caching policies.
  */
 class ThumbnailGenerationService
 {

@@ -19,7 +19,7 @@ export default function AdminPermissions({
     const [newPermissionType, setNewPermissionType] = useState('company') // 'company' or 'site'
     const [creatingPermission, setCreatingPermission] = useState(false)
     const [errors, setErrors] = useState({})
-    const [activeTab, setActiveTab] = useState('system') // 'system' or 'tenant'
+    const [activeTab, setActiveTab] = useState('system') // 'system', 'tenant', or 'debug'
     const [collapsedSections, setCollapsedSections] = useState({
         systemManagement: false,
         ticketManagement: false,
@@ -38,6 +38,14 @@ export default function AdminPermissions({
         tagManagement: false,
     })
     const [showTenantInfo, setShowTenantInfo] = useState(false)
+
+    // Permission Debug (Admin Only)
+    const [debugUserId, setDebugUserId] = useState('')
+    const [debugTenantId, setDebugTenantId] = useState('')
+    const [debugBrandId, setDebugBrandId] = useState('')
+    const [debugPermission, setDebugPermission] = useState('assets.delete')
+    const [debugResult, setDebugResult] = useState(null)
+    const [debugLoading, setDebugLoading] = useState(false)
 
     // Default roles and permissions structure
     const defaultSiteRoles = site_roles || [
@@ -1112,6 +1120,18 @@ export default function AdminPermissions({
                             >
                                 Tenant Permissions
                             </button>
+                            <button
+                                onClick={() => setActiveTab('debug')}
+                                className={`
+                                    ${activeTab === 'debug' 
+                                        ? 'border-indigo-500 text-indigo-600' 
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                    }
+                                    whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium
+                                `}
+                            >
+                                Permission Debug
+                            </button>
                         </nav>
                     </div>
 
@@ -1251,6 +1271,129 @@ export default function AdminPermissions({
                                 </div>
                             </div>
                         </>
+                    )}
+
+                    {/* Permission Debug Tab */}
+                    {activeTab === 'debug' && (
+                        <div className="mb-8 rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="border-b border-gray-200 px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100">
+                                        <span className="text-amber-600">🔍</span>
+                                    </div>
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">Permission Debug (Admin Only)</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Check if a user has a permission for a tenant/brand. Result and source (PermissionMap vs Spatie) for troubleshooting.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="px-6 py-4 space-y-4">
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">User ID</label>
+                                        <input
+                                            type="text"
+                                            value={debugUserId}
+                                            onChange={(e) => setDebugUserId(e.target.value)}
+                                            placeholder="e.g. 1"
+                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Tenant ID (optional)</label>
+                                        <input
+                                            type="text"
+                                            value={debugTenantId}
+                                            onChange={(e) => setDebugTenantId(e.target.value)}
+                                            placeholder="e.g. 1"
+                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Brand ID (optional)</label>
+                                        <input
+                                            type="text"
+                                            value={debugBrandId}
+                                            onChange={(e) => setDebugBrandId(e.target.value)}
+                                            placeholder="e.g. 1"
+                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Permission</label>
+                                        <input
+                                            type="text"
+                                            value={debugPermission}
+                                            onChange={(e) => setDebugPermission(e.target.value)}
+                                            placeholder="e.g. assets.delete"
+                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (!debugUserId || !debugPermission) return
+                                        setDebugLoading(true)
+                                        setDebugResult(null)
+                                        try {
+                                            const res = await fetch('/app/admin/permissions/debug', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'Accept': 'application/json',
+                                                    'X-Requested-With': 'XMLHttpRequest',
+                                                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                                                },
+                                                body: JSON.stringify({
+                                                    user_id: parseInt(debugUserId, 10),
+                                                    tenant_id: debugTenantId ? parseInt(debugTenantId, 10) : null,
+                                                    brand_id: debugBrandId ? parseInt(debugBrandId, 10) : null,
+                                                    permission: debugPermission.trim(),
+                                                }),
+                                            })
+                                            const data = await res.json()
+                                            if (!res.ok) setDebugResult({ error: data.message || data.errors?.user_id?.[0] || 'Request failed' })
+                                            else setDebugResult(data)
+                                        } catch (e) {
+                                            setDebugResult({ error: e.message })
+                                        } finally {
+                                            setDebugLoading(false)
+                                        }
+                                    }}
+                                    disabled={debugLoading || !debugUserId || !debugPermission}
+                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                >
+                                    {debugLoading ? 'Checking...' : 'Check Permission'}
+                                </button>
+                                {debugResult && !debugResult.error && (
+                                    <div className="mt-4 p-4 rounded-lg border-2 border-gray-200 bg-gray-50">
+                                        <div className="text-sm font-semibold text-gray-900 mb-2">Result</div>
+                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                            <span className="text-gray-600">User:</span>
+                                            <span>{debugResult.user?.name} ({debugResult.user?.email})</span>
+                                            <span className="text-gray-600">Tenant:</span>
+                                            <span>{debugResult.tenant?.name ?? '—'}</span>
+                                            <span className="text-gray-600">Brand:</span>
+                                            <span>{debugResult.brand?.name ?? '—'}</span>
+                                            <span className="text-gray-600">Permission:</span>
+                                            <span>{debugResult.permission}</span>
+                                            <span className="text-gray-600">Result:</span>
+                                            <span className={debugResult.result ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+                                                {debugResult.result ? 'true' : 'false'}
+                                            </span>
+                                            <span className="text-gray-600">Source:</span>
+                                            <span className="font-mono">{debugResult.source}</span>
+                                        </div>
+                                    </div>
+                                )}
+                                {debugResult?.error && (
+                                    <div className="mt-4 p-4 rounded-lg border-2 border-red-200 bg-red-50 text-red-700 text-sm">
+                                        {debugResult.error}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     )}
 
                     {/* Add Permission Modal */}

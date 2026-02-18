@@ -1804,6 +1804,38 @@ class SiteAdminController extends Controller
     }
 
     /**
+     * Permission Debug (Admin Only): Check if a user has a permission for tenant/brand.
+     * Returns result and source (PermissionMap, Spatie, or denied) for troubleshooting.
+     */
+    public function permissionDebug(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this.');
+
+        $validated = $request->validate([
+            'user_id' => 'required|exists:users,id',
+            'tenant_id' => 'nullable|exists:tenants,id',
+            'brand_id' => 'nullable|exists:brands,id',
+            'permission' => 'required|string|max:255',
+        ]);
+
+        $user = User::find($validated['user_id']);
+        $tenant = isset($validated['tenant_id']) ? Tenant::find($validated['tenant_id']) : null;
+        $brand = isset($validated['brand_id']) ? Brand::find($validated['brand_id']) : null;
+
+        $resolver = app(\App\Services\TenantPermissionResolver::class);
+        $result = $resolver->debugCheck($user, $tenant, $brand, $validated['permission']);
+
+        return response()->json([
+            'result' => $result['result'],
+            'source' => $result['source'],
+            'user' => ['id' => $user->id, 'name' => $user->name, 'email' => $user->email],
+            'tenant' => $tenant ? ['id' => $tenant->id, 'name' => $tenant->name] : null,
+            'brand' => $brand ? ['id' => $brand->id, 'name' => $brand->name] : null,
+            'permission' => $validated['permission'],
+        ]);
+    }
+
+    /**
      * Display the Stripe status page.
      */
     public function stripeStatus(): Response

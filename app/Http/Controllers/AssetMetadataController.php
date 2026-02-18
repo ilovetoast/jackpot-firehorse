@@ -1181,10 +1181,11 @@ class AssetMetadataController extends Controller
     }
 
     /**
-     * Get unresolved system incidents for an asset.
+     * Get system incidents for an asset.
      * GET /assets/{asset}/incidents
+     * Query: ?timeline=1 — return all incidents (resolved + unresolved) for Reliability Timeline UI.
      */
-    public function getIncidents(Asset $asset): JsonResponse
+    public function getIncidents(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -1204,22 +1205,27 @@ class AssetMetadataController extends Controller
         }
 
         // Resolve stale incidents: asset is now complete, old "stuck" incidents are obsolete
+        // Skip when timeline=1 (Reliability Timeline shows full history)
+        $timeline = $request->boolean('timeline');
         $status = $asset->analysis_status ?? 'uploading';
-        if ($status === 'complete') {
+        if (!$timeline && $status === 'complete') {
             app(SystemIncidentService::class)->resolveBySource('asset', $asset->id);
             app(SystemIncidentService::class)->resolveBySource('job', $asset->id);
         }
 
-        $incidents = SystemIncident::whereNull('resolved_at')
-            ->where(function ($q) use ($asset) {
-                $q->where('source_type', 'asset')->where('source_id', $asset->id)
-                    ->orWhere(function ($q2) use ($asset) {
-                        $q2->where('source_type', 'job')->where('source_id', $asset->id);
-                    });
-            })
+        $query = SystemIncident::where(function ($q) use ($asset) {
+            $q->where('source_type', 'asset')->where('source_id', $asset->id)
+                ->orWhere(function ($q2) use ($asset) {
+                    $q2->where('source_type', 'job')->where('source_id', $asset->id);
+                });
+        });
+        if (!$timeline) {
+            $query->whereNull('resolved_at');
+        }
+        $incidents = $query
             ->orderByRaw("CASE severity WHEN 'critical' THEN 1 WHEN 'error' THEN 2 WHEN 'warning' THEN 3 ELSE 4 END")
             ->orderBy('detected_at', 'desc')
-            ->get(['id', 'source_type', 'severity', 'title', 'message', 'retryable', 'requires_support', 'detected_at'])
+            ->get(['id', 'source_type', 'severity', 'title', 'message', 'retryable', 'requires_support', 'detected_at', 'resolved_at', 'auto_resolved'])
             ->map(fn ($i) => [
                 'id' => $i->id,
                 'source_type' => $i->source_type,
@@ -1229,6 +1235,8 @@ class AssetMetadataController extends Controller
                 'retryable' => $i->retryable,
                 'requires_support' => $i->requires_support,
                 'detected_at' => $i->detected_at?->toIso8601String(),
+                'resolved_at' => $i->resolved_at?->toIso8601String(),
+                'auto_resolved' => $i->auto_resolved,
             ]);
 
         return response()->json(['incidents' => $incidents]);

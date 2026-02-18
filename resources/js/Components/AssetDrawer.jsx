@@ -120,6 +120,10 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Unified Operations: Unresolved incidents for asset (processing issues)
     const [assetIncidents, setAssetIncidents] = useState([])
     const [incidentsLoading, setIncidentsLoading] = useState(false)
+    // Reliability Timeline: all incidents (resolved + unresolved) for collapsible section
+    const [reliabilityTimeline, setReliabilityTimeline] = useState([])
+    const [reliabilityTimelineLoading, setReliabilityTimelineLoading] = useState(false)
+    const [reliabilityTimelineExpanded, setReliabilityTimelineExpanded] = useState(false)
     const [retryProcessingLoading, setRetryProcessingLoading] = useState(false)
     const [submitTicketLoading, setSubmitTicketLoading] = useState(false)
     
@@ -505,6 +509,18 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             .catch(() => setAssetIncidents([]))
             .finally(() => setIncidentsLoading(false))
     }, [displayAsset?.id])
+
+    // Fetch Reliability Timeline when section expanded (lazy load)
+    useEffect(() => {
+        if (!reliabilityTimelineExpanded || !displayAsset?.id) return
+        setReliabilityTimelineLoading(true)
+        window.axios.get(`/app/assets/${displayAsset.id}/incidents`, { params: { timeline: 1 } })
+            .then(res => {
+                setReliabilityTimeline((res.data?.incidents ?? []).filter(Boolean))
+            })
+            .catch(() => setReliabilityTimeline([]))
+            .finally(() => setReliabilityTimelineLoading(false))
+    }, [reliabilityTimelineExpanded, displayAsset?.id])
 
     // Phase V-1: Detect if asset is a video
     const isVideo = useMemo(() => {
@@ -2552,6 +2568,51 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     </div>
                 )}
 
+                    </CollapsibleSection>
+                </div>
+
+                {/* Reliability Timeline (Unified Operations) */}
+                <div className="border-t border-gray-200">
+                    <CollapsibleSection
+                        title="Reliability Timeline"
+                        defaultExpanded={false}
+                        onToggle={(expanded) => setReliabilityTimelineExpanded(expanded)}
+                    >
+                        {reliabilityTimelineLoading ? (
+                            <div className="py-4 text-center text-sm text-gray-500">Loading…</div>
+                        ) : reliabilityTimeline.length === 0 ? (
+                            <div className="py-4 text-center text-sm text-gray-500">No reliability events for this asset.</div>
+                        ) : (
+                            <ul className="divide-y divide-gray-100">
+                                {reliabilityTimeline.map((ev) => (
+                                    <li key={ev.id} className="py-3 first:pt-0">
+                                        <div className="flex items-start gap-2">
+                                            <span className={`inline-flex shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
+                                                ev.resolved_at
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : ev.severity === 'critical'
+                                                        ? 'bg-red-100 text-red-800'
+                                                        : ev.severity === 'error'
+                                                            ? 'bg-amber-100 text-amber-800'
+                                                            : 'bg-gray-100 text-gray-700'
+                                            }`}>
+                                                {ev.resolved_at ? 'Resolved' : ev.severity}
+                                            </span>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-medium text-gray-900">{ev.title}</p>
+                                                {ev.message && <p className="mt-0.5 text-xs text-gray-500">{ev.message}</p>}
+                                                <p className="mt-1 text-xs text-gray-400">
+                                                    {ev.detected_at ? new Date(ev.detected_at).toLocaleString() : ''}
+                                                    {ev.resolved_at && (
+                                                        <span> → Resolved {ev.auto_resolved ? '(auto)' : ''} {new Date(ev.resolved_at).toLocaleString()}</span>
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
                     </CollapsibleSection>
                 </div>
 

@@ -11,15 +11,22 @@ export default function CollapsibleSection({
     title, 
     defaultExpanded = true, 
     children, 
-    className = "" 
+    className = "",
+    onToggle,
 }) {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded)
+
+    const handleToggle = () => {
+        const next = !isExpanded
+        setIsExpanded(next)
+        onToggle?.(next)
+    }
 
     return (
         <div className={`${className}`}>
             <button
                 type="button"
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={handleToggle}
                 className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-inset"
             >
                 {typeof title === 'string' ? (

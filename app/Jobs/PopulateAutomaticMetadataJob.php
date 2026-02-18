@@ -460,8 +460,10 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
     protected function persistColorAnalysisData(Asset $asset, array $colorAnalysisResult): void
     {
         // Merge internal data into asset.metadata (preserve existing metadata)
+        // visual_metadata_source: "thumbnail" | "original" — for debugging (ColorAnalysisService always uses thumbnail)
         $metadata = $asset->metadata ?? [];
         $metadata['_color_analysis'] = $colorAnalysisResult['internal'];
+        $metadata['visual_metadata_source'] = 'thumbnail';
         $asset->update(['metadata' => $metadata]);
 
         Log::info('[PopulateAutomaticMetadataJob] Persisted color analysis data', [
