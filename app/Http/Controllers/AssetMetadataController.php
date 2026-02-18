@@ -10,6 +10,7 @@ use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\ActivityEvent;
 use App\Models\AssetEmbedding;
+use App\Models\BrandComplianceScore;
 use Illuminate\Support\Facades\Bus;
 use App\Models\Asset;
 use App\Models\Category;
@@ -1109,8 +1110,12 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
+        // Reset analysis_status so pipeline chain runs from the start
+        // Clear existing BrandComplianceScore (and debug_snapshot)
         // Reset thumbnail_status so GenerateThumbnailsJob will run (it skips when COMPLETED)
+        BrandComplianceScore::where('asset_id', $asset->id)->where('brand_id', $asset->brand_id)->delete();
         $asset->update([
+            'analysis_status' => 'generating_thumbnails',
             'thumbnail_status' => ThumbnailStatus::PENDING,
             'thumbnail_error' => null,
         ]);

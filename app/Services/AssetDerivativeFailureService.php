@@ -23,7 +23,8 @@ class AssetDerivativeFailureService
         \Throwable $e,
         ?string $failureReason = null,
         ?string $codec = null,
-        ?string $mime = null
+        ?string $mime = null,
+        ?array $extraMetadata = null
     ): ?AssetDerivativeFailure {
         try {
             $record = AssetDerivativeFailure::firstOrCreate(
@@ -39,11 +40,18 @@ class AssetDerivativeFailureService
                 ]
             );
 
+            $errorCode = $this->classifyFailureReason($e);
+            if ($errorCode === 'unknown') {
+                $errorCode = class_basename($e);
+            }
             $metadata = array_merge($record->metadata ?? [], [
                 'exception_trace' => substr($e->getTraceAsString(), 0, 5000),
                 'codec' => $codec,
                 'mime' => $mime,
-            ]);
+                'error_code' => $errorCode,
+                'error_message' => $e->getMessage(),
+                'retryable' => true,
+            ], $extraMetadata ?? []);
 
             $record->increment('failure_count');
             $record->update([

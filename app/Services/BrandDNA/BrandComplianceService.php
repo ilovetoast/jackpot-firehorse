@@ -115,8 +115,11 @@ class BrandComplianceService
         }
 
         // STEP 2: Image analysis guard — image assets require dominant colors, hue group, embedding
-        // If analysis_status=complete and we fail here: incomplete (AI finished, data insufficient)
+        // If we fail here: incomplete (rules exist but data insufficient to evaluate)
         if (! $this->isImageAnalysisReady($asset)) {
+            $statusForImageGuard = in_array($analysisStatus, ['scoring', 'complete'], true)
+                ? 'incomplete'
+                : $evaluationStatusForNotReady;
             $this->upsertScore($asset, $brand, [
                 'overall_score' => null,
                 'color_score' => 0,
@@ -124,12 +127,12 @@ class BrandComplianceService
                 'tone_score' => 0,
                 'imagery_score' => 0,
                 'breakdown_payload' => [
-                    'color' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
-                    'typography' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
-                    'tone' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
-                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $evaluationStatusForNotReady],
+                    'color' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $statusForImageGuard],
+                    'typography' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $statusForImageGuard],
+                    'tone' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $statusForImageGuard],
+                    'imagery' => ['score' => null, 'weight' => 0, 'reason' => $reasonForNotReady, 'status' => $statusForImageGuard],
                 ],
-                'evaluation_status' => $evaluationStatusForNotReady,
+                'evaluation_status' => $statusForImageGuard,
             ]);
 
             return null;
@@ -141,21 +144,30 @@ class BrandComplianceService
         }
         $scoringRules = $payload['scoring_rules'] ?? [];
         $scoringConfig = $payload['scoring_config'] ?? [];
-        $colorWeight = (float) ($scoringConfig['color_weight'] ?? 0.1);
-        $typographyWeight = (float) ($scoringConfig['typography_weight'] ?? 0.2);
-        $toneWeight = (float) ($scoringConfig['tone_weight'] ?? 0.2);
-        $imageryWeight = (float) ($scoringConfig['imagery_weight'] ?? 0.5);
+        $weights = [
+            'color' => (float) ($scoringConfig['color_weight'] ?? 0.1),
+            'typography' => (float) ($scoringConfig['typography_weight'] ?? 0.2),
+            'tone' => (float) ($scoringConfig['tone_weight'] ?? 0.2),
+            'imagery' => (float) ($scoringConfig['imagery_weight'] ?? 0.5),
+        ];
+        $applicableDimensions = $this->getApplicableDimensions($asset, $brand);
 
         // Wrap each dimension in try-catch so a failure in one never aborts scoring.
         // Dominant color (and other metadata) can be null, missing, or malformed.
         $colorResult = $this->safeScoreDimension(fn () => $this->scoreColor($asset, $scoringRules), 'color');
         $typographyResult = $this->safeScoreDimension(fn () => $this->scoreTypography($asset, $scoringRules), 'typography');
         $toneResult = $this->safeScoreDimension(fn () => $this->scoreTone($asset, $scoringRules), 'tone');
-        // Imagery: prefer similarity when brand has visual refs; else use photography_attributes
-        $hasVisualRefs = $this->brandHasVisualReferencesWithEmbeddings($brand);
-        $imageryResult = $hasVisualRefs
-            ? $this->safeScoreDimension(fn () => $this->scoreImagerySimilarity($asset, $brand), 'imagery')
-            : $this->safeScoreDimension(fn () => $this->scoreImagery($asset, $scoringRules), 'imagery');
+        // Imagery: category-aware — Photography uses embedding similarity; Graphics uses heuristic
+        $imageryResultWithStrategy = $this->safeScoreImageryContextual(
+            $asset,
+            $brand,
+            $scoringRules,
+            $colorResult,
+            $typographyResult,
+            $applicableDimensions
+        );
+        $imageryResult = array_slice($imageryResultWithStrategy, 0, 3);
+        $imageryStrategy = $imageryResultWithStrategy[3] ?? null;
 
         $applicable = [];
         $breakdown = [];
@@ -163,14 +175,18 @@ class BrandComplianceService
         $hasRulesButNotEvaluated = false;
 
         foreach ([
-            'color' => [$colorResult, $colorWeight],
-            'typography' => [$typographyResult, $typographyWeight],
-            'tone' => [$toneResult, $toneWeight],
-            'imagery' => [$imageryResult, $imageryWeight],
+            'color' => [$colorResult, $weights['color']],
+            'typography' => [$typographyResult, $weights['typography']],
+            'tone' => [$toneResult, $weights['tone']],
+            'imagery' => [$imageryResult, $weights['imagery']],
         ] as $key => [$res, $weight]) {
             [$score, $reason, $status] = $res;
             $breakdown[$key] = ['score' => $score, 'weight' => $weight, 'reason' => $reason, 'status' => $status];
-            if ($status === 'scored') {
+            if ($key === 'imagery' && $imageryStrategy !== null) {
+                $breakdown[$key]['imagery_strategy_used'] = $imageryStrategy;
+            }
+            // Only include in weighted average if dimension is applicable AND scored
+            if ($applicableDimensions[$key] && $status === 'scored') {
                 $applicable[] = ['score' => $score, 'weight' => $weight];
             }
             if ($status !== 'not_configured') {
@@ -191,6 +207,8 @@ class BrandComplianceService
                 'imagery_score' => $breakdown['imagery']['score'],
                 'breakdown_payload' => $breakdown,
                 'evaluation_status' => 'not_applicable',
+                'applicable_dimensions' => $applicableDimensions,
+                'total_weight_used' => 0.0,
             ]);
             $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_NOT_APPLICABLE, [
                 'evaluation_status' => 'not_applicable',
@@ -201,6 +219,7 @@ class BrandComplianceService
 
         // CASE 3: Rules configured but required metadata missing (no dimension scored)
         if (empty($applicable) && $hasRulesButNotEvaluated) {
+            $totalWeightUsedForIncomplete = array_sum(array_column($applicable, 'weight'));
             $this->upsertScore($asset, $brand, [
                 'overall_score' => null,
                 'color_score' => $breakdown['color']['score'],
@@ -209,6 +228,8 @@ class BrandComplianceService
                 'imagery_score' => $breakdown['imagery']['score'],
                 'breakdown_payload' => $breakdown,
                 'evaluation_status' => 'incomplete',
+                'applicable_dimensions' => $applicableDimensions,
+                'total_weight_used' => $totalWeightUsedForIncomplete,
             ]);
             $this->logComplianceTimelineEvent($asset, EventType::ASSET_BRAND_COMPLIANCE_INCOMPLETE, [
                 'evaluation_status' => 'incomplete',
@@ -217,11 +238,11 @@ class BrandComplianceService
             return null;
         }
 
-        // CASE 4: At least one dimension successfully scored
-        $totalWeight = array_sum(array_column($applicable, 'weight'));
+        // CASE 4: At least one dimension successfully scored (context-aware: only applicable dimensions)
+        $totalWeightUsed = array_sum(array_column($applicable, 'weight'));
         $weightedSum = 0;
         foreach ($applicable as $a) {
-            $w = $totalWeight > 0 ? $a['weight'] / $totalWeight : 0;
+            $w = $totalWeightUsed > 0 ? $a['weight'] / $totalWeightUsed : 0;
             $weightedSum += $a['score'] * $w;
         }
         $visualScore = (int) round($weightedSum);
@@ -279,6 +300,8 @@ class BrandComplianceService
             'imagery_score' => $breakdown['imagery']['score'],
             'breakdown_payload' => $breakdown,
             'evaluation_status' => 'evaluated',
+            'applicable_dimensions' => $applicableDimensions,
+            'total_weight_used' => $totalWeightUsed,
         ];
 
         $this->upsertScore($asset, $brand, $result);
@@ -320,6 +343,46 @@ class BrandComplianceService
         ]);
 
         return $result;
+    }
+
+    /**
+     * Context-aware dimension applicability. Returns which dimensions apply to this asset/brand.
+     *
+     * COLOR: Applicable if dominant colors exist.
+     * IMAGERY: Applicable if (Photography category AND brand has visual references)
+     *          OR (Graphics category AND color dimension applicable).
+     * TYPOGRAPHY: Applicable if asset contains extracted text OR category in [Graphics, Print, Packaging].
+     * TONE: Applicable if extracted text exists.
+     *
+     * @return array{color: bool, imagery: bool, typography: bool, tone: bool}
+     */
+    protected function getApplicableDimensions(Asset $asset, Brand $brand): array
+    {
+        $hasDominantColors = $this->hasDominantColors($asset);
+        $extractedText = trim($this->getAssetTextForTone($asset));
+        $hasExtractedText = $extractedText !== '';
+
+        $category = $asset->category;
+        $categoryName = $category?->name ?? '';
+        $categorySlug = $category?->slug ?? '';
+        $isPhotography = in_array($categoryName, ['Photography'], true)
+            || in_array($categorySlug, ['photography'], true);
+        $isGraphics = in_array($categoryName, ['Graphics'], true)
+            || in_array($categorySlug, ['graphics'], true);
+        $isGraphicsPrintPackaging = in_array($categoryName, ['Graphics', 'Print', 'Packaging'], true)
+            || in_array($categorySlug, ['graphics', 'print', 'packaging'], true);
+
+        $hasVisualRefs = $this->brandHasVisualReferencesWithEmbeddings($brand);
+
+        $imageryApplicable = ($isPhotography && $hasVisualRefs)
+            || ($isGraphics && $hasDominantColors);
+
+        return [
+            'color' => $hasDominantColors,
+            'imagery' => $imageryApplicable,
+            'typography' => $hasExtractedText || $isGraphicsPrintPackaging,
+            'tone' => $hasExtractedText,
+        ];
     }
 
     /**
@@ -459,6 +522,158 @@ class BrandComplianceService
         }
 
         return in_array($normalized, $normalizedHexList, true);
+    }
+
+    /**
+     * Safely run imagery contextual scorer. Returns [score, reason, status, strategy].
+     * Strategy is 'photography_similarity' | 'graphics_heuristic' | null when not scored.
+     */
+    protected function safeScoreImageryContextual(
+        Asset $asset,
+        Brand $brand,
+        array $scoringRules,
+        array $colorResult,
+        array $typographyResult,
+        array $applicableDimensions
+    ): array {
+        try {
+            return $this->scoreImageryContextual(
+                $asset,
+                $brand,
+                $scoringRules,
+                $colorResult,
+                $typographyResult,
+                $applicableDimensions
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[BrandComplianceService] Imagery dimension failed', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [0, "Imagery failed: {$e->getMessage()}", 'not_evaluated', null];
+        }
+    }
+
+    /**
+     * Category-aware imagery scoring. Photography: embedding similarity. Graphics: color+typography heuristic.
+     * Returns [score, reason, status, imagery_strategy_used].
+     */
+    protected function scoreImageryContextual(
+        Asset $asset,
+        Brand $brand,
+        array $scoringRules,
+        array $colorResult,
+        array $typographyResult,
+        array $applicableDimensions
+    ): array {
+        $category = $asset->category;
+        $categoryName = $category?->name ?? '';
+        $categorySlug = $category?->slug ?? '';
+        $isPhotography = in_array($categoryName, ['Photography'], true)
+            || in_array($categorySlug, ['photography'], true);
+        $isGraphics = in_array($categoryName, ['Graphics'], true)
+            || in_array($categorySlug, ['graphics'], true);
+        $hasVisualRefs = $this->brandHasVisualReferencesWithEmbeddings($brand);
+
+        if ($isPhotography && $hasVisualRefs) {
+            [$score, $reason, $status] = $this->scoreImagerySimilarity($asset, $brand);
+
+            return [$score, $reason, $status, 'photography_similarity'];
+        }
+
+        // Guard: Graphics with no dominant colors → not applicable (absence of metadata must never equal punishment)
+        if ($isGraphics && ! $this->hasDominantColors($asset)) {
+            return [0, 'Graphics imagery requires dominant colors; missing metadata.', 'not_configured', null];
+        }
+
+        if ($isGraphics && $applicableDimensions['color']) {
+            $result = $this->scoreImageryGraphicsHeuristic(
+                $asset,
+                $scoringRules,
+                $colorResult,
+                $typographyResult,
+                $applicableDimensions
+            );
+
+            return [...$result, 'graphics_heuristic'];
+        }
+
+        return [0, 'Imagery not applicable for this category/asset.', 'not_configured', null];
+    }
+
+    /**
+     * Graphics imagery heuristic: nuanced base from color score + typography match (+15) + logo placeholder (+15).
+     * Base: colorScore >= 80 → 75, >= 60 → 65, >= 40 → 50, else → 0.
+     * Score 0 only when color is banned or colorScore < 40.
+     *
+     * @return array{0: int, 1: string, 2: string}
+     */
+    protected function scoreImageryGraphicsHeuristic(
+        Asset $asset,
+        array $rules,
+        array $colorResult,
+        array $typographyResult,
+        array $applicableDimensions
+    ): array {
+        $allowed = $rules['allowed_color_palette'] ?? [];
+        $banned = $rules['banned_colors'] ?? [];
+        if (empty($allowed) && empty($banned)) {
+            return [0, 'No brand color references for Graphics imagery.', 'not_configured'];
+        }
+
+        $dominantColors = $this->getAssetDominantColors($asset);
+        if (empty($dominantColors)) {
+            return [0, 'No dominant colors for Graphics imagery.', 'not_evaluated'];
+        }
+
+        // Color banned → imagery 0
+        $bannedHexes = collect($banned)
+            ->map(fn ($c) => is_array($c) ? ($c['hex'] ?? null) : $c)
+            ->filter()
+            ->map(fn ($h) => $this->normalizeHex((string) $h))
+            ->filter()
+            ->values()
+            ->all();
+        foreach ($dominantColors as $color) {
+            $hex = is_array($color) ? ($color['hex'] ?? null) : $color;
+            if (is_string($hex) && $hex !== '' && ! empty($bannedHexes) && $this->hexInList($hex, $bannedHexes)) {
+                return [0, "Dominant color {$hex} is banned; Graphics imagery score 0.", 'scored'];
+            }
+        }
+
+        $score = 0;
+        $reasons = [];
+
+        // Nuanced base from color dimension score (not binary)
+        if (! empty($allowed)) {
+            [$colorScore] = $colorResult;
+            if ($colorScore >= 80) {
+                $score = 75;
+                $reasons[] = 'Strong color alignment (≥80)';
+            } elseif ($colorScore >= 60) {
+                $score = 65;
+                $reasons[] = 'Color aligned (≥60)';
+            } elseif ($colorScore >= 40) {
+                $score = 50;
+                $reasons[] = 'Partial color alignment (≥40)';
+            }
+            // else: score stays 0
+        }
+
+        // +15 if typography applicable and matches
+        if ($applicableDimensions['typography'] && $typographyResult[2] === 'scored' && $typographyResult[0] >= 100) {
+            $score += 15;
+            $reasons[] = 'Typography matches allowed fonts';
+        }
+
+        // +15 if logo detected (future placeholder — always 0 for now)
+        // $score += 15 when logo detected;
+
+        $score = min(100, $score);
+        $reason = ! empty($reasons) ? implode('. ', $reasons) : 'Graphics heuristic: colors do not align with palette.';
+
+        return [$score, $reason, 'scored'];
     }
 
     /**
@@ -1048,7 +1263,7 @@ class BrandComplianceService
         $embedding = AssetEmbedding::where('asset_id', $asset->id)->first();
         $hasEmbedding = $embedding !== null && ! empty($embedding->embedding_vector ?? []);
 
-        return [
+        $snapshot = [
             'analysis_status' => $asset->analysis_status ?? 'uploading',
             'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
             'has_dominant_colors' => $this->hasDominantColors($asset),
@@ -1057,5 +1272,18 @@ class BrandComplianceService
             'evaluation_status' => $result['evaluation_status'] ?? null,
             'overall_score' => $result['overall_score'] ?? null,
         ];
+
+        if (isset($result['applicable_dimensions'])) {
+            $snapshot['applicable_dimensions'] = $result['applicable_dimensions'];
+        }
+        if (array_key_exists('total_weight_used', $result)) {
+            $snapshot['total_weight_used'] = (float) ($result['total_weight_used'] ?? 0);
+        }
+        $imageryStrategy = $result['breakdown_payload']['imagery']['imagery_strategy_used'] ?? null;
+        if ($imageryStrategy !== null) {
+            $snapshot['imagery_strategy_used'] = $imageryStrategy;
+        }
+
+        return $snapshot;
     }
 }

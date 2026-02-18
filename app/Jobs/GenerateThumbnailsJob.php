@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
+use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetProcessingFailureService;
@@ -820,13 +821,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $asset->update(['metadata' => $currentMetadata]);
 
                 // Phase T-1: Record derivative failure for observability (never affects Asset.status)
+                // firstOrCreate(asset_id, derivative_type) prevents double-record on retries
                 try {
-                    $processor = AssetDerivativeFailureService::inferProcessorFromException($e);
                     $mime = $asset->metadata['mime_type'] ?? $asset->mime_type ?? null;
                     app(AssetDerivativeFailureService::class)->recordFailure(
                         $asset,
                         DerivativeType::THUMBNAIL,
-                        $processor,
+                        DerivativeProcessor::THUMBNAIL_GENERATOR,
                         $e,
                         null,
                         null,

@@ -10,12 +10,15 @@ use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Models\Asset;
+use App\Models\AssetDerivativeFailure;
 use App\Models\Brand;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Services\ThumbnailGenerationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -173,5 +176,74 @@ class ThumbnailFailureStateTest extends TestCase
             $validTerminalStates,
             'Thumbnail status must be a valid terminal state: COMPLETED, FAILED, or SKIPPED'
         );
+    }
+
+    /**
+     * Test: Thumbnail timeout records derivative failure.
+     *
+     * When GenerateThumbnailsJob fails (e.g. timeout), AssetDerivativeFailure should be recorded
+     * with asset_id, derivative_type thumbnail, processor thumbnail_generator, error_code, retryable.
+     * firstOrCreate prevents double-record on retries.
+     */
+    public function test_thumbnail_timeout_records_derivative_failure(): void
+    {
+        $uploadSession = UploadSession::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'upload_session_id' => $uploadSession->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Test Asset',
+            'original_filename' => 'test.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 1024,
+            'storage_bucket_id' => $this->bucket->id,
+            'storage_root_path' => 'assets/test/test.jpg',
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'analysis_status' => 'generating_thumbnails',
+        ]);
+
+        $timeoutException = new \RuntimeException('Thumbnail generation timed out after 300 seconds');
+
+        $mockService = Mockery::mock(ThumbnailGenerationService::class);
+        $mockService->shouldReceive('generateThumbnails')
+            ->once()
+            ->with(Mockery::type(Asset::class))
+            ->andThrow($timeoutException);
+
+        $this->app->instance(ThumbnailGenerationService::class, $mockService);
+
+        try {
+            $job = new GenerateThumbnailsJob($asset->id);
+            $job->handle(app(ThumbnailGenerationService::class));
+        } catch (\Throwable $e) {
+            // Expected - job throws after recording failure
+        }
+
+        $record = AssetDerivativeFailure::where('asset_id', $asset->id)
+            ->where('derivative_type', 'thumbnail')
+            ->first();
+
+        $this->assertNotNull($record, 'Derivative failure should be recorded when thumbnail generation fails');
+        $this->assertSame('thumbnail_generator', $record->processor);
+        $this->assertSame('timeout', $record->failure_reason);
+        $this->assertGreaterThanOrEqual(1, $record->failure_count);
+        $metadata = $record->metadata ?? [];
+        $this->assertArrayHasKey('error_code', $metadata);
+        $this->assertArrayHasKey('error_message', $metadata);
+        $this->assertTrue($metadata['retryable'] ?? false);
+
+        Mockery::close();
     }
 }

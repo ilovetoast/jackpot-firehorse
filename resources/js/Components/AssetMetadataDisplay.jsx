@@ -215,10 +215,11 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
         )
     }
 
-    // Compliance badge color: 90+ green, 70-89 amber, <70 red
+    // Compliance badge color: >=80 green, 60-79 amber, 40-59 neutral, <40 red
     const getComplianceBadgeClass = (score) => {
-        if (score >= 90) return 'bg-green-50 text-green-700 ring-green-600/20'
-        if (score >= 70) return 'bg-amber-50 text-amber-700 ring-amber-600/20'
+        if (score >= 80) return 'bg-green-50 text-green-700 ring-green-600/20'
+        if (score >= 60) return 'bg-amber-50 text-amber-700 ring-amber-600/20'
+        if (score >= 40) return 'bg-gray-50 text-gray-700 ring-gray-600/20'
         return 'bg-red-50 text-red-700 ring-red-600/20'
     }
 

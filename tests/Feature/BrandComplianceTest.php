@@ -873,6 +873,148 @@ class BrandComplianceTest extends TestCase
     }
 
     /**
+     * Graphics asset uses heuristic (color+typography), not embedding similarity.
+     * Brand has visual refs that would yield low similarity — Graphics must not be penalized.
+     */
+    public function test_graphic_asset_not_penalized_by_photo_similarity(): void
+    {
+        $graphicsCategory = Category::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Graphics',
+            'slug' => 'graphics',
+            'asset_type' => AssetType::ASSET,
+            'is_system' => false,
+            'requires_approval' => false,
+        ]);
+
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'allowed_color_palette' => [['hex' => '#003388']],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0.5,
+                    'typography_weight' => 0,
+                    'tone_weight' => 0,
+                    'imagery_weight' => 0.5,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $refAsset = $this->createAsset();
+        $asset = $this->createAsset([
+            'metadata' => ['category_id' => $graphicsCategory->id],
+        ]);
+        $this->setAssetEmbedding($asset);
+        $this->setAssetDominantColors($asset, [['hex' => '#003388', 'coverage' => 1]]);
+
+        // Brand visual refs with embeddings orthogonal to asset — would yield ~0 similarity if we used it
+        $refVec = array_fill(0, 384, 0.0);
+        for ($i = 0; $i < 384; $i++) {
+            $refVec[$i] = $i === 0 ? 1.0 : 0.0;
+        }
+        $assetVec = array_fill(0, 384, 0.0);
+        for ($i = 0; $i < 384; $i++) {
+            $assetVec[$i] = $i === 1 ? 1.0 : 0.0;
+        }
+        BrandVisualReference::create([
+            'brand_id' => $this->brand->id,
+            'asset_id' => $refAsset->id,
+            'embedding_vector' => $refVec,
+            'type' => BrandVisualReference::TYPE_LIFESTYLE_PHOTOGRAPHY,
+        ]);
+        AssetEmbedding::where('asset_id', $asset->id)->delete();
+        AssetEmbedding::create([
+            'asset_id' => $asset->id,
+            'embedding_vector' => $assetVec,
+            'model' => 'test-model',
+        ]);
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $this->assertNotNull($result);
+        $imageryBreakdown = $result['breakdown_payload']['imagery'] ?? null;
+        $this->assertNotNull($imageryBreakdown);
+        $this->assertSame('graphics_heuristic', $imageryBreakdown['imagery_strategy_used'] ?? null);
+        $this->assertSame('scored', $imageryBreakdown['status']);
+        $this->assertGreaterThanOrEqual(70, $imageryBreakdown['score'] ?? 0,
+            'Graphics asset must use heuristic (color alignment = 70), not low photo similarity');
+    }
+
+    /**
+     * Graphics asset with no color data: imagery not applicable, overall from other dimensions only.
+     * Absence of metadata must never equal punishment.
+     */
+    public function test_graphic_asset_with_no_color_data_is_not_penalized(): void
+    {
+        $graphicsCategory = Category::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Graphics',
+            'slug' => 'graphics',
+            'asset_type' => AssetType::ASSET,
+            'is_system' => false,
+            'requires_approval' => false,
+        ]);
+
+        $brandModel = $this->brand->brandModel;
+        if (! $brandModel) {
+            $brandModel = BrandModel::create(['brand_id' => $this->brand->id, 'is_enabled' => false]);
+        }
+        $version = BrandModelVersion::create([
+            'brand_model_id' => $brandModel->id,
+            'version_number' => 1,
+            'source_type' => 'manual',
+            'model_payload' => [
+                'scoring_rules' => [
+                    'allowed_color_palette' => [['hex' => '#003388']],
+                    'tone_keywords' => ['brand'],
+                ],
+                'scoring_config' => [
+                    'color_weight' => 0.25,
+                    'typography_weight' => 0,
+                    'tone_weight' => 0.75,
+                    'imagery_weight' => 0,
+                ],
+            ],
+            'status' => 'active',
+        ]);
+        $brandModel->update(['is_enabled' => true, 'active_version_id' => $version->id]);
+
+        $asset = $this->createAsset([
+            'metadata' => ['category_id' => $graphicsCategory->id],
+            'title' => 'Brand asset',
+            'mime_type' => 'application/pdf',
+        ]);
+        $this->makeAssetComplete($asset);
+        // No dominant colors, no typography — PDF bypasses image guard
+
+        $service = app(BrandComplianceService::class);
+        $result = $service->scoreAsset($asset, $this->brand);
+
+        $imageryBreakdown = $result['breakdown_payload']['imagery'] ?? null;
+        $this->assertNotNull($imageryBreakdown);
+        $this->assertNotSame('scored', $imageryBreakdown['status'],
+            'Imagery must not be scored when Graphics has no color data');
+        $this->assertContains($imageryBreakdown['status'], ['not_configured', 'not_evaluated']);
+
+        $this->assertNotNull($result);
+        $this->assertNotNull($result['overall_score']);
+        $this->assertSame('evaluated', $result['evaluation_status']);
+    }
+
+    /**
      * Imagery similarity dimension returns not_configured when no visual refs.
      */
     public function test_imagery_similarity_dimension_calculates(): void
