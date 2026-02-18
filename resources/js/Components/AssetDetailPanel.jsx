@@ -1244,15 +1244,6 @@ export default function AssetDetailPanel({
                             <CollapsibleSection title="File information" defaultExpanded={true}>
                                 <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
                                     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                                        {/* Asset ID (UUID) */}
-                                        {asset?.id && (
-                                            <div className="sm:col-span-2">
-                                                <dt className="font-semibold text-gray-700 mb-1">Asset ID</dt>
-                                                <dd className="text-sm font-mono text-gray-900 break-all" title={asset.id}>
-                                                    {asset.id}
-                                                </dd>
-                                            </div>
-                                        )}
                                         {/* Filename (editable when permission) */}
                                         <div className="sm:col-span-2">
                                             <dt className="font-semibold text-gray-700 mb-1">Filename</dt>
@@ -1408,6 +1399,15 @@ export default function AssetDetailPanel({
                                         )}
                                         <dt className="font-semibold text-gray-700">Thumbnail status</dt>
                                         <dd className="text-sm text-gray-900">{asset?.thumbnail_status ?? '—'}</dd>
+                                        {/* Asset ID (UUID) — at bottom for copy/reference */}
+                                        {asset?.id && (
+                                            <div className="sm:col-span-2 pt-3 mt-3 border-t border-gray-200">
+                                                <dt className="font-semibold text-gray-700 mb-1">Asset ID</dt>
+                                                <dd className="text-sm font-mono text-gray-900 break-all" title={asset.id}>
+                                                    {asset.id}
+                                                </dd>
+                                            </div>
+                                        )}
                                     </dl>
                                 </div>
                             </CollapsibleSection>

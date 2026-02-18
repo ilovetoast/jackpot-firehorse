@@ -1068,6 +1068,10 @@ class AssetMetadataController extends Controller
         $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding
             && $thumbnailComplete && $hasAiTaggingCompleted && $hasMetadataExtracted && $hasPreviewGenerated;
 
+        // SVG: vector format does not support dominant color extraction or visual embedding (pixel-based analysis)
+        $metadataHealth['is_svg'] = $asset->mime_type === 'image/svg+xml'
+            || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
+
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');

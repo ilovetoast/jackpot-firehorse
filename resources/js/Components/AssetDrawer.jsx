@@ -2167,14 +2167,6 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     )}
                     
                     <dl className="space-y-3">
-                        {displayAsset.id && (
-                            <div className="flex items-start gap-4">
-                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Asset ID</dt>
-                                <dd className="text-sm font-mono text-gray-900 flex-1 min-w-0 break-all text-left" title={displayAsset.id}>
-                                    {displayAsset.id}
-                                </dd>
-                            </div>
-                        )}
                         <div className="flex items-start gap-4">
                             <dt className="text-sm text-gray-500 w-32 flex-shrink-0">File Type</dt>
                             <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left uppercase">
@@ -2392,12 +2384,21 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             return null
                         })()}
                         
-                        {/* Filename at bottom — label column + wider left-aligned value column (matches Metadata) */}
+                        {/* Filename — label column + wider left-aligned value column (matches Metadata) */}
                         {displayAsset.original_filename && (
                             <div className="flex items-start gap-4">
                                 <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Filename</dt>
                                 <dd className="text-sm font-mono font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                     {displayAsset.original_filename}
+                                </dd>
+                            </div>
+                        )}
+                        {/* Asset ID (UUID) — at bottom for copy/reference */}
+                        {displayAsset.id && (
+                            <div className="flex items-start gap-4 pt-2 mt-2 border-t border-gray-100">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Asset ID</dt>
+                                <dd className="text-sm font-mono text-gray-900 flex-1 min-w-0 break-all text-left" title={displayAsset.id}>
+                                    {displayAsset.id}
                                 </dd>
                             </div>
                         )}
