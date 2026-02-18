@@ -170,7 +170,9 @@ class CollectionController extends Controller
                     $this->assetSortService->applySort($query, $sort, $sortDirection);
                     $perPage = 36;
                     $paginator = $query->paginate($perPage)->withQueryString();
-                    $assets = collect($paginator->items())->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
+                    $items = $paginator->items();
+                    $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset(collect($items)->pluck('id')->all());
+                    $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
                     $brand = $collection->brand;
                     $selectedCollection = [
                         'id' => $collection->id,
@@ -257,8 +259,9 @@ class CollectionController extends Controller
         }
         $query = $this->collectionAssetQueryService->query($user, $collection);
         $assetModels = $query->get();
+        $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset($assetModels->pluck('id')->all());
 
-        return $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand))->values()->all();
+        return $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
     }
 
     /**
@@ -665,9 +668,37 @@ class CollectionController extends Controller
     }
 
     /**
+     * Build asset_id => worst incident severity map for health badge.
+     *
+     * @param string[] $assetIds
+     * @return array<string, string>
+     */
+    private function buildIncidentSeverityByAsset(array $assetIds): array
+    {
+        $incidentSeverityByAsset = [];
+        if (empty($assetIds)) {
+            return $incidentSeverityByAsset;
+        }
+        $incidents = \App\Models\SystemIncident::whereNull('resolved_at')
+            ->whereIn('source_type', ['asset', 'job'])
+            ->whereIn('source_id', $assetIds)
+            ->get(['source_id', 'severity']);
+        $order = ['critical' => 1, 'error' => 2, 'warning' => 3];
+        foreach ($incidents as $inc) {
+            $aid = $inc->source_id;
+            $sev = $inc->severity ?? 'warning';
+            if (! isset($incidentSeverityByAsset[$aid]) || ($order[$sev] ?? 99) < ($order[$incidentSeverityByAsset[$aid]] ?? 99)) {
+                $incidentSeverityByAsset[$aid] = $sev;
+            }
+        }
+
+        return $incidentSeverityByAsset;
+    }
+
+    /**
      * Map a single Asset model to the grid payload (same shape as AssetController/DeliverableController).
      */
-    private function mapAssetToGridArray(Asset $asset, Tenant $tenant, Brand $brand): array
+    private function mapAssetToGridArray(Asset $asset, Tenant $tenant, Brand $brand, array $incidentSeverityByAsset = []): array
     {
         $fileExtension = null;
         if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -751,6 +782,7 @@ class CollectionController extends Controller
             'created_at' => $asset->created_at?->toIso8601String(),
             'metadata' => $asset->metadata,
             'category' => $categoryName ? ['id' => $categoryId, 'name' => $categoryName] : null,
+            'user_id' => $asset->user_id, // For delete-own permission check
             'uploaded_by' => $uploadedBy,
             'preview_thumbnail_url' => $previewThumbnailUrl,
             'final_thumbnail_url' => $finalThumbnailUrl,
@@ -761,6 +793,7 @@ class CollectionController extends Controller
             'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null,
             'preview_url' => null,
             'url' => null,
+            'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
         ];
     }
 

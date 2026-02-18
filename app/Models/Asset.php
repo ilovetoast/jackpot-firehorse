@@ -491,6 +491,35 @@ class Asset extends Model
     }
 
     /**
+     * Scope: assets that support thumbnail-derived metadata (hasRasterThumbnail + thumbnail_status=completed + medium path).
+     * Matches supportsThumbnailMetadata() for SQL-based integrity metrics.
+     */
+    public function scopeWhereSupportsThumbnailMetadata(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where('thumbnail_status', ThumbnailStatus::COMPLETED)
+            ->whereNotNull('metadata->thumbnails->medium->path')
+            ->where(function ($q) {
+                $q->where('mime_type', 'like', 'image/%')
+                    ->orWhere('mime_type', 'application/pdf')
+                    ->orWhere('mime_type', 'like', 'video/%');
+            });
+    }
+
+    /**
+     * Scope: of those supporting thumbnail metadata, where visualMetadataReady() would be false.
+     * Invalid = thumbnail_timeout OR missing/invalid dimensions.
+     */
+    public function scopeWhereVisualMetadataInvalid(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where(function ($q) {
+            $q->where('metadata->thumbnail_timeout', true)
+                ->orWhereNull('metadata->thumbnail_dimensions->medium')
+                ->orWhereRaw('COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.medium.width")) AS UNSIGNED), 0) <= 0')
+                ->orWhereRaw('COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.medium.height")) AS UNSIGNED), 0) <= 0');
+        });
+    }
+
+    /**
      * Check if asset type produces a raster thumbnail (image, SVG, PDF, video).
      *
      * Used for capability-based logic: orientation, resolution_class, dominant_colors
@@ -565,6 +594,32 @@ class Asset extends Model
             && isset($dims['width'], $dims['height'])
             && $dims['width'] > 0
             && $dims['height'] > 0;
+    }
+
+    /**
+     * Compute asset health status for Ops/support visibility.
+     * Derived from: open incidents, visualMetadataReady(), thumbnail_status.
+     *
+     * @param string|null $worstIncidentSeverity 'critical'|'error'|'warning' from unresolved incidents
+     * @return 'healthy'|'warning'|'critical'
+     */
+    public function computeHealthStatus(?string $worstIncidentSeverity): string
+    {
+        $ts = $this->thumbnail_status instanceof ThumbnailStatus
+            ? $this->thumbnail_status->value
+            : (string) ($this->thumbnail_status ?? 'pending');
+
+        if ($worstIncidentSeverity === 'critical' || $worstIncidentSeverity === 'error' || $ts === 'failed') {
+            return 'critical';
+        }
+
+        if ($worstIncidentSeverity === 'warning'
+            || ($this->supportsThumbnailMetadata() && ! $this->visualMetadataReady())
+            || in_array($ts, ['pending', 'processing'], true)) {
+            return 'warning';
+        }
+
+        return 'healthy';
     }
 
     /**

@@ -15,6 +15,7 @@ import {
     PhotoIcon,
     ServerStackIcon,
     ChartBarIcon,
+    ChartBarSquareIcon,
 } from '@heroicons/react/24/outline'
 
 function IncidentRow({ incident: i, onAction, selected, onSelect }) {
@@ -67,6 +68,13 @@ function IncidentRow({ incident: i, onAction, selected, onSelect }) {
             <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
             <td className="py-3 px-3 text-sm text-gray-500">{i.source_type}/{i.source_id || '—'}</td>
             <td className="py-3 px-3 text-sm text-gray-500">{new Date(i.detected_at).toLocaleString()}</td>
+            <td className="py-3 px-3 text-sm text-gray-500">
+                {i.repair_attempts > 0 ? (
+                    <span title={i.last_repair_attempt_at ? `Last: ${new Date(i.last_repair_attempt_at).toLocaleString()}` : ''}>
+                        {i.repair_attempts} {i.repair_attempts >= 3 ? '(→ ticket)' : ''}
+                    </span>
+                ) : '—'}
+            </td>
             <td className="py-3 px-3 text-right">
                 <div className="flex justify-end gap-1">
                     <button
@@ -101,6 +109,7 @@ function IncidentRow({ incident: i, onAction, selected, onSelect }) {
 
 const TABS = [
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
+    { id: 'mttr', label: 'MTTR', icon: ChartBarSquareIcon },
     { id: 'queue', label: 'Queue Health', icon: QueueListIcon },
     { id: 'scheduler', label: 'Scheduler', icon: ClockIcon },
     { id: 'visual-metadata', label: 'Visual Metadata Integrity', icon: ChartBarIcon },
@@ -119,6 +128,7 @@ export default function OperationsCenterIndex({
     queueHealth,
     schedulerHealth,
     visualMetadataIntegrity,
+    mttrMetric,
     horizonAvailable,
     horizonUrl,
 }) {
@@ -291,6 +301,7 @@ export default function OperationsCenterIndex({
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Title</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Repair attempts</th>
                                                 <th className="py-3.5 px-3 text-right text-sm font-semibold text-gray-900">Actions</th>
                                             </tr>
                                         </thead>
@@ -309,6 +320,34 @@ export default function OperationsCenterIndex({
                                     {incidentList.length === 0 && (
                                         <p className="py-8 text-center text-sm text-gray-500">No unresolved incidents</p>
                                     )}
+                                </div>
+                            </div>
+                        )}
+
+                        {tab === 'mttr' && (
+                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                        <ChartBarSquareIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                        <h3 className="text-sm font-medium text-gray-900">Mean Time To Repair (MTTR)</h3>
+                                    </div>
+                                </div>
+                                <p className="mt-4 text-sm text-gray-500">
+                                    Average resolution time (detected_at → resolved_at) for incidents resolved in the last {mttrMetric?.window_hours ?? 24}h.
+                                </p>
+                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                    <div>
+                                        <span className="text-sm text-gray-500">MTTR (avg minutes)</span>
+                                        <p className="text-lg font-semibold">
+                                            {mttrMetric?.mttr_minutes_avg != null
+                                                ? `${Math.round(mttrMetric.mttr_minutes_avg)} min`
+                                                : '—'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span className="text-sm text-gray-500">Resolved (24h)</span>
+                                        <p className="text-lg font-semibold">{mttrMetric?.resolved_count_24h ?? 0}</p>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -380,23 +419,35 @@ export default function OperationsCenterIndex({
                                     </span>
                                 </div>
                                 <p className="mt-4 text-sm text-gray-500">
-                                    % of assets where supportsThumbnailMetadata AND visualMetadataReady. SLO target: {visualMetadataIntegrity?.slo_target_percent ?? 95}%.
+                                    State-derived: % of eligible assets (supportsThumbnailMetadata) where visualMetadataReady. SLO target: {visualMetadataIntegrity?.slo_target_percent ?? 95}%.
                                 </p>
-                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
                                     <div>
-                                        <span className="text-sm text-gray-500">Visual metadata incidents (unresolved)</span>
+                                        <span className="text-sm text-gray-500">Integrity rate</span>
+                                        <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.rate_percent ?? 100) >= 95 ? '' : 'text-amber-600'}`}>
+                                            {visualMetadataIntegrity?.rate_percent ?? 100}%
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span className="text-sm text-gray-500">Eligible</span>
+                                        <p className="text-lg font-semibold">{visualMetadataIntegrity?.eligible ?? 0}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-sm text-gray-500">Invalid</span>
+                                        <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.invalid ?? 0) > 0 ? 'text-amber-600' : ''}`}>
+                                            {visualMetadataIntegrity?.invalid ?? 0}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span className="text-sm text-gray-500">Incidents (diagnostic)</span>
                                         <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.incidents_count ?? 0) > 0 ? 'text-amber-600' : ''}`}>
                                             {visualMetadataIntegrity?.incidents_count ?? 0}
                                         </p>
                                     </div>
-                                    <div>
-                                        <span className="text-sm text-gray-500">Assets with thumbnails (24h)</span>
-                                        <p className="text-lg font-semibold">{visualMetadataIntegrity?.total_eligible_24h ?? 0}</p>
-                                    </div>
                                 </div>
-                                {(visualMetadataIntegrity?.incidents_count ?? 0) > 0 && (
+                                {(visualMetadataIntegrity?.invalid ?? 0) > 0 && (
                                     <p className="mt-4 text-sm text-amber-700">
-                                        If incidents dip below 95% integrity → red alert. Run <code className="bg-amber-100 px-1 rounded">assets:backfill-thumbnail-dimensions</code> for legacy assets.
+                                        Run <code className="bg-amber-100 px-1 rounded">assets:backfill-thumbnail-dimensions</code> for legacy assets missing dimensions.
                                     </p>
                                 )}
                             </div>

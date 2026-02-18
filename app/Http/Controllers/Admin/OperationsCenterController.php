@@ -53,6 +53,8 @@ class OperationsCenterController extends Controller
                 'retryable' => $i->retryable,
                 'requires_support' => $i->requires_support,
                 'detected_at' => $i->detected_at?->toIso8601String(),
+                'repair_attempts' => $i->metadata['repair_attempts'] ?? $i->metadata['recovery_attempt_count'] ?? 0,
+                'last_repair_attempt_at' => $i->metadata['last_repair_attempt_at'] ?? $i->metadata['last_recovery_attempt_at'] ?? null,
             ]);
 
         $assetsStalled = $incidents->where('source_type', 'asset')->values();
@@ -92,6 +94,7 @@ class OperationsCenterController extends Controller
         $queueHealth = $this->getQueueHealth();
         $schedulerHealth = $this->getSchedulerHealth();
         $visualMetadataIntegrity = $this->getVisualMetadataIntegrity();
+        $mttrMetric = $this->getMTTRMetric();
 
         $horizonAvailable = class_exists(\Laravel\Horizon\Horizon::class);
         $horizonUrl = $horizonAvailable ? url(config('horizon.path', 'horizon')) : null;
@@ -105,6 +108,7 @@ class OperationsCenterController extends Controller
             'queueHealth' => $queueHealth,
             'schedulerHealth' => $schedulerHealth,
             'visualMetadataIntegrity' => $visualMetadataIntegrity,
+            'mttrMetric' => $mttrMetric,
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
         ]);
@@ -137,40 +141,74 @@ class OperationsCenterController extends Controller
 
     /**
      * Visual Metadata Integrity Rate — SLO for media reliability.
-     * % of assets where supportsThumbnailMetadata AND visualMetadataReady.
-     * Red alert if rate < 95% (or incidents count high).
+     * State-derived: % of eligible assets where visualMetadataReady.
+     * Incidents are diagnostic (visibility), not source of truth.
      */
     protected function getVisualMetadataIntegrity(): array
     {
         try {
+            $eligible = Asset::whereSupportsThumbnailMetadata()->count();
+            $invalid = Asset::whereSupportsThumbnailMetadata()->whereVisualMetadataInvalid()->count();
+            $valid = max(0, $eligible - $invalid);
+            $ratePercent = $eligible > 0 ? round(100 * $valid / $eligible, 1) : 100;
+
             $incidentsCount = SystemIncident::whereNull('resolved_at')
                 ->where('title', 'Expected visual metadata missing')
                 ->count();
 
-            // Total assets with thumbnail_status=completed in last 24h (eligible for visual metadata)
-            $totalEligible = Asset::where('thumbnail_status', 'completed')
-                ->where('created_at', '>=', now()->subDay())
-                ->count();
-
-            $totalAllTime = Asset::where('thumbnail_status', 'completed')->count();
-
-            // Use incidents as proxy: high count = low integrity
-            $status = $incidentsCount === 0 ? 'healthy' : ($incidentsCount <= 5 ? 'warning' : 'critical');
+            $sloTarget = 95;
+            $status = $ratePercent >= $sloTarget ? 'healthy' : ($ratePercent >= 80 ? 'warning' : 'critical');
 
             return [
                 'status' => $status,
+                'rate_percent' => $ratePercent,
+                'eligible' => $eligible,
+                'invalid' => $invalid,
+                'valid' => $valid,
                 'incidents_count' => $incidentsCount,
-                'total_eligible_24h' => $totalEligible,
-                'total_eligible_all_time' => $totalAllTime,
-                'slo_target_percent' => 95,
+                'slo_target_percent' => $sloTarget,
             ];
         } catch (\Throwable $e) {
             return [
                 'status' => 'unknown',
+                'rate_percent' => 0,
+                'eligible' => 0,
+                'invalid' => 0,
+                'valid' => 0,
                 'incidents_count' => 0,
-                'total_eligible_24h' => 0,
-                'total_eligible_all_time' => 0,
                 'slo_target_percent' => 95,
+            ];
+        }
+    }
+
+    /**
+     * Mean Time To Repair (MTTR) — average resolution time for incidents in last 24h.
+     * Enterprise telemetry: detected_at → resolved_at.
+     */
+    protected function getMTTRMetric(): array
+    {
+        try {
+            $since = now()->subHours(24);
+            $result = SystemIncident::whereNotNull('resolved_at')
+                ->where('resolved_at', '>=', $since)
+                ->selectRaw('AVG(TIMESTAMPDIFF(MINUTE, detected_at, resolved_at)) as mttr_minutes_avg')
+                ->selectRaw('COUNT(*) as resolved_count')
+                ->first();
+
+            $mttrMinutes = $result && $result->mttr_minutes_avg !== null
+                ? (float) $result->mttr_minutes_avg
+                : null;
+
+            return [
+                'mttr_minutes_avg' => $mttrMinutes,
+                'resolved_count_24h' => (int) ($result->resolved_count ?? 0),
+                'window_hours' => 24,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'mttr_minutes_avg' => null,
+                'resolved_count_24h' => 0,
+                'window_hours' => 24,
             ];
         }
     }

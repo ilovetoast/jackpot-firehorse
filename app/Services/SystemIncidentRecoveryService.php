@@ -277,14 +277,19 @@ class SystemIncidentRecoveryService
     /**
      * Should create ticket based on SLA rules?
      *
+     * Repair attempts: after 3 attempts → auto-create ticket (prevents infinite retry).
      * Severity rules:
-     * - info: no auto ticket
-     * - warning: only after 2 failures
+     * - info: no auto ticket (unless repair_attempts >= 3)
+     * - warning: after 2 failures, or 3 repair attempts
      * - error: yes
      * - critical: immediate
      */
-    public function shouldCreateTicketBySeverity(SystemIncident $incident, int $recoveryAttemptCount): bool
+    public function shouldCreateTicketBySeverity(SystemIncident $incident, int $repairAttempts): bool
     {
+        if ($repairAttempts >= 3) {
+            return true;
+        }
+
         $severity = strtolower($incident->severity ?? 'info');
 
         if ($severity === 'info') {
@@ -294,7 +299,7 @@ class SystemIncidentRecoveryService
             return true;
         }
         if ($severity === 'warning') {
-            return $recoveryAttemptCount >= 2;
+            return $repairAttempts >= 2;
         }
 
         return false;

@@ -334,28 +334,36 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                         </span>
                     </div>
                 )}
-                {/* File type badge overlay - top right. In guidelines mode, file type moves to label below. */}
-                {showInfo && (
-                    <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
-                        <div className="inline-flex items-center gap-1.5">
-                            {!isGuidelines && (
-                                <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
-                                    {fileExtension}
-                                </span>
-                            )}
-                            {/* Starred: gold for visibility on varied image backgrounds (brand primary was too dark) */}
-                            {asset.starred === true && (
-                                <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />
-                            )}
-                            {/* Subtle unpublished icon */}
-                            {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
-                            {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
-                            {!asset.archived_at && asset.is_published === false && (
-                                <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
-                            )}
-                        </div>
+                {/* Top-right badges: health (when warning/critical) + file type + star + unpublished */}
+                <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
+                    <div className="inline-flex items-center gap-1.5">
+                        {/* Asset health badge — warning/critical (support visibility) */}
+                        {asset?.health_status && asset.health_status !== 'healthy' && (
+                            <span
+                                className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ring-2 ring-white/80 ${
+                                    asset.health_status === 'critical' ? 'bg-red-500' : 'bg-amber-500'
+                                }`}
+                                title={asset.health_status === 'critical' ? 'Critical' : 'Warning'}
+                                aria-label={asset.health_status === 'critical' ? 'Critical' : 'Warning'}
+                            />
+                        )}
+                        {showInfo && !isGuidelines && (
+                            <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
+                                {fileExtension}
+                            </span>
+                        )}
+                        {/* Starred: gold for visibility on varied image backgrounds (brand primary was too dark) */}
+                        {asset.starred === true && (
+                            <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />
+                        )}
+                        {/* Subtle unpublished icon */}
+                        {/* CANONICAL RULE: Published vs Unpublished is determined ONLY by is_published */}
+                        {/* Use is_published boolean from API - do not infer from approval, lifecycle enums, or fallbacks */}
+                        {!asset.archived_at && asset.is_published === false && (
+                            <EyeSlashIcon className="h-3 w-3 text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Unpublished" />
+                        )}
                     </div>
-                )}
+                </div>
             </div>
             
             {/* Title section - Conditionally hidden based on showInfo prop */}

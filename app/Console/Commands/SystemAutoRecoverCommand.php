@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\SystemIncident;
 use App\Services\SystemIncidentRecoveryService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Deterministic auto-recovery loop for operational incidents.
@@ -63,18 +64,19 @@ class SystemAutoRecoverCommand extends Command
                 continue;
             }
 
-            // Not resolved - apply SLA rules
+            // Not resolved - increment repair attempts (canonical: repair_attempts, last_repair_attempt_at)
             $metadata = $incident->metadata ?? [];
-            $recoveryAttemptCount = ($metadata['recovery_attempt_count'] ?? 0) + 1;
-            $incident->update([
-                'metadata' => array_merge($metadata, [
-                    'recovery_attempt_count' => $recoveryAttemptCount,
-                    'last_recovery_attempt_at' => now()->toIso8601String(),
-                ]),
+            $repairAttempts = ($metadata['repair_attempts'] ?? $metadata['recovery_attempt_count'] ?? 0) + 1;
+            $metadata = array_merge($metadata, [
+                'repair_attempts' => $repairAttempts,
+                'last_repair_attempt_at' => now()->toIso8601String(),
+                'recovery_attempt_count' => $repairAttempts, // backward compat
+                'last_recovery_attempt_at' => now()->toIso8601String(),
             ]);
+            $incident->update(['metadata' => $metadata]);
 
-            // SLA: should we create ticket?
-            $shouldCreateTicket = $recoveryService->shouldCreateTicketBySeverity($incident, $recoveryAttemptCount);
+            // SLA: create ticket after 3 repair attempts, or per severity rules
+            $shouldCreateTicket = $recoveryService->shouldCreateTicketBySeverity($incident, $repairAttempts);
             if ($shouldCreateTicket) {
                 $ticket = $recoveryService->createTicket($incident);
                 if ($ticket) {

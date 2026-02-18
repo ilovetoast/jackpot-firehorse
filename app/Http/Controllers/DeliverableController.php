@@ -408,9 +408,27 @@ class DeliverableController extends Controller
             ]);
         }
 
+        // Asset health badge: worst incident severity per asset
+        $assetIds = $assetModels->pluck('id')->all();
+        $incidentSeverityByAsset = [];
+        if (! empty($assetIds)) {
+            $incidents = \App\Models\SystemIncident::whereNull('resolved_at')
+                ->whereIn('source_type', ['asset', 'job'])
+                ->whereIn('source_id', $assetIds)
+                ->get(['source_id', 'severity']);
+            $order = ['critical' => 1, 'error' => 2, 'warning' => 3];
+            foreach ($incidents as $inc) {
+                $aid = $inc->source_id;
+                $sev = $inc->severity ?? 'warning';
+                if (! isset($incidentSeverityByAsset[$aid]) || ($order[$sev] ?? 99) < ($order[$incidentSeverityByAsset[$aid]] ?? 99)) {
+                    $incidentSeverityByAsset[$aid] = $sev;
+                }
+            }
+        }
+
         // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
         $mappedAssets = $assetModels
-            ->map(function ($asset) use ($tenant, $brand) {
+            ->map(function ($asset) use ($tenant, $brand, $incidentSeverityByAsset) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -577,6 +595,7 @@ class DeliverableController extends Controller
                         'id' => $categoryId,
                         'name' => $categoryName,
                     ] : null,
+                    'user_id' => $asset->user_id, // For delete-own permission check
                     'uploaded_by' => $uploadedBy, // User who uploaded the asset
                     // Phase L.4: Lifecycle fields (read-only display)
                     'published_at' => $asset->published_at?->toIso8601String(),
@@ -599,6 +618,7 @@ class DeliverableController extends Controller
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
+                    'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                 ];
             })
             ->values()

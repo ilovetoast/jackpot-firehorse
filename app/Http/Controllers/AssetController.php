@@ -415,8 +415,25 @@ class AssetController extends Controller
             }
         }
 
+        // Asset health badge: worst incident severity per asset (source_type asset or job, source_id = asset_id)
+        $incidentSeverityByAsset = [];
+        if (! empty($assetIds)) {
+            $incidents = \App\Models\SystemIncident::whereNull('resolved_at')
+                ->whereIn('source_type', ['asset', 'job'])
+                ->whereIn('source_id', $assetIds)
+                ->get(['source_id', 'severity']);
+            $order = ['critical' => 1, 'error' => 2, 'warning' => 3];
+            foreach ($incidents as $inc) {
+                $aid = $inc->source_id;
+                $sev = $inc->severity ?? 'warning';
+                if (! isset($incidentSeverityByAsset[$aid]) || ($order[$sev] ?? 99) < ($order[$incidentSeverityByAsset[$aid]] ?? 99)) {
+                    $incidentSeverityByAsset[$aid] = $sev;
+                }
+            }
+        }
+
         try {
-            $mappedAssets = $assetModels->map(function ($asset) use ($tenant, $brand, $starredFromTable) {
+            $mappedAssets = $assetModels->map(function ($asset) use ($tenant, $brand, $starredFromTable, $incidentSeverityByAsset) {
                 try {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
@@ -618,6 +635,8 @@ class AssetController extends Controller
                     'video_preview_url' => $asset->video_preview_url,
                     // Pipeline status for visible progression (uploading → complete)
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
+                    // Asset health badge (healthy|warning|critical) for support visibility
+                    'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                 ];
                 } catch (\Throwable $e) {
                     Log::error('[AssetController::index] map asset failed', [
@@ -636,6 +655,7 @@ class AssetController extends Controller
                         'metadata' => $asset->metadata ?? [],
                         'starred' => false,
                         'category' => null,
+                        'user_id' => $asset->user_id ?? null,
                         'uploaded_by' => null,
                         'preview_thumbnail_url' => null,
                         'final_thumbnail_url' => null,
@@ -649,6 +669,7 @@ class AssetController extends Controller
                         'archived_by' => null,
                         'video_preview_url' => null,
                         'analysis_status' => 'uploading',
+                        'health_status' => 'healthy',
                     ];
                 }
             })
