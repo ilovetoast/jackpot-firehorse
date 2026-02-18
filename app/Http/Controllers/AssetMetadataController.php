@@ -8,6 +8,7 @@ use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
+use App\Jobs\PromoteAssetJob;
 use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
@@ -1208,6 +1209,12 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
+        // Phase 5: Promotion failed is terminal — retry promotion only, not full pipeline
+        if (($asset->analysis_status ?? '') === 'promotion_failed') {
+            PromoteAssetJob::dispatch($asset->id);
+            return response()->json(['status' => 'queued']);
+        }
+
         $hasRetryableIncident = SystemIncident::whereNull('resolved_at')
             ->where(function ($q) use ($asset) {
                 $q->where('source_type', 'asset')->where('source_id', $asset->id)
@@ -1291,6 +1298,8 @@ class AssetMetadataController extends Controller
             'tenant_id' => $asset->tenant_id,
             'brand_id' => $asset->brand_id,
             'analysis_status' => $asset->analysis_status ?? 'uploading',
+            'promotion_status' => $asset->analysis_status ?? 'uploading',
+            'has_thumbnails' => isset($asset->metadata['thumbnails']),
             'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
             'thumbnail_error' => $asset->thumbnail_error,
             'metadata' => [

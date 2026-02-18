@@ -173,20 +173,21 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
-    const activeAsset = activeAssetId ? assetsList.find(asset => asset.id === activeAssetId) : null
+    const safeAssetsList = (assetsList || []).filter(Boolean)
+    const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
     // This check is robust against temporary nulls during async updates
     // We check for ID existence, not object reference equality
     useEffect(() => {
         if (activeAssetId) {
-            const assetExists = assetsList.some(asset => asset.id === activeAssetId)
+            const assetExists = safeAssetsList.some(asset => asset?.id === activeAssetId)
             if (!assetExists) {
                 // Asset ID no longer exists in array - close drawer
                 setActiveAssetId(null)
             }
         }
-    }, [activeAssetId, assetsList])
+    }, [activeAssetId, safeAssetsList])
 
     // Category switches should reset the drawer selection,
     // but must NOT remount the entire page (that destroys <img> nodes and causes flashes).
@@ -218,8 +219,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             const assetId = urlParams.get('asset')
             const editMetadataFieldId = urlParams.get('edit_metadata')
             
-            if (assetId && assetsList.length > 0) {
-                const asset = assetsList.find(a => a.id === assetId)
+            if (assetId && safeAssetsList.length > 0) {
+                const asset = safeAssetsList.find(a => a?.id === assetId)
                 if (asset) {
                     setActiveAssetId(assetId)
                     // If edit_metadata param is present, the drawer will handle it
@@ -227,7 +228,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                 }
             }
         }
-    }, [assetsList]) // Re-check when assets load
+    }, [safeAssetsList]) // Re-check when assets load
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
@@ -341,8 +342,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // No view refreshes - only local state updates
     const handleThumbnailUpdate = useCallback((updatedAsset) => {
         setAssetsList(prevAssets => {
-            return prevAssets.map(asset => {
-                if (asset.id === updatedAsset.id) {
+            return (prevAssets || []).filter(Boolean).map(asset => {
+                if (asset?.id === updatedAsset?.id) {
                     // Merge updated asset data (async, no refresh)
                     return mergeAsset(asset, updatedAsset)
                 }
@@ -355,8 +356,8 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     // This preserves drawer state and grid scroll position
     const handleLifecycleUpdate = useCallback((updatedAsset) => {
         setAssetsList(prevAssets => {
-            return prevAssets.map(asset => {
-                if (asset.id === updatedAsset.id) {
+            return (prevAssets || []).filter(Boolean).map(asset => {
+                if (asset?.id === updatedAsset?.id) {
                     // Merge updated asset data (preserves thumbnail state, updates lifecycle fields)
                     return mergeAsset(asset, updatedAsset)
                 }
@@ -366,7 +367,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     }, [])
     
     useThumbnailSmartPoll({
-        assets: assetsList,
+        assets: safeAssetsList,
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
     })
@@ -1070,7 +1071,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             {assetsList && assetsList.length > 0 ? (
                                 <>
                                 <AssetGrid 
-                                    assets={assetsList} 
+                                    assets={safeAssetsList} 
                                     onAssetClick={handleAssetClick}
                                     cardSize={cardSize}
                                     cardStyle={cardStyle}
@@ -1158,7 +1159,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                                 asset={activeAsset} // May be undefined temporarily during async updates
                                 onClose={() => setActiveAssetId(null)}
                                 assets={assetsList}
-                                currentAssetIndex={activeAsset ? assetsList.findIndex(a => a.id === activeAsset.id) : -1}
+                                currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
@@ -1180,7 +1181,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
                             asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => setActiveAssetId(null)}
                             assets={assetsList}
-                            currentAssetIndex={activeAsset ? assetsList.findIndex(a => a.id === activeAsset.id) : -1}
+                            currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}

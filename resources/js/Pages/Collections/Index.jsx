@@ -53,13 +53,13 @@ export default function CollectionsIndex({
     const activeTextColor = getContrastTextColor(workspaceAccentColor)
     const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
 
-    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
+    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
 
     useEffect(() => {
-        setAssetsList(Array.isArray(assets) ? assets : [])
+        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
         setNextPageUrl(next_page_url ?? null)
     }, [assets, next_page_url])
 
@@ -70,7 +70,7 @@ export default function CollectionsIndex({
             const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
             const response = await axios.get(url)
             const data = response.data?.data ?? []
-            setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
+            setAssetsList(prev => [...(prev || []).filter(Boolean), ...(Array.isArray(data) ? data.filter(Boolean) : [])])
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
             console.error('Infinite scroll failed', e)
@@ -107,7 +107,8 @@ export default function CollectionsIndex({
     const mobileTouchStartRef = useRef(null)
     const mobileTouchDeltaRef = useRef({ x: 0, y: 0 })
     const [activeAssetId, setActiveAssetId] = useState(null)
-    const activeAsset = activeAssetId ? assetsList.find((a) => a.id === activeAssetId) : null
+    const safeAssetsList = (assetsList || []).filter(Boolean)
+    const activeAsset = activeAssetId ? safeAssetsList.find((a) => a?.id === activeAssetId) : null
 
     const navigateToCollection = useCallback((collectionId, options = {}) => {
         const params = collectionId == null ? {} : { collection: collectionId }
@@ -123,10 +124,10 @@ export default function CollectionsIndex({
     }
 
     useEffect(() => {
-        if (activeAssetId && !assetsList.some((a) => a.id === activeAssetId)) {
+        if (activeAssetId && !safeAssetsList.some((a) => a?.id === activeAssetId)) {
             setActiveAssetId(null)
         }
-    }, [activeAssetId, assetsList])
+    }, [activeAssetId, safeAssetsList])
 
     useEffect(() => {
         setActiveAssetId(null)
@@ -178,7 +179,7 @@ export default function CollectionsIndex({
 
     const handleLifecycleUpdate = (updatedAsset) => {
         setAssetsList((prev) =>
-            prev.map((a) => (a.id === updatedAsset?.id ? { ...a, ...updatedAsset } : a))
+            (prev || []).filter(Boolean).map((a) => (a?.id === updatedAsset?.id ? { ...a, ...updatedAsset } : a))
         )
     }
 
@@ -578,7 +579,7 @@ export default function CollectionsIndex({
                                     {hasAssets ? (
                                         <>
                                         <AssetGrid
-                                            assets={assetsList}
+                                            assets={safeAssetsList}
                                             onAssetClick={(asset) => setActiveAssetId(asset?.id ?? null)}
                                             cardSize={cardSize}
                                             cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
@@ -627,8 +628,8 @@ export default function CollectionsIndex({
                                 key={activeAssetId}
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
-                                assets={assetsList}
-                                currentAssetIndex={activeAsset ? assetsList.findIndex((a) => a.id === activeAsset.id) : -1}
+                                assets={safeAssetsList}
+                                currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
@@ -641,7 +642,7 @@ export default function CollectionsIndex({
                                     onOpenCreateCollection: () => setShowCreateModal(true),
                                     onAssetRemovedFromCollection: (assetId, collectionId) => {
                                         if (collectionId === selectedCollectionId) {
-                                            setAssetsList((prev) => prev.filter((a) => a.id !== assetId))
+                                            setAssetsList((prev) => (prev || []).filter(Boolean).filter((a) => a?.id !== assetId))
                                             setActiveAssetId(null)
                                         }
                                     },
@@ -660,8 +661,8 @@ export default function CollectionsIndex({
                         key={activeAssetId}
                         asset={activeAsset}
                         onClose={() => setActiveAssetId(null)}
-                        assets={assetsList}
-                        currentAssetIndex={activeAsset ? assetsList.findIndex((a) => a.id === activeAsset.id) : -1}
+                        assets={safeAssetsList}
+                        currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
                         onAssetUpdate={handleLifecycleUpdate}
                         bucketAssetIds={bucketAssetIds}
                         onBucketToggle={handleBucketToggle}
@@ -674,7 +675,7 @@ export default function CollectionsIndex({
                             onOpenCreateCollection: () => setShowCreateModal(true),
                                     onAssetRemovedFromCollection: (assetId, collectionId) => {
                                         if (collectionId === selectedCollectionId) {
-                                            setAssetsList((prev) => prev.filter((a) => a.id !== assetId))
+                                            setAssetsList((prev) => (prev || []).filter(Boolean).filter((a) => a?.id !== assetId))
                                             setActiveAssetId(null)
                                         }
                                     },

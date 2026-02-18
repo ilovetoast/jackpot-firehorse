@@ -144,8 +144,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     
     // Phase 3.1: Get assets with thumbnail support or video support for carousel (images, PDFs, PSDs, and videos)
     const imageAssets = useMemo(() => {
-        if (!assets || assets.length === 0) return []
-        return assets.filter(a => {
+        const safe = (assets || []).filter(Boolean)
+        if (safe.length === 0) return []
+        return safe.filter(a => {
             const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
             const mimeType = a.mime_type || ''
             const isVideoFile = mimeType.startsWith('video/') || ['MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
@@ -168,7 +169,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Only update if not in zoom modal (to allow carousel navigation)
     useEffect(() => {
         if (!showZoomModal && imageAssets.length > 0 && asset?.id) {
-            const index = imageAssets.findIndex(a => a.id === asset.id)
+            const index = imageAssets.findIndex(a => a?.id === asset?.id)
             if (index >= 0 && index !== carouselIndex) {
                 setCarouselIndex(index)
             }
@@ -1126,8 +1127,80 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
 
             {/* Content */}
             <div className="px-4 py-4 space-y-4">
-                {/* Unified Operations: Processing issue banner when unresolved incident exists */}
-                {assetIncidents?.length > 0 && (
+                {/* Phase 6: Promotion failed — dedicated banner with clear messaging */}
+                {(displayAsset?.analysis_status ?? '') === 'promotion_failed' && (
+                    <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-md">
+                        <div className="flex">
+                            <div className="flex-shrink-0">
+                                <ExclamationTriangleIcon className="h-5 w-5 text-amber-400" />
+                            </div>
+                            <div className="ml-3 flex-1">
+                                <p className="text-sm font-medium text-amber-800">
+                                    Asset promotion failed
+                                </p>
+                                <p className="mt-1 text-sm text-amber-700">
+                                    Thumbnails may not be publicly available.
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={retryProcessingLoading}
+                                        onClick={async () => {
+                                            setRetryProcessingLoading(true)
+                                            try {
+                                                await window.axios.post(`/app/assets/${displayAsset.id}/retry-processing`)
+                                                setAssetIncidents([])
+                                                if (onAssetUpdate) onAssetUpdate()
+                                                router.reload({ only: ['assets'] })
+                                            } catch (e) {
+                                                setToastMessage('Failed to retry promotion.')
+                                                setToastType('error')
+                                                setTimeout(() => setToastMessage(null), 5000)
+                                            } finally {
+                                                setRetryProcessingLoading(false)
+                                            }
+                                        }}
+                                        className="inline-flex items-center rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                                    >
+                                        <ArrowPathIcon className="h-3.5 w-3.5 mr-1" />
+                                        {retryProcessingLoading ? 'Retrying…' : 'Retry Promotion'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            try {
+                                                const res = await window.axios.post(
+                                                    `/app/assets/${displayAsset.id}/submit-ticket`,
+                                                    {},
+                                                    { headers: { Accept: 'application/json' } }
+                                                )
+                                                const ticket = res.data?.ticket ?? null
+                                                if (ticket?.id) {
+                                                    setAssetIncidents([])
+                                                    if (onAssetUpdate) onAssetUpdate()
+                                                    router.reload({ only: ['assets'] })
+                                                }
+                                                setToastMessage('Support ticket submitted. Our team will review the processing issue.')
+                                                setToastType('success')
+                                                setTimeout(() => setToastMessage(null), 6000)
+                                            } catch (e) {
+                                                setToastMessage('Failed to submit support ticket.')
+                                                setToastType('error')
+                                                setTimeout(() => setToastMessage(null), 5000)
+                                            }
+                                        }}
+                                        className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                                    >
+                                        <TicketIcon className="h-3.5 w-3.5 mr-1" />
+                                        Submit Support Ticket
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* Unified Operations: Processing issue banner when unresolved incident exists (exclude promotion_failed — has dedicated banner above) */}
+                {assetIncidents?.length > 0 && (displayAsset?.analysis_status ?? '') !== 'promotion_failed' && (
                     <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-md">
                         <div className="flex">
                             <div className="flex-shrink-0">
@@ -1845,7 +1918,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                 assetId={displayAsset.id} 
                                 onPendingCountChange={setPendingMetadataCount}
                                 primaryColor={brandPrimary}
-                                suppressAnalysisRunningBanner={assetIncidents?.length > 0}
+                                suppressAnalysisRunningBanner={assetIncidents?.length > 0 || (displayAsset?.analysis_status ?? '') === 'promotion_failed'}
                                 collectionDisplay={{
                                     collections: assetCollections,
                                     loading: assetCollectionsLoading,

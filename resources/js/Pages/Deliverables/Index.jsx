@@ -49,7 +49,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     const [isAutoClosing, setIsAutoClosing] = useState(false)
     
     // Server-driven pagination
-    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets : [])
+    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
@@ -63,7 +63,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     }, [])
 
     useEffect(() => {
-        setAssetsList(Array.isArray(assets) ? assets : [])
+        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
             window.__assetGridStaleness.hasStaleAssetGrid = false
@@ -79,7 +79,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             const url = nextPageUrl + separator + 'load_more=1'
             const response = await axios.get(url)
             const data = response.data?.data ?? []
-            setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
+            setAssetsList(prev => [...(prev || []).filter(Boolean), ...(Array.isArray(data) ? data.filter(Boolean) : [])])
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
             console.error('Infinite scroll failed', e)
@@ -107,18 +107,19 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // Derive active asset from local assets array to prevent stale references
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
-    const activeAsset = activeAssetId ? assetsList.find(asset => asset.id === activeAssetId) : null
+    const safeAssetsList = (assetsList || []).filter(Boolean)
+    const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
     useEffect(() => {
         if (activeAssetId) {
-            const assetExists = assetsList.some(asset => asset.id === activeAssetId)
+            const assetExists = safeAssetsList.some(asset => asset?.id === activeAssetId)
             if (!assetExists) {
                 // Asset ID no longer exists in array - close drawer
                 setActiveAssetId(null)
             }
         }
-    }, [activeAssetId, assetsList])
+    }, [activeAssetId, safeAssetsList])
 
     // Phase D1: Download bucket from app-level context so the bar does not remount on category change (no flash)
     const { bucketAssetIds, bucketAdd, bucketRemove, bucketClear, bucketAddBatch, clearIfEmpty } = useBucket()
@@ -177,8 +178,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             const assetId = urlParams.get('asset')
             const editMetadataFieldId = urlParams.get('edit_metadata')
             
-            if (assetId && assetsList.length > 0) {
-                const asset = assetsList.find(a => a.id === assetId)
+            if (assetId && safeAssetsList.length > 0) {
+                const asset = safeAssetsList.find(a => a?.id === assetId)
                 if (asset) {
                     setActiveAssetId(assetId)
                     // If edit_metadata param is present, the drawer will handle it
@@ -186,7 +187,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                 }
             }
         }
-    }, [assetsList])
+    }, [safeAssetsList])
 
     // useThumbnailSmartPoll updates assetsList in-place via handleThumbnailUpdate callback
     // This matches Assets/Index behavior - reconciliation is disabled there too
@@ -199,9 +200,9 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // Grid thumbnail polling: Async updates for fade-in (same as drawer)
     // No view refreshes - only local state updates
     const handleThumbnailUpdate = useCallback((updatedAsset) => {
-        setLocalAssets(prevAssets => {
-            return prevAssets.map(asset => {
-                if (asset.id === updatedAsset.id) {
+        setAssetsList(prevAssets => {
+            return (prevAssets || []).filter(Boolean).map(asset => {
+                if (asset?.id === updatedAsset?.id) {
                     // Merge updated asset data (async, no refresh)
                     return mergeAsset(asset, updatedAsset)
                 }
@@ -213,9 +214,9 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     // Handle lifecycle updates (publish/unpublish) - updates local state without full reload
     // This preserves drawer state and grid scroll position (matches Assets/Index behavior)
     const handleLifecycleUpdate = useCallback((updatedAsset) => {
-        setLocalAssets(prevAssets => {
-            return prevAssets.map(asset => {
-                if (asset.id === updatedAsset.id) {
+        setAssetsList(prevAssets => {
+            return (prevAssets || []).filter(Boolean).map(asset => {
+                if (asset?.id === updatedAsset?.id) {
                     // Merge updated asset data (preserves thumbnail state, updates lifecycle fields)
                     return mergeAsset(asset, updatedAsset)
                 }
@@ -225,7 +226,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
     }, [])
     
     useThumbnailSmartPoll({
-        assets: assetsList,
+        assets: safeAssetsList,
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
     })
@@ -952,7 +953,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                         {assetsList && assetsList.length > 0 ? (
                             <>
                             <AssetGrid 
-                                assets={assetsList} 
+                                assets={safeAssetsList} 
                                 onAssetClick={(asset) => setActiveAssetId(asset?.id || null)}
                                 cardSize={cardSize}
                                 cardStyle={(auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'}
@@ -1009,8 +1010,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => setActiveAssetId(null)}
-                                assets={assetsList}
-                                currentAssetIndex={assetsList.findIndex(a => a.id === activeAsset.id)}
+                                assets={safeAssetsList}
+                                currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                                 onAssetUpdate={handleLifecycleUpdate}
                                 bucketAssetIds={bucketAssetIds}
                                 onBucketToggle={handleBucketToggle}
@@ -1034,7 +1035,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                             asset={activeAsset} // May be undefined temporarily during async updates
                             onClose={() => setActiveAssetId(null)}
                             assets={assetsList}
-                            currentAssetIndex={activeAsset ? assetsList.findIndex(a => a.id === activeAsset.id) : -1}
+                            currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}

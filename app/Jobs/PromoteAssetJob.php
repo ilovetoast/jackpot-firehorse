@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetProcessingFailureService;
+use App\Services\SystemIncidentService;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Bus\Queueable;
@@ -248,14 +249,13 @@ class PromoteAssetJob implements ShouldQueue
                     'error' => $e->getMessage(),
                 ]);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Asset promotion failed', [
                 'asset_id' => $asset->id,
-                'source_path' => $sourcePath,
-                'canonical_path' => $canonicalPath,
+                'source_path' => $sourcePath ?? null,
+                'canonical_path' => $canonicalPath ?? null,
                 'error' => $e->getMessage(),
             ]);
-
             $this->markPromotionFailed($asset, $e->getMessage());
             throw $e; // Re-throw to trigger retry mechanism
         }
@@ -566,7 +566,25 @@ class PromoteAssetJob implements ShouldQueue
         $metadata['promotion_failed_at'] = now()->toIso8601String();
         $metadata['promotion_error'] = $errorMessage;
 
-        $asset->update(['metadata' => $metadata]);
+        $asset->update([
+            'metadata' => $metadata,
+            'analysis_status' => 'promotion_failed',
+        ]);
+
+        app(SystemIncidentService::class)->record([
+            'source_type' => 'asset',
+            'source_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'severity' => 'error',
+            'title' => 'Asset promotion failed',
+            'message' => $errorMessage,
+            'retryable' => true,
+            'requires_support' => false,
+            'metadata' => [
+                'analysis_status' => $asset->analysis_status,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+            ],
+        ]);
 
         Log::error('Asset promotion marked as failed', [
             'asset_id' => $asset->id,

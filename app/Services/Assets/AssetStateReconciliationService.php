@@ -4,6 +4,7 @@ namespace App\Services\Assets;
 
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
+use App\Services\SystemIncidentService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -48,6 +49,22 @@ class AssetStateReconciliationService
         ) {
             $promotions = $this->applyRule3($asset);
             $changes = array_merge($changes, $promotions);
+        }
+
+        // Rule 4 — Promotion Failed + Thumbnails Missing: record critical incident
+        if (($asset->analysis_status ?? 'uploading') === 'promotion_failed') {
+            $hasThumbnails = (bool) data_get($asset->metadata, 'thumbnails.large.path');
+            if (!$hasThumbnails) {
+                app(SystemIncidentService::class)->recordIfNotExists([
+                    'source_type' => 'asset',
+                    'source_id' => $asset->id,
+                    'tenant_id' => $asset->tenant_id,
+                    'severity' => 'critical',
+                    'title' => 'Promotion failed and thumbnails missing',
+                    'retryable' => true,
+                    'unique_signature' => "promotion_failed_no_thumbnails:{$asset->id}",
+                ]);
+            }
         }
 
         return [

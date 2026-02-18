@@ -14,10 +14,10 @@
  */
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
-import { EyeSlashIcon } from '@heroicons/react/24/outline'
+import { EyeSlashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
-import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
+import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 
 export default function AssetCard({ asset, onClick = null, showInfo = true, isSelected = false, primaryColor = '#6366f1', isBulkSelected = false, onBulkSelect = null, isInBucket = false, onBucketToggle = null, isPendingApprovalMode = false, isPendingPublicationFilter = false, onAssetApproved = null, cardVariant = 'default', cardStyle = 'default' }) {
     const { auth } = usePage().props
@@ -116,6 +116,14 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
     // Phase 3.1E: Processing badge shows only when thumbnail state is 'PENDING'
     // This ensures badge disappears when thumbnail becomes available after reconciliation
     const isProcessing = thumbnailState.state === 'PENDING'
+
+    // Phase 7: Thumbnail integrity — complete but no thumbnail path = hidden corruption
+    const analysisStatus = asset?.analysis_status ?? ''
+    const hasThumbnailPath = Boolean(asset?.final_thumbnail_url || asset?.thumbnail_url)
+    const mimeType = asset?.mime_type || ''
+    const showThumbnailIntegrityBadge = supportsThumbnail(mimeType, extLower)
+        && analysisStatus === 'complete'
+        && !hasThumbnailPath
     
     // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
     // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
@@ -317,6 +325,15 @@ export default function AssetCard({ asset, onClick = null, showInfo = true, isSe
                     </div>
                 )}
 
+                {/* Phase 7: Thumbnail integrity warning — complete but thumbnails missing */}
+                {showThumbnailIntegrityBadge && (
+                    <div className="absolute top-2 left-2 z-10">
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white" title="Thumbnail integrity issue">
+                            <ExclamationTriangleIcon className="h-3.5 w-3.5" />
+                            Thumbnail integrity issue
+                        </span>
+                    </div>
+                )}
                 {/* File type badge overlay - top right. In guidelines mode, file type moves to label below. */}
                 {showInfo && (
                     <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">

@@ -9,6 +9,7 @@ export const PIPELINE_STAGE_LABELS = {
     generating_embedding: 'Generating embedding',
     scoring: 'Scoring brand compliance',
     complete: 'Complete',
+    promotion_failed: 'Promotion failed',
 }
 
 export const PIPELINE_STAGES = [
