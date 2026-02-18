@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import AssetDetailModal from '../../../Components/Admin/AssetDetailModal'
 import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
@@ -15,7 +16,7 @@ import {
     ChartBarSquareIcon,
 } from '@heroicons/react/24/outline'
 
-function IncidentRow({ incident: i, onAction, selected, onSelect }) {
+function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick }) {
     const [loading, setLoading] = useState(null)
     const baseUrl = '/app/admin/incidents'
     const handle = async (action) => {
@@ -63,7 +64,19 @@ function IncidentRow({ incident: i, onAction, selected, onSelect }) {
                 }`}>{i.severity}</span>
             </td>
             <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
-            <td className="py-3 px-3 text-sm text-gray-500">{i.source_type}/{i.source_id || '—'}</td>
+            <td className="py-3 px-3 text-sm">
+                {i.source_type === 'asset' && i.source_id ? (
+                    <button
+                        type="button"
+                        onClick={() => onSourceClick?.(i.source_id)}
+                        className="text-indigo-600 hover:text-indigo-900 font-medium hover:underline"
+                    >
+                        asset/{i.source_id}
+                    </button>
+                ) : (
+                    <span className="text-gray-500">{i.source_type}/{i.source_id || '—'}</span>
+                )}
+            </td>
             <td className="py-3 px-3 text-sm text-gray-500">{new Date(i.detected_at).toLocaleString()}</td>
             <td className="py-3 px-3 text-sm text-gray-500">
                 {i.repair_attempts > 0 ? (
@@ -124,7 +137,39 @@ export default function OperationsCenterIndex({
 }) {
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [bulkLoading, setBulkLoading] = useState(null)
+    const [quickViewData, setQuickViewData] = useState(null)
+    const [quickViewLoading, setQuickViewLoading] = useState(false)
     const selectAllRef = useRef(null)
+
+    const openAssetQuickView = (assetId) => {
+        setQuickViewData(null)
+        setQuickViewLoading(true)
+        axios.get(`/app/admin/assets/${assetId}`)
+            .then((r) => setQuickViewData(r.data))
+            .catch(() => setQuickViewData(null))
+            .finally(() => setQuickViewLoading(false))
+    }
+
+    const closeQuickView = () => {
+        setQuickViewData(null)
+    }
+
+    const runAssetAction = async (assetId, action) => {
+        try {
+            if (action === 'repair') {
+                await axios.post(`/app/admin/assets/${assetId}/repair`)
+            } else if (action === 'retry-pipeline') {
+                await axios.post(`/app/admin/assets/${assetId}/retry-pipeline`)
+            } else if (action === 'restore') {
+                await axios.post(`/app/admin/assets/${assetId}/restore`)
+            }
+            closeQuickView()
+            router.reload({ only: ['incidents'] })
+        } catch (e) {
+            console.error(e)
+            alert(e?.response?.data?.message || e?.message || 'Action failed.')
+        }
+    }
 
     const incidentList = incidents || []
     const allSelected = incidentList.length > 0 && selectedIds.size === incidentList.length
@@ -377,6 +422,7 @@ export default function OperationsCenterIndex({
                                                     onAction={() => router.reload({ only: ['incidents'] })}
                                                     selected={selectedIds.has(i.id)}
                                                     onSelect={(checked) => toggleSelect(i.id, checked)}
+                                                    onSourceClick={openAssetQuickView}
                                                 />
                                             ))}
                                         </tbody>
@@ -517,6 +563,29 @@ export default function OperationsCenterIndex({
                     </div>
                 </div>
             </main>
+
+            {/* Asset Quick View Modal (from source click in Incidents) */}
+            {(quickViewData !== null || quickViewLoading) && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeQuickView}>
+                    <div
+                        className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-xl bg-white shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {quickViewLoading ? (
+                            <div className="p-12 text-center">Loading…</div>
+                        ) : quickViewData ? (
+                            <AssetDetailModal
+                                data={quickViewData}
+                                onClose={closeQuickView}
+                                onAction={runAssetAction}
+                                onRefresh={() => { closeQuickView(); router.reload({ only: ['incidents'] }) }}
+                                showThumbnail
+                            />
+                        ) : null}
+                    </div>
+                </div>
+            )}
+
             <AppFooter />
         </div>
     )
