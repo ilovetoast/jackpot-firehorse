@@ -256,6 +256,7 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                         analysis_status: {analysisStatus}
                         evaluation_status: {evaluationStatus}
                         thumbnail_status: {thumbnailStatus}
+                        metadata_health: {metadataHealth ? JSON.stringify(metadataHealth) : 'null'}
                     </pre>
                 </div>
             )}

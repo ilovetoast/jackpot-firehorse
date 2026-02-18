@@ -13,8 +13,18 @@ use Illuminate\Support\Facades\DB;
 class AssetSearchService
 {
     /**
+     * UUID regex: 8-4-4-4-12 hex with optional dashes.
+     * Matches asset IDs (e.g. 019c6cb5-ace4-73b3-9c18-8e73a6d52d23).
+     */
+    private const UUID_REGEX = '/^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i';
+
+    /**
      * Apply search to the asset query (before pagination/order).
      * Scope is already set by caller (tenant, brand, type, category).
+     *
+     * Supports:
+     * - Text search: title, filename, tags, collection name
+     * - Asset ID: paste UUID (or id:uuid, asset:uuid) to find that asset directly
      *
      * @param Builder $query Asset query builder (already scoped)
      * @param string $q Search string (e.g. from ?q=)
@@ -23,6 +33,12 @@ class AssetSearchService
     {
         $q = trim($q);
         if ($q === '') {
+            return;
+        }
+
+        $assetId = $this->extractAssetIdFromQuery($q);
+        if ($assetId !== null) {
+            $query->where('assets.id', $assetId);
             return;
         }
 
@@ -57,6 +73,35 @@ class AssetSearchService
                 });
             }
         });
+    }
+
+    /**
+     * Extract asset ID from search query if it looks like a UUID.
+     * Supports: bare UUID, id:uuid, asset:uuid.
+     *
+     * @return string|null The UUID if found, null otherwise
+     */
+    private function extractAssetIdFromQuery(string $q): ?string
+    {
+        $q = trim($q);
+        if ($q === '') {
+            return null;
+        }
+
+        // Bare UUID
+        if (preg_match(self::UUID_REGEX, $q)) {
+            return $q;
+        }
+
+        // id:uuid or asset:uuid
+        if (preg_match('/^(?:id|asset):\s*(.+)$/i', $q, $m)) {
+            $candidate = trim($m[1]);
+            if (preg_match(self::UUID_REGEX, $candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**

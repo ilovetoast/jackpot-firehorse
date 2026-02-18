@@ -204,6 +204,7 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
     }, [selectedCategoryId])
     
     // Open drawer from URL query parameter (e.g., ?asset={id}&edit_metadata={field_id})
+    // Also when ?q=uuid (asset ID search): open drawer if the asset is in results
     // Also clear staleness flag on mount (navigation to /app/assets completes)
     useEffect(() => {
         // Clear staleness flag when navigating to assets page (view is synced)
@@ -214,21 +215,24 @@ export default function AssetsIndex({ categories, categories_by_type, selected_c
             }))
         }
         
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && safeAssetsList.length > 0) {
             const urlParams = new URLSearchParams(window.location.search)
-            const assetId = urlParams.get('asset')
-            const editMetadataFieldId = urlParams.get('edit_metadata')
-            
-            if (assetId && safeAssetsList.length > 0) {
+            let assetId = urlParams.get('asset')
+            // If no ?asset= but q looks like a UUID, treat q as asset ID (e.g. direct link ?q=uuid)
+            if (!assetId && searchQuery) {
+                const uuidRegex = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i
+                const m = searchQuery.trim().match(/^(?:id|asset):\s*(.+)$/i)
+                const candidate = m ? m[1].trim() : searchQuery.trim()
+                if (uuidRegex.test(candidate)) assetId = candidate
+            }
+            if (assetId) {
                 const asset = safeAssetsList.find(a => a?.id === assetId)
                 if (asset) {
                     setActiveAssetId(assetId)
-                    // If edit_metadata param is present, the drawer will handle it
-                    // (AssetDrawer or AssetMetadataDisplay should read this)
                 }
             }
         }
-    }, [safeAssetsList]) // Re-check when assets load
+    }, [safeAssetsList, searchQuery]) // Re-check when assets load or search changes
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge

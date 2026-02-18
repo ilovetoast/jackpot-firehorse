@@ -1040,7 +1040,9 @@ class AssetMetadataController extends Controller
             || ! empty(data_get($asset->metadata, 'fields.dominant_colors'));
         $hasDominantHueGroup = ! empty($asset->dominant_hue_group);
         $hasEmbedding = $asset->embedding()->exists();
-        $thumbnailComplete = $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED;
+        // Thumbnails "complete" when COMPLETED or SKIPPED (skipped = no work to do, e.g. unsupported format)
+        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus ? $asset->thumbnail_status : null;
+        $thumbnailComplete = $thumbEnum === ThumbnailStatus::COMPLETED || $thumbEnum === ThumbnailStatus::SKIPPED;
         $metadataHealth = [
             'dominant_colors' => $hasDominantColors,
             'dominant_hue_group' => $hasDominantHueGroup,

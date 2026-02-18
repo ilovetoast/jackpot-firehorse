@@ -26,6 +26,22 @@ import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 
+/** UUID regex: 8-4-4-4-12 hex with optional dashes. Matches asset IDs. */
+const UUID_REGEX = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i
+
+/** Extract asset ID from search string if it looks like a UUID (bare, id:uuid, or asset:uuid). */
+function extractAssetIdFromSearch(q) {
+    const trimmed = (q || '').trim()
+    if (!trimmed) return null
+    if (UUID_REGEX.test(trimmed)) return trimmed
+    const m = trimmed.match(/^(?:id|asset):\s*(.+)$/i)
+    if (m) {
+        const candidate = m[1].trim()
+        if (UUID_REGEX.test(candidate)) return candidate
+    }
+    return null
+}
+
 /**
  * Primary Filter Bar Component
  * 
@@ -98,10 +114,18 @@ export default function AssetGridPrimaryFilters({
         }
         
         const urlParams = new URLSearchParams(window.location.search)
-        if (debouncedSearch.trim()) {
-            urlParams.set('q', debouncedSearch.trim())
+        const trimmed = debouncedSearch.trim()
+        if (trimmed) {
+            urlParams.set('q', trimmed)
+            const assetId = extractAssetIdFromSearch(trimmed)
+            if (assetId) {
+                urlParams.set('asset', assetId)
+            } else {
+                urlParams.delete('asset')
+            }
         } else {
             urlParams.delete('q')
+            urlParams.delete('asset')
         }
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
@@ -122,6 +146,7 @@ export default function AssetGridPrimaryFilters({
         
         const urlParams = new URLSearchParams(window.location.search)
         urlParams.delete('q')
+        urlParams.delete('asset')
         router.get(window.location.pathname, Object.fromEntries(urlParams), {
             preserveState: true,
             preserveScroll: true,
@@ -153,7 +178,7 @@ export default function AssetGridPrimaryFilters({
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search assets…"
+                            placeholder="Search assets… or paste asset ID"
                             className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                         />
                         {searchQuery && (
