@@ -732,7 +732,7 @@ class AssetThumbnailController extends Controller
         // The job itself has idempotency checks (checks if COMPLETED) so it's safe
 
         // Validate file type is supported for thumbnail generation
-        // This uses the same logic as GenerateThumbnailsJob to ensure consistency
+        // Must align with GenerateThumbnailsJob / ThumbnailGenerationService supported types
         $mimeType = strtolower($asset->mime_type ?? '');
         $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
 
@@ -748,6 +748,21 @@ class AssetThumbnailController extends Controller
                 return response()->json([
                     'error' => 'PDF thumbnail generation requires spatie/pdf-to-image package',
                 ], 422);
+            }
+        }
+
+        // Check SVG support (rasterized via Imagick)
+        if (!$isSupported && ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
+            $isSupported = true;
+            $supportReason = 'SVG';
+        }
+
+        // Check TIFF/AVIF support (Imagick)
+        if (!$isSupported && extension_loaded('imagick')) {
+            if (($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') ||
+                ($mimeType === 'image/avif' || $extension === 'avif')) {
+                $isSupported = true;
+                $supportReason = $mimeType === 'image/avif' || $extension === 'avif' ? 'AVIF' : 'TIFF';
             }
         }
 
@@ -809,7 +824,6 @@ class AssetThumbnailController extends Controller
             'asset_id' => $asset->id,
             'user_id' => $user->id,
             'file_type' => $supportReason,
-            'previous_status' => 'skipped',
         ]);
 
         // Log activity event for timeline
@@ -821,7 +835,6 @@ class AssetThumbnailController extends Controller
                     'triggered_by' => 'user_manual_request',
                     'triggered_by_user_id' => $user->id,
                     'file_type' => $supportReason,
-                    'previous_status' => 'skipped',
                 ]
             );
         } catch (\Exception $e) {

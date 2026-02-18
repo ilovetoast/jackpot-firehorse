@@ -787,12 +787,11 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const isOwnAsset = assetOwnerId != null && String(assetOwnerId) === String(auth?.user?.id)
     const canDelete = canDeleteAny || (canDeleteOwn && isOwnAsset)
 
-    // Check if asset can have thumbnail generated (for previously skipped assets)
-    // IMPORTANT: This is for existing assets that were skipped but are now supported
-    // (e.g., PDFs before PDF support was added)
-    // This is a manual, user-triggered action only - does not modify the thumbnail pipeline
+    // Check if asset can have thumbnail generated (for previously skipped or pending assets)
+    // - SKIPPED: was unsupported, now supported (e.g. PDF/SVG/TIFF/AVIF support added)
+    // - PENDING: user removed preview and wants to regenerate
     // PERMISSION CHECK: User must have assets.retry_thumbnails permission
-    // BUTTON HIDING: Button is hidden during generation (processing/pending) or while loading
+    // BUTTON HIDING: Button is hidden during generation (processing) or while loading
     const canGenerateThumbnail = useMemo(() => {
         if (!displayAsset) return false
         
@@ -806,28 +805,27 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
             return false
         }
         
-        // Hide button if thumbnail is being processed (status changed from skipped)
-        // The drawer polling will detect this change
-        if (thumbnailStatus === 'processing' || thumbnailStatus === 'pending') {
+        // Hide button if thumbnail is actively being processed
+        if (thumbnailStatus === 'processing') {
             return false
         }
         
-        // Must be in skipped state (was previously unsupported)
-        if (thumbnailStatus !== 'skipped') {
+        // Show for PENDING (e.g. after Remove Preview) or SKIPPED (was unsupported)
+        if (thumbnailStatus !== 'skipped' && thumbnailStatus !== 'pending') {
             return false
         }
         
-        // Must be a PDF (currently the main use case)
-        // Could be extended to other file types in the future
+        // Supported file types (must align with backend /thumbnails/generate)
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
         
-        if (mimeType === 'application/pdf' || extension === 'pdf') {
-            return true
-        }
+        if (mimeType === 'application/pdf' || extension === 'pdf') return true
+        if (mimeType === 'image/svg+xml' || extension === 'svg') return true
+        if (['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'].includes(mimeType)) return true
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) return true
+        if (mimeType === 'image/tiff' || mimeType === 'image/tif' || ['tiff', 'tif'].includes(extension)) return true
+        if (mimeType === 'image/avif' || extension === 'avif') return true
         
-        // Could also support images that were skipped for other reasons
-        // For now, focus on PDFs
         return false
     }, [displayAsset, thumbnailStatus, canRetryThumbnails, generateLoading])
 
@@ -2420,9 +2418,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         )}
                     </dl>
 
-                {/* Processing State - Skipped (informational, not error) */}
-                {/* Show different UI for assets that can now generate thumbnails vs truly unsupported */}
-                {thumbnailsSkipped && (
+                {/* Processing State - Skipped or Pending (e.g. after Remove Preview) */}
+                {/* Show Regenerate/Generate button when supported; otherwise informational message */}
+                {(thumbnailsSkipped || (thumbnailStatus === 'pending' && canGenerateThumbnail)) && (
                     <div className="border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900 mb-2">Preview Status</h3>
                         
@@ -2430,12 +2428,14 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         {canGenerateThumbnail ? (
                             <div className="bg-indigo-50 border border-indigo-200 rounded-md p-4">
                                 <p className="text-sm font-medium text-indigo-900 mb-2">
-                                    Preview not generated yet
+                                    {thumbnailStatus === 'pending' ? 'Preview removed — ready to regenerate' : 'Preview not generated yet'}
                                 </p>
                                 <p className="text-xs text-indigo-700 mb-3">
-                                    {displayAsset.mime_type === 'application/pdf' || displayAsset.original_filename?.toLowerCase().endsWith('.pdf')
-                                        ? 'PDF previews generate from page 1'
-                                        : 'Thumbnail generation is now available for this file type'}
+                                    {thumbnailStatus === 'pending'
+                                        ? 'Click below to regenerate. Ensure the queue worker is running (sail artisan queue:work) for jobs to process.'
+                                        : displayAsset.mime_type === 'application/pdf' || displayAsset.original_filename?.toLowerCase().endsWith('.pdf')
+                                            ? 'PDF previews generate from page 1'
+                                            : 'Thumbnail generation is now available for this file type'}
                                 </p>
                                 
                                 {/* PDF Size Limit Info */}
@@ -2464,7 +2464,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         </>
                                     ) : (
                                         <>
-                                            Generate Preview
+                                            {thumbnailStatus === 'pending' ? 'Regenerate Preview' : 'Generate Preview'}
                                         </>
                                     )}
                                 </button>
