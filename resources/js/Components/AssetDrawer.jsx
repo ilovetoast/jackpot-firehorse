@@ -1168,7 +1168,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         </button>
                                     )}
                                     <a
-                                        href={typeof route !== 'undefined' ? route('support.tickets.create') : '/app/support/tickets/create'}
+                                        href="/app/support/tickets/create"
                                         className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
                                     >
                                         <TicketIcon className="h-3.5 w-3.5 mr-1" />
