@@ -44,8 +44,7 @@ class DominantColorsExtractor
      */
     public function extractAndPersist(Asset $asset): void
     {
-        // Only process image assets
-        if (!$this->isImageAsset($asset)) {
+        if (!$asset->visualMetadataReady()) {
             return;
         }
 
@@ -388,24 +387,4 @@ class DominantColorsExtractor
         ]);
     }
 
-    /**
-     * Check if asset is an image.
-     *
-     * @param Asset $asset
-     * @return bool
-     */
-    protected function isImageAsset(Asset $asset): bool
-    {
-        $mimeType = $asset->mime_type ?? '';
-        if (str_starts_with($mimeType, 'image/')) {
-            return true;
-        }
-
-        // Check by extension as fallback
-        $filename = $asset->original_filename ?? '';
-        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif'];
-
-        return in_array($extension, $imageExtensions);
-    }
 }

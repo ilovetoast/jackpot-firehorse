@@ -12,6 +12,7 @@ use App\Services\AutomaticMetadataWriter;
 use App\Services\Automation\ColorAnalysisService;
 use App\Services\Automation\DominantColorsExtractor;
 use App\Services\MetadataSchemaResolver;
+use App\Services\SystemIncidentService;
 use App\Support\Logging\PipelineLogger;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -234,12 +235,11 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             ]);
         }
 
-        // Run color analysis for dominant colors extraction (for image assets)
+        // Run color analysis for dominant colors extraction (image, SVG, PDF, video with raster thumbnails)
         // CRITICAL: This runs regardless of whether other fields need populating
         // because dominant_colors is a system automatic field that should always be extracted
         $colorAnalysisResult = null;
-        $assetType = $this->determineAssetType($asset);
-        if ($assetType === 'image') {
+        if ($asset->visualMetadataReady()) {
             PipelineLogger::info('[PopulateAutomaticMetadataJob] COLOR_ANALYSIS_START', [
                 'asset_id' => $asset->id,
                 'mime_type' => $asset->mime_type,
@@ -286,10 +286,40 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
                 // Continue - don't fail the entire job if color analysis fails
             }
         } else {
-            Log::debug('[PopulateAutomaticMetadataJob] Skipping color analysis - not an image asset', [
+            Log::debug('[PopulateAutomaticMetadataJob] Skipping color analysis - thumbnail metadata not supported', [
                 'asset_id' => $asset->id,
-                'asset_type' => $assetType,
             ]);
+
+            // Incident: thumbnail_status=COMPLETED but visual metadata missing (dimensions, timeout, etc.)
+            // Prevents masking real thumbnail failures — BrandCompliance will mark incomplete
+            // Severity escalation: warning → error (repeated) → critical (timeout+no dims, or stuck >15min)
+            if ($asset->supportsThumbnailMetadata() && !$asset->visualMetadataReady()) {
+                try {
+                    $severity = $this->computeVisualMetadataIncidentSeverity($asset);
+                    app(SystemIncidentService::class)->recordIfNotExists([
+                        'source_type' => 'asset',
+                        'source_id' => $asset->id,
+                        'tenant_id' => $asset->tenant_id,
+                        'severity' => $severity,
+                        'title' => 'Expected visual metadata missing',
+                        'message' => 'Thumbnail path exists but dimensions/timeout invalid — color analysis skipped',
+                        'metadata' => [
+                            'asset_id' => $asset->id,
+                            'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+                            'thumbnail_timeout' => $asset->metadata['thumbnail_timeout'] ?? null,
+                            'thumbnail_retry_count' => $asset->thumbnail_retry_count ?? 0,
+                            'has_thumbnail_dimensions' => !empty($asset->thumbnailDimensions('medium')),
+                        ],
+                        'retryable' => true,
+                        'unique_signature' => "expected_visual_metadata_missing:{$asset->id}",
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('[PopulateAutomaticMetadataJob] Failed to record visual metadata missing incident', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         // Persist internal color analysis data (for dominant colors extraction)
@@ -385,6 +415,33 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             'skipped' => count($results['skipped']),
             'skipped_reasons' => array_column($results['skipped'], 'reason'),
         ]);
+    }
+
+    /**
+     * Compute severity for "Expected visual metadata missing" incident.
+     * Escalation: warning (first) → error (repeated) → critical (timeout+no dims).
+     *
+     * @param Asset $asset
+     * @return string 'warning' | 'error' | 'critical'
+     */
+    protected function computeVisualMetadataIncidentSeverity(Asset $asset): string
+    {
+        $metadata = $asset->metadata ?? [];
+        $thumbnailTimeout = (bool) ($metadata['thumbnail_timeout'] ?? false);
+        $hasDimensions = !empty($asset->thumbnailDimensions('medium'));
+        $retryCount = $asset->thumbnail_retry_count ?? 0;
+
+        // Critical: thumbnail timeout + no dimensions (corrupted/stuck)
+        if ($thumbnailTimeout && !$hasDimensions) {
+            return 'critical';
+        }
+
+        // Error: repeated failure (>= 2 retries)
+        if ($retryCount >= 2) {
+            return 'error';
+        }
+
+        return 'warning';
     }
 
     /**

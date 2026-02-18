@@ -600,6 +600,7 @@ class TenantMetadataVisibilityService
         $restrictFields = $config['restrict_fields'] ?? [];
         $tagsAndCollectionOnlySlugs = $config['tags_and_collection_only_slugs'] ?? ['video'];
         $dominantColorsVisibility = $config['dominant_colors_visibility'] ?? [];
+        $systemAutomatedEnabledForAll = $config['system_automated_enabled_for_all'] ?? [];
 
         $slug = $category->slug;
         $assetTypeValue = $category->asset_type?->value ?? 'asset';
@@ -635,7 +636,8 @@ class TenantMetadataVisibilityService
                 $categoryConfig,
                 $restrictFields,
                 $tagsAndCollectionOnlySlugs,
-                $dominantColorsVisibility
+                $dominantColorsVisibility,
+                $systemAutomatedEnabledForAll
             );
             if ($visibility === null) {
                 continue; // Skip (no row = fall back to field/tenant defaults)
@@ -704,6 +706,7 @@ class TenantMetadataVisibilityService
         $restrictFields = $config['restrict_fields'] ?? [];
         $tagsAndCollectionOnlySlugs = $config['tags_and_collection_only_slugs'] ?? ['video'];
         $dominantColorsVisibility = $config['dominant_colors_visibility'] ?? [];
+        $systemAutomatedEnabledForAll = $config['system_automated_enabled_for_all'] ?? [];
 
         $slug = $category->slug;
         $assetTypeValue = $category->asset_type?->value ?? 'asset';
@@ -749,7 +752,8 @@ class TenantMetadataVisibilityService
                 $categoryConfig,
                 $restrictFields,
                 $tagsAndCollectionOnlySlugs,
-                $dominantColorsVisibility
+                $dominantColorsVisibility,
+                $systemAutomatedEnabledForAll
             );
             if ($visibility === null) {
                 continue;
@@ -973,8 +977,32 @@ class TenantMetadataVisibilityService
         array $categoryConfig,
         array $restrictFields,
         array $tagsAndCollectionOnlySlugs,
-        array $dominantColorsVisibility
+        array $dominantColorsVisibility,
+        array $systemAutomatedEnabledForAll = []
     ): ?array {
+        // System automated fields: always enabled for every category
+        if (in_array($fieldKey, $systemAutomatedEnabledForAll, true)) {
+            $v = $dominantColorsVisibility[$fieldKey] ?? [];
+            if (!empty($v)) {
+                return [
+                    'is_hidden' => $v['is_hidden'] ?? false,
+                    'is_upload_hidden' => $v['is_upload_hidden'] ?? false,
+                    'is_filter_hidden' => $v['is_filter_hidden'] ?? false,
+                    'is_primary' => $v['is_primary'] ?? null,
+                    'is_edit_hidden' => $v['is_edit_hidden'] ?? false,
+                ];
+            }
+            $alwaysHidden = config('metadata_category_defaults.always_hidden_fields', []);
+            $isFilterHidden = in_array($fieldKey, $alwaysHidden, true);
+            return [
+                'is_hidden' => false,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => $isFilterHidden,
+                'is_primary' => null,
+                'is_edit_hidden' => false,
+            ];
+        }
+
         // Explicit per-slug config for this field (checked first so type fields can override tags_and_collection_only)
         if (isset($categoryConfig[$fieldKey][$categorySlug])) {
             $settings = $categoryConfig[$fieldKey][$categorySlug];

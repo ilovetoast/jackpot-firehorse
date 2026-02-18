@@ -37,12 +37,12 @@ class ComputedMetadataService
             'mime_type' => $asset->mime_type,
         ]);
         
-        // Only process image assets
-        if (!$this->isImageAsset($asset)) {
+        // Process image assets (original dimensions) or thumbnail-derived metadata (fallback)
+        if (!$this->isImageAsset($asset) && !$asset->visualMetadataReady()) {
             return;
         }
 
-        // Get image dimensions and EXIF data
+        // Get image dimensions and EXIF data (original first, thumbnail fallback for SVG/PDF/video)
         $imageData = $this->extractImageData($asset);
         if (!$imageData) {
             Log::warning('[ComputedMetadataService] Could not extract image data', [
@@ -101,16 +101,37 @@ class ComputedMetadataService
     /**
      * Extract image dimensions and EXIF data.
      *
-     * CRITICAL: This method MUST use the original image file, NOT thumbnails or cached metadata.
-     * Dimensions are computed from getimagesize() on the actual original file downloaded from S3.
+     * Tries original file first (image/tiff/avif). Falls back to thumbnail-derived
+     * dimensions for SVG/PDF/video when original getimagesize fails.
      *
      * @param Asset $asset
      * @return array|null Array with 'width', 'height', 'exif' keys, or null on failure
      */
     protected function extractImageData(Asset $asset): ?array
     {
+        $data = $this->extractImageDataFromOriginal($asset);
+        if (!$data && $asset->visualMetadataReady()) {
+            $data = $this->extractImageDataFromThumbnail($asset);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Extract image data from original file (image/tiff/avif only).
+     *
+     * Uses getimagesize() on the original file. Returns null for PDF/video/SVG.
+     *
+     * @param Asset $asset
+     * @return array|null Array with 'width', 'height', 'exif' keys, or null on failure
+     */
+    protected function extractImageDataFromOriginal(Asset $asset): ?array
+    {
+        if (!$this->isImageAsset($asset)) {
+            return null;
+        }
+
         try {
-            // CRITICAL: Ensure we're using the original file path, not thumbnails
             $bucket = $asset->storageBucket;
             if (!$bucket || !$asset->storage_root_path) {
                 Log::warning('[ComputedMetadataService] Missing storage info', [
@@ -119,18 +140,14 @@ class ComputedMetadataService
                 return null;
             }
 
-            // Verify storage_root_path is the original file (not a thumbnail)
-            // Original files should not contain 'thumbnail' or 'thumb' in the path
             $originalPath = $asset->storage_root_path;
             if (stripos($originalPath, 'thumbnail') !== false || stripos($originalPath, 'thumb') !== false) {
                 Log::error('[ComputedMetadataService] CRITICAL: storage_root_path appears to be a thumbnail, not original', [
                     'asset_id' => $asset->id,
                     'storage_path' => $originalPath,
                 ]);
-                // Still proceed but log the issue - this should never happen
             }
 
-            // Download ORIGINAL file to temporary location
             $tempPath = $this->downloadFromS3($bucket, $originalPath);
             if (!file_exists($tempPath)) {
                 Log::warning('[ComputedMetadataService] Could not download original file', [
@@ -140,8 +157,6 @@ class ComputedMetadataService
                 return null;
             }
 
-            // CRITICAL: Get dimensions from ORIGINAL image file using getimagesize()
-            // This is the ONLY authoritative source for pixel dimensions
             $imageInfo = @getimagesize($tempPath);
             if (!$imageInfo || !isset($imageInfo[0], $imageInfo[1])) {
                 Log::warning('[ComputedMetadataService] Could not read image dimensions from original file', [
@@ -152,19 +167,15 @@ class ComputedMetadataService
                 return null;
             }
 
-            // getimagesize() returns [width, height, type, ...]
-            // These are the ACTUAL pixel dimensions of the stored image file
             $storedWidth = (int) $imageInfo[0];
             $storedHeight = (int) $imageInfo[1];
 
-            // Extract EXIF data (if available) - used ONLY for orientation correction
             $exif = [];
             $exifOrientation = null;
             if (function_exists('exif_read_data') && in_array(strtolower(pathinfo($tempPath, PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'tiff', 'tif'])) {
                 $exifData = @exif_read_data($tempPath);
                 if ($exifData !== false) {
                     $exif = $exifData;
-                    // Extract orientation from EXIF (if present)
                     if (isset($exif['Orientation'])) {
                         $exifOrientation = (int) $exif['Orientation'];
                     } elseif (isset($exif['IFD0']['Orientation'])) {
@@ -173,12 +184,8 @@ class ComputedMetadataService
                 }
             }
 
-            // Normalize dimensions based on EXIF orientation (if present)
-            // EXIF orientation tells us how the image should be displayed, not how it's stored
-            // Only swap width/height for orientations 6 and 8 (90° rotations)
             [$width, $height] = $this->normalizeDimensionsFromExif($storedWidth, $storedHeight, $exif);
 
-            // TEMPORARY DEBUG LOGGING (dev only - can be removed later)
             if (config('app.debug', false)) {
                 Log::debug('[ComputedMetadataService] Orientation computation debug', [
                     'asset_id' => $asset->id,
@@ -192,7 +199,6 @@ class ComputedMetadataService
                 ]);
             }
 
-            // Clean up temp file
             @unlink($tempPath);
 
             return [
@@ -201,13 +207,48 @@ class ComputedMetadataService
                 'exif' => $exif,
             ];
         } catch (\Exception $e) {
-            Log::error('[ComputedMetadataService] Error extracting image data', [
+            Log::error('[ComputedMetadataService] Error extracting image data from original', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
             return null;
         }
+    }
+
+    /**
+     * Extract image data from persisted thumbnail dimensions (no S3 download).
+     *
+     * Used for SVG/PDF/video when original getimagesize fails. Requires
+     * thumbnail_status === completed and thumbnail_dimensions.medium.
+     *
+     * @param Asset $asset
+     * @return array|null Array with 'width', 'height', 'exif' keys, or null on failure
+     */
+    protected function extractImageDataFromThumbnail(Asset $asset): ?array
+    {
+        if (!$asset->visualMetadataReady()) {
+            return null;
+        }
+
+        $dimensions = $asset->thumbnailDimensions('medium');
+        if (!$dimensions || !isset($dimensions['width'], $dimensions['height'])) {
+            return null;
+        }
+
+        $width = (int) $dimensions['width'];
+        $height = (int) $dimensions['height'];
+
+        // Sanity guard: reject corrupted/edge-case thumbnails (empty frame, zero SVG, Imagick glitch)
+        if ($width < 5 || $height < 5) {
+            return null;
+        }
+
+        return [
+            'width' => $width,
+            'height' => $height,
+            'exif' => [],
+        ];
     }
 
     /**

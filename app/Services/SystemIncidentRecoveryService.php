@@ -10,6 +10,7 @@ use App\Models\SystemIncident;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
 use App\Services\Assets\AssetStateReconciliationService;
@@ -213,6 +214,9 @@ class SystemIncidentRecoveryService
 
         if (($asset->analysis_status ?? '') === 'promotion_failed') {
             PromoteAssetJob::dispatch($asset->id);
+        } elseif ($incident->title === 'Expected visual metadata missing') {
+            $asset->update(['analysis_status' => 'extracting_metadata']);
+            PopulateAutomaticMetadataJob::dispatch($asset->id);
         } else {
             ProcessAssetJob::dispatch($asset->id);
         }
@@ -262,6 +266,11 @@ class SystemIncidentRecoveryService
             return true;
         }
 
+        // Expected visual metadata missing: resolved when visualMetadataReady() becomes true
+        if (str_contains($title, 'expected visual metadata missing')) {
+            return $asset->visualMetadataReady();
+        }
+
         return false;
     }
 
@@ -296,6 +305,17 @@ class SystemIncidentRecoveryService
         $asset = Asset::find($incident->source_id);
         if (!$asset) {
             return ['resolved' => false, 'changes' => []];
+        }
+
+        // Expected visual metadata missing: dispatch PopulateAutomaticMetadataJob (self-healing)
+        // Job will succeed if dimensions were added by backfill; otherwise incident remains
+        if ($incident->title === 'Expected visual metadata missing') {
+            $asset->update(['analysis_status' => 'extracting_metadata']);
+            PopulateAutomaticMetadataJob::dispatch($asset->id);
+            Log::info('[SystemIncidentRecoveryService] Dispatched PopulateAutomaticMetadataJob for visual metadata incident', [
+                'incident_id' => $incident->id,
+                'asset_id' => $asset->id,
+            ]);
         }
 
         $result = $this->reconciliationService->reconcile($asset->fresh());

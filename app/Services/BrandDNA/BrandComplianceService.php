@@ -358,6 +358,7 @@ class BrandComplianceService
      */
     protected function getApplicableDimensions(Asset $asset, Brand $brand): array
     {
+        $visualMetadataReady = $asset->visualMetadataReady();
         $hasDominantColors = $this->hasDominantColors($asset);
         $extractedText = trim($this->getAssetTextForTone($asset));
         $hasExtractedText = $extractedText !== '';
@@ -374,11 +375,14 @@ class BrandComplianceService
 
         $hasVisualRefs = $this->brandHasVisualReferencesWithEmbeddings($brand);
 
+        // Color/orientation/resolution_class/dominant_colors: applicable only when visual metadata ready
+        // Else NOT_CONFIGURED (no penalty for missing metadata)
+        $colorApplicable = $visualMetadataReady && $hasDominantColors;
         $imageryApplicable = ($isPhotography && $hasVisualRefs)
-            || ($isGraphics && $hasDominantColors);
+            || ($isGraphics && $visualMetadataReady && $hasDominantColors);
 
         return [
-            'color' => $hasDominantColors,
+            'color' => $colorApplicable,
             'imagery' => $imageryApplicable,
             'typography' => $hasExtractedText || $isGraphicsPrintPackaging,
             'tone' => $hasExtractedText,
@@ -706,22 +710,21 @@ class BrandComplianceService
     }
 
     /**
-     * Centralized readiness gate: image assets must not be scored until ALL required background jobs complete.
-     * Non-image assets return true (bypass).
+     * Centralized readiness gate: assets with visual metadata ready must not be scored
+     * until ALL required background jobs complete. Others bypass (return true).
      *
-     * Requirements for image assets:
-     * - mime_type starts with "image/"
+     * Requirements when visualMetadataReady():
      * - thumbnail_status === ThumbnailStatus::COMPLETED
      * - dominant_colors present in metadata
      * - dominant_hue_group present on assets table
      * - AssetEmbedding exists with non-empty embedding_vector
      *
-     * @return bool False if any requirement missing (or not an image); true if ready to score
+     * @return bool False if any requirement missing; true if ready to score or bypass
      */
     protected function isImageAnalysisReady(Asset $asset): bool
     {
-        if (! str_starts_with($asset->mime_type ?? '', 'image/')) {
-            return true; // Non-image assets bypass
+        if (! $asset->visualMetadataReady()) {
+            return true; // Bypass: no thumbnail-derived metadata required
         }
 
         if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {

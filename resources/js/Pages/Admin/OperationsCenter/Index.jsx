@@ -14,6 +14,7 @@ import {
     CubeIcon,
     PhotoIcon,
     ServerStackIcon,
+    ChartBarIcon,
 } from '@heroicons/react/24/outline'
 
 function IncidentRow({ incident: i, onAction, selected, onSelect }) {
@@ -102,6 +103,7 @@ const TABS = [
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
     { id: 'queue', label: 'Queue Health', icon: QueueListIcon },
     { id: 'scheduler', label: 'Scheduler', icon: ClockIcon },
+    { id: 'visual-metadata', label: 'Visual Metadata Integrity', icon: ChartBarIcon },
     { id: 'assets-stalled', label: 'Assets Stalled', icon: PhotoIcon },
     { id: 'derivative-failures', label: 'Derivative Failures', icon: ExclamationCircleIcon },
     { id: 'failed-jobs', label: 'Failed Jobs', icon: ServerStackIcon },
@@ -116,6 +118,7 @@ export default function OperationsCenterIndex({
     failedJobs,
     queueHealth,
     schedulerHealth,
+    visualMetadataIntegrity,
     horizonAvailable,
     horizonUrl,
 }) {
@@ -357,6 +360,45 @@ export default function OperationsCenterIndex({
                                 <p className="mt-4 text-sm text-gray-500">
                                     Last heartbeat: {schedulerHealth?.last_heartbeat ? formatDate(schedulerHealth.last_heartbeat) : 'Never'}
                                 </p>
+                            </div>
+                        )}
+
+                        {tab === 'visual-metadata' && (
+                            <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                        <ChartBarIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                        <h3 className="text-sm font-medium text-gray-900">Visual Metadata Integrity</h3>
+                                    </div>
+                                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                        (visualMetadataIntegrity?.status || 'unknown') === 'healthy' ? 'bg-green-100 text-green-800' :
+                                        (visualMetadataIntegrity?.status || 'unknown') === 'warning' ? 'bg-amber-100 text-amber-800' :
+                                        'bg-red-100 text-red-800'
+                                    }`}>
+                                        {(visualMetadataIntegrity?.status || 'unknown') === 'healthy' ? 'Healthy' :
+                                         (visualMetadataIntegrity?.status || 'unknown') === 'warning' ? 'Warning' : 'Critical'}
+                                    </span>
+                                </div>
+                                <p className="mt-4 text-sm text-gray-500">
+                                    % of assets where supportsThumbnailMetadata AND visualMetadataReady. SLO target: {visualMetadataIntegrity?.slo_target_percent ?? 95}%.
+                                </p>
+                                <div className="mt-4 grid grid-cols-2 gap-4">
+                                    <div>
+                                        <span className="text-sm text-gray-500">Visual metadata incidents (unresolved)</span>
+                                        <p className={`text-lg font-semibold ${(visualMetadataIntegrity?.incidents_count ?? 0) > 0 ? 'text-amber-600' : ''}`}>
+                                            {visualMetadataIntegrity?.incidents_count ?? 0}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <span className="text-sm text-gray-500">Assets with thumbnails (24h)</span>
+                                        <p className="text-lg font-semibold">{visualMetadataIntegrity?.total_eligible_24h ?? 0}</p>
+                                    </div>
+                                </div>
+                                {(visualMetadataIntegrity?.incidents_count ?? 0) > 0 && (
+                                    <p className="mt-4 text-sm text-amber-700">
+                                        If incidents dip below 95% integrity → red alert. Run <code className="bg-amber-100 px-1 rounded">assets:backfill-thumbnail-dimensions</code> for legacy assets.
+                                    </p>
+                                )}
                             </div>
                         )}
 

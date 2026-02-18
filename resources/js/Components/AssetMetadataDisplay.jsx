@@ -294,34 +294,31 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
             <div>
                 {!suppressAnalysisRunningBanner && !metadataHealth?.is_complete && metadataHealth && analysisStatus !== 'complete' && (
                     <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
-                        <div className="font-medium text-amber-800">
-                            System analysis still running
-                        </div>
-                        <div className="text-sm text-amber-700 mt-1">
-                            Dominant colors, embeddings, or thumbnails may not have completed. You can re-run analysis to ensure brand scoring accuracy.
-                        </div>
-                        <button
-                            type="button"
-                            onClick={handleReanalyze}
-                            disabled={reanalyzeLoading}
-                            className="mt-3 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                        >
-                            {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
-                        </button>
+                        {thumbnailStatus === 'completed' && metadataHealth?.visual_metadata_ready === false ? (
+                            <>
+                                <div className="font-medium text-amber-800">
+                                    Visual metadata invalid
+                                </div>
+                                <div className="text-sm text-amber-700 mt-1">
+                                    Thumbnail exists but dimensions or metadata are missing or invalid. Re-run analysis or contact support.
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="font-medium text-amber-800">
+                                    System analysis still running
+                                </div>
+                                <div className="text-sm text-amber-700 mt-1">
+                                    Dominant colors, embeddings, or thumbnails may not have completed. Re-run analysis will be available once the pipeline finishes.
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
                 {!suppressAnalysisRunningBanner && evaluationStatus === 'evaluated' && analysisStatus !== 'complete' && (
                     <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-sm font-medium text-amber-800">System inconsistency detected — re-run analysis</p>
-                        <p className="text-xs text-amber-700 mt-1">The compliance score may be stale. Re-run analysis to resolve.</p>
-                        <button
-                            type="button"
-                            onClick={handleReanalyze}
-                            disabled={reanalyzeLoading}
-                            className="mt-3 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                        >
-                            {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
-                        </button>
+                        <p className="text-sm font-medium text-amber-800">System inconsistency detected</p>
+                        <p className="text-xs text-amber-700 mt-1">The compliance score may be stale. Re-run analysis will be available once the pipeline completes.</p>
                     </div>
                 )}
                 {!suppressAnalysisRunningBanner && analysisStatus === 'complete' && evaluationStatus === 'pending_processing' && (

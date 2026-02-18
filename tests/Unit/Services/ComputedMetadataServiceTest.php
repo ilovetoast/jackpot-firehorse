@@ -2,7 +2,15 @@
 
 namespace Tests\Unit\Services;
 
+use App\Enums\ThumbnailStatus;
+use App\Models\Asset;
+use App\Models\Brand;
+use App\Models\StorageBucket;
+use App\Models\Tenant;
+use App\Models\UploadSession;
+use App\Models\User;
 use App\Services\ComputedMetadataService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 use ReflectionClass;
 use ReflectionMethod;
@@ -11,9 +19,11 @@ use ReflectionMethod;
  * Computed Metadata Service Test
  *
  * Tests orientation detection with EXIF normalization and ratio-based classification.
+ * Tests thumbnail-derived metadata fallback (extractImageDataFromThumbnail).
  */
 class ComputedMetadataServiceTest extends TestCase
 {
+    use RefreshDatabase;
     protected ComputedMetadataService $service;
 
     protected function setUp(): void
@@ -326,6 +336,112 @@ class ComputedMetadataServiceTest extends TestCase
             $this->assertEquals(1920, $width, "EXIF orientation {$exifOrientation} should not swap width");
             $this->assertEquals(1080, $height, "EXIF orientation {$exifOrientation} should not swap height");
         }
+    }
+
+    /**
+     * Test: extractImageDataFromThumbnail returns dimensions when asset supports thumbnail metadata
+     */
+    public function test_extract_image_data_from_thumbnail_returns_dimensions(): void
+    {
+        $asset = $this->createAssetWithThumbnailDimensions(800, 600);
+        $result = $this->callProtectedMethod('extractImageDataFromThumbnail', [$asset]);
+
+        $this->assertNotNull($result);
+        $this->assertEquals(800, $result['width']);
+        $this->assertEquals(600, $result['height']);
+        $this->assertEquals([], $result['exif']);
+    }
+
+    /**
+     * Test: extractImageDataFromThumbnail returns null when thumbnail_timeout is true
+     */
+    public function test_extract_image_data_from_thumbnail_returns_null_when_thumbnail_timeout(): void
+    {
+        $asset = $this->createAssetWithThumbnailDimensions(800, 600);
+        $metadata = $asset->metadata ?? [];
+        $metadata['thumbnail_timeout'] = true;
+        $asset->metadata = $metadata;
+
+        $result = $this->callProtectedMethod('extractImageDataFromThumbnail', [$asset]);
+
+        $this->assertNull($result);
+    }
+
+    /**
+     * Test: extractImageDataFromThumbnail returns null when thumbnail_status is not completed
+     */
+    public function test_extract_image_data_from_thumbnail_returns_null_when_status_not_completed(): void
+    {
+        $asset = $this->createAssetWithThumbnailDimensions(800, 600);
+        $asset->thumbnail_status = ThumbnailStatus::PENDING;
+
+        $result = $this->callProtectedMethod('extractImageDataFromThumbnail', [$asset]);
+
+        $this->assertNull($result);
+    }
+
+    /**
+     * Test: extractImageDataFromThumbnail returns null when dimensions are missing
+     */
+    public function test_extract_image_data_from_thumbnail_returns_null_when_dimensions_missing(): void
+    {
+        $asset = $this->createAssetWithThumbnailDimensions(800, 600);
+        $metadata = $asset->metadata ?? [];
+        unset($metadata['thumbnail_dimensions']);
+        $asset->metadata = $metadata;
+
+        $result = $this->callProtectedMethod('extractImageDataFromThumbnail', [$asset]);
+
+        $this->assertNull($result);
+    }
+
+    protected function createAssetWithThumbnailDimensions(int $width, int $height): Asset
+    {
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'Test', 'slug' => 'test']);
+        $user = User::create([
+            'email' => 'test@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Test',
+            'last_name' => 'User',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test',
+            'status' => \App\Enums\StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => \App\Enums\UploadStatus::COMPLETED,
+            'type' => \App\Enums\UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        return Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'user_id' => $user->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'type' => \App\Enums\AssetType::ASSET,
+            'status' => \App\Enums\AssetStatus::VISIBLE,
+            'mime_type' => 'image/jpeg',
+            'original_filename' => 'test.jpg',
+            'storage_root_path' => 'temp/test.jpg',
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'metadata' => [
+                'thumbnails' => [
+                    'medium' => ['path' => 'assets/thumbnails/medium/test.jpg'],
+                ],
+                'thumbnail_dimensions' => [
+                    'medium' => ['width' => $width, 'height' => $height],
+                ],
+            ],
+        ]);
     }
 
     /**

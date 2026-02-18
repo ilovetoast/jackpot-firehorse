@@ -1072,6 +1072,10 @@ class AssetMetadataController extends Controller
         $metadataHealth['is_svg'] = $asset->mime_type === 'image/svg+xml'
             || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
 
+        // Visual metadata ready: thumbnail_status=completed, dimensions valid, no timeout
+        // When false but thumbnail_status=completed → "Visual metadata invalid" (not "analysis still running")
+        $metadataHealth['visual_metadata_ready'] = $asset->visualMetadataReady();
+
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status->value
             : ($asset->thumbnail_status ?? 'pending');

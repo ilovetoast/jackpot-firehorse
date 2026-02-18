@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Asset;
 use App\Models\SystemIncident;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -90,6 +91,7 @@ class OperationsCenterController extends Controller
 
         $queueHealth = $this->getQueueHealth();
         $schedulerHealth = $this->getSchedulerHealth();
+        $visualMetadataIntegrity = $this->getVisualMetadataIntegrity();
 
         $horizonAvailable = class_exists(\Laravel\Horizon\Horizon::class);
         $horizonUrl = $horizonAvailable ? url(config('horizon.path', 'horizon')) : null;
@@ -102,6 +104,7 @@ class OperationsCenterController extends Controller
             'failedJobs' => $failedJobs,
             'queueHealth' => $queueHealth,
             'schedulerHealth' => $schedulerHealth,
+            'visualMetadataIntegrity' => $visualMetadataIntegrity,
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
         ]);
@@ -129,6 +132,46 @@ class OperationsCenterController extends Controller
             ];
         } catch (\Throwable $e) {
             return ['status' => 'unknown', 'pending_count' => 0, 'failed_count' => 0];
+        }
+    }
+
+    /**
+     * Visual Metadata Integrity Rate — SLO for media reliability.
+     * % of assets where supportsThumbnailMetadata AND visualMetadataReady.
+     * Red alert if rate < 95% (or incidents count high).
+     */
+    protected function getVisualMetadataIntegrity(): array
+    {
+        try {
+            $incidentsCount = SystemIncident::whereNull('resolved_at')
+                ->where('title', 'Expected visual metadata missing')
+                ->count();
+
+            // Total assets with thumbnail_status=completed in last 24h (eligible for visual metadata)
+            $totalEligible = Asset::where('thumbnail_status', 'completed')
+                ->where('created_at', '>=', now()->subDay())
+                ->count();
+
+            $totalAllTime = Asset::where('thumbnail_status', 'completed')->count();
+
+            // Use incidents as proxy: high count = low integrity
+            $status = $incidentsCount === 0 ? 'healthy' : ($incidentsCount <= 5 ? 'warning' : 'critical');
+
+            return [
+                'status' => $status,
+                'incidents_count' => $incidentsCount,
+                'total_eligible_24h' => $totalEligible,
+                'total_eligible_all_time' => $totalAllTime,
+                'slo_target_percent' => 95,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'status' => 'unknown',
+                'incidents_count' => 0,
+                'total_eligible_24h' => 0,
+                'total_eligible_all_time' => 0,
+                'slo_target_percent' => 95,
+            ];
         }
     }
 

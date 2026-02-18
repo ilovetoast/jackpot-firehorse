@@ -200,6 +200,18 @@ class ThumbnailGenerationService
                     $finalStyles
                 );
                 $metadata['thumbnails_generated_at'] = now()->toIso8601String();
+                // Persist thumbnail_dimensions when medium was regenerated
+                if (isset($finalStyles['medium']['width'], $finalStyles['medium']['height'])) {
+                    $metadata['thumbnail_dimensions'] = array_merge(
+                        $metadata['thumbnail_dimensions'] ?? [],
+                        [
+                            'medium' => [
+                                'width' => $finalStyles['medium']['width'],
+                                'height' => $finalStyles['medium']['height'],
+                            ],
+                        ]
+                    );
+                }
             }
             
             $asset->update(['metadata' => $metadata]);
@@ -552,14 +564,30 @@ class ThumbnailGenerationService
             // Preview thumbnails are stored separately in metadata but returned together
             $allThumbnails = array_merge($previewThumbnails, $thumbnails);
             
+            // Persist thumbnail_dimensions for ALL thumbnail-producing types (image, svg, pdf, video)
+            // Avoids S3 re-download for ComputedMetadataService thumbnail fallback
+            $metadata = $asset->metadata ?? [];
+            $metadataUpdated = false;
+            if (isset($thumbnails['medium']['width'], $thumbnails['medium']['height'])) {
+                $metadata['thumbnail_dimensions'] = array_merge(
+                    $metadata['thumbnail_dimensions'] ?? [],
+                    [
+                        'medium' => [
+                            'width' => $thumbnails['medium']['width'],
+                            'height' => $thumbnails['medium']['height'],
+                        ],
+                    ]
+                );
+                $metadataUpdated = true;
+            }
+            
             // Store source image dimensions in metadata ONLY for image file types
             // These dimensions are from the ORIGINAL source file (not thumbnails)
             // Only image file types have pixel dimensions - PDFs, videos, and other types do not
             if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
-                $metadata = $asset->metadata ?? [];
                 $metadata['image_width'] = $sourceImageWidth;
                 $metadata['image_height'] = $sourceImageHeight;
-                $asset->update(['metadata' => $metadata]);
+                $metadataUpdated = true;
                 
                 Log::info('[ThumbnailGenerationService] Stored original source image dimensions in metadata', [
                     'asset_id' => $asset->id,
@@ -567,6 +595,10 @@ class ThumbnailGenerationService
                     'source_image_height' => $sourceImageHeight,
                     'note' => 'Dimensions are from original source file, not thumbnails',
                 ]);
+            }
+            
+            if ($metadataUpdated) {
+                $asset->update(['metadata' => $metadata]);
             }
             
             return $allThumbnails;
@@ -727,14 +759,17 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Generate thumbnail for SVG files (passthrough).
+     * Generate thumbnail for SVG files.
      *
-     * SVG is vector format - we serve the original file as the thumbnail.
-     * Copies the source SVG to a temp file for upload to S3 at each style path.
+     * When Imagick is available: Rasterizes SVG to PNG/WebP for analysis (dominant colors,
+     * embedding) and consistent display. Output matches config assets.thumbnail.output_format.
+     *
+     * When Imagick is unavailable: Passthrough (copies original SVG). Brand scoring will
+     * remain incomplete for SVG in that case.
      *
      * @param string $sourcePath
      * @param array $styleConfig
-     * @return string Path to generated thumbnail (copy of original)
+     * @return string Path to generated thumbnail (raster or SVG copy)
      * @throws \RuntimeException If generation fails
      */
     protected function generateSvgThumbnail(string $sourcePath, array $styleConfig): string
@@ -751,6 +786,25 @@ class ThumbnailGenerationService
         if ($content === false || !preg_match('/<\s*(svg|\?xml)/i', $content)) {
             throw new \RuntimeException("Source file does not appear to be a valid SVG (size: {$sourceFileSize} bytes)");
         }
+
+        // Rasterize with Imagick when available (enables color analysis and embedding)
+        if (extension_loaded('imagick')) {
+            try {
+                return $this->generateSvgRasterizedThumbnail($sourcePath, $styleConfig);
+            } catch (\ImagickException $e) {
+                Log::warning('[ThumbnailGenerationService] SVG rasterization failed, falling back to passthrough', [
+                    'source_path' => $sourcePath,
+                    'error' => $e->getMessage(),
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('[ThumbnailGenerationService] SVG rasterization failed, falling back to passthrough', [
+                    'source_path' => $sourcePath,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Fallback: passthrough (original SVG) when Imagick unavailable or rasterization fails
         $tempPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.svg';
         if (!copy($sourcePath, $tempPath)) {
             throw new \RuntimeException("Failed to copy SVG file for thumbnail");
@@ -761,6 +815,70 @@ class ThumbnailGenerationService
             'source_file_size' => $sourceFileSize,
         ]);
         return $tempPath;
+    }
+
+    /**
+     * Rasterize SVG to raster thumbnail using Imagick.
+     *
+     * @param string $sourcePath
+     * @param array $styleConfig
+     * @return string Path to generated raster thumbnail
+     */
+    protected function generateSvgRasterizedThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        $imagick = new \Imagick();
+        // Set resolution before reading so SVG renders at sufficient quality
+        $imagick->setResolution(144, 144);
+        $imagick->readImage($sourcePath);
+        $imagick->setIteratorIndex(0);
+        $imagick = $imagick->getImage();
+
+        $sourceWidth = $imagick->getImageWidth();
+        $sourceHeight = $imagick->getImageHeight();
+        if ($sourceWidth === 0 || $sourceHeight === 0) {
+            $imagick->clear();
+            $imagick->destroy();
+            throw new \RuntimeException('SVG rendered with invalid dimensions');
+        }
+
+        $targetWidth = $styleConfig['width'] ?? 1024;
+        $targetHeight = $styleConfig['height'] ?? 1024;
+        $fit = $styleConfig['fit'] ?? 'contain';
+        [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+            $sourceWidth,
+            $sourceHeight,
+            $targetWidth,
+            $targetHeight,
+            $fit
+        );
+
+        $imagick->resizeImage($thumbWidth, $thumbHeight, \Imagick::FILTER_LANCZOS, 1, true);
+        if (!empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            $imagick->blurImage(0, 2);
+        }
+
+        $outputFormat = config('assets.thumbnail.output_format', 'webp');
+        $quality = $styleConfig['quality'] ?? 85;
+        $imagick->setImageFormat($outputFormat);
+        $imagick->setImageCompressionQuality($quality);
+
+        $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+        $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_svg_') . '.' . $extension;
+        $imagick->writeImage($thumbPath);
+        $imagick->clear();
+        $imagick->destroy();
+
+        if (!file_exists($thumbPath) || filesize($thumbPath) === 0) {
+            throw new \RuntimeException('SVG rasterization produced empty output');
+        }
+
+        Log::info('[ThumbnailGenerationService] SVG rasterized to thumbnail', [
+            'source_path' => $sourcePath,
+            'thumb_path' => $thumbPath,
+            'thumb_width' => $thumbWidth,
+            'thumb_height' => $thumbHeight,
+        ]);
+        return $thumbPath;
     }
 
     /**

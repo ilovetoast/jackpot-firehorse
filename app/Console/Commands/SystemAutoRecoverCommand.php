@@ -40,6 +40,14 @@ class SystemAutoRecoverCommand extends Command
                 break;
             }
 
+            // Escalate: "Expected visual metadata missing" stuck >15 min → critical
+            if ($incident->title === 'Expected visual metadata missing' && $incident->detected_at) {
+                $minutesStuck = $incident->detected_at->diffInMinutes(now());
+                if ($minutesStuck >= 15 && strtolower($incident->severity ?? '') !== 'critical') {
+                    $incident->update(['severity' => 'critical']);
+                }
+            }
+
             Log::info('[SystemAutoRecover] Auto recovery attempt', [
                 'incident_id' => $incident->id,
                 'source_type' => $incident->source_type,

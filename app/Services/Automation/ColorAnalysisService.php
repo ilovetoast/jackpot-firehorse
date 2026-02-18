@@ -53,7 +53,7 @@ class ColorAnalysisService
      */
     public function analyze(Asset $asset): ?array
     {
-        if (!$this->isImageAsset($asset)) {
+        if (!$asset->visualMetadataReady()) {
             return null;
         }
 
@@ -137,15 +137,6 @@ class ColorAnalysisService
             'buckets' => $buckets,
             'internal' => $internal,
         ];
-    }
-
-    protected function isImageAsset(Asset $asset): bool
-    {
-        $fileTypeService = app(\App\Services\FileTypeService::class);
-        $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
-        
-        // Check if it's an image type (image, tiff, avif)
-        return in_array($fileType, ['image', 'tiff', 'avif']);
     }
 
     /**

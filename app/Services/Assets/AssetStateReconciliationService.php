@@ -74,10 +74,41 @@ class AssetStateReconciliationService
             $changes = array_merge($changes, $promotions);
         }
 
+        // Rule 6 — Visual metadata now ready: auto-resolve "Expected visual metadata missing" incident
+        // Prevents incident from lingering in Ops center after backfill or recovery
+        if ($asset->visualMetadataReady()) {
+            $this->resolveVisualMetadataIncidentIfExists($asset);
+        }
+
         return [
             'updated' => !empty($changes),
             'changes' => $changes,
         ];
+    }
+
+    /**
+     * Resolve "Expected visual metadata missing" incident when asset now has visualMetadataReady.
+     * Only resolves this specific incident type — does not touch unrelated incidents.
+     */
+    protected function resolveVisualMetadataIncidentIfExists(Asset $asset): void
+    {
+        $incident = \App\Models\SystemIncident::where('source_type', 'asset')
+            ->where('source_id', $asset->id)
+            ->whereNull('resolved_at')
+            ->where('title', 'Expected visual metadata missing')
+            ->first();
+
+        if ($incident) {
+            $incident->update([
+                'resolved_at' => now(),
+                'auto_resolved' => true,
+                'metadata' => array_merge($incident->metadata ?? [], ['auto_recovered' => true]),
+            ]);
+            Log::info('[AssetStateReconciliationService] Auto-resolved visual metadata incident', [
+                'asset_id' => $asset->id,
+                'incident_id' => $incident->id,
+            ]);
+        }
     }
 
     /**

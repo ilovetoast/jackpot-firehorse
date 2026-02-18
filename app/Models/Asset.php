@@ -491,6 +491,83 @@ class Asset extends Model
     }
 
     /**
+     * Check if asset type produces a raster thumbnail (image, SVG, PDF, video).
+     *
+     * Used for capability-based logic: orientation, resolution_class, dominant_colors
+     * can be derived from thumbnails for these types. Does NOT treat PDF/video as true images.
+     *
+     * @return bool
+     */
+    public function hasRasterThumbnail(): bool
+    {
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $fileType = $fileTypeService->detectFileTypeFromAsset($this);
+
+        return in_array($fileType, ['image', 'tiff', 'avif', 'svg', 'pdf', 'video'], true);
+    }
+
+    /**
+     * Check if asset supports thumbnail-derived metadata (orientation, resolution_class, dominant_colors).
+     *
+     * Requires: hasRasterThumbnail() AND thumbnail_status === COMPLETED AND medium thumbnail path exists.
+     * Used by ComputedMetadataService, ColorAnalysisService, DominantColorsExtractor, BrandComplianceService.
+     *
+     * @return bool
+     */
+    public function supportsThumbnailMetadata(): bool
+    {
+        return $this->hasRasterThumbnail()
+            && $this->thumbnail_status === ThumbnailStatus::COMPLETED
+            && isset($this->metadata['thumbnails']['medium']['path']);
+    }
+
+    /**
+     * Get persisted thumbnail dimensions for a style (from metadata, no S3 download).
+     *
+     * @param string $style Thumbnail style (e.g. 'medium')
+     * @return array{width: int|null, height: int|null}|null
+     */
+    public function thumbnailDimensions(string $style = 'medium'): ?array
+    {
+        $dimensions = $this->metadata['thumbnail_dimensions'][$style] ?? null;
+
+        if (!is_array($dimensions) || !isset($dimensions['width'], $dimensions['height'])) {
+            return null;
+        }
+
+        return [
+            'width' => $dimensions['width'],
+            'height' => $dimensions['height'],
+        ];
+    }
+
+    /**
+     * Check if asset is ready for visual metadata (orientation, resolution_class, dominant_colors).
+     *
+     * Consolidates: supportsThumbnailMetadata, thumbnail_timeout, thumbnail_dimensions.
+     * Use this instead of scattered checks to prevent drift.
+     *
+     * @return bool
+     */
+    public function visualMetadataReady(): bool
+    {
+        if (!$this->supportsThumbnailMetadata()) {
+            return false;
+        }
+
+        if ($this->metadata['thumbnail_timeout'] ?? false) {
+            return false;
+        }
+
+        $dims = $this->thumbnailDimensions('medium');
+
+        return $dims
+            && isset($dims['width'], $dims['height'])
+            && $dims['width'] > 0
+            && $dims['height'] > 0;
+    }
+
+    /**
      * Get the S3 thumbnail path for a specific style.
      *
      * Retrieves the thumbnail path from asset metadata.

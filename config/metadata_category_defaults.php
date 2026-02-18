@@ -8,8 +8,24 @@
  *
  * System fields (scope=system) are enabled for all categories by default.
  * Tenant-scoped fields: only tags and collection enabled unless in category_config.
+ *
+ * System automated fields (orientation, resolution_class, dominant_colors, etc.) are
+ * enabled for every category by default so execution assets (Print, Digital, etc.)
+ * receive computed metadata without manual enablement.
  */
 return [
+    /*
+     * System automated fields always enabled for every category.
+     * Ensures dominant colors, orientation, resolution class, etc. are computed
+     * and visible for all assets (including executions) without per-category setup.
+     */
+    'system_automated_enabled_for_all' => [
+        'orientation',
+        'resolution_class',
+        'color_space',
+        'dominant_colors',
+        'dominant_hue_group',
+    ],
     /*
      * Category slugs that get only collection and tags enabled.
      * All system category templates use this minimal default.
@@ -106,21 +122,21 @@ return [
     'restrict_fields' => ['template_type', 'audio_type', 'model_3d_type'],
 
     /*
-     * Dominant color fields: special defaults for image (asset) categories.
+     * Dominant color fields: enabled by default for all categories.
      * dominant_hue_group: filter-only field (perceptual hue clusters).
      */
     'dominant_colors_visibility' => [
         'dominant_colors' => [
-            'is_hidden' => true,
-            'is_upload_hidden' => true,
-            'is_filter_hidden' => true,
+            'is_hidden' => false,
+            'is_upload_hidden' => false,
+            'is_filter_hidden' => true, // Never in More filters (always_hidden_fields)
             'is_primary' => null,
         ],
         'dominant_hue_group' => [
-            'is_hidden' => true,
+            'is_hidden' => false,
             'is_upload_hidden' => true,
-            'is_edit_hidden' => true,
-            'is_filter_hidden' => true,
+            'is_edit_hidden' => false,
+            'is_filter_hidden' => false,
             'is_primary' => false,
         ],
     ],
