@@ -98,7 +98,7 @@ class SystemIncidentRecoveryService
             . "Analysis status: " . ($asset?->analysis_status ?? 'unknown') . "\n"
             . "Thumbnail status: " . ($asset?->thumbnail_status?->value ?? 'unknown');
 
-        $severity = match (strtolower($incident->severity ?? 'warning')) {
+        $severityValue = match (strtolower($incident->severity ?? 'warning')) {
             'critical' => TicketSeverity::P0,
             'error' => TicketSeverity::P1,
             default => TicketSeverity::P2,
@@ -114,15 +114,16 @@ class SystemIncidentRecoveryService
             $tenantId = null;
         }
 
+        $hasSeverityColumn = \Illuminate\Support\Facades\Schema::hasColumn('tickets', 'severity');
+
         try {
-            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severity, $creator, $tenantId) {
-                $ticket = Ticket::create([
+            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severityValue, $creator, $tenantId, $hasSeverityColumn) {
+                $createData = [
                     'type' => TicketType::INTERNAL,
                     'status' => TicketStatus::OPEN,
                     'tenant_id' => $tenantId,
                     'created_by_user_id' => $creator->id,
                     'assigned_team' => \App\Enums\TicketTeam::ENGINEERING,
-                    'severity' => $severity,
                     'metadata' => [
                         'subject' => $subject,
                         'description' => $description,
@@ -132,8 +133,13 @@ class SystemIncidentRecoveryService
                         'source' => 'operations_incident',
                         'analysis_status' => $asset?->analysis_status ?? 'unknown',
                         'thumbnail_status' => $asset?->thumbnail_status?->value ?? null,
+                        'severity' => $severityValue->value,
                     ],
-                ]);
+                ];
+                if ($hasSeverityColumn) {
+                    $createData['severity'] = $severityValue;
+                }
+                $ticket = Ticket::create($createData);
 
                 if ($asset?->brand_id) {
                     $ticket->brands()->attach([$asset->brand_id]);

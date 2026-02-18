@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -16,7 +16,7 @@ import {
     ServerStackIcon,
 } from '@heroicons/react/24/outline'
 
-function IncidentRow({ incident: i, onAction }) {
+function IncidentRow({ incident: i, onAction, selected, onSelect }) {
     const [loading, setLoading] = useState(null)
     const baseUrl = '/app/admin/incidents'
     const handle = async (action) => {
@@ -47,6 +47,16 @@ function IncidentRow({ incident: i, onAction }) {
     }
     return (
         <tr>
+            {onSelect != null && (
+                <td className="whitespace-nowrap py-3 pl-4 pr-2">
+                    <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(e) => onSelect(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                </td>
+            )}
             <td className="whitespace-nowrap py-3 pl-4 pr-3">
                 <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
                     i.severity === 'critical' ? 'bg-red-100 text-red-800' :
@@ -109,7 +119,56 @@ export default function OperationsCenterIndex({
     horizonAvailable,
     horizonUrl,
 }) {
+    const [selectedIds, setSelectedIds] = useState(new Set())
+    const [bulkLoading, setBulkLoading] = useState(null)
+    const selectAllRef = useRef(null)
+    useEffect(() => {
+        if (selectAllRef.current) {
+            selectAllRef.current.indeterminate = someSelected && !allSelected
+        }
+    }, [someSelected, allSelected])
+
     const setTab = (t) => router.get(route('admin.operations-center.index'), { tab: t }, { preserveState: true })
+
+    const incidentList = incidents || []
+    const allSelected = incidentList.length > 0 && selectedIds.size === incidentList.length
+    const someSelected = selectedIds.size > 0
+
+    const toggleSelect = (id, checked) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev)
+            if (checked) next.add(id)
+            else next.delete(id)
+            return next
+        })
+    }
+
+    const toggleSelectAll = (checked) => {
+        if (checked) setSelectedIds(new Set(incidentList.map((i) => i.id)))
+        else setSelectedIds(new Set())
+    }
+
+    const runBulkAction = async (action) => {
+        const ids = Array.from(selectedIds)
+        if (ids.length === 0) return
+        setBulkLoading(action)
+        try {
+            const res = await axios.post('/app/admin/incidents/bulk-actions', { action, incident_ids: ids })
+            const data = res?.data ?? {}
+            setSelectedIds(new Set())
+            router.reload({ only: ['incidents', 'assetsStalled'] })
+            if (action === 'create-ticket' && (data.failed_count ?? 0) > 0) {
+                const created = data.ticket_ids?.length ?? 0
+                const err = (data.results ?? []).find((r) => !r.ok)
+                alert(`Created ${created} ticket(s). ${data.failed_count} failed: ${err?.error ?? 'unknown'}`)
+            }
+        } catch (e) {
+            console.error(e)
+            alert(e?.response?.data?.error || e?.message || 'Bulk action failed.')
+        } finally {
+            setBulkLoading(null)
+        }
+    }
 
     const getStatusBadge = (status) => {
         switch (status) {
@@ -176,14 +235,54 @@ export default function OperationsCenterIndex({
                     <div className="mt-6">
                         {tab === 'incidents' && (
                             <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-                                <div className="px-4 py-4 sm:px-6">
-                                    <h2 className="text-lg font-semibold text-gray-900">Unresolved Incidents</h2>
-                                    <p className="mt-1 text-sm text-gray-500">{incidents?.length ?? 0} unresolved</p>
+                                <div className="px-4 py-4 sm:px-6 flex items-center justify-between">
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">Unresolved Incidents</h2>
+                                        <p className="mt-1 text-sm text-gray-500">{incidentList.length} unresolved</p>
+                                    </div>
+                                    {someSelected && (
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm text-gray-600">{selectedIds.size} selected</span>
+                                            <button
+                                                type="button"
+                                                disabled={!!bulkLoading}
+                                                onClick={() => runBulkAction('attempt-repair')}
+                                                className="inline-flex rounded px-3 py-1.5 text-sm font-medium bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50"
+                                            >
+                                                {bulkLoading === 'attempt-repair' ? '…' : 'Attempt Repair All'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={!!bulkLoading}
+                                                onClick={() => runBulkAction('create-ticket')}
+                                                className="inline-flex rounded px-3 py-1.5 text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50"
+                                            >
+                                                {bulkLoading === 'create-ticket' ? '…' : 'Create Tickets'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={!!bulkLoading}
+                                                onClick={() => runBulkAction('resolve')}
+                                                className="inline-flex rounded px-3 py-1.5 text-sm font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50"
+                                            >
+                                                {bulkLoading === 'resolve' ? '…' : 'Resolve All'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="border-t border-gray-200 overflow-x-auto">
                                     <table className="min-w-full divide-y divide-gray-300">
                                         <thead>
                                             <tr>
+                                                <th className="py-3.5 pl-4 pr-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        ref={selectAllRef}
+                                                        checked={allSelected}
+                                                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                </th>
                                                 <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Severity</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Title</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
@@ -192,12 +291,18 @@ export default function OperationsCenterIndex({
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-200">
-                                            {(incidents || []).map((i) => (
-                                                <IncidentRow key={i.id} incident={i} onAction={() => router.reload({ only: ['incidents', 'assetsStalled'] })} />
+                                            {incidentList.map((i) => (
+                                                <IncidentRow
+                                                    key={i.id}
+                                                    incident={i}
+                                                    onAction={() => router.reload({ only: ['incidents', 'assetsStalled'] })}
+                                                    selected={selectedIds.has(i.id)}
+                                                    onSelect={(checked) => toggleSelect(i.id, checked)}
+                                                />
                                             ))}
                                         </tbody>
                                     </table>
-                                    {(!incidents || incidents.length === 0) && (
+                                    {incidentList.length === 0 && (
                                         <p className="py-8 text-center text-sm text-gray-500">No unresolved incidents</p>
                                     )}
                                 </div>

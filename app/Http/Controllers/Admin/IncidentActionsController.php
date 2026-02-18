@@ -74,4 +74,61 @@ class IncidentActionsController extends Controller
 
         return response()->json(['resolved' => true]);
     }
+
+    /**
+     * Bulk actions on multiple incidents.
+     * POST /admin/incidents/bulk-actions
+     * Body: { action: 'attempt-repair'|'create-ticket'|'resolve', incident_ids: [1,2,...] }
+     */
+    public function bulkActions(Request $request, SystemIncidentRecoveryService $recoveryService): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $action = $request->input('action');
+        $incidentIds = $request->input('incident_ids', []);
+
+        $validActions = ['attempt-repair', 'create-ticket', 'resolve'];
+        if (!in_array($action, $validActions, true)) {
+            return response()->json(['error' => 'Invalid action'], 400);
+        }
+
+        if (!is_array($incidentIds) || empty($incidentIds)) {
+            return response()->json(['error' => 'incident_ids required and must be non-empty'], 400);
+        }
+
+        $incidents = SystemIncident::whereIn('id', $incidentIds)->get();
+        $results = [];
+
+        foreach ($incidents as $incident) {
+            try {
+                if ($action === 'attempt-repair') {
+                    $result = $recoveryService->attemptRepair($incident);
+                    $results[] = ['id' => $incident->id, 'ok' => true, 'resolved' => $result['resolved'] ?? false];
+                } elseif ($action === 'create-ticket') {
+                    $ticket = $recoveryService->createTicket($incident);
+                    $results[] = ['id' => $incident->id, 'ok' => $ticket !== null, 'ticket_id' => $ticket?->id];
+                } else {
+                    $recoveryService->resolve($incident, false);
+                    $results[] = ['id' => $incident->id, 'ok' => true];
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('[IncidentActionsController] bulk action failed', [
+                    'incident_id' => $incident->id,
+                    'action' => $action,
+                    'error' => $e->getMessage(),
+                ]);
+                $results[] = ['id' => $incident->id, 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        $ticketIds = array_filter(array_column($results, 'ticket_id'));
+        $failed = array_filter($results, fn ($r) => !($r['ok'] ?? false));
+
+        return response()->json([
+            'results' => $results,
+            'ticket_ids' => array_values($ticketIds),
+            'success_count' => count($results) - count($failed),
+            'failed_count' => count($failed),
+        ]);
+    }
 }
