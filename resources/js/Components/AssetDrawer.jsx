@@ -497,7 +497,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         setIncidentsLoading(true)
         window.axios.get(`/app/assets/${displayAsset.id}/incidents`)
             .then(res => {
-                setAssetIncidents(res.data?.incidents ?? [])
+                setAssetIncidents((res.data?.incidents ?? []).filter(Boolean))
             })
             .catch(() => setAssetIncidents([]))
             .finally(() => setIncidentsLoading(false))
@@ -1144,7 +1144,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     System retry attempted. Support recommended.
                                 </p>
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                    {assetIncidents.some(i => i.retryable) && (
+                                    {(assetIncidents || []).filter(Boolean).some(i => i?.retryable) && (
                                         <button
                                             type="button"
                                             disabled={retryProcessingLoading}
@@ -1171,16 +1171,20 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                         type="button"
                                         onClick={async () => {
                                             try {
-                                                const res = await window.axios.post(`/app/assets/${displayAsset.id}/submit-ticket`)
+                                                const res = await window.axios.post(
+                                                    `/app/assets/${displayAsset.id}/submit-ticket`,
+                                                    {},
+                                                    { headers: { Accept: 'application/json' } }
+                                                )
                                                 const ticket = res.data?.ticket ?? null
                                                 if (ticket?.id) {
                                                     setAssetIncidents([])
                                                     if (onAssetUpdate) onAssetUpdate()
                                                     router.reload({ only: ['assets'] })
-                                                    setToastMessage('Support ticket submitted. Our team will review the processing issue.')
-                                                    setToastType('success')
-                                                    setTimeout(() => setToastMessage(null), 6000)
                                                 }
+                                                setToastMessage('Support ticket submitted. Our team will review the processing issue.')
+                                                setToastType('success')
+                                                setTimeout(() => setToastMessage(null), 6000)
                                             } catch (e) {
                                                 setToastMessage('Failed to submit support ticket.')
                                                 setToastType('error')
@@ -1889,7 +1893,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 <div className="relative">
                                                     <CollectionSelector
                                                         collections={dropdownCollections}
-                                                        selectedIds={assetCollections.map((c) => c.id)}
+                                                        selectedIds={(assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)}
                                                         maxHeight="320px"
                                                         onChange={async (newCollectionIds) => {
                                                             if (!asset?.id || addToCollectionLoading) return
@@ -1905,8 +1909,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                                 const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
                                                                 setAssetCollections(res.data?.collections ?? [])
                                                                 // Notify parent if callback provided
-                                                                const added = newCollectionIds.filter((id) => !assetCollections.some((c) => c.id === id))
-                                                                const removed = assetCollections.filter((c) => !newCollectionIds.includes(c.id)).map((c) => c.id)
+                                                                const added = newCollectionIds.filter((id) => !(assetCollections || []).filter(Boolean).some((c) => c?.id === id))
+                                                                const removed = (assetCollections || []).filter(Boolean).filter((c) => !newCollectionIds.includes(c?.id)).map((c) => c?.id).filter(Boolean)
                                                                 if (collectionContext) {
                                                                     added.forEach((id) => collectionContext.onAssetAddedToCollection?.(asset.id, id))
                                                                     removed.forEach((id) => collectionContext.onAssetRemovedFromCollection?.(asset.id, id))
@@ -1959,7 +1963,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         // C9.1: Add new collection to dropdown list
                         setDropdownCollections((prev) => {
                             // Avoid duplicates
-                            if (prev.some((c) => c.id === newCollection.id)) {
+                            if ((prev || []).filter(Boolean).some((c) => c?.id === newCollection?.id)) {
                                 return prev
                             }
                             return [...prev, { id: newCollection.id, name: newCollection.name }]
@@ -1967,7 +1971,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                         
                         // C9.1: Auto-select the new collection and sync to asset
                         if (asset?.id) {
-                            const newCollectionIds = [...assetCollections.map((c) => c.id), newCollection.id]
+                            const newCollectionIds = [...(assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean), newCollection.id]
                             setAddToCollectionLoading(true)
                             try {
                                 await window.axios.put(
