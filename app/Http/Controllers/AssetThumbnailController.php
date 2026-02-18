@@ -79,12 +79,12 @@ class AssetThumbnailController extends Controller
     /**
      * Stream thumbnail for Admin Asset Operations (cross-tenant).
      *
-     * GET /app/admin/assets/{asset}/thumbnail
+     * GET /app/admin/assets/{asset}/thumbnail?style=thumb|medium|large
      *
      * Uses the asset's storage bucket (not the default s3 disk) so thumbnails
      * load correctly in staging/production where per-tenant buckets are used.
      */
-    public function adminThumbnail(string $asset): \Symfony\Component\HttpFoundation\Response
+    public function adminThumbnail(Request $request, string $asset): \Symfony\Component\HttpFoundation\Response
     {
         $user = Auth::user();
         if (!$user) {
@@ -100,11 +100,12 @@ class AssetThumbnailController extends Controller
         }
 
         $asset = Asset::withTrashed()->with('storageBucket')->findOrFail($asset);
-        $this->validateStyle('medium');
+        $style = $request->query('style', 'medium');
+        $this->validateStyle($style);
 
         // Prefer completed thumbnail when available
         if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
-            $thumbnailPath = $asset->thumbnailPathForStyle('medium');
+            $thumbnailPath = $asset->thumbnailPathForStyle($style);
             if ($thumbnailPath) {
                 try {
                     return $this->streamThumbnailFromS3($asset, $thumbnailPath);

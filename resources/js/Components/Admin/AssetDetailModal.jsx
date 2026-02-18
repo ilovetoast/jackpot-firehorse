@@ -76,7 +76,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                             <button
                                 key={t.id}
                                 onClick={() => setTab(t.id)}
-                                className={`border-b-2 py-3 text-sm font-medium ${
+                                className={`whitespace-nowrap border-b-2 py-3 text-sm font-medium ${
                                     tab === t.id
                                         ? 'border-indigo-600 text-indigo-600'
                                         : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -164,8 +164,28 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                         </div>
                     )}
                     {tab === 'thumbnails' && (
-                        <div className="overflow-auto rounded border border-slate-200 bg-slate-50 p-4 max-h-96 [&_.w-rjv]:text-xs">
-                            <JsonView value={asset?.metadata?.thumbnails ?? {}} collapsed={1} enableClipboard />
+                        <div className="space-y-4">
+                            {asset?.thumbnail_view_urls && Object.keys(asset.thumbnail_view_urls).length > 0 && (
+                                <div className="flex flex-wrap gap-3 text-sm">
+                                    <span className="text-slate-500">View in new window:</span>
+                                    {['thumb', 'medium', 'large'].map((style) =>
+                                        asset.thumbnail_view_urls[style] ? (
+                                            <a
+                                                key={style}
+                                                href={asset.thumbnail_view_urls[style]}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-indigo-600 hover:text-indigo-800 hover:underline capitalize"
+                                            >
+                                                {style}
+                                            </a>
+                                        ) : null
+                                    )}
+                                </div>
+                            )}
+                            <div className="overflow-auto rounded border border-slate-200 bg-slate-50 p-4 max-h-96 [&_.w-rjv]:text-xs">
+                                <JsonView value={asset?.metadata?.thumbnails ?? {}} collapsed={1} enableClipboard />
+                            </div>
                         </div>
                     )}
                     {tab === 'failed_jobs' && (

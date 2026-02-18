@@ -558,6 +558,25 @@ class AdminAssetController extends Controller
         $list['storage_root_path'] = $asset->storage_root_path;
         $list['storage_bucket_id'] = $asset->storage_bucket_id;
         $list['thumbnail_error'] = $asset->thumbnail_error;
+        $list['thumbnail_view_urls'] = $this->adminThumbnailViewUrls($asset);
         return $list;
+    }
+
+    /**
+     * URLs for viewing thumb, medium, large thumbnails in new window (admin only).
+     * Only includes styles that exist when thumbnail_status is completed.
+     */
+    protected function adminThumbnailViewUrls(Asset $asset): array
+    {
+        $urls = [];
+        if ($asset->thumbnail_status?->value !== 'completed') {
+            return $urls;
+        }
+        foreach (['thumb', 'medium', 'large'] as $style) {
+            if ($asset->thumbnailPathForStyle($style)) {
+                $urls[$style] = route('admin.assets.thumbnail', ['asset' => $asset->id, 'style' => $style]);
+            }
+        }
+        return $urls;
     }
 }
