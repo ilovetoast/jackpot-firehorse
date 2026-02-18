@@ -22,8 +22,12 @@ function IncidentRow({ incident: i, onAction }) {
     const handle = async (action) => {
         setLoading(action)
         try {
-            await axios.post(`${baseUrl}/${i.id}/${action}`)
+            const res = await axios.post(`${baseUrl}/${i.id}/${action}`)
+            const data = res?.data ?? {}
             onAction?.()
+            if (action === 'create-ticket' && data.ticket_id) {
+                router.visit(`/app/admin/support/tickets/${data.ticket_id}`)
+            }
         } catch (e) {
             console.error(e)
         } finally {

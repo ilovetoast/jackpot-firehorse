@@ -48,6 +48,7 @@ class SystemIncidentRecoveryService
 
     /**
      * Create SupportTicket for incident if none exists (idempotent).
+     * Returns the created ticket, or the existing open ticket if one already exists.
      */
     public function createTicket(SystemIncident $incident): ?SupportTicket
     {
@@ -62,13 +63,13 @@ class SystemIncidentRecoveryService
 
         // For job incidents, source_id is asset id
         $assetId = $sourceId;
-        $hasOpenTicket = SupportTicket::where('source_type', 'asset')
+        $existingTicket = SupportTicket::where('source_type', 'asset')
             ->where('source_id', $assetId)
             ->whereIn('status', ['open', 'in_progress'])
-            ->exists();
+            ->first();
 
-        if ($hasOpenTicket) {
-            return null;
+        if ($existingTicket) {
+            return $existingTicket;
         }
 
         $asset = Asset::find($assetId);
