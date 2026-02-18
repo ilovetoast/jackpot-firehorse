@@ -60,6 +60,12 @@ Schedule::command('assets:watchdog')
     ->withoutOverlapping()
     ->description('Detect assets stuck in uploading or thumbnail generation');
 
+// System Auto-Recovery: reconcile, retry, create tickets for unresolved incidents
+Schedule::command('system:auto-recover')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->description('Auto-recover unresolved system incidents');
+
 // Abandoned upload session detection (runs every 15 minutes)
 Schedule::command('uploads:detect-abandoned')
     ->everyFifteenMinutes()

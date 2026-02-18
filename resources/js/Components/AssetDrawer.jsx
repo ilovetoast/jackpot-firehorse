@@ -121,6 +121,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const [assetIncidents, setAssetIncidents] = useState([])
     const [incidentsLoading, setIncidentsLoading] = useState(false)
     const [retryProcessingLoading, setRetryProcessingLoading] = useState(false)
+    const [submitTicketLoading, setSubmitTicketLoading] = useState(false)
     
     // Metadata approval state
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
@@ -141,6 +142,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
     const [toastType, setToastType] = useState('success')
+    const [toastTicketUrl, setToastTicketUrl] = useState(null)
     
     // Phase 3.1: Get assets with thumbnail support or video support for carousel (images, PDFs, PSDs, and videos)
     const imageAssets = useMemo(() => {
@@ -1167,7 +1169,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     </button>
                                     <button
                                         type="button"
+                                        disabled={submitTicketLoading}
                                         onClick={async () => {
+                                            setSubmitTicketLoading(true)
                                             try {
                                                 const res = await window.axios.post(
                                                     `/app/assets/${displayAsset.id}/submit-ticket`,
@@ -1175,24 +1179,31 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                     { headers: { Accept: 'application/json' } }
                                                 )
                                                 const ticket = res.data?.ticket ?? null
+                                                const tenantTicket = res.data?.tenant_ticket ?? null
                                                 if (ticket?.id) {
                                                     setAssetIncidents([])
                                                     if (onAssetUpdate) onAssetUpdate()
                                                     router.reload({ only: ['assets'] })
                                                 }
-                                                setToastMessage('Support ticket submitted. Our team will review the processing issue.')
+                                                setToastMessage(tenantTicket?.url
+                                                    ? 'Support ticket created.'
+                                                    : 'Support ticket submitted. Our team will review the processing issue.')
                                                 setToastType('success')
-                                                setTimeout(() => setToastMessage(null), 6000)
+                                                setToastTicketUrl(tenantTicket?.url ?? null)
+                                                setTimeout(() => { setToastMessage(null); setToastTicketUrl(null) }, 6000)
                                             } catch (e) {
                                                 setToastMessage('Failed to submit support ticket.')
                                                 setToastType('error')
+                                                setToastTicketUrl(null)
                                                 setTimeout(() => setToastMessage(null), 5000)
+                                            } finally {
+                                                setSubmitTicketLoading(false)
                                             }
                                         }}
-                                        className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                                        className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
                                     >
                                         <TicketIcon className="h-3.5 w-3.5 mr-1" />
-                                        Submit Support Ticket
+                                        {submitTicketLoading ? 'Submitting…' : 'Submit Support Ticket'}
                                     </button>
                                 </div>
                             </div>
@@ -1211,7 +1222,7 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     Processing Issue Detected
                                 </p>
                                 <p className="mt-1 text-sm text-amber-700">
-                                    {assetIncidents[0]?.title || 'Thumbnail stalled'}
+                                    {assetIncidents[0]?.title || 'Processing issue'}
                                 </p>
                                 <p className="mt-1 text-xs text-amber-600">
                                     System retry attempted. Support recommended.
@@ -1242,7 +1253,9 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                     )}
                                     <button
                                         type="button"
+                                        disabled={submitTicketLoading}
                                         onClick={async () => {
+                                            setSubmitTicketLoading(true)
                                             try {
                                                 const res = await window.axios.post(
                                                     `/app/assets/${displayAsset.id}/submit-ticket`,
@@ -1250,24 +1263,31 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                     { headers: { Accept: 'application/json' } }
                                                 )
                                                 const ticket = res.data?.ticket ?? null
+                                                const tenantTicket = res.data?.tenant_ticket ?? null
                                                 if (ticket?.id) {
                                                     setAssetIncidents([])
                                                     if (onAssetUpdate) onAssetUpdate()
                                                     router.reload({ only: ['assets'] })
                                                 }
-                                                setToastMessage('Support ticket submitted. Our team will review the processing issue.')
+                                                setToastMessage(tenantTicket?.url
+                                                    ? 'Support ticket created.'
+                                                    : 'Support ticket submitted. Our team will review the processing issue.')
                                                 setToastType('success')
-                                                setTimeout(() => setToastMessage(null), 6000)
+                                                setToastTicketUrl(tenantTicket?.url ?? null)
+                                                setTimeout(() => { setToastMessage(null); setToastTicketUrl(null) }, 6000)
                                             } catch (e) {
                                                 setToastMessage('Failed to submit support ticket.')
                                                 setToastType('error')
+                                                setToastTicketUrl(null)
                                                 setTimeout(() => setToastMessage(null), 5000)
+                                            } finally {
+                                                setSubmitTicketLoading(false)
                                             }
                                         }}
-                                        className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                                        className="inline-flex items-center rounded-md border border-amber-600 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
                                     >
                                         <TicketIcon className="h-3.5 w-3.5 mr-1" />
-                                        Submit Support Ticket
+                                        {submitTicketLoading ? 'Submitting…' : 'Submit Support Ticket'}
                                     </button>
                                 </div>
                             </div>
@@ -3140,11 +3160,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                             </div>
                             <div className="ml-3 flex-1">
                                 <p className="text-sm font-medium">{toastMessage}</p>
+                                {toastTicketUrl && (
+                                    <a
+                                        href={toastTicketUrl}
+                                        className="mt-2 inline-flex text-sm font-medium text-green-700 hover:text-green-800 underline"
+                                    >
+                                        View ticket →
+                                    </a>
+                                )}
                             </div>
                             <div className="ml-4 flex-shrink-0">
                                 <button
                                     type="button"
-                                    onClick={() => setToastMessage(null)}
+                                    onClick={() => { setToastMessage(null); setToastTicketUrl(null) }}
                                     className={`inline-flex rounded-md p-1.5 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                                         toastType === 'error' ? 'text-red-500 hover:bg-red-100 focus:ring-red-600' :
                                         toastType === 'warning' ? 'text-yellow-500 hover:bg-yellow-100 focus:ring-yellow-600' :

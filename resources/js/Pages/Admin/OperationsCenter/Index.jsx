@@ -1,4 +1,6 @@
 import { Link, router } from '@inertiajs/react'
+import { useState } from 'react'
+import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import {
@@ -13,6 +15,63 @@ import {
     PhotoIcon,
     ServerStackIcon,
 } from '@heroicons/react/24/outline'
+
+function IncidentRow({ incident: i, onAction }) {
+    const [loading, setLoading] = useState(null)
+    const baseUrl = '/app/admin/incidents'
+    const handle = async (action) => {
+        setLoading(action)
+        try {
+            await axios.post(`${baseUrl}/${i.id}/${action}`)
+            onAction?.()
+        } catch (e) {
+            console.error(e)
+        } finally {
+            setLoading(null)
+        }
+    }
+    return (
+        <tr>
+            <td className="whitespace-nowrap py-3 pl-4 pr-3">
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                    i.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                    i.severity === 'error' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-800'
+                }`}>{i.severity}</span>
+            </td>
+            <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
+            <td className="py-3 px-3 text-sm text-gray-500">{i.source_type}/{i.source_id || '—'}</td>
+            <td className="py-3 px-3 text-sm text-gray-500">{new Date(i.detected_at).toLocaleString()}</td>
+            <td className="py-3 px-3 text-right">
+                <div className="flex justify-end gap-1">
+                    <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => handle('attempt-repair')}
+                        className="inline-flex rounded px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50"
+                    >
+                        {loading === 'attempt-repair' ? '…' : 'Attempt Repair'}
+                    </button>
+                    <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => handle('create-ticket')}
+                        className="inline-flex rounded px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50"
+                    >
+                        {loading === 'create-ticket' ? '…' : 'Create Ticket'}
+                    </button>
+                    <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => handle('resolve')}
+                        className="inline-flex rounded px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50"
+                    >
+                        {loading === 'resolve' ? '…' : 'Resolve (Manual)'}
+                    </button>
+                </div>
+            </td>
+        </tr>
+    )
+}
 
 const TABS = [
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
@@ -114,21 +173,12 @@ export default function OperationsCenterIndex({
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Title</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
+                                                <th className="py-3.5 px-3 text-right text-sm font-semibold text-gray-900">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-200">
                                             {(incidents || []).map((i) => (
-                                                <tr key={i.id}>
-                                                    <td className="whitespace-nowrap py-3 pl-4 pr-3">
-                                                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                                                            i.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                                                            i.severity === 'error' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-800'
-                                                        }`}>{i.severity}</span>
-                                                    </td>
-                                                    <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-500">{i.source_type}/{i.source_id || '—'}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-500">{formatDate(i.detected_at)}</td>
-                                                </tr>
+                                                <IncidentRow key={i.id} incident={i} onAction={() => router.reload({ only: ['incidents', 'assetsStalled'] })} />
                                             ))}
                                         </tbody>
                                     </table>

@@ -37,6 +37,7 @@ class OperationsCenterController extends Controller
         $tab = $request->get('tab', 'incidents');
 
         $incidents = SystemIncident::whereNull('resolved_at')
+            ->orderByRaw("CASE severity WHEN 'critical' THEN 1 WHEN 'error' THEN 2 WHEN 'warning' THEN 3 ELSE 4 END")
             ->orderBy('detected_at', 'desc')
             ->limit(100)
             ->get()

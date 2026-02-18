@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Enums\EventType;
+use App\Enums\TicketCategory;
+use App\Enums\TicketStatus;
+use App\Enums\TicketType;
 use App\Enums\ThumbnailStatus;
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
@@ -11,6 +14,8 @@ use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
 use App\Jobs\ScoreAssetComplianceJob;
 use App\Models\SupportTicket;
+use App\Models\Ticket;
+use App\Models\TicketMessage;
 use App\Models\SystemIncident;
 use App\Models\ActivityEvent;
 use App\Models\AssetEmbedding;
@@ -1177,6 +1182,7 @@ class AssetMetadataController extends Controller
                         $q2->where('source_type', 'job')->where('source_id', $asset->id);
                     });
             })
+            ->orderByRaw("CASE severity WHEN 'critical' THEN 1 WHEN 'error' THEN 2 WHEN 'warning' THEN 3 ELSE 4 END")
             ->orderBy('detected_at', 'desc')
             ->get(['id', 'source_type', 'severity', 'title', 'message', 'retryable', 'requires_support', 'detected_at'])
             ->map(fn ($i) => [
@@ -1337,14 +1343,20 @@ class AssetMetadataController extends Controller
                 'ticket_id' => $existing->id,
             ]);
 
+            $tenantTicket = $this->findOrCreateTenantTicketForAsset($asset, $existing, $payload);
             return response()->json([
                 'ticket' => $existing->fresh(),
+                'tenant_ticket' => $tenantTicket ? [
+                    'id' => $tenantTicket->id,
+                    'ticket_number' => $tenantTicket->ticket_number,
+                    'url' => route('support.tickets.show', $tenantTicket),
+                ] : null,
                 'incidents' => $recentIncidents,
                 'last_failed_job' => $lastFailedJob,
             ]);
         }
 
-        $ticket = SupportTicket::create([
+        $supportTicket = SupportTicket::create([
             'source_type' => 'asset',
             'source_id' => $asset->id,
             'summary' => "Asset processing issue: {$asset->title}",
@@ -1358,14 +1370,103 @@ class AssetMetadataController extends Controller
 
         Log::info('[SupportTicket] Created from asset processing issue', [
             'asset_id' => $asset->id,
-            'ticket_id' => $ticket->id,
+            'ticket_id' => $supportTicket->id,
         ]);
 
+        $tenantTicket = $this->createTenantTicketForAsset($asset, $supportTicket, $payload);
+
         return response()->json([
-            'ticket' => $ticket->fresh(),
+            'ticket' => $supportTicket->fresh(),
+            'tenant_ticket' => $tenantTicket ? [
+                'id' => $tenantTicket->id,
+                'ticket_number' => $tenantTicket->ticket_number,
+                'url' => route('support.tickets.show', $tenantTicket),
+            ] : null,
             'incidents' => $recentIncidents,
             'last_failed_job' => $lastFailedJob,
         ]);
+    }
+
+    /**
+     * Find existing tenant Ticket for asset processing, or create one.
+     * Used when returning existing SupportTicket (idempotent case).
+     */
+    protected function findOrCreateTenantTicketForAsset(Asset $asset, SupportTicket $supportTicket, array $payload): ?Ticket
+    {
+        $existing = Ticket::where('type', TicketType::TENANT)
+            ->where('tenant_id', $asset->tenant_id)
+            ->where('metadata->asset_id', $asset->id)
+            ->where('metadata->source', 'asset_processing')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        return $this->createTenantTicketForAsset($asset, $supportTicket, $payload);
+    }
+
+    /**
+     * Create a tenant Ticket so it appears in Support Tickets page.
+     * SupportTicket is for internal admin ops; Ticket is for tenant visibility.
+     */
+    protected function createTenantTicketForAsset(Asset $asset, SupportTicket $supportTicket, array $payload): ?Ticket
+    {
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        try {
+            $this->authorize('create', Ticket::class);
+        } catch (\Throwable $e) {
+            Log::warning('[SupportTicket] User cannot create tenant Ticket, skipping', [
+                'asset_id' => $asset->id,
+                'user_id' => $user->id,
+            ]);
+            return null;
+        }
+
+        $assetLabel = $asset->title ?? $asset->original_filename ?? 'Asset ' . substr($asset->id, 0, 8);
+        $subject = "Asset processing issue: " . $assetLabel;
+        $description = "User-submitted support ticket for asset processing issues.\n\n"
+            . "Asset: {$assetLabel}\n"
+            . "Asset ID: {$asset->id}\n"
+            . "Status: " . ($asset->analysis_status ?? 'unknown') . "\n"
+            . "Thumbnails: " . (isset($asset->metadata['thumbnails']) ? 'Yes' : 'No') . "\n\n"
+            . "Diagnostic payload attached for support team.";
+
+        return DB::transaction(function () use ($asset, $supportTicket, $payload, $user, $tenant, $subject, $description) {
+            $ticket = Ticket::create([
+                'type' => TicketType::TENANT,
+                'status' => TicketStatus::OPEN,
+                'tenant_id' => $tenant->id,
+                'created_by_user_id' => $user->id,
+                'metadata' => [
+                    'category' => TicketCategory::TECHNICAL_ISSUE->value,
+                    'subject' => $subject,
+                    'asset_id' => $asset->id,
+                    'support_ticket_id' => $supportTicket->id,
+                    'source' => 'asset_processing',
+                    'payload' => $payload,
+                ],
+            ]);
+
+            $ticket->brands()->attach([$asset->brand_id]);
+
+            TicketMessage::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $user->id,
+                'body' => $description,
+                'is_internal' => false,
+            ]);
+
+            Log::info('[SupportTicket] Created tenant Ticket for asset', [
+                'asset_id' => $asset->id,
+                'support_ticket_id' => $supportTicket->id,
+                'tenant_ticket_id' => $ticket->id,
+            ]);
+
+            return $ticket;
+        });
     }
 
     /**

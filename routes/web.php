@@ -238,6 +238,9 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::get('/admin/documentation', [\App\Http\Controllers\SiteAdminController::class, 'documentation'])->name('admin.documentation');
     Route::get('/admin/system-status', [\App\Http\Controllers\Admin\SystemStatusController::class, 'index'])->name('admin.system-status');
     Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');
+    Route::post('/admin/incidents/{incident}/attempt-repair', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'attemptRepair'])->name('admin.incidents.attempt-repair');
+    Route::post('/admin/incidents/{incident}/create-ticket', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'createTicket'])->name('admin.incidents.create-ticket');
+    Route::post('/admin/incidents/{incident}/resolve', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'resolve'])->name('admin.incidents.resolve');
     Route::post('/admin/support-tickets/{supportTicket}/resolve-and-reconcile', [\App\Http\Controllers\Admin\SupportTicketResolveController::class, 'resolveAndReconcile'])->name('admin.support-tickets.resolve-and-reconcile');
     Route::get('/admin/logs', [\App\Http\Controllers\Admin\AdminLogController::class, 'index'])->name('admin.logs.index');
     Route::get('/admin/logs/{stream}', [\App\Http\Controllers\Admin\AdminLogController::class, 'api'])->name('admin.logs.api')->where('stream', 'web|worker');
