@@ -74,6 +74,13 @@ class AssetStateReconciliationService
             $changes = array_merge($changes, $promotions);
         }
 
+        // Rule 5b — Non-image assets stuck at generating_embedding (PDF, video, etc.)
+        // Embedding job is never dispatched for non-images; nothing advances status. Fix stuck assets.
+        if (($asset->analysis_status ?? 'uploading') === 'generating_embedding') {
+            $promotions = $this->applyRule5b($asset);
+            $changes = array_merge($changes, $promotions);
+        }
+
         // Rule 6 — Visual metadata now ready: auto-resolve "Expected visual metadata missing" incident
         // Prevents incident from lingering in Ops center after backfill or recovery
         if ($asset->visualMetadataReady()) {
@@ -214,5 +221,32 @@ class AssetStateReconciliationService
         ]);
 
         return ['analysis_status → complete'];
+    }
+
+    /**
+     * Rule 5b: Non-image assets stuck at generating_embedding.
+     *
+     * PDF/video/etc. never get GenerateAssetEmbeddingJob dispatched, so status stays stuck.
+     * If pipeline completed (thumbnails, metadata, etc.), advance to complete.
+     */
+    protected function applyRule5b(Asset $asset): array
+    {
+        if (\App\Services\ImageEmbeddingService::isImageMimeType($asset->mime_type ?? '')) {
+            return [];
+        }
+        $metadata = $asset->metadata ?? [];
+        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus ? $asset->thumbnail_status : null;
+        $thumbnailDone = $thumbEnum === ThumbnailStatus::COMPLETED || $thumbEnum === ThumbnailStatus::SKIPPED;
+        $pipelineDone = isset($metadata['pipeline_completed_at'])
+            || ($thumbnailDone && ($metadata['ai_tagging_completed'] ?? false) && ($metadata['metadata_extracted'] ?? false));
+
+        if ($pipelineDone) {
+            $asset->update(['analysis_status' => 'complete']);
+            Log::info('[AssetStateReconciliationService] Rule 5b applied (non-image stuck at generating_embedding)', [
+                'asset_id' => $asset->id,
+            ]);
+            return ['analysis_status → complete'];
+        }
+        return [];
     }
 }

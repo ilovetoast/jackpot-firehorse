@@ -70,9 +70,15 @@ class FinalizeAssetJob implements ShouldQueue
             $metadata = $asset->metadata ?? [];
             $metadata['pipeline_completed_at'] = now()->toIso8601String();
             
-            $asset->update([
-                'metadata' => $metadata,
-            ]);
+            $updates = ['metadata' => $metadata];
+
+            // For non-image assets (PDF, video, etc.): advance analysis_status to complete.
+            // Embedding job is only dispatched for images; without it, status stays stuck at generating_embedding.
+            if (!ImageEmbeddingService::isImageMimeType($asset->mime_type)) {
+                $updates['analysis_status'] = 'complete';
+            }
+
+            $asset->update($updates);
 
             // Emit asset finalized event
             AssetEvent::create([
