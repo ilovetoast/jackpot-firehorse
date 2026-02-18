@@ -19,7 +19,9 @@ import {
     ArrowUturnLeftIcon,
     WrenchScrewdriverIcon,
     ArrowDownTrayIcon,
+    InformationCircleIcon,
 } from '@heroicons/react/24/outline'
+import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
 
 const STATUS_COLORS = {
     complete: 'bg-emerald-100 text-emerald-800',
@@ -109,8 +111,14 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                 <div><span className="text-slate-500">Brand</span><br />{asset?.brand?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Created by</span><br />{asset?.created_by?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Analysis</span><br />
-                                    <span className={`rounded px-2 py-0.5 text-xs ${STATUS_COLORS[asset?.analysis_status] || ''}`}>
+                                    <span
+                                        className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${STATUS_COLORS[asset?.analysis_status] || ''}`}
+                                        title={getPipelineStageTooltip(asset?.analysis_status)}
+                                    >
                                         {asset?.analysis_status}
+                                        {getPipelineStageTooltip(asset?.analysis_status) && (
+                                            <InformationCircleIcon className="h-3.5 w-3.5 opacity-70" />
+                                        )}
                                     </span>
                                 </div>
                                 <div><span className="text-slate-500">Thumbnail</span><br />
