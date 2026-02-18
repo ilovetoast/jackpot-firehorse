@@ -989,8 +989,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         // Includes both images (GD), PDFs (ImageMagick/Ghostscript), and TIFF/AVIF (Imagick)
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif', 'image/vnd.adobe.photoshop', 'application/postscript', 'application/vnd.adobe.illustrator', 'application/illustrator']
-        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'tiff', 'tif', 'avif', 'psd', 'psb', 'ai']
+        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif', 'image/vnd.adobe.photoshop', 'application/postscript', 'application/vnd.adobe.illustrator', 'application/illustrator']
+        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'tiff', 'tif', 'avif', 'psd', 'psb', 'ai']
         
         // Check if MIME type or extension is supported
         if (mimeType && !supportedMimeTypes.includes(mimeType)) {
@@ -1020,8 +1020,8 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
         
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif', 'image/vnd.adobe.photoshop', 'application/postscript', 'application/vnd.adobe.illustrator', 'application/illustrator']
-        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'tiff', 'tif', 'avif', 'psd', 'psb', 'ai']
+        const supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf', 'image/tiff', 'image/tif', 'image/avif', 'image/vnd.adobe.photoshop', 'application/postscript', 'application/vnd.adobe.illustrator', 'application/illustrator']
+        const supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'tiff', 'tif', 'avif', 'psd', 'psb', 'ai']
         
         if (mimeType && !supportedMimeTypes.includes(mimeType)) {
             if (!extension || !supportedExtensions.includes(extension)) {
