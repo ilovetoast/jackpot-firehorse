@@ -604,6 +604,10 @@ export default function AdminCompanyView({
                         {/* Users */}
                         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="p-6">
+                                {/* TODO: Add a way to manage all users associated with this company and their roles with the company and the brand */}
+                                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                    <span className="font-medium">TODO:</span> Add a way to manage all users associated with this company and their roles with the company and the brand.
+                                </div>
                                 <div className="flex items-center justify-between mb-4">
                                     <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                                         <UsersIcon className="h-5 w-5 text-gray-400" />
@@ -618,7 +622,7 @@ export default function AdminCompanyView({
                                             Add User
                                         </button>
                                         <Link
-                                            href={`/app/admin?company_id=${company.id}`}
+                                            href="/app/admin/organization?tab=users"
                                             className="text-sm text-indigo-600 hover:text-indigo-900"
                                         >
                                             View All ({stats.total_users})

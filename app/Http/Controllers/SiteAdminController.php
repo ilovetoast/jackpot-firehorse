@@ -123,6 +123,74 @@ class SiteAdminController extends Controller
     }
 
     /**
+     * Organization management - companies and users.
+     */
+    public function organization(Request $request): Response
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
+
+        $perPage = (int) $request->get('per_page', 10);
+        $searchQuery = $request->get('search', '');
+
+        $companiesQuery = Tenant::select(['id', 'name', 'slug', 'created_at', 'stripe_id', 'manual_plan_override', 'is_agency', 'agency_tier_id'])
+            ->with('agencyTier:id,name');
+
+        if (!empty($searchQuery)) {
+            $companiesQuery->where(function ($query) use ($searchQuery) {
+                $query->where('name', 'like', "%{$searchQuery}%")
+                    ->orWhere('slug', 'like', "%{$searchQuery}%");
+            });
+        }
+
+        $companies = $companiesQuery
+            ->orderBy('created_at', 'desc')
+            ->paginate($perPage)
+            ->appends($request->except('page'));
+
+        $planService = app(\App\Services\PlanService::class);
+
+        $stats = cache()->remember('admin_stats', 300, function () {
+            return [
+                'total_companies' => Tenant::count(),
+                'total_users' => User::count(),
+                'total_brands' => Brand::count(),
+                'active_subscriptions' => Subscription::where('stripe_status', 'active')->count(),
+            ];
+        });
+
+        return Inertia::render('Admin/Organization/Index', [
+            'companies' => $companies->map(function ($company) use ($planService) {
+                $planName = $planService->getCurrentPlan($company);
+                $stripeConnected = !empty($company->stripe_id);
+                return [
+                    'id' => $company->id,
+                    'name' => $company->name,
+                    'slug' => $company->slug,
+                    'created_at' => $company->created_at?->format('M d, Y'),
+                    'plan_name' => $planName,
+                    'stripe_connected' => $stripeConnected,
+                    'plan_management' => [
+                        'source' => $planService->getPlanManagementSource($company),
+                        'is_externally_managed' => $planService->isExternallyManaged($company),
+                    ],
+                    'can_manage_plan' => !$stripeConnected,
+                    'is_agency' => (bool) $company->is_agency,
+                    'agency_tier' => $company->agencyTier?->name,
+                    'details_loaded' => false,
+                ];
+            }),
+            'pagination' => [
+                'current_page' => $companies->currentPage(),
+                'last_page' => $companies->lastPage(),
+                'per_page' => $companies->perPage(),
+                'total' => $companies->total(),
+            ],
+            'stats' => $stats,
+            'users' => [],
+        ]);
+    }
+
+    /**
      * Get admin stats (AJAX endpoint).
      */
     public function stats(): \Illuminate\Http\JsonResponse

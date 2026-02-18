@@ -153,7 +153,8 @@ class AdminTicketController extends Controller
         }
         
         // Filter for engineering tickets (type=internal, assigned_team=engineering)
-        if ($request->filled('engineering_only')) {
+        $engineeringFilter = $request->filled('engineering_only') || $request->get('type') === 'engineering';
+        if ($engineeringFilter) {
             $query->where('type', TicketType::INTERNAL)
                 ->where('assigned_team', TicketTeam::ENGINEERING);
         }
@@ -211,7 +212,10 @@ class AdminTicketController extends Controller
             'tickets' => $formattedTickets,
             'pagination' => $tickets->toArray(),
             'filterOptions' => $filterOptions,
-            'filters' => $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only']),
+            'filters' => array_merge(
+                $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only']),
+                $request->get('type') === 'engineering' ? ['engineering_only' => '1'] : []
+            ),
         ]);
     }
 

@@ -221,8 +221,10 @@ Route::middleware(['auth', 'ensure.account.active'])->prefix('app')->group(funct
     Route::put('/profile/password', [\App\Http\Controllers\ProfileController::class, 'updatePassword'])->name('profile.password.update');
     Route::delete('/profile', [\App\Http\Controllers\ProfileController::class, 'destroy'])->name('profile.destroy');
 
-    // Site Admin routes (only user ID 1)
-    Route::get('/admin', [\App\Http\Controllers\SiteAdminController::class, 'index'])->name('admin.index');
+    // Site Admin routes - Command Center
+    Route::get('/admin', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'index'])->name('admin.index');
+    Route::get('/admin/api/overview', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'metrics'])->name('admin.api.overview');
+    Route::get('/admin/organization', [\App\Http\Controllers\SiteAdminController::class, 'organization'])->name('admin.organization.index');
     
     // Admin API endpoints (AJAX)
     Route::get('/admin/api/stats', [\App\Http\Controllers\SiteAdminController::class, 'stats'])->name('admin.api.stats');
