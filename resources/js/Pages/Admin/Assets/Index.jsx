@@ -231,6 +231,7 @@ export default function AdminAssetsIndex({
         { id: 'unpublish', label: 'Unpublish', icon: XCircleIcon },
         { id: 'archive', label: 'Archive', icon: ArchiveBoxIcon },
         { id: 'clear_thumbnail_timeout', label: 'Clear Thumbnail Timeout Flag', icon: PhotoIcon },
+        { id: 'clear_promotion_failed', label: 'Clear Promotion Failed', icon: CheckCircleIcon },
         { id: 'reconcile', label: 'Reconcile State', icon: WrenchScrewdriverIcon },
         { id: 'create_ticket', label: 'Create Support Ticket', icon: TicketIcon },
         { id: 'export_ids', label: 'Export IDs', icon: ArrowDownTrayIcon },

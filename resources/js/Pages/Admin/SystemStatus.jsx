@@ -1,4 +1,6 @@
-import { Link, usePage } from '@inertiajs/react'
+import { useState } from 'react'
+import { Link, router, usePage } from '@inertiajs/react'
+import axios from 'axios'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import {
@@ -18,6 +20,7 @@ import {
 
 export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun, horizonAvailable, horizonUrl, deployedAt }) {
     const { auth } = usePage().props
+    const [clearingId, setClearingId] = useState(null)
 
     // Get status badge config
     const getStatusBadge = (status) => {
@@ -511,6 +514,9 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                     Error Details
                                                 </th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Actions
+                                                </th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
@@ -546,26 +552,41 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                                     </td>
                                                     <td className="px-6 py-4 text-sm text-gray-500">
                                                         <div className="max-w-md space-y-1">
-                                                            {asset.thumbnail_error && (
-                                                                <div>
-                                                                    <span className="font-medium text-red-600">Thumbnail: </span>
-                                                                    <span className="text-red-600" title={asset.thumbnail_error}>
-                                                                        {truncate(asset.thumbnail_error, 80)}
-                                                                    </span>
-                                                                </div>
-                                                            )}
-                                                            {asset.promotion_error && (
-                                                                <div>
-                                                                    <span className="font-medium text-amber-600">Promotion: </span>
-                                                                    <span className="text-amber-600" title={asset.promotion_error}>
-                                                                        {truncate(asset.promotion_error, 80)}
-                                                                    </span>
-                                                                </div>
-                                                            )}
-                                                            {!asset.thumbnail_error && !asset.promotion_error && (
+                                                            {asset.error_messages?.length ? (
+                                                                asset.error_messages.map((msg, i) => (
+                                                                    <div key={i} className="text-gray-600" title={msg}>
+                                                                        {truncate(msg, 80)}
+                                                                    </div>
+                                                                ))
+                                                            ) : (
                                                                 <span className="text-gray-400">No error details</span>
                                                             )}
                                                         </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        {asset.issues.includes('promotion_failed') && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    if (clearingId === asset.id) return
+                                                                    setClearingId(asset.id)
+                                                                    try {
+                                                                        await axios.post(`/app/admin/assets/${asset.id}/clear-promotion-failed`, {}, {
+                                                                            headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content, 'Accept': 'application/json' },
+                                                                            withCredentials: true,
+                                                                        })
+                                                                        router.reload()
+                                                                    } catch (e) {
+                                                                        setClearingId(null)
+                                                                        alert(e?.response?.data?.message || e?.message || 'Failed to clear')
+                                                                    }
+                                                                }}
+                                                                disabled={clearingId === asset.id}
+                                                                className="text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                                                            >
+                                                                {clearingId === asset.id ? 'Clearing…' : 'Clear'}
+                                                            </button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}

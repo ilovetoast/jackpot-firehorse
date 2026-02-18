@@ -182,7 +182,7 @@ class AdminAssetController extends Controller
 
         $validActions = [
             'restore', 'retry_pipeline', 'regenerate_thumbnails', 'rerun_metadata', 'rerun_ai_tagging',
-            'publish', 'unpublish', 'archive', 'clear_thumbnail_timeout', 'reconcile', 'create_ticket', 'export_ids',
+            'publish', 'unpublish', 'archive', 'clear_thumbnail_timeout', 'clear_promotion_failed', 'reconcile', 'create_ticket', 'export_ids',
         ];
         if ($this->canDestructive()) {
             $validActions[] = 'delete';
@@ -380,6 +380,27 @@ class AdminAssetController extends Controller
         return response()->json(['status' => 'queued']);
     }
 
+    /**
+     * POST /app/admin/assets/{asset}/clear-promotion-failed
+     *
+     * Clears promotion_failed flag so asset no longer appears in "Assets with Processing Issues".
+     */
+    public function clearPromotionFailed(string $assetId): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $asset = Asset::withTrashed()->findOrFail($assetId);
+
+        $meta = $asset->metadata ?? [];
+        unset($meta['promotion_failed'], $meta['promotion_failed_at'], $meta['promotion_error']);
+        $asset->update([
+            'metadata' => $meta,
+            'analysis_status' => 'complete',
+        ]);
+
+        return response()->json(['cleared' => true]);
+    }
+
     protected function parseFilters(Request $request): array
     {
         $search = trim($request->get('search', ''));
@@ -542,6 +563,14 @@ class AdminAssetController extends Controller
                 $meta = $asset->metadata ?? [];
                 unset($meta['thumbnail_timeout']);
                 $asset->update(['metadata' => $meta]);
+                break;
+            case 'clear_promotion_failed':
+                $meta = $asset->metadata ?? [];
+                unset($meta['promotion_failed'], $meta['promotion_failed_at'], $meta['promotion_error']);
+                $asset->update([
+                    'metadata' => $meta,
+                    'analysis_status' => 'complete',
+                ]);
                 break;
             case 'reconcile':
                 $this->reconciliationService->reconcile($asset);
