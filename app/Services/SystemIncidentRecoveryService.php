@@ -2,12 +2,18 @@
 
 namespace App\Services;
 
+use App\Enums\TicketSeverity;
+use App\Enums\TicketStatus;
+use App\Enums\TicketType;
 use App\Models\Asset;
-use App\Models\SupportTicket;
 use App\Models\SystemIncident;
+use App\Models\Ticket;
+use App\Models\TicketMessage;
+use App\Models\User;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
 use App\Services\Assets\AssetStateReconciliationService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -16,6 +22,9 @@ use Illuminate\Support\Facades\Log;
  * Used by SystemAutoRecoverCommand and admin incident action endpoints.
  * Must not mutate asset unless reconciliation confirms safe repair.
  * Must not create duplicate tickets (idempotent).
+ *
+ * Create Ticket: Creates a Ticket (admin support UI) not SupportTicket.
+ * Admin support tickets route expects Ticket model.
  */
 class SystemIncidentRecoveryService
 {
@@ -47,10 +56,10 @@ class SystemIncidentRecoveryService
     }
 
     /**
-     * Create SupportTicket for incident if none exists (idempotent).
+     * Create Ticket (admin support UI) for incident if none exists (idempotent).
      * Returns the created ticket, or the existing open ticket if one already exists.
      */
-    public function createTicket(SystemIncident $incident): ?SupportTicket
+    public function createTicket(SystemIncident $incident): ?Ticket
     {
         if ($incident->resolved_at) {
             return null;
@@ -61,53 +70,93 @@ class SystemIncidentRecoveryService
             return null;
         }
 
-        // For job incidents, source_id is asset id
         $assetId = $sourceId;
-        $existingTicket = SupportTicket::where('source_type', 'asset')
-            ->where('source_id', $assetId)
-            ->whereIn('status', ['open', 'in_progress'])
+        $asset = Asset::find($assetId);
+
+        // Check for existing open Ticket for this asset from operations center
+        $existingTicket = Ticket::where('type', TicketType::INTERNAL)
+            ->where('metadata->asset_id', $assetId)
+            ->where('metadata->source', 'operations_incident')
+            ->whereIn('status', [
+                TicketStatus::OPEN,
+                TicketStatus::IN_PROGRESS,
+                TicketStatus::WAITING_ON_SUPPORT,
+                TicketStatus::WAITING_ON_USER,
+                TicketStatus::BLOCKED,
+            ])
             ->first();
 
         if ($existingTicket) {
             return $existingTicket;
         }
 
-        $asset = Asset::find($assetId);
-        $payload = [
-            'asset_id' => $assetId,
-            'tenant_id' => $asset?->tenant_id ?? $incident->tenant_id,
-            'brand_id' => $asset?->brand_id,
-            'analysis_status' => $asset?->analysis_status ?? 'unknown',
-            'thumbnail_status' => $asset?->thumbnail_status?->value ?? null,
-            'incident_id' => $incident->id,
-            'incident_title' => $incident->title,
-            'incident_severity' => $incident->severity,
-        ];
+        $subject = $asset ? "Asset processing: {$asset->title}" : $incident->title;
+        $description = "Created from Operations Center incident.\n\n"
+            . "Incident: {$incident->title}\n"
+            . ($incident->message ? "Details: {$incident->message}\n" : '')
+            . "\nAsset ID: {$assetId}\n"
+            . "Analysis status: " . ($asset?->analysis_status ?? 'unknown') . "\n"
+            . "Thumbnail status: " . ($asset?->thumbnail_status?->value ?? 'unknown');
 
         $severity = match (strtolower($incident->severity ?? 'warning')) {
-            'critical' => 'critical',
-            'error' => 'warning',
-            default => 'warning',
+            'critical' => TicketSeverity::P0,
+            'error' => TicketSeverity::P1,
+            default => TicketSeverity::P2,
         };
 
-        $ticket = SupportTicket::create([
-            'source_type' => 'asset',
-            'source_id' => $assetId,
-            'summary' => $asset ? "Asset processing: {$asset->title}" : $incident->title,
-            'description' => "Auto-created from incident: {$incident->title}. " . ($incident->message ?? ''),
-            'severity' => $severity,
-            'status' => 'open',
-            'source' => 'system',
-            'payload' => array_merge($payload, $incident->metadata ?? []),
-            'auto_created' => true,
-        ]);
+        $creator = User::where('email', 'system@internal')->first() ?? User::find(1);
+        if (!$creator) {
+            return null;
+        }
 
-        Log::info('[SystemIncidentRecoveryService] Created SupportTicket for incident', [
-            'incident_id' => $incident->id,
-            'ticket_id' => $ticket->id,
-        ]);
+        try {
+            $ticket = DB::transaction(function () use ($incident, $asset, $assetId, $subject, $description, $severity, $creator) {
+                $ticket = Ticket::create([
+                    'type' => TicketType::INTERNAL,
+                    'status' => TicketStatus::OPEN,
+                    'tenant_id' => $asset?->tenant_id ?? $incident->tenant_id,
+                    'created_by_user_id' => $creator->id,
+                    'assigned_team' => \App\Enums\TicketTeam::ENGINEERING,
+                    'severity' => $severity,
+                    'metadata' => [
+                        'subject' => $subject,
+                        'description' => $description,
+                        'asset_id' => $assetId,
+                        'incident_id' => $incident->id,
+                        'incident_title' => $incident->title,
+                        'source' => 'operations_incident',
+                        'analysis_status' => $asset?->analysis_status ?? 'unknown',
+                        'thumbnail_status' => $asset?->thumbnail_status?->value ?? null,
+                    ],
+                ]);
 
-        return $ticket;
+                if ($asset?->brand_id) {
+                    $ticket->brands()->attach([$asset->brand_id]);
+                }
+
+                TicketMessage::create([
+                    'ticket_id' => $ticket->id,
+                    'user_id' => $creator->id,
+                    'body' => $description,
+                    'is_internal' => false,
+                ]);
+
+                return $ticket;
+            });
+
+            Log::info('[SystemIncidentRecoveryService] Created Ticket for incident', [
+                'incident_id' => $incident->id,
+                'ticket_id' => $ticket->id,
+            ]);
+
+            return $ticket;
+        } catch (\Throwable $e) {
+            Log::error('[SystemIncidentRecoveryService] Failed to create ticket', [
+                'incident_id' => $incident->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**

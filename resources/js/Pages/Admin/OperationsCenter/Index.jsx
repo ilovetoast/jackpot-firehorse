@@ -25,11 +25,18 @@ function IncidentRow({ incident: i, onAction }) {
             const res = await axios.post(`${baseUrl}/${i.id}/${action}`)
             const data = res?.data ?? {}
             onAction?.()
-            if (action === 'create-ticket' && data.ticket_id) {
-                router.visit(`/app/admin/support/tickets/${data.ticket_id}`)
+            if (action === 'create-ticket') {
+                if (data.ticket_id) {
+                    router.visit(`/app/admin/support/tickets/${data.ticket_id}`)
+                } else if (!data.created) {
+                    alert('Could not create ticket. A ticket may already exist for this asset, or the incident may be resolved.')
+                }
             }
         } catch (e) {
             console.error(e)
+            if (action === 'create-ticket') {
+                alert('Failed to create ticket. Please try again.')
+            }
         } finally {
             setLoading(null)
         }

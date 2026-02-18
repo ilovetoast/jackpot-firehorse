@@ -11,7 +11,6 @@ use App\Enums\UploadType;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\StorageBucket;
-use App\Models\SupportTicket;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Models\UploadSession;
@@ -144,10 +143,10 @@ class SystemAutoRecoverTest extends TestCase
             'detected_at' => now(),
         ]);
 
-        $this->assertSame(0, SupportTicket::where('source_type', 'asset')->where('source_id', $asset->id)->count());
+        $this->assertSame(0, \App\Models\Ticket::where('metadata->asset_id', $asset->id)->where('metadata->source', 'operations_incident')->count());
 
         $this->artisan('system:auto-recover')->assertSuccessful();
 
-        $this->assertSame(1, SupportTicket::where('source_type', 'asset')->where('source_id', $asset->id)->count());
+        $this->assertSame(1, \App\Models\Ticket::where('metadata->asset_id', $asset->id)->where('metadata->source', 'operations_incident')->count());
     }
 }
