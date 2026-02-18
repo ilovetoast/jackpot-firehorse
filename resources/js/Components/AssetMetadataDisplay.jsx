@@ -416,37 +416,64 @@ export default function AssetMetadataDisplay({ assetId, onPendingCountChange, co
                     <div className="mb-3">
                         <p className="text-xs text-amber-600 font-medium">⚠ Incomplete brand data.</p>
                         <p className="mt-0.5 text-[11px] text-gray-500">This asset is missing required metadata for evaluation.</p>
-                        {brandDnaEnabled && (
-                            <button
-                                type="button"
-                                onClick={async () => {
-                                    if (!assetId || rescoreLoading) return
-                                    setRescoreLoading(true)
-                                    try {
-                                        const res = await fetch(`/app/assets/${assetId}/rescore`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json',
-                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                                                'Accept': 'application/json',
-                                            },
-                                            credentials: 'same-origin',
-                                        })
-                                        const data = await res.json()
-                                        if (data.status === 'queued') {
-                                            setEvaluationStatus('pending')
-                                        }
-                                    } finally {
-                                        setRescoreLoading(false)
-                                    }
-                                }}
-                                disabled={rescoreLoading}
-                                className="mt-1 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                            >
-                                <ArrowPathRoundedSquareIcon className="h-3 w-3" />
-                                {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
-                            </button>
+                        {metadataHealth && !metadataHealth.is_complete && (
+                            <div className="mt-2 rounded border border-amber-200 bg-amber-50/80 p-2 text-[11px] text-amber-800">
+                                <p className="font-medium mb-1">Missing for scoring:</p>
+                                <ul className="list-disc list-inside space-y-0.5">
+                                    {!metadataHealth.dominant_colors && <li>Dominant colors</li>}
+                                    {!metadataHealth.dominant_hue_group && <li>Dominant hue group</li>}
+                                    {!metadataHealth.embedding && <li>Visual embedding</li>}
+                                    {!metadataHealth.thumbnails && <li>Thumbnails</li>}
+                                    {!metadataHealth.ai_tagging_completed && <li>AI tagging</li>}
+                                    {!metadataHealth.metadata_extracted && <li>Metadata extraction</li>}
+                                    {metadataHealth.preview_generated === false && <li>Preview generation</li>}
+                                </ul>
+                                <p className="mt-2 text-amber-700">Re-run Analysis regenerates this data. Recalculate Score alone will not fix it.</p>
+                            </div>
                         )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {!metadataHealth?.is_complete && (
+                                <button
+                                    type="button"
+                                    onClick={handleReanalyze}
+                                    disabled={reanalyzeLoading}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                                >
+                                    {reanalyzeLoading ? 'Re-running…' : 'Re-run Analysis'}
+                                </button>
+                            )}
+                            {brandDnaEnabled && (
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (!assetId || rescoreLoading) return
+                                        setRescoreLoading(true)
+                                        try {
+                                            const res = await fetch(`/app/assets/${assetId}/rescore`, {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Content-Type': 'application/json',
+                                                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                                                    'Accept': 'application/json',
+                                                },
+                                                credentials: 'same-origin',
+                                            })
+                                            const data = await res.json()
+                                            if (data.status === 'queued') {
+                                                setEvaluationStatus('pending')
+                                            }
+                                        } finally {
+                                            setRescoreLoading(false)
+                                        }
+                                    }}
+                                    disabled={rescoreLoading}
+                                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                                >
+                                    <ArrowPathRoundedSquareIcon className="h-3 w-3" />
+                                    {rescoreLoading ? 'Recalculating…' : 'Recalculate Score'}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 )}
                 {analysisStatus === 'complete' && evaluationStatus === 'evaluated' && complianceScore != null && (

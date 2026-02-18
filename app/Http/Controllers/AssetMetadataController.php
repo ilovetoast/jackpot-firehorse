@@ -1044,10 +1044,14 @@ class AssetMetadataController extends Controller
         }
 
         // Metadata health: surface missing system metadata for recovery UI
+        $metadata = $asset->metadata ?? [];
         $hasDominantColors = ! empty(data_get($asset->metadata, 'dominant_colors'))
             || ! empty(data_get($asset->metadata, 'fields.dominant_colors'));
         $hasDominantHueGroup = ! empty($asset->dominant_hue_group);
         $hasEmbedding = $asset->embedding()->exists();
+        $hasAiTaggingCompleted = ! empty($metadata['ai_tagging_completed']);
+        $hasMetadataExtracted = ! empty($metadata['metadata_extracted']);
+        $hasPreviewGenerated = ! isset($metadata['preview_generated']) || ! empty($metadata['preview_generated']);
         // Thumbnails "complete" when COMPLETED or SKIPPED (skipped = no work to do, e.g. unsupported format)
         $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus ? $asset->thumbnail_status : null;
         $thumbnailComplete = $thumbEnum === ThumbnailStatus::COMPLETED || $thumbEnum === ThumbnailStatus::SKIPPED;
@@ -1056,9 +1060,13 @@ class AssetMetadataController extends Controller
             'dominant_hue_group' => $hasDominantHueGroup,
             'embedding' => $hasEmbedding,
             'thumbnails' => $thumbnailComplete,
+            'ai_tagging_completed' => $hasAiTaggingCompleted,
+            'metadata_extracted' => $hasMetadataExtracted,
+            'preview_generated' => $hasPreviewGenerated,
         ];
-        // If dominant_colors exist but dominant_hue_group missing → incomplete (needs re-analysis)
-        $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding && $thumbnailComplete;
+        // Matches AssetCompletionService::meetsCompletionCriteria + BrandComplianceService::isImageAnalysisReady
+        $metadataHealth['is_complete'] = $hasDominantColors && $hasDominantHueGroup && $hasEmbedding
+            && $thumbnailComplete && $hasAiTaggingCompleted && $hasMetadataExtracted && $hasPreviewGenerated;
 
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status->value

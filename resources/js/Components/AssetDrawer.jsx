@@ -2167,6 +2167,14 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                     )}
                     
                     <dl className="space-y-3">
+                        {displayAsset.id && (
+                            <div className="flex items-start gap-4">
+                                <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Asset ID</dt>
+                                <dd className="text-sm font-mono text-gray-900 flex-1 min-w-0 break-all text-left" title={displayAsset.id}>
+                                    {displayAsset.id}
+                                </dd>
+                            </div>
+                        )}
                         <div className="flex items-start gap-4">
                             <dt className="text-sm text-gray-500 w-32 flex-shrink-0">File Type</dt>
                             <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left uppercase">

@@ -251,6 +251,14 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                     <div className="space-y-3 border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900">File Information</h3>
                         <dl className="space-y-3">
+                            {asset?.id && (
+                                <div className="flex justify-between gap-4">
+                                    <dt className="text-sm text-gray-500 flex-shrink-0">Asset ID</dt>
+                                    <dd className="text-sm font-mono text-gray-900 break-all text-right" title={asset.id}>
+                                        {asset.id}
+                                    </dd>
+                                </div>
+                            )}
                             <div className="flex justify-between">
                                 <dt className="text-sm text-gray-500">File Type</dt>
                                 <dd className="text-sm font-medium text-gray-900 uppercase">
