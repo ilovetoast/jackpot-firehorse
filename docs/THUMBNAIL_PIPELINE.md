@@ -192,6 +192,17 @@ These features are **not currently implemented** and should not be added without
 3. **Backend**: Verify `thumbnail_status` is COMPLETED
 4. **Storage**: Check S3 bucket for thumbnail files
 
+### storage_error (S3 Download Failure)
+
+When `GenerateThumbnailsJob` fails at `downloadFromS3()` with `storage_error`:
+
+1. **Diagnose**: Run `php artisan assets:check-storage {asset_id}` to verify the source file exists in S3 and report any access issues.
+2. **Common causes**:
+   - **NoSuchKey**: File missing at `storage_root_path` (temp cleanup before promotion, wrong path)
+   - **AccessDenied**: Worker IAM lacks `s3:GetObject` for the bucket
+   - **NoSuchBucket**: Per-tenant bucket not provisioned
+3. **Fix**: Ensure worker uses credentials with S3 access; run `tenants:ensure-buckets` if buckets are missing.
+
 ### White Logos on Transparent Background
 
 Transparent logos (PNG, WebP, GIF) with white content get a gray-400 background so they remain visible. If existing assets still show white-on-white:

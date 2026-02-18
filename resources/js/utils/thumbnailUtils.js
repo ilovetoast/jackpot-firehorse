@@ -66,6 +66,7 @@ export const THUMBNAIL_SUPPORTED_EXTENSIONS = [
     'svg', // SVG passthrough - original served as thumbnail
     'pdf',
     'ai', // Adobe Illustrator - PDF-compatible
+    'eps', // Encapsulated PostScript - same pipeline as AI
     // BMP excluded: GD library has limited BMP support
     // 'bmp',
     // HEIC/HEIF excluded: backend pipeline may not support these yet

@@ -123,7 +123,7 @@ class ThumbnailGenerationService
 
         // Download source file (same logic as generateThumbnails)
         $sourceS3Path = $asset->storage_root_path;
-        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path);
+        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
         
         if (!file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source file is invalid or empty');
@@ -294,7 +294,7 @@ class ThumbnailGenerationService
 
         // Download original file to temporary location
         // This is the SAME source file used for metadata extraction
-        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path);
+        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
         
         // Verify downloaded file is valid
         if (!file_exists($tempPath) || filesize($tempPath) === 0) {
@@ -651,13 +651,16 @@ class ThumbnailGenerationService
      *
      * @param StorageBucket $bucket
      * @param string $s3Key
+     * @param int|string|null $assetId Optional asset ID for error context (appears in failed_jobs)
      * @return string Path to temporary file
      * @throws \RuntimeException If download fails
      */
-    protected function downloadFromS3(StorageBucket $bucket, string $s3Key): string
+    protected function downloadFromS3(StorageBucket $bucket, string $s3Key, $assetId = null): string
     {
+        $ctx = $assetId !== null ? " asset_id={$assetId}" : '';
         try {
             Log::info('[ThumbnailGenerationService] Downloading source file from S3', [
+                'asset_id' => $assetId,
                 'bucket' => $bucket->name,
                 's3_key' => $s3Key,
             ]);
@@ -673,10 +676,11 @@ class ThumbnailGenerationService
             $contentLength = strlen($bodyContents);
             
             if ($contentLength === 0) {
-                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes)");
+                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes){$ctx}");
             }
             
             Log::info('[ThumbnailGenerationService] Source file downloaded from S3', [
+                'asset_id' => $assetId,
                 'bucket' => $bucket->name,
                 's3_key' => $s3Key,
                 'content_length' => $contentLength,
@@ -687,10 +691,11 @@ class ThumbnailGenerationService
             
             // Verify file was written correctly
             if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
-                throw new \RuntimeException("Failed to write downloaded file to temp location");
+                throw new \RuntimeException("Failed to write downloaded file to temp location{$ctx}");
             }
             
             Log::info('[ThumbnailGenerationService] Source file saved to temp location', [
+                'asset_id' => $assetId,
                 'temp_path' => $tempPath,
                 'file_size' => filesize($tempPath),
             ]);
@@ -698,12 +703,13 @@ class ThumbnailGenerationService
             return $tempPath;
         } catch (S3Exception $e) {
             Log::error('[ThumbnailGenerationService] Failed to download asset from S3 for thumbnail generation', [
+                'asset_id' => $assetId,
                 'bucket' => $bucket->name,
                 'key' => $s3Key,
                 'error' => $e->getMessage(),
                 'aws_error_code' => $e->getAwsErrorCode(),
             ]);
-            throw new \RuntimeException("Failed to download asset from S3: {$e->getMessage()}", 0, $e);
+            throw new \RuntimeException("Failed to download asset from S3{$ctx}: {$e->getMessage()}", 0, $e);
         }
     }
 

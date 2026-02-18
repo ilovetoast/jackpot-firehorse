@@ -654,13 +654,18 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
     const fileExtension = displayAsset.file_extension || displayAsset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
     const isImage = displayAsset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
     
-    // Assets that support thumbnail preview (images, PDFs, and PSDs)
+    // Assets that support thumbnail preview (images, PDFs, PSDs, EPS, AI)
     const hasThumbnailSupport = isImage || 
                                 displayAsset.mime_type === 'application/pdf' || 
                                 displayAsset.mime_type === 'image/vnd.adobe.photoshop' ||
+                                displayAsset.mime_type === 'application/postscript' ||
+                                displayAsset.mime_type === 'application/vnd.adobe.illustrator' ||
+                                displayAsset.mime_type === 'application/illustrator' ||
                                 fileExtension.toUpperCase() === 'PDF' ||
                                 fileExtension.toUpperCase() === 'PSD' ||
-                                fileExtension.toUpperCase() === 'PSB'
+                                fileExtension.toUpperCase() === 'PSB' ||
+                                fileExtension.toUpperCase() === 'EPS' ||
+                                fileExtension.toUpperCase() === 'AI'
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates
