@@ -1181,6 +1181,12 @@ class GenerateThumbnailsJob implements ShouldQueue
             return 'unsupported_format:bmp';
         }
 
+        // Known file type but not explicitly handled above (e.g. format added to unsupported later)
+        // Use FileTypeService pattern for consistency with UploadCompletionService
+        if ($fileType && !$fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+            return "unsupported_format:{$fileType}";
+        }
+
         // Generic fallback
         return 'unsupported_file_type';
     }

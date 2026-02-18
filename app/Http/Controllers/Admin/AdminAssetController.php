@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\AssetStatus;
+use App\Enums\ThumbnailStatus;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
@@ -245,6 +247,10 @@ class AdminAssetController extends Controller
 
     /**
      * POST /app/admin/assets/{asset}/retry-pipeline
+     *
+     * Clears blocking flags so ProcessAssetJob can run again, then dispatches the full pipeline.
+     * Handles assets that failed mid-pipeline (e.g. PopulateAutomaticMetadataJob) or were
+     * skipped for formats now supported (e.g. SVG, TIFF, AVIF).
      */
     public function retryPipeline(string $asset): JsonResponse
     {
@@ -255,6 +261,50 @@ class AdminAssetController extends Controller
         if (!$canRetry['allowed']) {
             return response()->json(['error' => $canRetry['reason'] ?? 'Retry not allowed'], 400);
         }
+
+        $metadata = $asset->metadata ?? [];
+
+        // Clear blocking flags so ProcessAssetJob will run (it skips if processing_started)
+        unset($metadata['processing_started']);
+        unset($metadata['processing_started_at']);
+
+        // Clear old skip reasons for formats now supported (SVG, TIFF, AVIF, PSD)
+        $skipReason = $metadata['thumbnail_skip_reason'] ?? null;
+        $mimeType = strtolower($asset->mime_type ?? '');
+        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        $isNowSupported = $skipReason === 'unsupported_format:tiff' && ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') && extension_loaded('imagick')
+            || $skipReason === 'unsupported_format:avif' && ($mimeType === 'image/avif' || $extension === 'avif') && extension_loaded('imagick')
+            || ($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') && ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') && extension_loaded('imagick')
+            || $skipReason === 'unsupported_format:svg' && ($mimeType === 'image/svg+xml' || $extension === 'svg');
+        if ($isNowSupported) {
+            unset($metadata['thumbnail_skip_reason']);
+        }
+
+        // Clear failure metadata so pipeline can proceed
+        unset($metadata['processing_failed']);
+        unset($metadata['failure_reason']);
+        unset($metadata['failed_job']);
+        unset($metadata['failure_attempts']);
+        unset($metadata['failure_is_retryable']);
+        unset($metadata['failed_at']);
+
+        $updateData = [
+            'metadata' => $metadata,
+            'analysis_status' => 'uploading',
+        ];
+
+        // Restore visibility if asset was marked FAILED by pipeline failure
+        if ($asset->status === AssetStatus::FAILED) {
+            $updateData['status'] = AssetStatus::VISIBLE;
+        }
+
+        // Reset SKIPPED thumbnail status to PENDING so GenerateThumbnailsJob will run
+        if ($asset->thumbnail_status === ThumbnailStatus::SKIPPED) {
+            $updateData['thumbnail_status'] = ThumbnailStatus::PENDING;
+            $updateData['thumbnail_error'] = null;
+        }
+
+        $asset->update($updateData);
 
         ProcessAssetJob::dispatch($asset->id);
 

@@ -2465,16 +2465,19 @@ export default function AssetDrawer({ asset, onClose, assets = [], currentAssetI
                                                 ? 'Unsupported file type (SVG)'
                                                 : 'Unsupported file type'}
                                         </p>
-                                        {/* Show regeneration option for TIFF/AVIF if retry is allowed */}
+                                        {/* Show regeneration option for TIFF/AVIF/SVG if retry is allowed */}
                                         {(displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' || 
-                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif') && 
+                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif' ||
+                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg') && 
                                          canRetryThumbnail && (
                                             <div className="mt-2">
                                                 <p className="text-xs text-green-700 font-medium">
-                                                    💡 TIFF/AVIF support is now available via Imagick.
+                                                    💡 {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg' 
+                                                        ? 'SVG support is now available (passthrough).'
+                                                        : 'TIFF/AVIF support is now available via Imagick.'}
                                                 </p>
                                                 <p className="text-xs text-green-600 mt-1">
-                                                    Skip reason will be cleared automatically and thumbnails will regenerate.
+                                                    Use &quot;Retry Pipeline&quot; or &quot;Attempt Repair&quot; to regenerate thumbnails.
                                                 </p>
                                             </div>
                                         )}
